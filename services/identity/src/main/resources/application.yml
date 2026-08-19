@@ -1,0 +1,36 @@
+server:
+  port: 8082
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  application:
+    name: identity-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/commerceos_identity
+    username: ${DB_USERNAME:commerceos}
+    password: ${DB_PASSWORD:commerceos_dev_password}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      # Hibernate owns schema here today; Flway migration adoption is the P0 goal.
+      ddl-auto: ${HIBERNATE_DDL_AUTO:validate}
+    show-sql: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:commerceos_redis_secret}
+
+app:
+  jwt:
+    # Must be supplied via JWT_SECRET environment variable; application fails fast if missing.
+    secret: ${JWT_SECRET:}
+    access-expiration-ms: ${JWT_ACCESS_EXPIRATION_MS:900000}
+    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:2592000000}
+  sms:
+    two-factor:
+      # 2factor.in SMS-OTP gateway API key. Always provided via the
+      # TWO_FACTOR_API_KEY environment variable; no real key is committed.
+      api-key: ${TWO_FACTOR_API_KEY:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://10.0.2.2:8090}

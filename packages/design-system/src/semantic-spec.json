@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "Commerce OS Universal Semantic Design Specification",
+  "version": "2.0.0",
+  "palette": {
+    "brandPrimary": { "hex": "#16A34A", "name": "Emerald Vitality", "usage": "Primary CTA, Verified Badge, Active Accent" },
+    "brandSecondary": { "hex": "#0B132B", "name": "Midnight Luxury Navy", "usage": "Dark Header Surfaces, High Contrast Contrast Text" },
+    "speedAccent": { "hex": "#4F46E5", "name": "Electric Indigo", "usage": "10-Minute Instant Delivery SLA, Dispatch Timeline" },
+    "clinicalRx": { "hex": "#E11D48", "name": "Clinical Rose", "usage": "Schedule H Doctor Prescription Alerts, Temperature Cautions" },
+    "warningAmber": { "hex": "#F59E0B", "name": "Amber Alert", "usage": "Low Stock, Pending COD, Unverified Session" },
+    "surfaceBackground": { "hex": "#F8FAFC", "name": "Slate Canvas", "usage": "Main Viewport Background" },
+    "surfaceCard": { "hex": "#FFFFFF", "name": "Card Surface", "usage": "Standard Elevation Containers" },
+    "textPrimary": { "hex": "#0F172A", "name": "Slate 900", "usage": "Headings, Product Titles, Price Values" },
+    "textMuted": { "hex": "#64748B", "name": "Slate 500", "usage": "Subtitles, Pack Sizes, Timestamps" },
+    "borderSubtle": { "hex": "#E2E8F0", "name": "Slate 200", "usage": "Container Borders, Dividers" }
+  },
+  "typography": {
+    "fontFamily": "Inter, -apple-system, Roboto, sans-serif",
+    "letterSpacing": {
+      "display": "-0.035em",
+      "heading": "-0.025em",
+      "body": "-0.01em",
+      "mono": "0"
+    }
+  },
+  "geometry": {
+    "controlHeights": {
+      "xs": 28,
+      "sm": 32,
+      "md": 40,
+      "lg": 48,
+      "xl": 56
+    },
+    "borderRadius": {
+      "sm": 6,
+      "md": 10,
+      "lg": 14,
+      "xl": 18,
+      "2xl": 24,
+      "full": 9999
+    }
+  }
+}

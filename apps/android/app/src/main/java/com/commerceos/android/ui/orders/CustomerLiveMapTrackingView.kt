@@ -1,0 +1,152 @@
+package com.commerceos.android.ui.orders
+
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.commerceos.android.model.CustomerOrderApiResponse
+import com.commerceos.android.model.CustomerOrderTrackingDto
+
+@Composable
+fun CustomerLiveMapTrackingView(
+    order: CustomerOrderApiResponse,
+    liveTracking: CustomerOrderTrackingDto?,
+    modifier: Modifier = Modifier
+) {
+    val merchantLat = liveTracking?.merchantLat ?: 28.2021899
+    val merchantLng = liveTracking?.merchantLng ?: 76.6153954
+    val customerLat = liveTracking?.customerLat ?: order.deliveryAddress?.latitude ?: 28.1970
+    val customerLng = liveTracking?.customerLng ?: order.deliveryAddress?.longitude ?: 76.6190
+
+    val telemetry = liveTracking?.liveRiderTelemetry
+    val realRiderLat = telemetry?.latitude
+    val realRiderLng = telemetry?.longitude
+    val heading = telemetry?.heading
+    val isStale = liveTracking?.isStale ?: (telemetry?.isStale ?: false)
+
+    val hasGpsData = realRiderLat != null && realRiderLng != null && realRiderLat != 0.0 && realRiderLng != 0.0
+
+    // Pulsing beacon for live partner status
+    val infiniteTransition = rememberInfiniteTransition(label = "MapBeacon")
+    val beaconAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "BeaconAlpha"
+    )
+    val beaconScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "BeaconScale"
+    )
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1120)),
+        border = BorderStroke(1.dp, Color(0xFF1E293B)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        modifier = modifier.fillMaxWidth().height(290.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Interactive MapLibre Dark Map
+            ZomatoDarkMapView(
+                merchantLat = merchantLat,
+                merchantLng = merchantLng,
+                customerLat = customerLat,
+                customerLng = customerLng,
+                riderLat = realRiderLat,
+                riderLng = realRiderLng,
+                riderHeading = heading,
+                isStale = isStale,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Top Floating Live Status Glass Pill
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+                    .background(Color(0xFF0F172A).copy(alpha = 0.92f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .scale(if (hasGpsData && !isStale) beaconScale else 1.0f)
+                            .background(
+                                when {
+                                    hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
+                                    hasGpsData && isStale -> Color(0xFFF59E0B)
+                                    order.orderStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
+                                    else -> Color(0xFF38BDF8)
+                                },
+                                CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = when {
+                            order.orderStatus == "DELIVERED" -> "Order Delivered"
+                            order.orderStatus == "HANDOFF_STARTED" -> "Partner at your door"
+                            order.orderStatus == "ARRIVED_CUSTOMER" -> "Partner has arrived"
+                            order.orderStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
+                            order.orderStatus == "PICKED_UP" -> "Order packed & picked up"
+                            order.orderStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"
+                            order.orderStatus == "SELLER_ACCEPTED" -> "Order accepted & being packed"
+                            hasGpsData -> "Partner is on the way"
+                            else -> "Assigning delivery partner..."
+                        },
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Surface(
+                    color = when {
+                        order.orderStatus == "DELIVERED" -> Color(0xFF10B981)
+                        hasGpsData && !isStale -> Color(0xFF10B981)
+                        order.orderStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
+                        else -> Color(0xFF38BDF8)
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = when {
+                            order.orderStatus == "DELIVERED" -> "DELIVERED"
+                            hasGpsData && !isStale -> "LIVE GPS"
+                            order.orderStatus == "SELLER_ACCEPTED" -> "PACKING"
+                            else -> "ASSIGNING"
+                        },
+                        color = Color(0xFF0F172A),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "commerce-os",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Commerce OS — Enterprise Medicine & Healthcare Commerce Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "mock-api": "node platform/mock-server.js",
+    "dev:all": "node platform/mock-server.js & turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:guards": "node platform/test-production-static-guards.test.js",
+    "test:concurrency": "node platform/test-concurrency-and-dedup.js",
+    "test:fcm": "node platform/test-fcm-outbox-integration.js",
+    "test:http": "node platform/test-http-security-mock.js && node platform/test-http-security-production-node.js && node platform/test-http-security-spring.js",
+    "test:http:mock": "node platform/test-http-security-mock.js",
+    "test:http:node-production": "node platform/test-http-security-production-node.js",
+    "test:http:spring-production": "node platform/test-http-security-spring.js",
+    "test:contracts": "node platform/test-postgres-live/run-local-contracts.js",
+    "test:package": "node platform/test-production-package-install.test.js",
+    "test:live": "node platform/test-postgres-live/run-all-live.js",
+    "test:progress": "node platform/test-postgres-live/run-all-matrix-with-progress.js",
+    "test:all": "node platform/test-postgres-live/run-all-matrix-with-progress.js",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down -v"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "turbo": "^1.13.0",
+    "typescript": "^5.4.5"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0"
+  }
+}
