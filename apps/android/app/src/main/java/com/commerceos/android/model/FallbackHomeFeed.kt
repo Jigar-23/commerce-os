@@ -18,7 +18,8 @@ object FallbackHomeFeed {
                 brand = "Micro Labs",
                 unitLabel = "15 Tablets Strip",
                 price = 35.0,
-                sellingPrice = 30.5
+                discountedPrice = 30.5,
+                mrp = 35.0
             ),
             CommerceProduct(
                 id = "med_002",
@@ -27,7 +28,8 @@ object FallbackHomeFeed {
                 brand = "Mankind Pharma",
                 unitLabel = "10 Tablets Strip",
                 price = 180.0,
-                sellingPrice = 155.0
+                discountedPrice = 155.0,
+                mrp = 180.0
             ),
             CommerceProduct(
                 id = "med_003",
@@ -36,7 +38,8 @@ object FallbackHomeFeed {
                 brand = "Alkem Laboratories",
                 unitLabel = "15 Tablets Strip",
                 price = 155.0,
-                sellingPrice = 132.0
+                discountedPrice = 132.0,
+                mrp = 155.0
             )
         )
 

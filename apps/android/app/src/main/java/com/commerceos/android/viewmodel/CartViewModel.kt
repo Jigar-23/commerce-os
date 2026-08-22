@@ -180,8 +180,8 @@ class CartViewModel(
                         coldChain = it.coldChain
                     )
                 }
-                val safeSellingPrice = if (product.sellingPrice > 0) product.sellingPrice else (if (product.price > 0) product.price else 5.0)
-                val safeMrp = if (product.price > 0) product.price else safeSellingPrice
+                val safeSellingPrice = product.sellingPrice
+                val safeMrp = if (product.price > safeSellingPrice) product.price else safeSellingPrice
                 val item = CartItem(
                     productId = product.id,
                     sku = product.sku,
@@ -336,7 +336,8 @@ class CartViewModel(
             sku = targetItem.sku,
             name = targetItem.name,
             price = targetItem.mrp?.toDouble() ?: targetItem.unitPrice.toDouble(),
-            sellingPrice = targetItem.unitPrice.toDouble(),
+            discountedPrice = targetItem.unitPrice.toDouble(),
+            mrp = targetItem.mrp?.toDouble() ?: targetItem.unitPrice.toDouble(),
             inStock = true,
             verticalId = targetItem.verticalId,
             merchantId = targetItem.merchantId,

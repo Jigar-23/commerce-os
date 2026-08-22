@@ -30,18 +30,23 @@ fun CommerceProduct.toProductCardModel(
     etaLabel: String? = null,
     isWishlisted: Boolean = false
 ): ProductCardModel {
+    val safeSellingPrice = sellingPrice
+    val safePrice = if (displayPrice > safeSellingPrice) displayPrice else (if (price > safeSellingPrice) price else safeSellingPrice)
+    val discount = if (safePrice > safeSellingPrice && safePrice > 0) {
+        (((safePrice - safeSellingPrice) / safePrice) * 100).toInt()
+    } else 0
     return ProductCardModel(
         id = id,
         sku = sku,
         name = name,
         brandName = brand ?: brandName ?: "",
         packSize = unitLabel ?: "",
-        price = price,
-        sellingPrice = sellingPrice,
+        price = safePrice,
+        sellingPrice = safeSellingPrice,
         image = image ?: "",
         inStock = inStock ?: true,
         stockCount = null,
-        discountPercent = discountPercent,
+        discountPercent = discount,
         rating = rating,
         reviewCount = reviewCount,
         etaLabel = etaLabel, // Authentic fulfillment SLA; null if not available

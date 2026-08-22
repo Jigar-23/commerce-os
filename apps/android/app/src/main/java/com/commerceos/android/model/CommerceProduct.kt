@@ -38,8 +38,10 @@ data class CommerceProduct(
     val sku: String,
     val name: String,
     val brand: String? = null,
-    val price: Double,
-    val sellingPrice: Double,
+    @com.google.gson.annotations.SerializedName("price") val price: Double = 0.0,
+    @com.google.gson.annotations.SerializedName("discountedPrice") val discountedPrice: Double = 0.0,
+    @com.google.gson.annotations.SerializedName("sellingPrice") val rawSellingPrice: Double = 0.0,
+    @com.google.gson.annotations.SerializedName("mrp") val mrp: Double? = null,
     val image: String? = null,
     val inStock: Boolean? = null,
     val rating: Double? = null,
@@ -54,9 +56,25 @@ data class CommerceProduct(
     val fashionDetails: FashionAttributes? = null,
     val electronicsDetails: ElectronicsAttributes? = null
 ) {
+    val sellingPrice: Double
+        get() = when {
+            discountedPrice > 0 -> discountedPrice
+            rawSellingPrice > 0 -> rawSellingPrice
+            price > 0 -> price
+            (mrp ?: 0.0) > 0 -> mrp!!
+            else -> 5.0
+        }
+
+    val displayPrice: Double
+        get() = when {
+            (mrp ?: 0.0) > 0 -> mrp!!
+            price > 0 -> price
+            else -> sellingPrice
+        }
+
     val discountPercent: Int
-        get() = if (price > sellingPrice && price > 0) {
-            (((price - sellingPrice) / price) * 100).toInt()
+        get() = if (displayPrice > sellingPrice && displayPrice > 0) {
+            (((displayPrice - sellingPrice) / displayPrice) * 100).toInt()
         } else 0
 }
 
@@ -79,7 +97,8 @@ fun ApiMedicine.toCommerceProduct(verticalId: String = "health"): CommerceProduc
         name = name,
         brand = brandName,
         price = effectivePrice,
-        sellingPrice = effectiveSellingPrice,
+        discountedPrice = effectiveSellingPrice,
+        mrp = effectivePrice,
         image = image ?: "",
         inStock = inStock,
         rating = rating,

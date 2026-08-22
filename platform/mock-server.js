@@ -1099,7 +1099,21 @@ function paginate(list, limit, offset) {
 // data (buy-again from real order line items, popular from real purchase
 // frequency, top deals from real discount math). The client only renders — it
 // no longer composes "server-driven" shelves locally.
-function serverHomeFeed(customerId, products, orders, addressId) {
+function serverHomeFeed(customerId, rawProducts, orders, addressId) {
+  const products = (rawProducts || []).map(p => {
+    const sellPrice = Number(p.discountedPrice ?? p.sellingPrice ?? p.price ?? 5.0);
+    const mrpVal = Number(p.mrp ?? p.price ?? (sellPrice * 1.25));
+    const fullPrice = Math.max(mrpVal, sellPrice);
+    return {
+      ...p,
+      price: fullPrice,
+      mrp: fullPrice,
+      discountedPrice: sellPrice,
+      sellingPrice: sellPrice,
+      discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0
+    };
+  });
+
   const freq = new Map();
   orders.forEach((o) => (o.items || []).forEach((i) => {
     freq.set(i.sku, (freq.get(i.sku) || 0) + i.quantity);
@@ -2398,6 +2412,20 @@ async function handleRequest(port, req, res) {
         return json(res, 200, paginate(cats, query.get('limit'), query.get('offset')));
       }
 
+      function formatProductForCatalog(p) {
+        const sellPrice = Number(p.discountedPrice ?? p.sellingPrice ?? p.price ?? 5.0);
+        const mrpVal = Number(p.mrp ?? p.price ?? (sellPrice * 1.25));
+        const fullPrice = Math.max(mrpVal, sellPrice);
+        return {
+          ...p,
+          price: fullPrice,
+          mrp: fullPrice,
+          discountedPrice: sellPrice,
+          sellingPrice: sellPrice,
+          discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0
+        };
+      }
+
       if (path.includes('/search')) {
         const q = (query.get('query') || '').toLowerCase();
         let allProducts = [];
@@ -2413,6 +2441,7 @@ async function handleRequest(port, req, res) {
               (String(m.name || '') + String(m.brandName || '') + String(m.therapeuticCategory || m.category || '') + String(m.sku || '')).toLowerCase().includes(q)
             )
           : allProducts)
+          .map(formatProductForCatalog)
           .filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
         return json(res, 200, paginate(results, query.get('limit'), query.get('offset')));
       }
@@ -2434,6 +2463,7 @@ async function handleRequest(port, req, res) {
               String(m.therapeuticCategory || m.category || '').toLowerCase().includes(category)
             )
           : allProducts)
+          .map(formatProductForCatalog)
           .filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
         return json(res, 200, paginate(results, query.get('limit'), query.get('offset')));
       }
@@ -2454,10 +2484,11 @@ async function handleRequest(port, req, res) {
           med = (db.products || []).find((m) => m.id === targetId || m.sku === targetId);
         }
         if (!med) return json(res, 404, { error: 'Not Found' });
+        const formattedMed = formatProductForCatalog(med);
         return json(res, 200, {
-          ...med,
-          medicineInfo: medicineInfoFor(med),
-          substitutes: substituteMedicinesFor(med)
+          ...formattedMed,
+          medicineInfo: medicineInfoFor(formattedMed),
+          substitutes: substituteMedicinesFor(formattedMed)
         });
       }
 
@@ -2470,7 +2501,7 @@ async function handleRequest(port, req, res) {
       } else {
         all = db.products || [];
       }
-      const filtered = all.filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
+      const filtered = all.map(formatProductForCatalog).filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
       return json(res, 200, paginate(filtered, query.get('limit'), query.get('offset')));
     }
 
