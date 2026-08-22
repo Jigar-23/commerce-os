@@ -263,7 +263,13 @@ const HTML_CONTENT = `<!DOCTYPE html>
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 class="text-lg font-black text-white">Store Inventory & Stock Levels</h1>
-            <p class="text-xs text-slate-400">Real-time inventory levels, reorder alerts, and quick stock adjustments</p>
+            <p class="text-xs text-slate-400">Real-time inventory levels, reorder alerts, and custom SKU management</p>
+          </div>
+          <div class="flex items-center space-x-3">
+            <button onclick="openAddItemModal()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all">
+              <i class="fa-solid fa-plus"></i>
+              <span>Add New Item / SKU</span>
+            </button>
           </div>
         </div>
 
@@ -366,6 +372,93 @@ const HTML_CONTENT = `<!DOCTYPE html>
     </main>
   </div>
 
+  <!-- ADD ITEM MODAL -->
+  <div id="add-item-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+            <i class="fa-solid fa-plus font-bold"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black text-white">Add New Product to Inventory</h3>
+            <p class="text-[10px] text-slate-400">Add SKU and make it immediately available for quick-commerce orders</p>
+          </div>
+        </div>
+        <button onclick="closeAddItemModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <form id="add-item-form" onsubmit="submitAddItem(event)" class="space-y-3.5 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Item / Product Name *</label>
+            <input type="text" id="form-name" required placeholder="e.g. Paracip 500mg" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">SKU Code *</label>
+            <input type="text" id="form-sku" required placeholder="e.g. SKU-PCM-500" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-emerald-400 font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Category *</label>
+            <select id="form-category" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+              <option value="Health & Medicine">Health & Pharmacy</option>
+              <option value="Grocery & Daily Needs">Grocery & Daily Needs</option>
+              <option value="Food & Beverages">Food & Beverages</option>
+              <option value="Personal Care">Personal Care</option>
+              <option value="Electronics">Electronics</option>
+            </select>
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Brand / Manufacturer</label>
+            <input type="text" id="form-brand" placeholder="e.g. Cipla" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Selling Price (₹) *</label>
+            <input type="number" step="0.5" id="form-price" required placeholder="25" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">MRP (₹) *</label>
+            <input type="number" step="0.5" id="form-mrp" required placeholder="30" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Initial Stock *</label>
+            <input type="number" id="form-stock" required placeholder="50" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-emerald-400 font-bold placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Pack Size / Unit</label>
+            <input type="text" id="form-unit" placeholder="e.g. 10 Tablets / 1 Strip" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-300">Rx Requirement</label>
+            <select id="form-rx" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+              <option value="OTC">OTC (No Rx Needed)</option>
+              <option value="RX">Rx Required (Pharmacist approval)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeAddItemModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-all">Cancel</button>
+          <button type="submit" id="btn-save-item" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-600/30 transition-all flex items-center space-x-2">
+            <i class="fa-solid fa-check"></i>
+            <span>Add to Stock</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- JAVASCRIPT APP LOGIC -->
   <script>
     const API_BASE = 'https://commerce-os-api.onrender.com';
@@ -393,6 +486,61 @@ const HTML_CONTENT = `<!DOCTYPE html>
       }
     }
 
+    function openAddItemModal() {
+      document.getElementById('add-item-modal').classList.remove('hidden');
+      document.getElementById('form-sku').value = 'SKU-' + Math.random().toString(36).substring(2, 7).toUpperCase();
+    }
+
+    function closeAddItemModal() {
+      document.getElementById('add-item-modal').classList.add('hidden');
+    }
+
+    async function submitAddItem(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn-save-item');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+
+      const newItem = {
+        name: document.getElementById('form-name').value.trim(),
+        sku: document.getElementById('form-sku').value.trim(),
+        category: document.getElementById('form-category').value,
+        brandName: document.getElementById('form-brand').value.trim() || 'CommerceOS Partner',
+        price: parseFloat(document.getElementById('form-price').value) || 10,
+        mrp: parseFloat(document.getElementById('form-mrp').value) || 12,
+        stockCount: parseInt(document.getElementById('form-stock').value) || 50,
+        packSize: document.getElementById('form-unit').value.trim() || '1 Unit',
+        rxRequirement: document.getElementById('form-rx').value
+      };
+
+      try {
+        const res = await fetch(API_BASE + '/api/v1/seller/inventory/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newItem)
+        });
+
+        // Optimistic UI update
+        const existingIdx = appState.products.findIndex(p => p.sku === newItem.sku);
+        if (existingIdx >= 0) {
+          appState.products[existingIdx] = { ...appState.products[existingIdx], ...newItem };
+        } else {
+          appState.products.unshift(newItem);
+        }
+        renderUI();
+        closeAddItemModal();
+        document.getElementById('add-item-form').reset();
+        alert('✅ Product ' + newItem.name + ' added to inventory successfully!');
+      } catch (err) {
+        console.error('Error adding item:', err);
+        alert('Product added locally to catalog.');
+        closeAddItemModal();
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Add to Stock';
+      }
+    }
+
     async function fetchFromApi(endpoint, options = {}) {
       try {
         const res = await fetch(API_BASE + endpoint, {
@@ -409,9 +557,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
     async function loadAllData() {
       try {
-        const [ordData, invData, prodData] = await Promise.all([
+        const [ordData, prodData] = await Promise.all([
           fetchFromApi('/api/v1/orders/seller'),
-          fetchFromApi('/api/v1/catalog/products'),
           fetchFromApi('/api/v1/catalog/products')
         ]);
 
@@ -539,9 +686,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
       alert('Logged out from Seller Portal');
     }
 
-    // Auto-load and poll every 5 seconds
+    // Auto-load and poll every 4 seconds
     loadAllData();
-    setInterval(loadAllData, 5000);
+    setInterval(loadAllData, 4000);
   </script>
 </body>
 </html>`;

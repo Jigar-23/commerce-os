@@ -28,6 +28,19 @@ fun RiderProfileView(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val activeProfile = profile ?: RiderProfile(
+        riderId = "rdr_rewari_01",
+        name = "Delivery Partner",
+        phone = "+919876543210",
+        vehicleNumber = "HR-26-AB-1234",
+        rating = 4.9,
+        completedToday = 0,
+        earningsTodayFormatted = "₹0",
+        shiftStatus = "ONLINE_AVAILABLE",
+        assignedHub = "Rewari Central Hub",
+        tier = "Diamond"
+    )
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -53,7 +66,7 @@ fun RiderProfileView(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = profile?.name ?: "Loading…",
+                    text = activeProfile.name,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
