@@ -254,6 +254,25 @@ class RiderDeliveryRepository(
         }
     }
 
+    suspend fun fetchOfferById(offerId: String): ActiveOfferResult = withContext(Dispatchers.IO) {
+        try {
+            val conn = createConnection("/api/v1/delivery/offers/$offerId", "GET")
+            if (conn.responseCode == 200) {
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val obj = JSONObject(jsonStr)
+                val offer = parseOfferJson(obj)
+                return@withContext ActiveOfferResult.Success(offer)
+            } else if (conn.responseCode == 404 || conn.responseCode == 409) {
+                return@withContext ActiveOfferResult.None
+            } else {
+                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+                return@withContext ActiveOfferResult.Error("Server error $err")
+            }
+        } catch (e: Exception) {
+            return@withContext ActiveOfferResult.Error(e.message ?: "Network error fetching offer", e)
+        }
+    }
+
     suspend fun ackOffer(offerId: String, status: String = "DISPLAYED"): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val conn = createConnection("/api/v1/delivery/offers/$offerId/ack", "POST")

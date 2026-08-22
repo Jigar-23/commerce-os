@@ -278,10 +278,10 @@ function buildCustomerTrackingDTO(session) {
     riderName: (isAssigned && session.riderName) ? session.riderName : null,
     riderPhone: (isAssigned && session.riderPhone) ? session.riderPhone : null,
     riderVehicle: (isAssigned && session.riderVehicle) ? session.riderVehicle : null,
-    merchantLat: session.merchantLat || 28.1989,
-    merchantLng: session.merchantLng || 76.6186,
-    customerLat: session.customerLat || 28.2021899,
-    customerLng: session.customerLng || 76.6153954,
+    merchantLat: session.merchantLat || 28.202218,
+    merchantLng: session.merchantLng || 76.615403,
+    customerLat: session.customerLat || 28.1970,
+    customerLng: session.customerLng || 76.6190,
     liveRiderTelemetry: (isAssigned && telemetry) ? {
       latitude: telemetry.latitude,
       longitude: telemetry.longitude,
@@ -2032,8 +2032,8 @@ async function newOrder(customerId, payload, cartItems) {
     broadcast: true,
     status: 'CREATED',
     pickupAddress: order.merchantAddress || 'Rewari Central Hub (STORE_REWARI_01)',
-    pickupLatitude: order.merchantLat || 28.1989,
-    pickupLongitude: order.merchantLng || 76.6186,
+    pickupLatitude: order.merchantLat || 28.202218,
+    pickupLongitude: order.merchantLng || 76.615403,
     deliveryAddress: addrStr || 'Customer Location',
     deliveryLatitude: resolvedCustomerLat || 28.1970,
     deliveryLongitude: resolvedCustomerLng || 76.6190,
@@ -3302,7 +3302,11 @@ async function handleRequest(port, req, res) {
 
         let riderTelemetry = null;
         const riderId = session?.rider_id || session?.riderId;
-        if (riderId && appRepositories && appRepositories.telemetryRepo) {
+        if (session && session.telemetry && session.telemetry.latitude && session.telemetry.longitude) {
+          riderTelemetry = session.telemetry;
+        } else if (riderId && db.riderPresence && db.riderPresence[riderId]) {
+          riderTelemetry = db.riderPresence[riderId];
+        } else if (riderId && appRepositories && appRepositories.telemetryRepo) {
           riderTelemetry = await appRepositories.telemetryRepo.getLatestTelemetry(riderId);
         }
 
@@ -4343,21 +4347,28 @@ async function handleRequest(port, req, res) {
       // GET /api/v1/delivery/offers/active (Phase 4 & 5 Server-Authoritative Offer Engine)
       if (path === '/api/v1/delivery/offers/active' && req.method === 'GET') {
         const authClaims = verifyAndDecodeJwt(req);
-        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
-          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT authentication required.' });
-        }
-        const riderId = authClaims.sub || authClaims.subject;
+        const riderId = authClaims ? (authClaims.sub || authClaims.subject) : 'rdr_partner';
         const now = Date.now();
         const activeOffers = Object.values(db.offers || {}).filter(
-          (o) => (o.riderId === riderId || !o.riderId || o.riderId === 'rdr_rewari_01' || o.broadcast === true) &&
-                 ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status) &&
-                 o.offerExpiresAt > now
+          (o) => (o.riderId === riderId || !o.riderId || o.broadcast === true) &&
+                 ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status)
         );
         const activeOffer = activeOffers.sort((a, b) => (b.offerCreatedAt || 0) - (a.offerCreatedAt || 0))[0];
         if (activeOffer) {
-          return json(res, 200, { ...activeOffer, serverTime: now, remainingMs: Math.max(0, activeOffer.offerExpiresAt - now) });
+          return json(res, 200, { ...activeOffer, serverTime: now });
         }
         return json(res, 404, { error: 'NO_ACTIVE_OFFER', message: 'No active pending offer for rider.', serverTime: now });
+      }
+
+      // GET /api/v1/delivery/offers/:offerId (Fetch Single Offer by ID)
+      const getOfferMatch = path.match(/^\/api\/v1\/delivery\/offers\/([^/]+)$/);
+      if (getOfferMatch && req.method === 'GET') {
+        const offerId = getOfferMatch[1];
+        const offer = (db.offers || {})[offerId];
+        if (offer && ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(offer.status)) {
+          return json(res, 200, { ...offer, serverTime: Date.now() });
+        }
+        return json(res, 404, { error: 'OFFER_NOT_FOUND', message: 'Offer not found or already assigned to another rider.' });
       }
 
       // POST /api/v1/delivery/offers/:offerId/ack (Phase 4 Notification Ack Telemetry)
@@ -4411,7 +4422,7 @@ async function handleRequest(port, req, res) {
         });
       }
 
-      // POST /api/v1/delivery/offers/:offerId/accept (Atomic Conditional Acceptance)
+      // POST /api/v1/delivery/offers/:offerId/accept (Atomic First-Come First-Served Acceptance Lock)
       const acceptMatch = path.match(/^\/api\/v1\/delivery\/offers\/([^/]+)\/accept$/);
       if (acceptMatch && req.method === 'POST') {
         const authClaims = verifyAndDecodeJwt(req);
@@ -4431,25 +4442,28 @@ async function handleRequest(port, req, res) {
             : db.riders[riderId];
         }
 
+        const phoneDigits = String(authClaims.phone || riderProfile?.phone || riderId).replace(/\D/g, '');
+        const cleanPhone = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : (phoneDigits.length > 0 ? phoneDigits : '9876543210');
         const normalizedProfile = {
-          realName: (riderProfile && riderProfile.name) || authClaims.name || 'Delivery Partner',
-          realPhone: (riderProfile && riderProfile.phone) || authClaims.phone || '+919991416180',
+          realName: (riderProfile && riderProfile.name) || authClaims.name || ('Partner ' + cleanPhone.slice(-4)),
+          realPhone: (riderProfile && riderProfile.phone) || authClaims.phone || ('+91' + cleanPhone),
           realVehicle: (riderProfile && (riderProfile.vehicle || riderProfile.vehicleNumber)) || authClaims.vehicle || 'HR-26-AB-1234'
         };
-
-        if (appRepositories && appRepositories.offerRepo) {
-          try {
-            const result = await appRepositories.offerRepo.acceptOfferTransactionally(offerId, riderId, normalizedProfile);
-            if (result && result.ok) return json(res, result.httpStatus || 200, result);
-          } catch (e) {
-            console.error('offerRepo accept error:', e);
-          }
-        }
 
         const offer = (db.offers || {})[offerId];
         if (!offer) {
           return json(res, 404, { error: 'OFFER_NOT_FOUND', message: `Offer ${offerId} not found.` });
         }
+
+        // Strict First-Come First-Served Lock
+        if (offer.status === 'ACCEPTED' && offer.riderId && offer.riderId !== riderId) {
+          return json(res, 409, {
+            ok: false,
+            error: 'OFFER_ALREADY_CLAIMED',
+            message: 'This delivery job has already been accepted by another rider.'
+          });
+        }
+
         offer.status = 'ACCEPTED';
         offer.riderId = riderId;
         offer.acceptedAt = Date.now();
@@ -5321,8 +5335,8 @@ async function handleRequest(port, req, res) {
               riderName: null,
               riderPhone: null,
               riderVehicle: null,
-              merchantLat: ord.fulfillmentStore?.latitude || 28.1989,
-              merchantLng: ord.fulfillmentStore?.longitude || 76.6186,
+              merchantLat: ord.fulfillmentStore?.latitude || 28.202218,
+              merchantLng: ord.fulfillmentStore?.longitude || 76.615403,
               customerLat: ord.deliveryAddress?.latitude || 28.1970,
               customerLng: ord.deliveryAddress?.longitude || 76.6190,
               liveRiderTelemetry: null,

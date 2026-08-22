@@ -161,8 +161,8 @@ fun OrderTrackingContent(
                 .fillMaxSize()
                 .background(Color(0xFF0B1120))
         ) {
-            val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.1989
-            val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.6186
+            val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.202218
+            val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.615403
             val customerLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 28.1970)
             val customerLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 76.6190)
             val telemetry = liveTracking?.liveRiderTelemetry

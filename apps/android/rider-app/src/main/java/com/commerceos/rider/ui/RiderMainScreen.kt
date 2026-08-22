@@ -58,6 +58,7 @@ fun RiderMainScreen(
     var showCancelDeliveryDialog by remember { mutableStateOf(false) }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var jobAlreadyAssignedDialogMessage by remember { mutableStateOf<String?>(null) }
     var actionLoading by remember { mutableStateOf(false) }
     var enteredOtp by remember { mutableStateOf("") }
     var enteredCodAmount by remember { mutableStateOf("") }
@@ -440,8 +441,14 @@ fun RiderMainScreen(
                                             activeOffer = null
                                             session = it
                                         }.onFailure { err ->
-                                            Toast.makeText(context, err.message, Toast.LENGTH_LONG).show()
+                                            val msg = err.message ?: "Failed to accept job"
+                                            if (msg.contains("already", ignoreCase = true) || msg.contains("CLAIMED", ignoreCase = true) || msg.contains("409")) {
+                                                jobAlreadyAssignedDialogMessage = "This delivery job has already been accepted by another rider."
+                                            } else {
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
                                             activeOffer = null
+                                            notificationsList = notificationsList.filter { it.offerId != offId }
                                         }
                                         actionLoading = false
                                     }
@@ -577,12 +584,18 @@ fun RiderMainScreen(
                         onNotificationClick = { notif ->
                             scope.launch {
                                 repository.markNotificationRead(notif.notificationId)
-                                val offerRes = repository.fetchActiveOffer()
+                                val targetOfferId = notif.offerId
+                                val offerRes = if (!targetOfferId.isNullOrBlank()) {
+                                    repository.fetchOfferById(targetOfferId)
+                                } else {
+                                    repository.fetchActiveOffer()
+                                }
                                 if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
                                     activeOffer = offerRes.offer
+                                    session = null
                                     selectedTab = 0
-                                } else if (!notif.offerId.isNullOrBlank() || notif.type == "ORDER_OFFER" || notif.category == "ORDERS") {
-                                    selectedTab = 0
+                                } else {
+                                    jobAlreadyAssignedDialogMessage = "This delivery job has already been claimed by another rider or has ended."
                                 }
                             }
                         },
@@ -651,6 +664,38 @@ fun RiderMainScreen(
                 }
             },
             onDismiss = { showCancelDeliveryDialog = false }
+        )
+    }
+
+    if (jobAlreadyAssignedDialogMessage != null) {
+        AlertDialog(
+            onDismissRequest = { jobAlreadyAssignedDialogMessage = null },
+            title = {
+                Text(
+                    text = "⚡ Job Already Assigned",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color.White
+                )
+            },
+            text = {
+                Text(
+                    text = jobAlreadyAssignedDialogMessage ?: "",
+                    fontSize = 14.sp,
+                    color = Color(0xFFCBD5E1)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { jobAlreadyAssignedDialogMessage = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(16.dp)
         )
     }
 }

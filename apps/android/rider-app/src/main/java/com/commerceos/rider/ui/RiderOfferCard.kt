@@ -29,7 +29,7 @@ fun RiderOfferCard(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
-            // Top Badge & Countdown
+            // Top Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -45,14 +45,14 @@ fun RiderOfferCard(
 
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFFF59E0B).copy(alpha = 0.15f)
+                    color = Color(0xFF10B981).copy(alpha = 0.15f)
                 ) {
                     Text(
-                        text = "${offer.remainingSeconds}s",
-                        color = Color(0xFFF59E0B),
-                        fontSize = 12.sp,
+                        text = "⚡ FIRST-COME, FIRST-SERVED",
+                        color = Color(0xFF10B981),
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
             }
