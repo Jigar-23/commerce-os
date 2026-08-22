@@ -1,6 +1,7 @@
 package com.commerceos.android.session
 
 import android.content.Context
+import com.commerceos.android.BuildConfig
 import com.commerceos.android.network.NetworkClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,7 +42,14 @@ class SessionManager(context: Context) {
     init {
         val savedUrl = prefs.getString(KEY_BASE_URL, null)
         if (!savedUrl.isNullOrBlank()) {
-            NetworkClient.baseUrl = savedUrl
+            if (savedUrl.contains("192.168.") || savedUrl.contains("10.0.2.2") || savedUrl.contains("127.0.0.1") || savedUrl.contains("localhost")) {
+                NetworkClient.baseUrl = BuildConfig.API_BASE_URL
+                prefs.edit().putString(KEY_BASE_URL, BuildConfig.API_BASE_URL).apply()
+            } else {
+                NetworkClient.baseUrl = savedUrl
+            }
+        } else {
+            NetworkClient.baseUrl = BuildConfig.API_BASE_URL
         }
         NetworkClient.authTokenProvider = { _session.value.authToken }
         NetworkClient.refreshTokenProvider = { _session.value.refreshToken }

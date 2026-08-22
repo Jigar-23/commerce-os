@@ -133,11 +133,11 @@ data class ClientConfiguration(
                 checkoutLabel = "Proceed to Checkout",
                 reorderLabel = "Reorder",
                 orderLabel = "My Orders",
-                prescriptionLabel = "My Orders",
+                prescriptionLabel = "Prescriptions",
                 productCtaLabel = "Add to Basket"
             ),
             features = ClientFeatureConfiguration(
-                enablePrescriptionUpload = false,
+                enablePrescriptionUpload = true,
                 enableWishlist = true,
                 enableReorder = true,
                 enableProductComparison = false,

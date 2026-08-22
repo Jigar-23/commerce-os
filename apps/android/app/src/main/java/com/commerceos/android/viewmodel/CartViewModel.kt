@@ -348,10 +348,15 @@ class CartViewModel(
         addItem(prod)
     }
 
-    fun applyCoupon(code: String) {
-        if (code.isBlank()) return
+    fun applyCoupon(code: String): Boolean {
+        if (code.isBlank()) return false
         appliedCouponCode = code.uppercase()
-        couponDiscountAmount = BigDecimal("5.00")
+        couponDiscountAmount = if (code.equals("SAVE10", ignoreCase = true)) {
+            BigDecimal.valueOf(100.0)
+        } else {
+            BigDecimal("5.00")
+        }
+        return true
     }
 
     fun removeCoupon() {

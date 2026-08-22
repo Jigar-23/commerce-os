@@ -75,7 +75,7 @@ data class CheckoutUiState(
         }
 
     val readyForPayment: Boolean
-        get() = !isProcessing
+        get() = cartValid && addressValid && !isProcessing
 }
 
 class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {

@@ -5,4 +5,10 @@ package com.commerceos.android.rider
  */
 object RiderLocationService {
     fun getPendingOfflineQueueCount(): Int = 0
+    fun updateDeliverySession(deliveryId: String, riderId: String) {}
+    fun getOfflineQueueCount(): Int = 0
+    fun clearDeliverySession() {}
 }
+
+typealias RiderForegroundLocationService = RiderLocationService
+

@@ -1,5 +1,21 @@
 package com.commerceos.android.rider
 
+/** Canonical delivery state lifecycle across fulfillment. */
+enum class CanonicalDeliveryState {
+    ASSIGNED,
+    ACCEPTED,
+    EN_ROUTE_PICKUP,
+    ARRIVED_PICKUP,
+    PICKED_UP,
+    EN_ROUTE_CUSTOMER,
+    ARRIVED_CUSTOMER,
+    HANDOFF_STARTED,
+    DELIVERED,
+    CANCELLED,
+    DECLINED,
+    RETURNED
+}
+
 /** Status lifecycle of a delivery rider. */
 enum class RiderShiftStatus {
     OFFLINE,

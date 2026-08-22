@@ -1,6 +1,6 @@
 package com.commerceos.android.fulfillment
 
-import com.commerceos.rider.model.CanonicalDeliveryState
+import com.commerceos.android.rider.CanonicalDeliveryState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals

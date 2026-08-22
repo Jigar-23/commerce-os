@@ -371,8 +371,10 @@ object NetworkClient {
     private fun retrofitForBaseUrl(): Retrofit = synchronized(retrofitCache) {
         retrofitCache.getOrPut(baseUrl) {
             val client = OkHttpClient.Builder()
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(5, TimeUnit.SECONDS)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
                 .addInterceptor(authInterceptor)
                 .addInterceptor(refreshInterceptor)
                 .addInterceptor(

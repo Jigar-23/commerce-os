@@ -5,8 +5,8 @@ import com.commerceos.android.admin.TenantSuspensionEngine
 import com.commerceos.android.rider.JobAcceptanceState
 import com.commerceos.android.rider.RiderJob
 import com.commerceos.android.rider.RiderLocationService
-import com.commerceos.rider.model.RiderLocationUpdate
-import com.commerceos.rider.service.RiderForegroundLocationService
+import com.commerceos.android.rider.RiderLocationUpdate
+import com.commerceos.android.rider.RiderForegroundLocationService
 import com.commerceos.android.security.CodLedgerManager
 import com.commerceos.android.security.SecurityGate
 import com.commerceos.android.tracking.TrackingMode
@@ -169,10 +169,10 @@ class Batch2ReleaseE2eTest {
 
     @Test
     fun testSecurityGate_VerifiesAppSecretsSanityAndTokenLifecycle() {
+        val token = "jwt_access_token_demo"
+        SecurityGate.setAuthenticatedSession(token, System.currentTimeMillis() + 3600000L)
         assertTrue(SecurityGate.verifyAppSecretsSanity())
         assertTrue(SecurityGate.isOfflineLeaseValid())
-
-        val token = "jwt_access_token_demo"
         assertTrue(SecurityGate.validateTenantAuthorization("tenant_01", token))
 
         // Token Revocation
@@ -180,6 +180,7 @@ class Batch2ReleaseE2eTest {
         assertFalse(SecurityGate.validateTenantAuthorization("tenant_01", token))
 
         // Token Rotation
+        SecurityGate.setAuthenticatedSession(token, System.currentTimeMillis() + 3600000L)
         val newToken = SecurityGate.rotateAccessToken("refresh_token_valid")
         assertNotNull(newToken)
         assertTrue(SecurityGate.validateTenantAuthorization("tenant_01", newToken))

@@ -19,7 +19,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "commerce_os_cart.db"
-                ).fallbackToDestructiveMigration()
+                )
                 .build()
                 .also { instance = it }
             }
