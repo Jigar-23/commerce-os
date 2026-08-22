@@ -298,9 +298,9 @@ fun RiderAuthScreen(
 
                         Button(
                             onClick = {
-                                val cleanOtp = if (otp.isBlank()) "123456" else otp
+                                val cleanOtp = otp.trim()
                                 if (cleanOtp.length != 6) {
-                                    errorMessage = "Please enter the 6-digit OTP"
+                                    errorMessage = "Please enter the 6-digit OTP received on your mobile"
                                     return@Button
                                 }
                                 errorMessage = null

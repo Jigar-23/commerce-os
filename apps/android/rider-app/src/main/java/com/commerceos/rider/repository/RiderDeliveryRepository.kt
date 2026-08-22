@@ -29,8 +29,8 @@ class RiderDeliveryRepository(
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.doOutput = true
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
             val body = JSONObject().apply {
                 put("phone", phone)
             }
@@ -38,12 +38,16 @@ class RiderDeliveryRepository(
             if (conn.responseCode in 200..299) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val obj = JSONObject(jsonStr)
-                val challengeId = obj.optString("challengeId", "ch_${System.currentTimeMillis()}")
-                return@withContext Result.success(challengeId)
+                val challengeId = obj.optString("challengeId", "")
+                if (challengeId.isNotBlank()) {
+                    return@withContext Result.success(challengeId)
+                }
             }
-            return@withContext Result.success("ch_mock_${System.currentTimeMillis()}")
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            val errMsg = try { JSONObject(errStr).optString("message", errStr) } catch (_: Exception) { errStr }
+            return@withContext Result.failure(Exception(errMsg))
         } catch (e: Exception) {
-            return@withContext Result.success("ch_offline_${System.currentTimeMillis()}")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -62,8 +66,8 @@ class RiderDeliveryRepository(
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.doOutput = true
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
             val body = JSONObject().apply {
                 put("challengeId", challengeId)
                 put("phone", phone)
@@ -94,22 +98,11 @@ class RiderDeliveryRepository(
                 )
                 return@withContext Result.success(Pair(token, profile))
             }
-            val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
-            return@withContext Result.failure(Exception("OTP verification failed: $err"))
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            val errMsg = try { JSONObject(errStr).optString("message", errStr) } catch (_: Exception) { errStr }
+            return@withContext Result.failure(Exception(errMsg))
         } catch (e: Exception) {
-            val riderId = "rdr_${phone.takeLast(6)}"
-            val profile = RiderProfile(
-                riderId = riderId,
-                name = name.ifBlank { "Rider ${phone.takeLast(4)}" },
-                phone = phone,
-                vehicleNumber = vehicle.ifBlank { "HR-26-AB-1234" },
-                rating = 4.9,
-                completedToday = 12,
-                earningsTodayFormatted = "₹480",
-                shiftStatus = "ONLINE_AVAILABLE",
-                assignedHub = "Rewari Central Hub (STORE_REWARI_01)"
-            )
-            return@withContext Result.success(Pair("mock_jwt_${System.currentTimeMillis()}", profile))
+            return@withContext Result.failure(e)
         }
     }
 
