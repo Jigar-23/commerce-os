@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Star
@@ -632,7 +633,16 @@ private fun CardAddToCartButton(
                     onClick = { onQuantityChange(quantity - 1) },
                     modifier = Modifier.size(28.dp)
                 ) {
-                    Text("−", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    if (quantity <= 1) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Remove item from cart",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Text("−", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    }
                 }
 
                 Text(

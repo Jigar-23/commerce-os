@@ -339,7 +339,14 @@ private fun CartItemCard(
                 Spacer(modifier = Modifier.height(Spacing.sm))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    QuantityControls(quantity = item.quantity, onDecrease = { if (item.quantity > 1) onQuantityChange(item.sku, item.quantity - 1) }, onIncrease = { onQuantityChange(item.sku, item.quantity + 1) })
+                    QuantityControls(
+                        quantity = item.quantity,
+                        onDecrease = {
+                            if (item.quantity <= 1) onRemoveItem(item.sku)
+                            else onQuantityChange(item.sku, item.quantity - 1)
+                        },
+                        onIncrease = { onQuantityChange(item.sku, item.quantity + 1) }
+                    )
 
                     Spacer(modifier = Modifier.weight(1f))
 
@@ -360,11 +367,23 @@ private fun QuantityControls(quantity: Int, onDecrease: () -> Unit, onIncrease: 
     Row(verticalAlignment = Alignment.CenterVertically) {
         FilledTonalIconButton(
             onClick = onDecrease,
-            enabled = quantity > 1,
             shape = RoundedCornerShape(Radius.Button),
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = if (quantity <= 1) CommerceColors.DangerSoft else CommerceColors.SurfaceSubtle,
+                contentColor = if (quantity <= 1) CommerceColors.Danger else CommerceColors.TextPrimary
+            ),
             modifier = Modifier.size(40.dp)
         ) {
-            Text("−", style = CommerceTypography.BodyLarge, fontWeight = FontWeight.Bold)
+            if (quantity <= 1) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Remove item from cart",
+                    tint = CommerceColors.Danger,
+                    modifier = Modifier.size(18.dp)
+                )
+            } else {
+                Text("−", style = CommerceTypography.BodyLarge, fontWeight = FontWeight.Bold)
+            }
         }
         Text(
             quantity.toString(),

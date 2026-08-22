@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -443,10 +444,21 @@ private fun QuantityStepper(quantity: Int, onIncrease: () -> Unit, onDecrease: (
         OutlinedIconButton(
             onClick = onDecrease,
             shape = RoundedCornerShape(Radius.Button),
-            colors = IconButtonDefaults.outlinedIconButtonColors(contentColor = CommerceColors.Primary),
+            colors = IconButtonDefaults.outlinedIconButtonColors(
+                contentColor = if (quantity <= 1) CommerceColors.Danger else CommerceColors.Primary
+            ),
             modifier = Modifier.size(44.dp)
         ) {
-            Text("−", style = CommerceTypography.BodyLarge, fontWeight = FontWeight.Bold, color = CommerceColors.Primary)
+            if (quantity <= 1) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Remove item from cart",
+                    tint = CommerceColors.Danger,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Text("−", style = CommerceTypography.BodyLarge, fontWeight = FontWeight.Bold, color = CommerceColors.Primary)
+            }
         }
         Text(
             quantity.toString(),
