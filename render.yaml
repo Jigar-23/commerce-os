@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: npm install
+    buildCommand: pnpm install
     startCommand: node platform/mock-server.js
     healthCheckPath: /health
     envVars:
