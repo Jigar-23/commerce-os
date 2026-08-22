@@ -534,8 +534,10 @@ async function twoFactorVerify(sessionId, otp) {
     String(parsed.Details || '').toLowerCase().includes('otp matched');
 }
 
+const GATEWAY_PORT = Number(process.env.PORT) || 8090;
+
 const SERVICES = [
-  { name: 'API Gateway (single origin: /api/v1/*)', port: 8090 },
+  { name: 'API Gateway (single origin: /api/v1/*)', port: GATEWAY_PORT },
   { name: 'AI Service (Prescription OCR & Safety)', port: 8080 },
   { name: 'Catalog Service (Multi-Template Commerce Catalog)', port: 8081 },
   { name: 'Identity Service (Auth, JWT, Passkeys)', port: 8082 },
@@ -2018,8 +2020,16 @@ async function handleRequest(port, req, res) {
   const path = getPath(url);
   const query = new URL(url, 'http://localhost').searchParams;
 
-  // ---------------- 8090 / 8080 API GATEWAY (single client origin) ----------------
-  if (port === 8090 || port === 8080) {
+  // ---------------- API GATEWAY (single client origin: /api/v1/*) ----------------
+  if (port === GATEWAY_PORT || port === 8090 || port === 8080) {
+    if (path === '/health' || path === '/' || path === '/api/health') {
+      return json(res, 200, {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        service: 'CommerceOS Unified Microservices API Gateway',
+        environment: process.env.NODE_ENV || 'development'
+      });
+    }
     const route = GATEWAY_ROUTES.find((r) => path.startsWith(r.prefix));
     if (route) {
       return proxyToService(route.port, req, res, url, path);
@@ -2840,6 +2850,11 @@ async function handleRequest(port, req, res) {
         const authClaims = verifyAndDecodeJwt(req);
         if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
           return json(res, 401, { error: 'UNAUTHORIZED', message: 'Seller authentication required.' });
+        }
+        const userRoles = [authClaims.role, ...(authClaims.roles || [])].map(r => String(r || '').toUpperCase());
+        const isSellerOrAdmin = userRoles.some(r => ['SELLER', 'ROLE_SELLER', 'ADMIN', 'ROLE_ADMIN', 'PLATFORM_ROOT'].includes(r));
+        if (!isSellerOrAdmin) {
+          return json(res, 403, { error: 'FORBIDDEN', message: 'Access restricted to authenticated sellers and administrators.' });
         }
         const storeId = authClaims.storeId || authClaims.sellerId;
         if (appRepositories && appRepositories.orderRepo) {

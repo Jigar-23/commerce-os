@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: commerce-os-api
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node platform/mock-server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
