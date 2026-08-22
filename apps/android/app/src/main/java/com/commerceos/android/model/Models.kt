@@ -331,7 +331,10 @@ data class CustomerOrderApiResponse(
     val createdAt: String? = null,
     val deliveryAddress: ApiAddress? = null,
     val items: List<OrderItem>? = null,
-    val pharmacistVerification: PharmacistVerification? = null
+    val pharmacistVerification: PharmacistVerification? = null,
+    val riderName: String? = null,
+    val riderPhone: String? = null,
+    val riderVehicle: String? = null
 )
 
 data class OrderItem(

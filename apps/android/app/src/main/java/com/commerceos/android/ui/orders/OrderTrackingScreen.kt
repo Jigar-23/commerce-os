@@ -418,13 +418,49 @@ fun OrderTrackingContent(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
+                            val dynamicEtaMins: Int = remember(liveTracking, order) {
+                                val storeLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.202218
+                                val storeLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.615403
+                                val custLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 28.1970)
+                                val custLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 76.6190)
+                                val riderLat = liveTracking?.liveRiderTelemetry?.latitude
+                                val riderLng = liveTracking?.liveRiderTelemetry?.longitude
+
+                                val status = order.orderStatus.uppercase()
+                                when (status) {
+                                    "DELIVERED" -> 0
+                                    "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> 1
+                                    "OUT_FOR_DELIVERY", "IN_TRANSIT", "REACHING_YOU", "PICKED_UP" -> {
+                                        if (riderLat != null && riderLng != null && riderLat != 0.0) {
+                                            val d = calculateDistanceInKm(riderLat, riderLng, custLat, custLng)
+                                            Math.ceil(d * 2.5).toInt().coerceAtLeast(1)
+                                        } else {
+                                            val d = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
+                                            Math.ceil(d * 2.5).toInt().coerceAtLeast(2)
+                                        }
+                                    }
+                                    "AT_STORE", "ARRIVED_STORE", "ARRIVED_PICKUP", "PACKED" -> {
+                                        val dStoreCust = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
+                                        (2 + Math.ceil(dStoreCust * 2.5).toInt()).coerceAtLeast(3)
+                                    }
+                                    else -> {
+                                        val dRiderStore = if (riderLat != null && riderLng != null && riderLat != 0.0) {
+                                            calculateDistanceInKm(riderLat, riderLng, storeLat, storeLng)
+                                        } else 1.2
+                                        val dStoreCust = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
+                                        val timeRiderStore = Math.ceil(dRiderStore * 2.5).toInt()
+                                        val timeStoreCust = Math.ceil(dStoreCust * 2.5).toInt()
+                                        (timeRiderStore + 2 + timeStoreCust).coerceIn(4, 45)
+                                    }
+                                }
+                            }
+
                             // Hero SLA Headline
                             Text(
                                 text = when (order.orderStatus.uppercase()) {
                                     "DELIVERED" -> "Delivered Successfully 🎉"
-                                    "OUT_FOR_DELIVERY", "REACHING_YOU" -> "Arriving in 6 mins ⚡"
-                                    "SELLER_ACCEPTED" -> "Arriving in 10 mins ⚡"
-                                    else -> "Arriving in 10 mins ⚡"
+                                    "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> "Rider is at your doorstep ⚡"
+                                    else -> "Arriving in $dynamicEtaMins mins ⚡"
                                 },
                                 color = Color.White,
                                 fontSize = 21.sp,
@@ -449,14 +485,15 @@ fun OrderTrackingContent(
                             modifier = Modifier.size(46.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = when (order.orderStatus.uppercase()) {
-                                        "DELIVERED" -> "🎉"
-                                        "OUT_FOR_DELIVERY" -> "🛵"
-                                        "SELLER_ACCEPTED" -> "📦"
-                                        else -> "⚡"
+                                Icon(
+                                    imageVector = when (order.orderStatus.uppercase()) {
+                                        "DELIVERED" -> Icons.Default.CheckCircle
+                                        "OUT_FOR_DELIVERY", "REACHING_YOU" -> Icons.Default.Place
+                                        else -> Icons.Default.CheckCircle
                                     },
-                                    fontSize = 20.sp
+                                    contentDescription = "Order Stage",
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }
@@ -519,24 +556,21 @@ fun OrderTrackingContent(
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Delivery Handover PIN", color = Color(0xFFF59E0B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = "Share with partner only at doorstep",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 11.sp
-                                )
+                                Text("Delivery Confirmation PIN", color = Color(0xFFF59E0B), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("Share with delivery partner at your doorstep", color = Color(0xFF94A3B8), fontSize = 11.sp)
                             }
                         }
 
                         Surface(
-                            color = Color(0xFFF59E0B),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF261D11),
+                            border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.6f))
                         ) {
                             Text(
-                                text = order.deliveryOtp,
-                                fontSize = 16.sp,
+                                text = order.deliveryOtp ?: "",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
-                                color = Color(0xFF0F172A),
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                                 letterSpacing = 2.sp
                             )
@@ -546,12 +580,12 @@ fun OrderTrackingContent(
             }
 
             // 4. Assigned Delivery Partner Card
-            val riderName = liveTracking?.riderName
-            val riderPhone = liveTracking?.riderPhone ?: ""
-            val riderVehicle = liveTracking?.riderVehicle
-            val hasAssignedRider = !riderName.isNullOrBlank() && riderName != "null" && riderName != "unassigned" && order.orderStatus.uppercase() !in listOf("PLACED", "PENDING", "CONFIRMED", "SELLER_ACCEPTED")
+            val assignedRiderName = liveTracking?.riderName ?: order.riderName
+            val assignedRiderPhone = liveTracking?.riderPhone ?: (order.riderPhone ?: "")
+            val assignedRiderVehicle = liveTracking?.riderVehicle ?: order.riderVehicle
+            val hasAssignedRider = !assignedRiderName.isNullOrBlank() && assignedRiderName != "null" && assignedRiderName != "unassigned"
 
-            if (hasAssignedRider) {
+            if (hasAssignedRider && assignedRiderName != null) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                     shape = RoundedCornerShape(18.dp),
@@ -578,28 +612,28 @@ fun OrderTrackingContent(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(riderName!!, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = assignedRiderName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Icon(Icons.Default.CheckCircle, contentDescription = "Verified", tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(12.dp))
                                     Spacer(modifier = Modifier.width(2.dp))
-                                    Text("4.9 (1,240 orders)", color = Color(0xFFF59E0B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "4.9 (1,240 orders)", color = Color(0xFFF59E0B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
-                                if (!riderVehicle.isNullOrBlank()) {
-                                    Text(riderVehicle, color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                if (!assignedRiderVehicle.isNullOrBlank()) {
+                                    Text(text = assignedRiderVehicle, color = Color(0xFF94A3B8), fontSize = 11.sp)
                                 }
                             }
                         }
 
-                        if (riderPhone.isNotBlank()) {
+                        if (assignedRiderPhone.isNotBlank()) {
                             FilledTonalButton(
                                 onClick = {
                                     try {
                                         val dialIntent = Intent(
                                             Intent.ACTION_DIAL,
-                                            Uri.parse("tel:$riderPhone")
+                                            Uri.parse("tel:$assignedRiderPhone")
                                         )
                                         context.startActivity(dialIntent)
                                     } catch (e: Exception) {
@@ -939,4 +973,15 @@ private fun DeliveryInstructionsCard() {
             )
         }
     }
+}
+
+private fun calculateDistanceInKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6371.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return r * c
 }

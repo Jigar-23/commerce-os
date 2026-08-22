@@ -189,24 +189,50 @@ fun RiderLiveNavigationView(
 
             // Primary Glove/Sunlight-Friendly Workflow Action
             when (session.state) {
-                "ASSIGNED", "ACCEPTED", "EN_ROUTE_PICKUP" -> {
-                    Button(
-                        onClick = onArrivedStore,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(54.dp)
-                    ) {
-                        Text("ARRIVED AT STORE", fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = 0.5.sp)
-                    }
-                }
-                "ARRIVED_PICKUP" -> {
-                    Button(
-                        onClick = onConfirmPickup,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(54.dp)
-                    ) {
-                        Text("CONFIRM PICKUP", fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color.Black, letterSpacing = 0.5.sp)
+                "ASSIGNED", "ACCEPTED", "EN_ROUTE_PICKUP", "ARRIVED_PICKUP" -> {
+                    val storeLat = session.merchantLat ?: 28.202218
+                    val storeLng = session.merchantLng ?: 76.615403
+                    val distanceToStoreMeters: Float? = if (riderLat != null && riderLng != null && riderLat != 0.0) {
+                        val results = FloatArray(1)
+                        android.location.Location.distanceBetween(riderLat, riderLng, storeLat, storeLng, results)
+                        results[0]
+                    } else null
+
+                    val isWithin50m = distanceToStoreMeters != null && distanceToStoreMeters <= 50.0f
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(
+                            onClick = {
+                                if (isWithin50m || distanceToStoreMeters == null) {
+                                    onConfirmPickup()
+                                } else {
+                                    Toast.makeText(context, "You are ${distanceToStoreMeters.toInt()}m away from store. Must be within 50m to fetch order.", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isWithin50m) Color(0xFF10B981) else Color(0xFF334155),
+                                disabledContainerColor = Color(0xFF1E293B)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(54.dp)
+                        ) {
+                            Text(
+                                text = if (isWithin50m) "ORDER FETCHED ✓" else if (distanceToStoreMeters != null) "ORDER FETCHED (${distanceToStoreMeters.toInt()}m away)" else "ORDER FETCHED",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
+                                color = if (isWithin50m) Color.Black else Color(0xFF94A3B8),
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                        if (!isWithin50m && distanceToStoreMeters != null) {
+                            Text(
+                                text = "⚠️ Reach within 50m of store to fetch order (${distanceToStoreMeters.toInt()}m away)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFF59E0B),
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                        }
                     }
                 }
                 "PICKED_UP", "EN_ROUTE_CUSTOMER" -> {

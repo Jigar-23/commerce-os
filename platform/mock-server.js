@@ -292,7 +292,29 @@ function buildCustomerTrackingDTO(session) {
       isStale: telemetry.isStale || isStale,
     } : null,
     trackingStatusText: session.state === 'DELIVERED' ? 'Order Delivered' : (session.state === 'ARRIVED_CUSTOMER' || session.state === 'HANDOFF_STARTED' ? 'Rider at your doorstep' : (isAssigned ? 'Out for delivery' : 'Assigning delivery partner...')),
-    estimatedArrivalMins: session.estimatedTimeMins || 10,
+    estimatedArrivalMins: (() => {
+      if (session.state === 'DELIVERED') return 0;
+      if (session.state === 'ARRIVED_CUSTOMER' || session.state === 'HANDOFF_STARTED') return 1;
+      const mLat = session.merchantLat || 28.202218;
+      const mLng = session.merchantLng || 76.615403;
+      const cLat = session.customerLat || 28.1970;
+      const cLng = session.customerLng || 76.6190;
+      const calcDist = (la1, lo1, la2, lo2) => {
+        const dLat = (la2 - la1) * Math.PI / 180;
+        const dLon = (lo2 - lo1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(la1 * Math.PI / 180) * Math.cos(la2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      };
+      if (['PICKED_UP', 'EN_ROUTE_CUSTOMER', 'OUT_FOR_DELIVERY'].includes(session.state)) {
+        const rLat = telemetry?.latitude || mLat;
+        const rLng = telemetry?.longitude || mLng;
+        return Math.max(1, Math.ceil(calcDist(rLat, rLng, cLat, cLng) * 2.5));
+      } else {
+        const rLat = telemetry?.latitude || (mLat - 0.005);
+        const rLng = telemetry?.longitude || (mLng - 0.005);
+        return Math.min(45, Math.max(4, Math.ceil(calcDist(rLat, rLng, mLat, mLng) * 2.5) + 2 + Math.ceil(calcDist(mLat, mLng, cLat, cLng) * 2.5)));
+      }
+    })(),
     isStale: isStale,
     lastUpdatedTimestamp: telemetry?.serverTimestamp || Date.now(),
   };

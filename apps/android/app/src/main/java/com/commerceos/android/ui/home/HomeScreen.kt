@@ -245,6 +245,35 @@ private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
 @Composable
 private fun DeliveryAddressWidget(context: HomeContext?, onChangeAddress: () -> Unit) {
     val hasAddress = context?.hasAddress == true
+
+    // Dynamic ETA calculation: distance between Store (28.202218, 76.615403) and Customer GeoPoint
+    val etaDisplay = remember(context) {
+        val geo = context?.geoPoint
+        if (!geo.isNullOrBlank() && geo.contains(",")) {
+            val parts = geo.split(",")
+            val lat = parts.getOrNull(0)?.trim()?.toDoubleOrNull()
+            val lng = parts.getOrNull(1)?.trim()?.toDoubleOrNull()
+            if (lat != null && lng != null && lat != 0.0) {
+                val r = 6371.0
+                val dLat = Math.toRadians(lat - 28.202218)
+                val dLon = Math.toRadians(lng - 76.615403)
+                val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                        Math.cos(Math.toRadians(28.202218)) * Math.cos(Math.toRadians(lat)) *
+                        Math.sin(dLon / 2) * Math.sin(dLon / 2)
+                val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+                val distKm = r * c
+                val eta = (3 + Math.ceil(distKm * 2.5).toInt()).coerceIn(4, 45)
+                "$eta MINS"
+            } else {
+                context.formattedEta?.takeIf { it.isNotBlank() } ?: "10 MINS"
+            }
+        } else if (!context?.formattedEta.isNullOrBlank()) {
+            context!!.formattedEta!!
+        } else {
+            "10 MINS"
+        }
+    }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
         shape = RoundedCornerShape(Radius.Card),
@@ -267,7 +296,7 @@ private fun DeliveryAddressWidget(context: HomeContext?, onChangeAddress: () -> 
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "10 MINS",
+                        text = etaDisplay,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Black,
                         color = CommerceColors.SushiInk
