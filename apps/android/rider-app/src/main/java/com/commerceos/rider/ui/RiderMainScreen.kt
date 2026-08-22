@@ -32,7 +32,8 @@ import java.util.Calendar
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RiderMainScreen(
-    profile: RiderProfile? = null
+    profile: RiderProfile? = null,
+    onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -80,11 +81,8 @@ fun RiderMainScreen(
     // 1. Fetch Authoritative Rider Profile & Register Cached FCM Token
     LaunchedEffect(Unit) {
         if (sessionManager.getAuthToken().isBlank()) {
-            val loginRes = repository.loginAsRider("rdr_rewari_01", "+919876543210")
-            loginRes.onSuccess { token ->
-                sessionManager.saveAuthToken(token)
-                sessionManager.saveRiderId("rdr_rewari_01")
-            }
+            onLogout()
+            return@LaunchedEffect
         }
         val res = repository.fetchRiderProfile()
         res.onSuccess {
@@ -504,18 +502,13 @@ fun RiderMainScreen(
                                     Spacer(modifier = Modifier.height(12.dp))
 
                                     val hubProf = liveProfile
-                                    if (hubProf != null && (!hubProf.assignedHub.isNullOrBlank() || !hubProf.tier.isNullOrBlank())) {
+                                    if (hubProf != null && !hubProf.assignedHub.isNullOrBlank()) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            if (!hubProf.assignedHub.isNullOrBlank()) {
-                                                Text(hubProf.assignedHub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFCBD5E1))
-                                            }
-                                            if (!hubProf.tier.isNullOrBlank()) {
-                                                Text(hubProf.tier, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
-                                            }
+                                            Text(hubProf.assignedHub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFCBD5E1))
                                         }
                                     }
                                 }
@@ -595,6 +588,7 @@ fun RiderMainScreen(
                             repository.logoutDeviceToken()
                             sessionManager.clearSession()
                             isOnline = false
+                            onLogout()
                         }
                     }
                 )

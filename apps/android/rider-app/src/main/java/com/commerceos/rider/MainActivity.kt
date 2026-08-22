@@ -8,6 +8,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.commerceos.rider.theme.RiderTheme
 import com.commerceos.rider.ui.RiderMainScreen
 import kotlinx.coroutines.launch
@@ -31,7 +35,28 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RiderTheme {
-                RiderMainScreen()
+                val sessionManager = androidx.compose.runtime.remember { com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext) }
+                var isAuthenticated by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(sessionManager.getAuthToken().isNotBlank()) }
+                var loggedProfile by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.commerceos.rider.model.RiderProfile?>(null) }
+
+                if (isAuthenticated) {
+                    com.commerceos.rider.ui.RiderMainScreen(
+                        profile = loggedProfile,
+                        onLogout = {
+                            isAuthenticated = false
+                            loggedProfile = null
+                        }
+                    )
+                } else {
+                    com.commerceos.rider.ui.RiderAuthScreen(
+                        onLoginSuccess = { profile ->
+                            loggedProfile = profile
+                            isAuthenticated = true
+                            startLocationService()
+                            initFirebaseMessagingToken()
+                        }
+                    )
+                }
             }
         }
     }

@@ -144,12 +144,6 @@ fun RiderProfileView(
                         Text(profile!!.assignedHub!!, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
                     }
                 }
-                if (!profile?.tier.isNullOrBlank()) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Fleet Tier", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                        Text(profile!!.tier!!, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
-                    }
-                }
             }
         }
 

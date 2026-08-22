@@ -102,12 +102,6 @@ fun EarningsView(
                         Text("Deliveries", fontSize = 11.sp, color = Color(0xFF94A3B8))
                         Text("$completedCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    if (!activeProfile.tier.isNullOrBlank()) {
-                        Column {
-                            Text("Partner Tier", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                            Text(activeProfile.tier, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
-                        }
-                    }
                     if (!activeProfile.assignedHub.isNullOrBlank()) {
                         Column {
                             Text("Assigned Hub", fontSize = 11.sp, color = Color(0xFF94A3B8))
