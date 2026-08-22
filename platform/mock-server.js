@@ -2641,13 +2641,37 @@ async function handleRequest(port, req, res) {
         const rawPhone = phone || '';
         const digitsOnly = String(rawPhone).replace(/\D/g, '');
         const cleanPhone = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+        const inputOtp = String(otp || '').trim();
 
-        let isValid = (otp === '123456' || otp === '999999');
+        if (!inputOtp) {
+          return json(res, 400, { error: 'OTP_REQUIRED', message: '6-digit OTP code is required.' });
+        }
+
+        let isValid = false;
         if (challengeId && otpStore[challengeId]) {
           const ch = otpStore[challengeId];
-          if (ch.otp === otp) isValid = true;
+          if (Date.now() > ch.expiresAt) {
+            delete otpStore[challengeId];
+            return json(res, 401, { error: 'OTP_EXPIRED', message: 'OTP has expired. Please request a new code.' });
+          }
+          if (ch.otp === inputOtp || inputOtp === '123456') {
+            isValid = true;
+            delete otpStore[challengeId];
+          } else {
+            ch.attemptsLeft = (ch.attemptsLeft || 5) - 1;
+            if (ch.attemptsLeft <= 0) {
+              delete otpStore[challengeId];
+              return json(res, 401, { error: 'TOO_MANY_ATTEMPTS', message: 'Too many incorrect attempts. Please request a new OTP.' });
+            }
+            return json(res, 401, { error: 'INVALID_OTP', message: `Incorrect OTP. ${ch.attemptsLeft} attempts remaining.` });
+          }
+        } else if (inputOtp === '123456') {
+          isValid = true;
         }
-        if (!isValid && otp && otp.length === 6) isValid = true;
+
+        if (!isValid) {
+          return json(res, 401, { error: 'INVALID_OTP', message: 'Incorrect OTP code entered. Please enter the valid code sent to your phone.' });
+        }
 
         const riderId = 'rdr_' + (cleanPhone || 'rewari_01');
         db.riders = db.riders || {};
