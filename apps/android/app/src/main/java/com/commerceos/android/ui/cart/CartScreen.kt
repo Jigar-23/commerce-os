@@ -365,39 +365,48 @@ private fun CartItemCard(
 @Composable
 private fun QuantityControls(quantity: Int, onDecrease: () -> Unit, onIncrease: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        FilledTonalIconButton(
-            onClick = onDecrease,
-            shape = RoundedCornerShape(Radius.Button),
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = if (quantity <= 1) CommerceColors.DangerSoft else CommerceColors.SurfaceSubtle,
-                contentColor = if (quantity <= 1) CommerceColors.Danger else CommerceColors.TextPrimary
-            ),
-            modifier = Modifier.size(40.dp)
+        Surface(
+            color = Color(0xFFF1F5F9),
+            shape = RoundedCornerShape(8.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+            modifier = Modifier.size(36.dp)
         ) {
-            if (quantity <= 1) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Remove item from cart",
-                    tint = CommerceColors.Danger,
-                    modifier = Modifier.size(18.dp)
+            IconButton(
+                onClick = onDecrease,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    "−",
+                    style = CommerceTypography.BodyLarge,
+                    fontWeight = FontWeight.Black,
+                    color = CommerceColors.TextPrimary
                 )
-            } else {
-                Text("−", style = CommerceTypography.BodyLarge, fontWeight = FontWeight.Bold)
             }
         }
         Text(
             quantity.toString(),
-            style = CommerceTypography.BodySmall,
+            style = CommerceTypography.Body,
             fontWeight = FontWeight.Bold,
             color = CommerceColors.TextPrimary,
             modifier = Modifier.padding(horizontal = Spacing.md)
         )
-        FilledTonalIconButton(
-            onClick = onIncrease,
-            shape = RoundedCornerShape(Radius.Button),
-            modifier = Modifier.size(40.dp)
+        Surface(
+            color = Color(0xFFF1F5F9),
+            shape = RoundedCornerShape(8.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+            modifier = Modifier.size(36.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Increase quantity", modifier = Modifier.size(18.dp))
+            IconButton(
+                onClick = onIncrease,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    "+",
+                    style = CommerceTypography.BodyLarge,
+                    fontWeight = FontWeight.Black,
+                    color = CommerceColors.TextPrimary
+                )
+            }
         }
     }
 }

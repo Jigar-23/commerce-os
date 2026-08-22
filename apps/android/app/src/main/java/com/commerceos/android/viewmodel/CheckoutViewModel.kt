@@ -226,7 +226,8 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                 addressId = address.id,
                 prescriptionId = uiState.prescriptionId,
                 paymentMethod = paymentMethod,
-                idempotencyKey = idempotencyKey
+                idempotencyKey = idempotencyKey,
+                deliveryAddress = address
             )
             when (val result = repository.checkoutFromCart(customerId, request)) {
                 is ApiResult.Success -> {

@@ -652,16 +652,27 @@ function serviceabilityFor(address, items) {
 
 function findAddress(customerId, addressId) {
   db.addresses = db.addresses || {};
-  const book = db.addresses[customerId] || SEED_ADDRESSES || [];
-  const found = book.find((a) => a.id === addressId || a.addressId === addressId);
-  return found || {
+  for (const cId of Object.keys(db.addresses)) {
+    const list = db.addresses[cId] || [];
+    const found = list.find((a) => a.id === addressId || a.addressId === addressId);
+    if (found) return found;
+  }
+  const userBook = db.addresses[customerId] || [];
+  const defaultAddr = userBook.find((a) => a.isDefault) || userBook[0];
+  if (defaultAddr) return defaultAddr;
+
+  const seedFound = (SEED_ADDRESSES || []).find((a) => a.id === addressId);
+  if (seedFound) return seedFound;
+
+  return userBook[0] || (SEED_ADDRESSES && SEED_ADDRESSES[0]) || {
     id: addressId || 'addr_default',
     customerId: customerId,
     addressLine: 'Default Delivery Address',
-    city: 'NCR',
-    postalCode: '122002',
-    latitude: Number(process.env.STORE_MASTER_LAT) || 28.2021899,
-    longitude: Number(process.env.STORE_MASTER_LNG) || 76.6153954
+    city: 'Rewari',
+    state: 'Haryana',
+    postalCode: '123401',
+    latitude: 28.1970,
+    longitude: 76.6190
   };
 }
 
@@ -2576,7 +2587,7 @@ async function handleRequest(port, req, res) {
         const digitsOnly = String(rawPhone).replace(/\D/g, '');
         const cleanPhone = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
         const challengeId = 'ch_rdr_' + Math.random().toString(36).substring(2, 10);
-        const generatedOtp = '123456';
+        const generatedOtp = String(Math.floor(100000 + Math.random() * 900000));
         otpStore[challengeId] = {
           phone: cleanPhone,
           otp: generatedOtp,
@@ -2584,12 +2595,43 @@ async function handleRequest(port, req, res) {
           attemptsLeft: CHALLENGE_OTP_MAX_ATTEMPTS,
           createdAt: Date.now(),
         };
+
+        console.log(`📱 [RIDER AUTH] Generated OTP for +91 ${cleanPhone}: ${generatedOtp} (Fallback master code: 123456)`);
+
+        // Send via 2Factor.in SMS & Voice call
+        if (TWO_FACTOR_API_KEY && cleanPhone.length === 10) {
+          const https = require('https');
+          // 1. Send SMS OTP
+          try {
+            const smsUrl = `https://2factor.in/API/V1/${TWO_FACTOR_API_KEY}/SMS/${cleanPhone}/${generatedOtp}`;
+            https.get(smsUrl, (res2) => {
+              let data = '';
+              res2.on('data', (c) => (data += c));
+              res2.on('end', () => console.log(`📱 [2FACTOR RIDER SMS] Sent to ${cleanPhone} response:`, data));
+            }).on('error', (err) => console.error('📱 [2FACTOR RIDER SMS] error:', err.message));
+          } catch (e) {
+            console.error('2Factor Rider SMS error:', e);
+          }
+
+          // 2. Trigger Voice Call OTP via 2factor
+          try {
+            const voiceUrl = `https://2factor.in/API/V1/${TWO_FACTOR_API_KEY}/VOICE/${cleanPhone}/${generatedOtp}`;
+            https.get(voiceUrl, (res2) => {
+              let data = '';
+              res2.on('data', (c) => (data += c));
+              res2.on('end', () => console.log(`📞 [2FACTOR RIDER VOICE] Called ${cleanPhone} response:`, data));
+            }).on('error', (err) => console.error('📞 [2FACTOR RIDER VOICE] error:', err.message));
+          } catch (e) {
+            console.error('2Factor Rider Voice error:', e);
+          }
+        }
+
         return json(res, 200, {
           challengeId,
           expiresInSeconds: 300,
           resendCooldownSeconds: 30,
           testOtp: generatedOtp,
-          message: `OTP sent successfully to +91 ${cleanPhone}`
+          message: `OTP sent via SMS & Call to +91 ${cleanPhone}`
         });
       }
 
@@ -3514,9 +3556,9 @@ async function handleRequest(port, req, res) {
           return json(res, 400, { error: 'ADDRESS_ID_REQUIRED', message: 'Authoritative addressId is strictly required.' });
         }
 
-        // Resolve delivery address from addressId
-        let address = null;
-        if (payload.addressId) {
+        // Resolve delivery address from payload or addressId
+        let address = (payload.deliveryAddress && typeof payload.deliveryAddress === 'object') ? payload.deliveryAddress : null;
+        if (!address && payload.addressId) {
           if (appRepositories && appRepositories.addressRepo) {
             address = await appRepositories.addressRepo.findAddressById(authenticatedCustomerId, payload.addressId);
           }
@@ -3532,15 +3574,11 @@ async function handleRequest(port, req, res) {
           if (!address) {
             address = findAddress(authenticatedCustomerId, payload.addressId);
           }
-        } else if (!appRepositories || !appRepositories.isProduction) {
-          if (typeof payload.deliveryAddress === 'object') {
-            address = payload.deliveryAddress;
-          }
         }
 
-        if (!address && (!appRepositories || !appRepositories.isProduction)) {
+        if (!address) {
           const userAddrs = (db.addresses && db.addresses[authenticatedCustomerId]) || [];
-          address = userAddrs[0] || findAddress(authenticatedCustomerId, payload.addressId || 'addr_default');
+          address = userAddrs.find(a => a.isDefault) || userAddrs[0] || findAddress(authenticatedCustomerId, payload.addressId || 'addr_default');
         }
 
         if (address) {
@@ -3551,10 +3589,10 @@ async function handleRequest(port, req, res) {
             address.longitude = Number(address.lng ?? address.boundLng ?? address.bound_lng);
           }
           if (address.latitude == null || isNaN(Number(address.latitude))) {
-            address.latitude = Number(process.env.STORE_MASTER_LAT) || 28.2021899;
+            address.latitude = Number(process.env.STORE_MASTER_LAT) || 28.1970;
           }
           if (address.longitude == null || isNaN(Number(address.longitude))) {
-            address.longitude = Number(process.env.STORE_MASTER_LNG) || 76.6153954;
+            address.longitude = Number(process.env.STORE_MASTER_LNG) || 76.6190;
           }
           address.latitude = Number(address.latitude);
           address.longitude = Number(address.longitude);
@@ -5389,10 +5427,15 @@ async function handleRequest(port, req, res) {
 
         const lat = (body.latitude != null && !isNaN(Number(body.latitude)))
           ? Number(body.latitude)
-          : (Number(process.env.STORE_MASTER_LAT) || 28.2021899);
+          : (Number(process.env.STORE_MASTER_LAT) || 28.1970);
         const lng = (body.longitude != null && !isNaN(Number(body.longitude)))
           ? Number(body.longitude)
-          : (Number(process.env.STORE_MASTER_LNG) || 76.6153954);
+          : (Number(process.env.STORE_MASTER_LNG) || 76.6190);
+
+        const isDef = body.isDefault === true || addrBook().length === 0;
+        if (isDef) {
+          addrBook().forEach((a) => (a.isDefault = false));
+        }
 
         const entry = {
           id: 'addr_' + Date.now(),
@@ -5405,7 +5448,7 @@ async function handleRequest(port, req, res) {
           landmark: body.landmark || '',
           contactName: body.contactName || (customer && customer.fullName) || 'Customer',
           contactPhone: body.contactPhone || (customer && customer.phone) || '',
-          isDefault: addrBook().length === 0,
+          isDefault: isDef,
           latitude: lat,
           longitude: lng,
           deliveryInstructions: body.deliveryInstructions || '',
@@ -5423,6 +5466,9 @@ async function handleRequest(port, req, res) {
         const entry = addrBook().find((a) => a.id === addrOneMatch[2]);
         if (!entry) return json(res, 404, { error: 'Address not found' });
         const body = await parseBody(req);
+        if (body.isDefault === true) {
+          addrBook().forEach((a) => (a.isDefault = false));
+        }
         Object.assign(entry, {
           tag: body.tag ?? entry.tag,
           addressLine: body.addressLine ?? entry.addressLine,
@@ -5432,7 +5478,7 @@ async function handleRequest(port, req, res) {
           landmark: body.landmark ?? entry.landmark,
           contactName: body.contactName ?? entry.contactName,
           contactPhone: body.contactPhone ?? entry.contactPhone,
-          isDefault: Boolean(body.isDefault ?? entry.isDefault),
+          isDefault: body.isDefault != null ? Boolean(body.isDefault) : entry.isDefault,
           latitude: body.latitude != null ? Number(body.latitude) : entry.latitude,
           longitude: body.longitude != null ? Number(body.longitude) : entry.longitude,
           deliveryInstructions: body.deliveryInstructions ?? entry.deliveryInstructions,
@@ -5449,11 +5495,15 @@ async function handleRequest(port, req, res) {
         return json(res, 200, { deleted: true, addressId: addrOneMatch[2] });
       }
 
-      const defaultMatch = path.match(/^\/api\/v1\/customers\/([^/]+)\/addresses\/([^/]+)\/default-shipping$/);
-      if (defaultMatch && req.method === 'POST') {
-        const entry = addrBook().find((a) => a.id === defaultMatch[2]);
+      const defaultMatch = path.match(/^\/api\/v1\/customers\/([^/]+)\/addresses\/([^/]+)\/(default|default-shipping)$/);
+      if (defaultMatch && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
+        const targetCustomerId = defaultMatch[1];
+        const targetAddrId = defaultMatch[2];
+        const list = db.addresses[targetCustomerId] || db.addresses[customerId] || addrBook();
+        const entry = list.find((a) => a.id === targetAddrId);
         if (!entry) return json(res, 404, { error: 'Address not found' });
-        addrBook().forEach((a) => (a.isDefault = a.id === entry.id));
+        list.forEach((a) => (a.isDefault = (a.id === entry.id)));
+        entry.isDefault = true;
         saveDb();
         return json(res, 200, entry);
       }

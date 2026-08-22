@@ -220,7 +220,8 @@ data class CartCheckoutRequest(
     val addressId: String,
     val prescriptionId: String?,
     val paymentMethod: String,
-    val idempotencyKey: String
+    val idempotencyKey: String,
+    val deliveryAddress: ApiAddress? = null
 )
 
 // Prescription upload / pharmacist verification (port 8089)

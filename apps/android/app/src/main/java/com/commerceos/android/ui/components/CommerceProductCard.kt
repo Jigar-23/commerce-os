@@ -633,16 +633,7 @@ private fun CardAddToCartButton(
                     onClick = { onQuantityChange(quantity - 1) },
                     modifier = Modifier.size(28.dp)
                 ) {
-                    if (quantity <= 1) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Remove item from cart",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    } else {
-                        Text("−", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    }
+                    Text("−", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
                 }
 
                 Text(
