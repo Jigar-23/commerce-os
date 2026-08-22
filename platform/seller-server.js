@@ -461,8 +461,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   <!-- JAVASCRIPT APP LOGIC -->
   <script>
-    const API_BASE = 'https://commerce-os-api.onrender.com';
+    const API_BASE = '';
     let currentTab = 'dashboard';
+    let searchQuery = '';
     let appState = {
       orders: [],
       inventory: [],
@@ -519,22 +520,16 @@ const HTML_CONTENT = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newItem)
         });
-
-        // Optimistic UI update
-        const existingIdx = appState.products.findIndex(p => p.sku === newItem.sku);
-        if (existingIdx >= 0) {
-          appState.products[existingIdx] = { ...appState.products[existingIdx], ...newItem };
+        if (res.ok) {
+          closeAddItemModal();
+          await loadAllData();
+          alert('Successfully added SKU: ' + newItem.name);
         } else {
-          appState.products.unshift(newItem);
+          alert('Failed to register SKU in inventory');
         }
-        renderUI();
-        closeAddItemModal();
-        document.getElementById('add-item-form').reset();
-        alert('✅ Product ' + newItem.name + ' added to inventory successfully!');
       } catch (err) {
-        console.error('Error adding item:', err);
-        alert('Product added locally to catalog.');
-        closeAddItemModal();
+        console.error('Error adding SKU:', err);
+        alert('Could not save product');
       } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-check"></i> Add to Stock';
@@ -572,7 +567,28 @@ const HTML_CONTENT = `<!DOCTYPE html>
       }
     }
 
+    async function updateOrderStatus(orderId, status) {
+      try {
+        await fetch(API_BASE + '/api/v1/orders/' + encodeURIComponent(orderId) + '/status', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        });
+        await loadAllData();
+      } catch (err) {
+        console.error('Failed to update status:', err);
+      }
+    }
+
     function renderUI() {
+      const q = searchQuery.toLowerCase().trim();
+      const filteredOrders = q
+        ? appState.orders.filter(o => (o.id + ' ' + (o.customerPhone || '') + ' ' + (o.items || []).map(i => i.name).join(' ')).toLowerCase().includes(q))
+        : appState.orders;
+      const filteredProducts = q
+        ? appState.products.filter(p => (p.name + ' ' + p.sku + ' ' + (p.brandName || '')).toLowerCase().includes(q))
+        : appState.products;
+
       // 1. KPI Badges
       const ordersCount = appState.orders.length;
       const totalStock = appState.products.reduce((acc, p) => acc + (Number(p.stockCount) || 0), 0);
@@ -584,38 +600,38 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
       // 2. Dashboard Orders Table
       const dOrdersTable = document.getElementById('dashboard-orders-table');
-      if (appState.orders.length === 0) {
+      if (filteredOrders.length === 0) {
         dOrdersTable.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500">No recent orders in this fulfillment hub</td></tr>';
       } else {
-        dOrdersTable.innerHTML = appState.orders.slice(0, 5).map(o => {
+        dOrdersTable.innerHTML = filteredOrders.slice(0, 6).map(o => {
           const itemsText = (o.items || []).map(i => i.name || 'Medicine').join(', ') || 'Prescription Medicines';
           return '<tr class="hover:bg-slate-800/40 transition-colors">' +
             '<td class="py-3 font-mono text-emerald-400 font-bold">' + o.id + '</td>' +
             '<td class="py-3 max-w-[200px] truncate text-slate-300">' + itemsText + '</td>' +
             '<td class="py-3 font-bold text-white">₹' + (o.totalAmount || 0) + '</td>' +
             '<td class="py-3">' + renderStatusBadge(o.orderStatus || o.status) + '</td>' +
-            '<td class="py-3 text-right"><button onclick="switchTab(\\'orders\\')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-300">Inspect</button></td>' +
+            '<td class="py-3 text-right"><button onclick="switchTab(\'orders\')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-300">Inspect</button></td>' +
           '</tr>';
         }).join('');
       }
 
       // 3. Full Orders Table
       const fOrdersTable = document.getElementById('full-orders-table');
-      if (appState.orders.length === 0) {
-        fOrdersTable.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No store orders created yet. Place an order from the mobile app to see it live here!</td></tr>';
+      if (filteredOrders.length === 0) {
+        fOrdersTable.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No store orders found. Place an order from the mobile app to see it live here!</td></tr>';
       } else {
-        fOrdersTable.innerHTML = appState.orders.map(o => {
+        fOrdersTable.innerHTML = filteredOrders.map(o => {
           const itemsList = (o.items || []).map(i => '<span class="inline-block px-2 py-0.5 bg-slate-800 rounded text-[10px] text-slate-300 mr-1 mb-1">' + (i.name || 'Item') + ' x' + (i.quantity || 1) + '</span>').join('');
-          const addr = typeof o.deliveryAddress === 'object' ? (o.deliveryAddress.addressLine || o.deliveryAddress.city || 'Address Saved') : (o.deliveryAddress || 'Delivery Address');
+          const addr = typeof o.deliveryAddress === 'object' && o.deliveryAddress ? (o.deliveryAddress.addressLine || o.deliveryAddress.city || 'Address Saved') : (o.deliveryAddress || 'Delivery Address');
           return '<tr class="hover:bg-slate-800/40 transition-colors">' +
             '<td class="py-3.5 font-mono text-emerald-400 font-bold">' + o.id + '</td>' +
-            '<td class="py-3.5 text-slate-300"><div>' + (o.customerPhone || '9991416180') + '</div><div class="text-[10px] text-slate-400 truncate max-w-[180px]">' + addr + '</div></td>' +
+            '<td class="py-3.5 text-slate-300"><div>' + (o.customerPhone || '+919876543210') + '</div><div class="text-[10px] text-slate-400 truncate max-w-[180px]">' + addr + '</div></td>' +
             '<td class="py-3.5">' + itemsList + '</td>' +
             '<td class="py-3.5 font-bold text-white"><div>₹' + (o.totalAmount || 0) + '</div><div class="text-[10px] text-slate-400 uppercase">' + (o.paymentMethod || 'COD') + '</div></td>' +
             '<td class="py-3.5">' + renderStatusBadge(o.orderStatus || o.status) + '</td>' +
             '<td class="py-3.5 text-right space-x-1.5">' +
-              '<button onclick="alert(\\'Packed order ' + o.id + '\\')" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]">Pack</button>' +
-              '<button onclick="alert(\\'Dispatched ' + o.id + '\\')" class="px-2.5 py-1 rounded-lg bg-accent-500 hover:bg-accent-600 text-white font-bold text-[10px]">Ship</button>' +
+              '<button onclick="updateOrderStatus(\'' + o.id + '\', \'PACKED\')" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]">Pack</button>' +
+              '<button onclick="updateOrderStatus(\'' + o.id + '\', \'DISPATCHED\')" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px]">Ship</button>' +
             '</td>' +
           '</tr>';
         }).join('');
@@ -623,7 +639,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
       // 4. Inventory Quick Preview & Full Table
       const dInvList = document.getElementById('dashboard-inventory-list');
-      dInvList.innerHTML = appState.products.slice(0, 4).map(p => {
+      dInvList.innerHTML = filteredProducts.slice(0, 4).map(p => {
         return '<div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/40">' +
           '<div class="truncate mr-2">' +
             '<p class="text-xs font-bold text-white truncate">' + p.name + '</p>' +
@@ -634,7 +650,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
       }).join('');
 
       const fInvTable = document.getElementById('full-inventory-table');
-      fInvTable.innerHTML = appState.products.map(p => {
+      fInvTable.innerHTML = filteredProducts.map(p => {
         return '<tr class="hover:bg-slate-800/40 transition-colors">' +
           '<td class="py-3 font-bold text-white">' + p.name + '<div class="text-[10px] text-slate-400 font-mono">' + p.sku + '</div></td>' +
           '<td class="py-3 text-slate-300">' + (p.brandName || p.manufacturer || 'Cipla') + '</td>' +
@@ -642,15 +658,15 @@ const HTML_CONTENT = `<!DOCTYPE html>
           '<td class="py-3 font-bold text-white">₹' + (p.discountedPrice || p.price || 0) + ' <span class="text-[10px] line-through text-slate-500 font-normal">₹' + (p.mrp || 0) + '</span></td>' +
           '<td class="py-3 font-bold text-emerald-400">' + (p.stockCount || 0) + ' units</td>' +
           '<td class="py-3 text-right space-x-1">' +
-            '<button onclick="adjustStock(\\'' + p.sku + '\\', 10)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold rounded text-xs">+10</button>' +
-            '<button onclick="adjustStock(\\'' + p.sku + '\\', -5)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 font-bold rounded text-xs">-5</button>' +
+            '<button onclick="adjustStock(\'' + p.sku + '\', 10)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold rounded text-xs">+10</button>' +
+            '<button onclick="adjustStock(\'' + p.sku + '\', -5)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 font-bold rounded text-xs">-5</button>' +
           '</td>' +
         '</tr>';
       }).join('');
 
       // 5. Products Grid
       const pGrid = document.getElementById('products-grid');
-      pGrid.innerHTML = appState.products.map(p => {
+      pGrid.innerHTML = filteredProducts.map(p => {
         return '<div class="p-4 rounded-2xl bg-slate-800/50 border border-slate-700/50 space-y-2">' +
           '<div class="flex items-center justify-between">' +
             '<span class="text-[10px] font-mono text-emerald-400 font-bold">' + p.sku + '</span>' +
@@ -674,11 +690,16 @@ const HTML_CONTENT = `<!DOCTYPE html>
       return '<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">PLACED</span>';
     }
 
-    function adjustStock(sku, delta) {
-      const item = appState.products.find(p => p.sku === sku);
-      if (item) {
-        item.stockCount = Math.max(0, (Number(item.stockCount) || 0) + delta);
-        renderUI();
+    async function adjustStock(sku, delta) {
+      try {
+        await fetch(API_BASE + '/api/v1/catalog/products/' + encodeURIComponent(sku) + '/stock', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ delta })
+        });
+        await loadAllData();
+      } catch (err) {
+        console.error('Adjust stock error:', err);
       }
     }
 
@@ -686,25 +707,176 @@ const HTML_CONTENT = `<!DOCTYPE html>
       alert('Logged out from Seller Portal');
     }
 
-    // Auto-load and poll every 4 seconds
+    // Quick search input binding
+    const searchInput = document.getElementById('quick-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        renderUI();
+      });
+    }
+
+    // Auto-load and poll every 3 seconds
     loadAllData();
-    setInterval(loadAllData, 4000);
+    setInterval(loadAllData, 3000);
   </script>
 </body>
 </html>`;
 
-const server = http.createServer((req, res) => {
+const fs = require('fs');
+const path = require('path');
+const dbPath = path.join(__dirname, 'db.json');
+
+function getDbData() {
+  try {
+    return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  } catch (e) {
+    return { orders: [], products: [] };
+  }
+}
+
+function saveDbData(data) {
+  try {
+    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving db.json:', e);
+  }
+}
+
+function parseJsonBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body || '{}'));
+      } catch (e) {
+        resolve({});
+      }
+    });
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
-  
-  if (parsedUrl.pathname === '/health' || parsedUrl.pathname === '/api/health') {
+  const pathname = parsedUrl.pathname;
+
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (pathname === '/health' || pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'healthy', app: 'CommerceOS Seller Portal' }));
     return;
   }
 
+  // API Route: GET /api/v1/orders/seller or /api/v1/orders
+  if ((pathname === '/api/v1/orders/seller' || pathname === '/api/v1/orders') && req.method === 'GET') {
+    const db = getDbData();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(db.orders || []));
+    return;
+  }
+
+  // API Route: GET /api/v1/catalog/products
+  if (pathname === '/api/v1/catalog/products' && req.method === 'GET') {
+    const db = getDbData();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ content: db.products || [], totalElements: (db.products || []).length }));
+    return;
+  }
+
+  // API Route: POST /api/v1/seller/inventory/add or /api/v1/catalog/products
+  if ((pathname === '/api/v1/seller/inventory/add' || pathname === '/api/v1/catalog/products') && req.method === 'POST') {
+    const body = await parseJsonBody(req);
+    const db = getDbData();
+    const product = {
+      id: body.id || 'prod_' + Math.floor(10000 + Math.random() * 90000),
+      sku: body.sku || 'SKU-' + Math.floor(1000 + Math.random() * 9000),
+      name: body.name || 'Untitled Commerce Item',
+      brandName: body.brandName || body.brand || 'Seller Brand',
+      manufacturer: body.manufacturer || 'Seller',
+      packSize: body.packSize || '1 unit',
+      rxRequirement: body.rxRequirement || 'OTC',
+      price: Number(body.mrp || body.price || 12),
+      mrp: Number(body.mrp || body.price || 12),
+      discountedPrice: Number(body.price || body.discountedPrice || 10),
+      sellingPrice: Number(body.price || body.discountedPrice || 10),
+      discountPercentage: 15,
+      inStock: Boolean(body.inStock ?? true),
+      stockCount: Number(body.stockCount ?? 100),
+      coldChainRequired: Boolean(body.coldChainRequired),
+      expressDeliverySlaMins: 15,
+      therapeuticCategory: body.category || body.therapeuticCategory || 'General Commerce',
+      templateType: 'MEDICINE_ITEM',
+      rating: 5.0,
+      reviewCount: 1,
+      image: body.image || '',
+      sellerId: 'seller_rewari_01'
+    };
+    db.products = db.products || [];
+    db.products.unshift(product);
+    saveDbData(db);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(product));
+    return;
+  }
+
+  // API Route: PATCH /api/v1/orders/:id/status
+  const orderStatusMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/status$/);
+  if (orderStatusMatch && req.method === 'PATCH') {
+    const orderId = decodeURIComponent(orderStatusMatch[1]);
+    const body = await parseJsonBody(req);
+    const db = getDbData();
+    const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
+    if (order) {
+      order.status = body.status || order.status;
+      order.orderStatus = body.status || order.orderStatus;
+      saveDbData(db);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(order));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'ORDER_NOT_FOUND' }));
+    }
+    return;
+  }
+
+  // API Route: PATCH /api/v1/catalog/products/:id/stock
+  const stockMatch = pathname.match(/^\/api\/v1\/catalog\/products\/([^/]+)\/stock$/);
+  if (stockMatch && req.method === 'PATCH') {
+    const sku = decodeURIComponent(stockMatch[1]);
+    const body = await parseJsonBody(req);
+    const db = getDbData();
+    const p = (db.products || []).find(prod => prod.sku === sku || prod.id === sku);
+    if (p) {
+      if (body.delta !== undefined) {
+        p.stockCount = Math.max(0, (Number(p.stockCount) || 0) + Number(body.delta));
+      } else if (body.stockCount !== undefined) {
+        p.stockCount = Math.max(0, Number(body.stockCount));
+      }
+      p.inStock = p.stockCount > 0;
+      saveDbData(db);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(p));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'PRODUCT_NOT_FOUND' }));
+    }
+    return;
+  }
+
+  // Default: HTML Web Portal
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'no-cache'
   });
   res.end(HTML_CONTENT);

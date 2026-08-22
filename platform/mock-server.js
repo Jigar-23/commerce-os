@@ -2099,7 +2099,7 @@ async function handleRequest(port, req, res) {
     }
     const route = GATEWAY_ROUTES.find((r) => path.startsWith(r.prefix));
     if (route) {
-      return proxyToService(route.port, req, res, url, path);
+      return handleRequest(route.port, req, res);
     }
   }
 
