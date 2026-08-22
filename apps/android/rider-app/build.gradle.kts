@@ -19,14 +19,14 @@ android {
             useSupportLibrary = true
         }
 
-        val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "http://192.168.1.38:8090"
+        val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            val prodUrl = System.getenv("COMMERCEOS_PROD_API_URL") ?: "https://api.commerceos.io"
+            val prodUrl = System.getenv("COMMERCEOS_PROD_API_URL") ?: "https://commerce-os-api.onrender.com"
             buildConfigField("String", "API_BASE_URL", "\"$prodUrl\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -34,7 +34,7 @@ android {
             )
         }
         debug {
-            val debugUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "http://192.168.1.38:8090"
+            val debugUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
             buildConfigField("String", "API_BASE_URL", "\"$debugUrl\"")
         }
     }

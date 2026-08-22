@@ -277,16 +277,16 @@ fun AuthScreen(viewModel: AuthViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     SuggestionChip(
-                        onClick = { serverHost = "http://192.168.1.38:8090" },
-                        label = { Text("Wi-Fi (192.168.1.38)", style = CommerceTypography.Meta) }
-                    )
-                    SuggestionChip(
-                        onClick = { serverHost = "http://10.0.2.2:8090" },
-                        label = { Text("Emulator", style = CommerceTypography.Meta) }
+                        onClick = { serverHost = "https://commerce-os-api.onrender.com" },
+                        label = { Text("Render Cloud", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold) }
                     )
                     SuggestionChip(
                         onClick = { serverHost = "http://127.0.0.1:8090" },
                         label = { Text("USB ADB", style = CommerceTypography.Meta) }
+                    )
+                    SuggestionChip(
+                        onClick = { serverHost = "http://10.0.2.2:8090" },
+                        label = { Text("Emulator", style = CommerceTypography.Meta) }
                     )
                 }
                 
