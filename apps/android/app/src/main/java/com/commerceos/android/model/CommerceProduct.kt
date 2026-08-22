@@ -62,13 +62,24 @@ data class CommerceProduct(
 
 /** Extension helper to map legacy ApiMedicine to universal CommerceProduct. */
 fun ApiMedicine.toCommerceProduct(verticalId: String = "health"): CommerceProduct {
+    val effectiveSellingPrice = when {
+        discountedPrice > 0 -> discountedPrice
+        price > 0 -> price
+        (mrp ?: 0.0) > 0 -> mrp!!
+        else -> 5.0
+    }
+    val effectivePrice = when {
+        (mrp ?: 0.0) > 0 -> mrp!!
+        price > 0 -> price
+        else -> effectiveSellingPrice
+    }
     return CommerceProduct(
         id = id,
         sku = sku,
         name = name,
         brand = brandName,
-        price = mrp ?: price,
-        sellingPrice = discountedPrice,
+        price = effectivePrice,
+        sellingPrice = effectiveSellingPrice,
         image = image ?: "",
         inStock = inStock,
         rating = rating,
@@ -80,9 +91,9 @@ fun ApiMedicine.toCommerceProduct(verticalId: String = "health"): CommerceProduc
         medicineDetails = MedicineAttributes(
             prescriptionRequired = rxRequirement != "OTC",
             composition = null,
-            manufacturer = manufacturer.takeIf { it.isNotBlank() },
-            coldChain = coldChainRequired,
-            packaging = null
+            manufacturer = manufacturer,
+            coldChain = coldChainRequired ?: false,
+            packaging = packSize
         )
     )
 }

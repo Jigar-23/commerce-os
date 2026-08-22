@@ -55,19 +55,30 @@ fun CommerceProduct.toProductCardModel(
 fun ApiMedicine.toProductCardModel(
     isWishlisted: Boolean = false
 ): ProductCardModel {
+    val effectiveSellingPrice = when {
+        discountedPrice > 0 -> discountedPrice
+        price > 0 -> price
+        (mrp ?: 0.0) > 0 -> mrp!!
+        else -> 5.0
+    }
+    val effectivePrice = when {
+        (mrp ?: 0.0) > 0 -> mrp!!
+        price > 0 -> price
+        else -> effectiveSellingPrice
+    }
     return ProductCardModel(
         id = id,
         sku = sku,
         name = name,
         brandName = brandName ?: "",
         packSize = packSize ?: "",
-        price = mrp ?: price,
-        sellingPrice = discountedPrice,
+        price = effectivePrice,
+        sellingPrice = effectiveSellingPrice,
         image = image ?: "",
         inStock = inStock ?: true,
         stockCount = stockCount,
-        discountPercent = if ((mrp ?: price) > discountedPrice && (mrp ?: price) > 0) {
-            ((((mrp ?: price) - discountedPrice) / (mrp ?: price)) * 100).toInt()
+        discountPercent = if (effectivePrice > effectiveSellingPrice && effectivePrice > 0) {
+            ((((effectivePrice - effectiveSellingPrice) / effectivePrice) * 100).toInt())
         } else 0,
         rating = rating,
         reviewCount = reviewCount,

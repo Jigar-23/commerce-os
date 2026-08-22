@@ -149,9 +149,10 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
             when (val result = repository.getServiceability(customerId, addressId, serviceabilityItems)) {
                 is ApiResult.Success -> {
                     val resp = result.data.copy(eligible = true, etaLabel = result.data.etaLabel ?: "10-Min Express SLA Guaranteed")
-                    val deliveryFee = BigDecimal.valueOf(resp.deliveryFee)
+                    val isFreeDelivery = uiState.itemsSubtotal >= BigDecimal("199.00")
+                    val deliveryFee = if (isFreeDelivery) BigDecimal.ZERO else BigDecimal("2.00")
                     val coldChainFee = BigDecimal.valueOf(resp.coldChainFee)
-                    val serviceabilityStatus = ServiceabilityState.Success(addressId, resp)
+                    val serviceabilityStatus = ServiceabilityState.Success(addressId, resp.copy(deliveryFee = deliveryFee.toDouble()))
 
                     val updated = uiState.copy(
                         serviceability = serviceabilityStatus,
@@ -165,16 +166,19 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                     )
                 }
                 is ApiResult.Failure -> {
+                    val isFreeDelivery = uiState.itemsSubtotal >= BigDecimal("199.00")
+                    val deliveryFee = if (isFreeDelivery) BigDecimal.ZERO else BigDecimal("2.00")
                     val fallbackResp = ServiceabilityResponse(
                         eligible = true,
                         etaLabel = "10-Min Express SLA Guaranteed",
-                        deliveryFee = 0.0,
+                        deliveryFee = deliveryFee.toDouble(),
                         coldChainFee = 0.0
                     )
                     val updated = uiState.copy(
                         serviceability = ServiceabilityState.Success(addressId, fallbackResp),
-                        deliveryFee = BigDecimal.ZERO,
-                        coldChainFee = BigDecimal.ZERO
+                        deliveryFee = deliveryFee,
+                        coldChainFee = BigDecimal.ZERO,
+                        grandTotal = uiState.itemsSubtotal.add(deliveryFee)
                     )
                     uiState = updated.copy(
                         state = if (rxGateClear(updated)) CheckoutState.ReadyForPayment else CheckoutState.Validating

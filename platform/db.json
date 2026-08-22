@@ -7426,12 +7426,6 @@
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787036471495
     },
-    "refresh_usr_383700_521695691448": {
-      "userId": "usr_383700",
-      "phone": "+919991416180",
-      "role": "ROLE_CUSTOMER",
-      "issuedAt": 1787041844701
-    },
     "refresh_seller_gurugram_01_611758878804": {
       "userId": "seller_gurugram_01",
       "phone": "9876543210",
@@ -7959,6 +7953,48 @@
       "phone": "9876543210",
       "role": "SELLER",
       "issuedAt": 1787075126257
+    },
+    "refresh_seller_rewari_01_329326535451": {
+      "userId": "seller_rewari_01",
+      "phone": "9876543210",
+      "role": "SELLER",
+      "issuedAt": 1787387848501
+    },
+    "refresh_seller_rewari_01_480208750818": {
+      "userId": "seller_rewari_01",
+      "phone": "9876543210",
+      "role": "SELLER",
+      "issuedAt": 1787387848537
+    },
+    "refresh_seller_rewari_01_510006477196": {
+      "userId": "seller_rewari_01",
+      "phone": "9876543210",
+      "role": "SELLER",
+      "issuedAt": 1787387848569
+    },
+    "refresh_seller_rewari_01_957267144623": {
+      "userId": "seller_rewari_01",
+      "phone": "9876543210",
+      "role": "SELLER",
+      "issuedAt": 1787387848600
+    },
+    "refresh_seller_rewari_01_575263405017": {
+      "userId": "seller_rewari_01",
+      "phone": "9876543210",
+      "role": "SELLER",
+      "issuedAt": 1787387848632
+    },
+    "refresh_seller_rewari_01_730074477488": {
+      "userId": "seller_rewari_01",
+      "phone": "9876543210",
+      "role": "SELLER",
+      "issuedAt": 1787421251416
+    },
+    "refresh_usr_383700_460004411916": {
+      "userId": "usr_383700",
+      "phone": "+919991416180",
+      "role": "ROLE_CUSTOMER",
+      "issuedAt": 1787424027458
     }
   },
   "deliverySessions": {
@@ -14167,6 +14203,13 @@
       "expiresAt": 1787075426111,
       "attempts": 0,
       "verifiedAt": "2026-08-18T17:45:26.145Z"
+    },
+    "otp_1787424031773_2995": {
+      "phone": "+919991416180",
+      "otpHash": "ce793ecdf46d625568534b63c3abda8f43d1d126d5884f962b93e52541d675db",
+      "expiresAt": 1787424331773,
+      "attempts": 0,
+      "verifiedAt": null
     }
   },
   "outboxEvents": [
@@ -51815,6 +51858,34 @@
         "recordedAt": 1787079055091
       },
       "timestamp": 1787079055091
+    },
+    {
+      "riderId": "admin_ops",
+      "eventType": {
+        "deliveryId": "ORD-E2E-1787340906774",
+        "latitude": 28.4595,
+        "longitude": 77.0266,
+        "speed": 30,
+        "heading": 90,
+        "accuracy": 2,
+        "sequenceNumber": 1,
+        "recordedAt": 1787340906791
+      },
+      "timestamp": 1787340906791
+    },
+    {
+      "riderId": "admin_ops",
+      "eventType": {
+        "deliveryId": "ORD-E2E-1787340906774",
+        "latitude": 28.4595,
+        "longitude": 77.0266,
+        "speed": 0,
+        "heading": 0,
+        "accuracy": 10,
+        "sequenceNumber": 1,
+        "recordedAt": 1787340906812
+      },
+      "timestamp": 1787340906812
     }
   ],
   "stores": [

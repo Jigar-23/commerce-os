@@ -355,16 +355,16 @@ async function runHttpSecurityTests() {
     console.log('\n================================================================');
     console.log(`🏆 ALL HTTP AUTHORIZATION TESTS COMPLETE: ${passedCount} PASSED, ${failedCount} FAILED`);
     console.log('================================================================\n');
-
-    if (failedCount > 0) {
-      process.exit(1);
-    }
   } finally {
     if (serverProcess) {
       try {
         serverProcess.kill('SIGKILL');
       } catch (_) {}
     }
+  }
+
+  if (failedCount > 0) {
+    process.exit(1);
   }
 }
 

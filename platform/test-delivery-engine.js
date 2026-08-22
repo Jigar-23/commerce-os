@@ -4,12 +4,48 @@
  */
 
 const http = require('http');
+const { spawn } = require('child_process');
+const path = require('path');
 
-const BASE_URL = 'http://localhost:8090';
+const crypto = require('crypto');
+
+const PORT = 8090;
+const BASE_URL = `http://localhost:${PORT}`;
+const JWT_SECRET = 'commerceos_master_jwt_secret_key_2026_production';
+const JWT_ISSUER = 'commerce-os-auth';
+const JWT_AUDIENCE = 'commerce-os-api';
+
+function makeJwt(payload = { sub: 'admin_ops', role: 'ROLE_ADMIN' }, secret = JWT_SECRET) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({
+    iss: JWT_ISSUER,
+    aud: JWT_AUDIENCE,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    ...payload
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${signature}`;
+}
+
+async function waitForServerReady(port = PORT, retries = 30) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await new Promise((resolve, reject) => {
+        const req = http.request({ hostname: '127.0.0.1', port, path: '/api/v1/orders/health', method: 'GET' }, resolve);
+        req.on('error', reject);
+        req.end();
+      });
+      if (res.statusCode) return true;
+    } catch {
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  return false;
+}
 
 function makeRequest(method, path, body = null, token = null) {
-  const defaultToken = Buffer.from(JSON.stringify({ sub: 'admin_ops', role: 'ROLE_ADMIN' })).toString('base64url');
-  const jwt = token || `mock.${defaultToken}.sig`;
+  const jwt = token || makeJwt();
 
   return new Promise((resolve, reject) => {
     const url = new URL(BASE_URL + path);
@@ -61,6 +97,16 @@ async function runE2ETestSuite() {
       console.error(` ❌ FAIL: ${message}`);
       failed++;
     }
+  }
+
+  let serverProcess = null;
+  const isReady = await waitForServerReady(PORT, 5);
+  if (!isReady) {
+    serverProcess = spawn(process.execPath, [path.join(__dirname, 'mock-server.js')], {
+      env: { ...process.env, PORT: String(PORT), JWT_SECRET, JWT_ISSUER, JWT_AUDIENCE, COMMERCEOS_ENV: 'local_test', COMMERCEOS_PERSISTENCE_MODE: 'local' },
+      stdio: 'pipe'
+    });
+    await waitForServerReady(PORT, 40);
   }
 
   try {
@@ -179,13 +225,20 @@ async function runE2ETestSuite() {
     console.log(`🏆 E2E TEST MATRIX RESULTS: ${passed} PASSED, ${failed} FAILED`);
     console.log('================================================================\n');
 
-    if (failed === 0) {
-      process.exit(0);
-    } else {
-      process.exit(1);
-    }
   } catch (err) {
     console.error('Fatal Test Execution Error:', err);
+    failed++;
+  } finally {
+    if (serverProcess) {
+      try {
+        serverProcess.kill('SIGKILL');
+      } catch (_) {}
+    }
+  }
+
+  if (failed === 0) {
+    process.exit(0);
+  } else {
     process.exit(1);
   }
 }

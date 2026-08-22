@@ -153,6 +153,81 @@ fun OrderTrackingContent(
     val scrollState = rememberScrollState()
     val presentation = OrderStatusPresentationMapper.present(order.orderStatus)
     val context = LocalContext.current
+    var isMapExpanded by remember { mutableStateOf(false) }
+
+    if (isMapExpanded) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0B1120))
+        ) {
+            val merchantLat = liveTracking?.merchantLat ?: 28.2021899
+            val merchantLng = liveTracking?.merchantLng ?: 76.6153954
+            val customerLat = liveTracking?.customerLat ?: order.deliveryAddress?.latitude ?: 28.1970
+            val customerLng = liveTracking?.customerLng ?: order.deliveryAddress?.longitude ?: 76.6190
+            val telemetry = liveTracking?.liveRiderTelemetry
+
+            ZomatoDarkMapView(
+                merchantLat = merchantLat,
+                merchantLng = merchantLng,
+                customerLat = customerLat,
+                customerLng = customerLng,
+                riderLat = telemetry?.latitude,
+                riderLng = telemetry?.longitude,
+                riderHeading = telemetry?.heading,
+                isStale = liveTracking?.isStale ?: (telemetry?.isStale ?: false),
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Floating Top Controls with Back Button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .align(Alignment.TopStart),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { isMapExpanded = false },
+                    modifier = Modifier
+                        .background(Color(0xFF0F172A).copy(alpha = 0.95f), CircleShape)
+                        .size(44.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Exit Fullscreen",
+                        tint = Color.White
+                    )
+                }
+
+                Surface(
+                    color = Color(0xFF0F172A).copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFF10B981), CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "ORDER #${order.id.takeLast(6).uppercase()} • LIVE MAP",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
 
     // Pulsing radar animation for active status
     val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
@@ -413,7 +488,8 @@ fun OrderTrackingContent(
             // 2. Hero Dark Map Viewport
             CustomerLiveMapTrackingView(
                 order = order,
-                liveTracking = liveTracking
+                liveTracking = liveTracking,
+                onExpandClick = { isMapExpanded = true }
             )
 
             // 3. Verified Security PIN Card (Golden Security Standard)
@@ -473,7 +549,7 @@ fun OrderTrackingContent(
             val riderName = liveTracking?.riderName
             val riderPhone = liveTracking?.riderPhone ?: ""
             val riderVehicle = liveTracking?.riderVehicle
-            val hasAssignedRider = !riderName.isNullOrBlank() && riderName != "null"
+            val hasAssignedRider = !riderName.isNullOrBlank() && riderName != "null" && riderName != "unassigned" && order.orderStatus.uppercase() !in listOf("PLACED", "PENDING", "CONFIRMED", "SELLER_ACCEPTED")
 
             if (hasAssignedRider) {
                 Card(
@@ -537,6 +613,51 @@ fun OrderTrackingContent(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Call", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
+                        }
+                    }
+                }
+            } else if (order.orderStatus.uppercase() !in listOf("DELIVERED", "CANCELLED")) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Surface(
+                                color = Color(0xFF38BDF8).copy(alpha = 0.15f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(46.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("⚡", fontSize = 22.sp)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Assigning Delivery Partner", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("Looking for partners near the store...", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                            }
+                        }
+
+                        Surface(
+                            color = Color(0xFF1E293B),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = "PACKING",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF38BDF8),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
                         }
                     }
                 }

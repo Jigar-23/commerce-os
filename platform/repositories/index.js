@@ -1279,10 +1279,10 @@ class ServiceabilityService {
       slaLabel = 'Standard Fulfillment Hub SLA';
     }
 
-    const baseDeliveryFee = 29.0;
-    const distanceSurcharge = distanceKm > 4.0 ? Math.round((distanceKm - 4.0) * 5) : 0;
-    const totalDeliveryFee = baseDeliveryFee + distanceSurcharge;
-    const coldChainFee = isCold ? 35.0 : 0.0;
+    const baseDeliveryFee = 2.0;
+    const distanceSurcharge = 0;
+    const totalDeliveryFee = 2.0;
+    const coldChainFee = isCold ? 15.0 : 0.0;
 
     return {
       eligible: true,

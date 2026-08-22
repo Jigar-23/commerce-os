@@ -268,16 +268,16 @@ function buildCustomerTrackingDTO(session) {
     }
   }
 
-  // A rider is only considered assigned when session is in an active delivery state (ACCEPTED, EN_ROUTE_PICKUP, etc.)
-  const isAssigned = session.state && !['PENDING', 'CREATED', 'DISPATCHED'].includes(session.state);
+  // A rider is only considered assigned when session is in an active delivery state and has a real riderId
+  const isAssigned = session.state && !['PENDING', 'CREATED', 'DISPATCHED', 'PLACED'].includes(session.state) && !!session.riderId && session.riderId !== 'unassigned';
 
   return {
     orderId: session.orderId,
     deliveryId: session.deliveryId,
     state: session.state,
-    riderName: isAssigned ? (session.riderName || 'Vikram Singh') : null,
-    riderPhone: isAssigned ? (session.riderPhone || '+919876543210') : null,
-    riderVehicle: isAssigned ? (session.riderVehicle || 'HR-26-AB-1234') : null,
+    riderName: (isAssigned && session.riderName) ? session.riderName : null,
+    riderPhone: (isAssigned && session.riderPhone) ? session.riderPhone : null,
+    riderVehicle: (isAssigned && session.riderVehicle) ? session.riderVehicle : null,
     merchantLat: session.merchantLat || 28.1989,
     merchantLng: session.merchantLng || 76.6186,
     customerLat: session.customerLat || 28.2021899,
@@ -291,7 +291,7 @@ function buildCustomerTrackingDTO(session) {
       serverTimestamp: telemetry.serverTimestamp || Date.now(),
       isStale: telemetry.isStale || isStale,
     } : null,
-    trackingStatusText: session.state === 'DELIVERED' ? 'Order Delivered' : (session.state === 'ARRIVED_CUSTOMER' || session.state === 'HANDOFF_STARTED' ? 'Rider at your doorstep' : (isAssigned ? 'Out for delivery' : 'Finding a delivery partner')),
+    trackingStatusText: session.state === 'DELIVERED' ? 'Order Delivered' : (session.state === 'ARRIVED_CUSTOMER' || session.state === 'HANDOFF_STARTED' ? 'Rider at your doorstep' : (isAssigned ? 'Out for delivery' : 'Assigning delivery partner...')),
     estimatedArrivalMins: session.estimatedTimeMins || 10,
     isStale: isStale,
     lastUpdatedTimestamp: telemetry?.serverTimestamp || Date.now(),

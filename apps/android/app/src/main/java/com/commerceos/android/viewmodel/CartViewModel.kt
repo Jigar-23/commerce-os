@@ -180,15 +180,17 @@ class CartViewModel(
                         coldChain = it.coldChain
                     )
                 }
+                val safeSellingPrice = if (product.sellingPrice > 0) product.sellingPrice else (if (product.price > 0) product.price else 5.0)
+                val safeMrp = if (product.price > 0) product.price else safeSellingPrice
                 val item = CartItem(
                     productId = product.id,
                     sku = product.sku,
                     name = product.name,
-                    unitPrice = java.math.BigDecimal.valueOf(product.sellingPrice),
+                    unitPrice = java.math.BigDecimal.valueOf(safeSellingPrice),
                     quantity = 1,
                     verticalId = product.verticalId ?: "general",
                     merchantId = product.merchantId,
-                    mrp = java.math.BigDecimal.valueOf(product.price),
+                    mrp = java.math.BigDecimal.valueOf(safeMrp),
                     pharmacyAttributes = pharmacyAttr
                 )
 

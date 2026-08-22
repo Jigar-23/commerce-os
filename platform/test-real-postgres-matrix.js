@@ -117,7 +117,7 @@ class MultiClientPostgresPool {
 
         // 1. SELECT ... FROM inventory FOR UPDATE (Row-Level Locking)
         if (cleanSql.includes('SELECT') && cleanSql.includes('FROM inventory') && cleanSql.includes('FOR UPDATE')) {
-          const sku = params.length === 2 ? params[1] : params[0];
+          const sku = params.length === 3 ? params[2] : (params.length === 2 ? params[1] : params[0]);
           const lockKey = `inventory:${sku}`;
           while (pool.rowLocks.has(lockKey) && !heldLocks.has(lockKey)) {
             await new Promise(r => setTimeout(r, 10));
@@ -405,7 +405,7 @@ async function runAllTests() {
   // Test 1: Real Multi-Client Concurrency on Inventory Reservation
   await test('Real Postgres Multi-Client Concurrency: Two separate DB connections debit last 1 item -> exactly 1 succeeds (200), 1 fails (409 OUT_OF_STOCK), stock = 0', async () => {
     const pool = new MultiClientPostgresPool();
-    pool.tables.inventory.set('SKU_MED_LORA_10', { sku: 'SKU_MED_LORA_10', stock_count: 1, reserved_count: 0, available_count: 1 });
+    pool.tables.inventory.set('SKU_MED_LORA_10', { product_id: 'PROD_MED_LORA_10', sku: 'SKU_MED_LORA_10', stock_count: 1, reserved_count: 0, available_count: 1 });
 
     const invRepo = new TransactionalInventoryRepository(pool);
 
@@ -414,7 +414,7 @@ async function runAllTests() {
 
     const doReserve = async (client) => {
       await client.query('BEGIN');
-      const res = await invRepo.reserveStockTransactionally(client, 'STORE_PRIMARY_01', [{ sku: 'SKU_MED_LORA_10', quantity: 1 }]);
+      const res = await invRepo.reserveStockTransactionally(client, 'STORE_PRIMARY_01', [{ productId: 'PROD_MED_LORA_10', sku: 'SKU_MED_LORA_10', quantity: 1 }]);
       if (res.ok) {
         await client.query('COMMIT');
       } else {
@@ -641,18 +641,18 @@ async function runAllTests() {
   // Test 7: Inventory Release on Order Cancellation
   await test('Inventory Restoration: Order cancellation releases stock via InventoryRepository without direct json mutation', async () => {
     const pool = new MultiClientPostgresPool();
-    pool.tables.inventory.set('SKU_PROD_101', { sku: 'SKU_PROD_101', stock_count: 5, reserved_count: 0, available_count: 5 });
+    pool.tables.inventory.set('SKU_PROD_101', { product_id: 'PROD_101', sku: 'SKU_PROD_101', stock_count: 5, reserved_count: 0, available_count: 5 });
 
     const invRepo = new TransactionalInventoryRepository(pool);
     const client = await pool.connect();
 
     // Reserve 2
-    await invRepo.reserveStockTransactionally(client, 'STORE_PRIMARY_01', [{ sku: 'SKU_PROD_101', quantity: 2 }]);
+    await invRepo.reserveStockTransactionally(client, 'STORE_PRIMARY_01', [{ productId: 'PROD_101', sku: 'SKU_PROD_101', quantity: 2 }]);
     assert.strictEqual(pool.tables.inventory.get('SKU_PROD_101').reserved_count, 2);
     assert.strictEqual(pool.tables.inventory.get('SKU_PROD_101').available_count, 3);
 
     // Cancel and release 2
-    await invRepo.releaseStockTransactionally(client, 'STORE_PRIMARY_01', [{ sku: 'SKU_PROD_101', quantity: 2 }]);
+    await invRepo.releaseStockTransactionally(client, 'STORE_PRIMARY_01', [{ productId: 'PROD_101', sku: 'SKU_PROD_101', quantity: 2 }]);
     assert.strictEqual(pool.tables.inventory.get('SKU_PROD_101').reserved_count, 0, 'Reserved count must be restored to 0');
     assert.strictEqual(pool.tables.inventory.get('SKU_PROD_101').available_count, 5, 'Available count must be restored to 5');
     client.release();

@@ -232,54 +232,52 @@ private fun generateHardenedDarkMapHtml(
             display: flex;
             flex-direction: column;
             align-items: center;
-            transform: translate(-50%, -100%);
+            width: 44px;
+            height: 52px;
         }
-        .store-pin {
+        .pin-head {
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            z-index: 2;
+        }
+        .store-head {
             background: #0284C7;
             border: 2px solid #38BDF8;
-            border-radius: 50%;
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.6);
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.8);
         }
-        .store-pin svg { width: 16px; height: 16px; fill: white; }
-        .store-tag {
-            background: rgba(15, 23, 42, 0.95);
-            color: #38BDF8;
-            font-size: 10px;
-            font-weight: 800;
-            padding: 2px 6px;
-            border-radius: 6px;
-            margin-top: 3px;
-            border: 1px solid rgba(56, 189, 248, 0.4);
-            white-space: nowrap;
-        }
-
-        .customer-pin {
+        .store-head svg { width: 16px; height: 16px; fill: white; }
+        .customer-head {
             background: #10B981;
             border: 2px solid #6EE7B7;
-            border-radius: 50%;
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.6);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.8);
         }
-        .customer-pin svg { width: 16px; height: 16px; fill: white; }
-        .customer-tag {
-            background: rgba(15, 23, 42, 0.95);
-            color: #10B981;
-            font-size: 10px;
-            font-weight: 800;
-            padding: 2px 6px;
-            border-radius: 6px;
-            margin-top: 3px;
-            border: 1px solid rgba(16, 185, 129, 0.4);
-            white-space: nowrap;
+        .customer-head svg { width: 16px; height: 16px; fill: white; }
+        .pin-needle {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            margin-top: -2px;
+            position: relative;
+            z-index: 1;
+        }
+        .store-needle { border-top: 8px solid #0284C7; }
+        .customer-needle { border-top: 8px solid #10B981; }
+        .pin-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #38BDF8;
+            border: 1px solid #0F172A;
+            margin-top: -2px;
+        }
+        .customer-dot {
+            background: #6EE7B7;
         }
         
         .biker-container {
@@ -366,8 +364,8 @@ private fun generateHardenedDarkMapHtml(
         animFrame = requestAnimationFrame(step);
     }
 
-    var storeHtml = '<div class="pin-wrapper"><div class="store-pin"><svg viewBox="0 0 24 24"><path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/></svg></div><div class="store-tag">Store</div></div>';
-    var customerHtml = '<div class="pin-wrapper"><div class="customer-pin"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div><div class="customer-tag">Home</div></div>';
+    var storeHtml = '<div class="pin-wrapper"><div class="pin-head store-head"><svg viewBox="0 0 24 24"><path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/></svg></div><div class="pin-needle store-needle"></div><div class="pin-dot"></div></div>';
+    var customerHtml = '<div class="pin-wrapper"><div class="pin-head customer-head"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div><div class="pin-needle customer-needle"></div><div class="pin-dot customer-dot"></div></div>';
     var bikeSvg = '<svg viewBox="0 0 24 24"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm14-8.5c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm-8.2-7.5l-2.4-4H5v2h2.2l1.6 2.7c-.8.8-1.3 1.8-1.5 3h2.1c.2-.7.6-1.3 1.1-1.8l1.7 2.1h3.7v-2h-2.5l-1.9-2.4.9-2.6 1.8 1.4v2.6h2v-3.7l-2.8-2.2c-.3-.2-.7-.3-1.1-.3-.4 0-.8.2-1.1.5l-1.6 2.4z"/></svg>';
 
     var autoFollow = true;
@@ -379,7 +377,7 @@ private fun generateHardenedDarkMapHtml(
 
         if (mLat && mLng) {
             if (!storeMarker) {
-                var icon = L.divIcon({ className: '', html: storeHtml, iconSize: [50, 50], iconAnchor: [25, 50] });
+                var icon = L.divIcon({ className: '', html: storeHtml, iconSize: [44, 52], iconAnchor: [22, 52] });
                 storeMarker = L.marker([mLat, mLng], { icon: icon }).addTo(map);
             } else {
                 storeMarker.setLatLng([mLat, mLng]);
@@ -389,7 +387,7 @@ private fun generateHardenedDarkMapHtml(
 
         if (cLat && cLng) {
             if (!customerMarker) {
-                var icon = L.divIcon({ className: '', html: customerHtml, iconSize: [50, 50], iconAnchor: [25, 50] });
+                var icon = L.divIcon({ className: '', html: customerHtml, iconSize: [44, 52], iconAnchor: [22, 52] });
                 customerMarker = L.marker([cLat, cLng], { icon: icon }).addTo(map);
             } else {
                 customerMarker.setLatLng([cLat, cLng]);

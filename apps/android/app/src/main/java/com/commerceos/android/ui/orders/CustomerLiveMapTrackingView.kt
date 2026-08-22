@@ -22,7 +22,8 @@ import com.commerceos.android.model.CustomerOrderTrackingDto
 fun CustomerLiveMapTrackingView(
     order: CustomerOrderApiResponse,
     liveTracking: CustomerOrderTrackingDto?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onExpandClick: (() -> Unit)? = null
 ) {
     val merchantLat = liveTracking?.merchantLat ?: 28.2021899
     val merchantLng = liveTracking?.merchantLng ?: 76.6153954
@@ -83,13 +84,13 @@ fun CustomerLiveMapTrackingView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp)
-                    .background(Color(0xFF0F172A).copy(alpha = 0.92f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(12.dp)
+                    .background(Color(0xFF0F172A).copy(alpha = 0.94f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Box(
                         modifier = Modifier
                             .size(10.dp)
@@ -104,7 +105,7 @@ fun CustomerLiveMapTrackingView(
                                 CircleShape
                             )
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = when {
                             order.orderStatus == "DELIVERED" -> "Order Delivered"
@@ -113,38 +114,32 @@ fun CustomerLiveMapTrackingView(
                             order.orderStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
                             order.orderStatus == "PICKED_UP" -> "Order packed & picked up"
                             order.orderStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"
-                            order.orderStatus == "SELLER_ACCEPTED" -> "Order accepted & being packed"
+                            order.orderStatus == "SELLER_ACCEPTED" -> "Order accepted & packing"
                             hasGpsData -> "Partner is on the way"
                             else -> "Assigning delivery partner..."
                         },
                         color = Color.White,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
                     )
                 }
 
-                Surface(
-                    color = when {
-                        order.orderStatus == "DELIVERED" -> Color(0xFF10B981)
-                        hasGpsData && !isStale -> Color(0xFF10B981)
-                        order.orderStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
-                        else -> Color(0xFF38BDF8)
-                    },
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = when {
-                            order.orderStatus == "DELIVERED" -> "DELIVERED"
-                            hasGpsData && !isStale -> "LIVE GPS"
-                            order.orderStatus == "SELLER_ACCEPTED" -> "PACKING"
-                            else -> "ASSIGNING"
-                        },
-                        color = Color(0xFF0F172A),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.5.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                if (onExpandClick != null) {
+                    Surface(
+                        onClick = onExpandClick,
+                        color = Color(0xFF1E293B),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.padding(start = 6.dp)
+                    ) {
+                        Text(
+                            text = "⛶ Fullscreen",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
                 }
             }
         }
