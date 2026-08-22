@@ -269,38 +269,44 @@ class RiderForegroundLocationService : Service(), LocationListener {
             // Atomic SQLite enqueue for active delivery telemetry
             dbHelper?.enqueue(update)
             _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
-        } else {
-            // Transmit idle rider location presence to server
-            serviceScope.launch(Dispatchers.IO) {
-                try {
-                    val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
-                    val baseUrl = sessionMgr.getBaseUrl()
-                    val token = sessionMgr.getAuthToken()
-                    if (baseUrl.isNotBlank() && token.isNotBlank()) {
-                        val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
-                        val conn = url.openConnection() as java.net.HttpURLConnection
-                        conn.requestMethod = "POST"
-                        conn.setRequestProperty("Content-Type", "application/json")
-                        conn.setRequestProperty("Authorization", "Bearer $token")
-                        conn.doOutput = true
+        }
 
-                        val body = JSONObject().apply {
-                            put("latitude", location.latitude)
-                            put("longitude", location.longitude)
-                            put("speedKmh", if (location.hasSpeed()) location.speed * 3.6f else 0.0f)
-                            if (location.hasBearing()) {
-                                put("heading", location.bearing)
-                            }
-                            put("accuracyMeters", accuracy)
-                            put("isOnline", true)
-                        }
-                        conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                        conn.responseCode // execute
-                        conn.disconnect()
+        // Transmit real-time telemetry and presence to server immediately
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+                val baseUrl = sessionMgr.getBaseUrl()
+                val token = sessionMgr.getAuthToken()
+                if (baseUrl.isNotBlank() && token.isNotBlank()) {
+                    if (activeDeliveryId.isNotBlank()) {
+                        transmitHeadTelemetry()
                     }
-                } catch (e: Exception) {
-                    // Ignore transient network errors during idle presence ping
+
+                    val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Authorization", "Bearer $token")
+                    conn.doOutput = true
+                    conn.connectTimeout = 2000
+                    conn.readTimeout = 2000
+
+                    val body = JSONObject().apply {
+                        put("latitude", location.latitude)
+                        put("longitude", location.longitude)
+                        put("speedKmh", if (location.hasSpeed()) location.speed * 3.6f else 0.0f)
+                        if (location.hasBearing()) {
+                            put("heading", location.bearing)
+                        }
+                        put("accuracyMeters", accuracy)
+                        put("isOnline", true)
+                    }
+                    conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    conn.responseCode // execute
+                    conn.disconnect()
                 }
+            } catch (e: Exception) {
+                // Ignore transient network errors
             }
         }
     }

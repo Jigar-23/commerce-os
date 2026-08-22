@@ -925,16 +925,16 @@ class TransactionalServiceabilityRepository {
 }
 
 const AUTHORITATIVE_STORE_MASTER = {
-  id: process.env.STORE_MASTER_ID || 'STORE_MASTER_001',
-  store_id: process.env.STORE_MASTER_ID || 'STORE_MASTER_001',
-  storeName: process.env.STORE_MASTER_NAME || 'Commerce OS Central Fulfillment Hub',
-  store_name: process.env.STORE_MASTER_NAME || 'Commerce OS Central Fulfillment Hub',
-  name: process.env.STORE_MASTER_NAME || 'Commerce OS Central Fulfillment Hub',
-  address: process.env.STORE_MASTER_ADDRESS || 'Central Dark Store Hub, Sector 18',
-  latitude: Number(process.env.STORE_MASTER_LAT) || 28.2021899,
-  longitude: Number(process.env.STORE_MASTER_LNG) || 76.6153954,
-  sla_minutes: 10,
-  slaMinutes: 10,
+  id: process.env.STORE_MASTER_ID || 'STORE_REWARI_01',
+  store_id: process.env.STORE_MASTER_ID || 'STORE_REWARI_01',
+  storeName: process.env.STORE_MASTER_NAME || 'Commerce OS Rewari Central Store Hub',
+  store_name: process.env.STORE_MASTER_NAME || 'Commerce OS Rewari Central Store Hub',
+  name: process.env.STORE_MASTER_NAME || 'Commerce OS Rewari Central Store Hub',
+  address: process.env.STORE_MASTER_ADDRESS || '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
+  latitude: 28.202218,
+  longitude: 76.615403,
+  sla_minutes: 8,
+  slaMinutes: 8,
   is_active: true,
   isActive: true
 };
