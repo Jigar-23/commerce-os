@@ -5731,10 +5731,8 @@ async function dispatchOutboxEvent(event) {
 
 async function startApplication() {
   console.log('🚀 Initializing Commerce OS Persistence & Application Repositories...');
-  const isProd = process.env.COMMERCEOS_ENV === 'production' || 
-                 process.env.COMMERCEOS_PERSISTENCE_MODE === 'postgres' || 
-                 process.env.NODE_ENV === 'production' || 
-                 process.env.PRODUCTION === 'true';
+  const isPostgresConfigured = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim());
+  const requirePostgres = process.env.COMMERCEOS_REQUIRE_POSTGRES === 'true';
 
   try {
     const sseBroadcaster = async (riderId, eventType, data, deliveryId) => {
@@ -5760,12 +5758,12 @@ async function startApplication() {
       pricingCalculator: calculateAuthoritativeEarnings
     });
 
-    if (isProd && (!appRepositories || !appRepositories.isProduction)) {
-      throw new Error('FATAL_CONFIGURATION_ERROR: COMMERCEOS_ENV=production requires initialized PostgreSQL repositories and Outbox worker.');
+    if (requirePostgres && (!appRepositories || !appRepositories.isProduction)) {
+      throw new Error('FATAL_CONFIGURATION_ERROR: COMMERCEOS_REQUIRE_POSTGRES=true requires initialized PostgreSQL repositories and Outbox worker.');
     }
   } catch (err) {
     console.error('FATAL: Could not initialize application repositories:', err.message);
-    if (isProd) {
+    if (requirePostgres) {
       console.error('❌ TERMINATING PROCESS: Production boot failure — repositories missing or uninitialized.');
       process.exit(1);
     }

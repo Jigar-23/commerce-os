@@ -2343,8 +2343,8 @@ class LocalDevelopmentOfferRepository {
       return { ok: false, httpStatus: 409, error: 'OFFER_EXPIRED', message: 'This offer has expired on the server.' };
     }
 
-    if (['CLAIMED_BY_OTHER'].includes(offer.status)) {
-      return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been claimed.' };
+    if (['ACCEPTED', 'DECLINED', 'CANCELLED', 'CLAIMED_BY_OTHER'].includes(offer.status)) {
+      return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been claimed or declined.' };
     }
 
     if (session && session.state === 'ACCEPTED' && session.riderId !== riderId) {
@@ -4615,10 +4615,14 @@ class DispatchService {
     const offerExpiresAt = now + 900000;
     const offerId = 'off_' + crypto.randomUUID();
 
-    const customerName = deliverySession.customerName || deliverySession.customer_name || 'Customer';
-    const customerAddress = deliverySession.customerAddress || deliverySession.customer_address || 'Delivery Address Provided';
-    const merchantName = store?.store_name || store?.storeName || deliverySession.merchantName || 'Rewari Central Master Store';
-    const merchantAddress = store?.address || deliverySession.merchantAddress || '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401';
+    const customerName = deliverySession.customerName || deliverySession.customer_name;
+    const customerAddress = deliverySession.customerAddress || deliverySession.customer_address;
+    const merchantName = store?.store_name || store?.storeName || deliverySession.merchantName || deliverySession.merchant_name;
+    const merchantAddress = store?.address || deliverySession.merchantAddress || deliverySession.merchant_address;
+
+    if (!customerName || !customerAddress || !merchantName || !merchantAddress) {
+      throw new Error(`INTEGRITY_ERROR: Incomplete customer or merchant details for delivery session ${deliveryId}.`);
+    }
 
     const offer = {
       offerId,
@@ -5226,7 +5230,8 @@ async function initApplicationRepositories(options = {}) {
     pricingCalculator = null
   } = options;
 
-  const shouldUsePostgres = (isProdEnv || Boolean(pgPool)) && !forceLocal;
+  const hasPostgresConfig = Boolean(pgPool || (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()));
+  const shouldUsePostgres = hasPostgresConfig && !forceLocal;
 
   if (shouldUsePostgres) {
     let pool = pgPool;
@@ -5239,11 +5244,8 @@ async function initApplicationRepositories(options = {}) {
       }
     }
 
-    if (!pool) {
-      throw new Error('FATAL_STARTUP_ERROR: COMMERCEOS_ENV=production requires a valid PostgreSQL pool or DATABASE_URL. Missing persistence infrastructure.');
-    }
-
-    console.log('[PersistenceLayer] Mode: PRODUCTION (PostgreSQL Transactional Repositories)');
+    if (pool) {
+      console.log('[PersistenceLayer] Mode: PRODUCTION (PostgreSQL Transactional Repositories)');
     const catalogRepo = new TransactionalCatalogRepository(pool);
     const customerRepo = new TransactionalCustomerRepository(pool);
     const addressRepo = new TransactionalAddressRepository(pool);
@@ -5329,6 +5331,7 @@ async function initApplicationRepositories(options = {}) {
       notificationService,
       outboxProcessor
     };
+    }
   }
 
   console.log('[PersistenceLayer] Initialized LocalDevelopmentRepository harness.');
