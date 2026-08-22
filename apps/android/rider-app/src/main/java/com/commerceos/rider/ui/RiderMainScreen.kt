@@ -124,11 +124,14 @@ fun RiderMainScreen(
                     activeOffer = offerResult.offer
                     if (prevId != offerResult.offer.offerId) {
                         com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offerResult.offer.offerId)
+                        // Post persistent notification in Android notification tray
+                        com.commerceos.rider.util.RiderNotificationManager.postDirectOfferNotification(context, offerResult.offer)
                     }
-                    // Since app is foregrounded, dismiss any pending system tray banner
-                    com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, offerResult.offer.offerId)
                 }
                 is com.commerceos.rider.model.ActiveOfferResult.None -> {
+                    if (activeOffer != null) {
+                        com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, activeOffer?.offerId)
+                    }
                     activeOffer = null
                 }
                 is com.commerceos.rider.model.ActiveOfferResult.Error -> {
@@ -431,6 +434,7 @@ fun RiderMainScreen(
                                 onAccept = { offId ->
                                     scope.launch {
                                         actionLoading = true
+                                        com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, offId)
                                         val res = repository.acceptOffer(offId)
                                         res.onSuccess {
                                             activeOffer = null
@@ -444,6 +448,7 @@ fun RiderMainScreen(
                                 },
                                 onDecline = { offId ->
                                     scope.launch {
+                                        com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, offId)
                                         repository.declineOffer(offId)
                                         activeOffer = null
                                     }
@@ -570,7 +575,16 @@ fun RiderMainScreen(
                         selectedCategory = selectedNotifCategory,
                         onCategorySelected = { selectedNotifCategory = it },
                         onNotificationClick = { notif ->
-                            scope.launch { repository.markNotificationRead(notif.notificationId) }
+                            scope.launch {
+                                repository.markNotificationRead(notif.notificationId)
+                                val offerRes = repository.fetchActiveOffer()
+                                if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
+                                    activeOffer = offerRes.offer
+                                    selectedTab = 0
+                                } else if (!notif.offerId.isNullOrBlank() || notif.type == "ORDER_OFFER" || notif.category == "ORDERS") {
+                                    selectedTab = 0
+                                }
+                            }
                         },
                         onMarkAllRead = { scope.launch { repository.markAllNotificationsRead() } },
                         onBack = { selectedTab = 0 }

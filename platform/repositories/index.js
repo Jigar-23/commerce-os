@@ -4005,20 +4005,21 @@ class LocalDevelopmentRiderRepository {
   }
 
   async findRiderById(riderId) {
-    let rider = (this.db.riders || []).find((r) => r.id === riderId || r.riderId === riderId);
+    let rider = (Array.isArray(this.db.riders) ? this.db.riders.find((r) => r.id === riderId || r.riderId === riderId) : this.db.riders?.[riderId]);
     if (!rider) {
+      const phoneDigits = String(riderId || '').replace(/\D/g, '');
+      const cleanPhone = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : (phoneDigits.length > 0 ? phoneDigits : '9876543210');
       rider = {
-        id: riderId || 'rdr_rewari_01',
-        riderId: riderId || 'rdr_rewari_01',
-        name: 'Vikram Singh',
-        realName: 'Vikram Singh',
-        phone: '+919876543210',
-        realPhone: '+919876543210',
+        id: riderId || 'rdr_' + cleanPhone,
+        riderId: riderId || 'rdr_' + cleanPhone,
+        name: 'Partner ' + cleanPhone.slice(-4),
+        realName: 'Partner ' + cleanPhone.slice(-4),
+        phone: '+91' + cleanPhone,
+        realPhone: '+91' + cleanPhone,
         vehicle: 'HR-26-AB-1234',
         realVehicle: 'HR-26-AB-1234',
         vehicleNumber: 'HR-26-AB-1234',
         vehicleType: 'TWO_WHEELER',
-        tier: 'PRO_EXPRESS',
         rating: 4.9,
         status: 'ACTIVE'
       };

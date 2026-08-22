@@ -176,8 +176,8 @@ object RiderNotificationManager {
                 .setVibrate(longArrayOf(0, 400, 200, 400))
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .setOngoing(false)
+                .setAutoCancel(false)
+                .setOngoing(true)
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(offer.offerId.hashCode(), builder.build())

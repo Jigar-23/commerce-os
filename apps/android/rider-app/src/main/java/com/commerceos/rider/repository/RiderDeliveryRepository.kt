@@ -165,50 +165,24 @@ class RiderDeliveryRepository(
                 val completedToday = if (json.has("completedToday") && !json.isNull("completedToday")) json.getInt("completedToday") else 0
                 val earningsTodayFormatted = json.optString("earningsTodayFormatted", "₹0").takeIf { it.isNotBlank() } ?: "₹0"
                 val shiftStatus = json.optString("shiftStatus", "ONLINE_AVAILABLE")
-                val assignedHub = json.optString("assignedHub", "Rewari Central Hub")
-                val tier = json.optString("tier", "Diamond")
+                val assignedHub = json.optString("assignedHub", "Rewari Central Hub (STORE_REWARI_01)")
                 val profile = RiderProfile(
-                    riderId = json.optString("riderId", "rdr_rewari_01"),
+                    riderId = json.optString("riderId", "rdr_partner"),
                     name = json.optString("name", "Delivery Partner"),
-                    phone = json.optString("phone", "+919876543210"),
-                    vehicleNumber = json.optString("vehicleNumber", "HR-26-AB-1234"),
+                    phone = json.optString("phone", ""),
+                    vehicleNumber = json.optString("vehicleNumber", json.optString("vehicle", "HR-26-AB-1234")),
                     rating = rating,
                     completedToday = completedToday,
                     earningsTodayFormatted = earningsTodayFormatted,
                     shiftStatus = shiftStatus,
-                    assignedHub = assignedHub,
-                    tier = tier
+                    assignedHub = assignedHub
                 )
                 return@withContext Result.success(profile)
             }
-            // Fallback default profile if network error or unauthenticated
-            val fallbackProfile = RiderProfile(
-                riderId = "rdr_rewari_01",
-                name = "Delivery Partner",
-                phone = "+919876543210",
-                vehicleNumber = "HR-26-AB-1234",
-                rating = 4.9,
-                completedToday = 0,
-                earningsTodayFormatted = "₹0",
-                shiftStatus = "ONLINE_AVAILABLE",
-                assignedHub = "Rewari Central Hub",
-                tier = "Diamond"
-            )
-            return@withContext Result.success(fallbackProfile)
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            return@withContext Result.failure(Exception("Failed to fetch profile: $errStr"))
         } catch (e: Exception) {
-            val fallbackProfile = RiderProfile(
-                riderId = "rdr_rewari_01",
-                name = "Delivery Partner",
-                phone = "+919876543210",
-                vehicleNumber = "HR-26-AB-1234",
-                rating = 4.9,
-                completedToday = 0,
-                earningsTodayFormatted = "₹0",
-                shiftStatus = "ONLINE_AVAILABLE",
-                assignedHub = "Rewari Central Hub",
-                tier = "Diamond"
-            )
-            return@withContext Result.success(fallbackProfile)
+            return@withContext Result.failure(e)
         }
     }
 
