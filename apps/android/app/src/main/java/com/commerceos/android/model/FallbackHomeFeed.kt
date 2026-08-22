@@ -58,7 +58,7 @@ object FallbackHomeFeed {
 
         val hero = HomeHeroDto(
             campaignId = "hero_01",
-            title = "10-Minute Express Quick Commerce",
+            title = "Instant Express Quick Commerce",
             subtitle = "Cash on Delivery Available • Verified Healthcare",
             badge = "OFFICIAL",
             ctaText = "Shop Now"

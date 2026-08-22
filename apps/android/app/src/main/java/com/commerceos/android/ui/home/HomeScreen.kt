@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.model.ApiMedicine
 import com.commerceos.android.util.MoneyFormatter
 import com.commerceos.android.model.CartItem
@@ -71,6 +72,7 @@ fun HomeScreen(
     customerId: String,
     cartItems: List<CartItem> = emptyList(),
     homeContext: HomeContext? = null,
+    selectedAddress: ApiAddress? = null,
     onChangeAddress: () -> Unit = {},
     onEntityClick: (CommerceEntity) -> Unit = {},
     onAddToCart: (CommerceProduct) -> Unit = {},
@@ -107,7 +109,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             item {
-                DeliveryAddressWidget(context = homeContext, onChangeAddress = onChangeAddress)
+                DeliveryAddressWidget(context = homeContext, selectedAddress = selectedAddress, onChangeAddress = onChangeAddress)
             }
 
             item {
@@ -243,34 +245,40 @@ private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun DeliveryAddressWidget(context: HomeContext?, onChangeAddress: () -> Unit) {
-    val hasAddress = context?.hasAddress == true
+private fun DeliveryAddressWidget(
+    context: HomeContext?,
+    selectedAddress: ApiAddress? = null,
+    onChangeAddress: () -> Unit
+) {
+    val hasAddress = context?.hasAddress == true || selectedAddress != null
 
-    // Dynamic ETA calculation: distance between Store (28.202218, 76.615403) and Customer GeoPoint
-    val etaDisplay = remember(context) {
-        val geo = context?.geoPoint
-        if (!geo.isNullOrBlank() && geo.contains(",")) {
-            val parts = geo.split(",")
-            val lat = parts.getOrNull(0)?.trim()?.toDoubleOrNull()
-            val lng = parts.getOrNull(1)?.trim()?.toDoubleOrNull()
-            if (lat != null && lng != null && lat != 0.0) {
-                val r = 6371.0
-                val dLat = Math.toRadians(lat - 28.202218)
-                val dLon = Math.toRadians(lng - 76.615403)
-                val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                        Math.cos(Math.toRadians(28.202218)) * Math.cos(Math.toRadians(lat)) *
-                        Math.sin(dLon / 2) * Math.sin(dLon / 2)
-                val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-                val distKm = r * c
-                val eta = (3 + Math.ceil(distKm * 2.5).toInt()).coerceIn(4, 45)
-                "$eta MINS"
-            } else {
-                context.formattedEta?.takeIf { it.isNotBlank() } ?: "10 MINS"
-            }
+    // Dynamic ETA calculation: distance between Store (28.202218, 76.615403) and Customer Coordinates
+    val etaDisplay = remember(selectedAddress, context) {
+        val selLat = selectedAddress?.latitude?.let { if (it != 0.0) it else null }
+        val selLng = selectedAddress?.longitude?.let { if (it != 0.0) it else null }
+
+        val geoParts = context?.geoPoint?.split(",")
+        val geoLat = geoParts?.getOrNull(0)?.trim()?.toDoubleOrNull()?.let { if (it != 0.0) it else null }
+        val geoLng = geoParts?.getOrNull(1)?.trim()?.toDoubleOrNull()?.let { if (it != 0.0) it else null }
+
+        val finalLat = selLat ?: geoLat
+        val finalLng = selLng ?: geoLng
+
+        if (finalLat != null && finalLng != null) {
+            val r = 6371.0
+            val dLat = Math.toRadians(finalLat - 28.202218)
+            val dLon = Math.toRadians(finalLng - 76.615403)
+            val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(Math.toRadians(28.202218)) * Math.cos(Math.toRadians(finalLat)) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+            val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+            val distKm = r * c
+            val eta = (3 + Math.ceil(distKm * 2.5).toInt()).coerceIn(4, 45)
+            "$eta MINS"
         } else if (!context?.formattedEta.isNullOrBlank()) {
             context!!.formattedEta!!
         } else {
-            "10 MINS"
+            "8 MINS"
         }
     }
 

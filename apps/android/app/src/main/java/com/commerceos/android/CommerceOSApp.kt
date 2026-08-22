@@ -372,37 +372,41 @@ fun CommerceOSApp(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (val screen = currentScreen) {
-                is Screen.Home -> HomeScreen(
-                    viewModel = homeViewModel,
-                    customerId = authenticatedCustomerId,
-                    cartItems = cartViewModel.cartItems,
-                    homeContext = addressViewModel.selectedAddress?.let { addr ->
-                        val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
-                        val status = when {
-                            serviceability == null -> FulfillmentStatus.UNKNOWN
-                            serviceability.addressId != addr.id -> FulfillmentStatus.UNKNOWN
-                            serviceability.response.eligible -> FulfillmentStatus.SERVICEABLE
-                            else -> FulfillmentStatus.UNSERVICEABLE
-                        }
-                        val fulfillment = FulfillmentContext(
-                            addressId = addr.id,
-                            status = status,
-                            etaLabel = serviceability?.response?.etaLabel,
-                            requestId = "home-ctx-${addr.id}"
-                        )
-                        HomeContext(
-                            addressId = addr.id,
-                            tag = addr.tag,
-                            addressLine = addr.addressLine,
-                            cityZip = "${addr.city} ${addr.postalCode}".trim(),
-                            fulfillment = fulfillment,
-                            sequenceId = fulfillment.generatedAt
-                        )
-                    },
-                    onChangeAddress = {
-                        addressViewModel.init(authenticatedCustomerId)
-                        navigate(Screen.AddressSelection)
-                    },
+                is Screen.Home -> {
+                    val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                    HomeScreen(
+                        viewModel = homeViewModel,
+                        customerId = authenticatedCustomerId,
+                        cartItems = cartViewModel.cartItems,
+                        selectedAddress = activeAddr,
+                        homeContext = activeAddr?.let { addr ->
+                            val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
+                            val status = when {
+                                serviceability == null -> FulfillmentStatus.UNKNOWN
+                                serviceability.addressId != addr.id -> FulfillmentStatus.UNKNOWN
+                                serviceability.response.eligible -> FulfillmentStatus.SERVICEABLE
+                                else -> FulfillmentStatus.UNSERVICEABLE
+                            }
+                            val fulfillment = FulfillmentContext(
+                                addressId = addr.id,
+                                status = status,
+                                etaLabel = serviceability?.response?.etaLabel,
+                                requestId = "home-ctx-${addr.id}"
+                            )
+                            HomeContext(
+                                addressId = addr.id,
+                                tag = addr.tag,
+                                addressLine = addr.addressLine,
+                                cityZip = "${addr.city} ${addr.postalCode}".trim(),
+                                geoPoint = "${addr.latitude},${addr.longitude}",
+                                fulfillment = fulfillment,
+                                sequenceId = fulfillment.generatedAt
+                            )
+                        },
+                        onChangeAddress = {
+                            addressViewModel.init(authenticatedCustomerId)
+                            navigate(Screen.AddressSelection)
+                        },
                     onEntityClick = { entity ->
                         when (entity) {
                             is CommerceEntity.ProductItem -> {
@@ -461,6 +465,7 @@ fun CommerceOSApp(
                         navigate(Screen.Catalog(catalogQuery))
                     }
                 )
+                }
                 is Screen.Catalog -> CatalogScreen(
                     viewModel = catalogViewModel,
                     onSelectProduct = { product ->

@@ -655,20 +655,31 @@ const SEED_ADDRESSES = [
 
 function serviceabilityFor(address, items) {
   const cold = (items || []).some((i) => i.coldChain || i.coldChainRequired);
+  const storeLat = 28.202218;
+  const storeLng = 76.615403;
+  const addrLat = (address && address.latitude != null && !isNaN(Number(address.latitude))) ? Number(address.latitude) : 28.1970;
+  const addrLng = (address && address.longitude != null && !isNaN(Number(address.longitude))) ? Number(address.longitude) : 76.6190;
+
+  const dLat = (addrLat - storeLat) * Math.PI / 180;
+  const dLon = (addrLng - storeLng) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(storeLat * Math.PI / 180) * Math.cos(addrLat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const distKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const calculatedEta = Math.min(45, Math.max(4, 3 + Math.ceil(distKm * 2.5)));
+
   return {
     eligible: true,
-    etaMinutes: { min: 8, max: 15 },
-    etaLabel: '10-Min Express SLA Guaranteed',
+    etaMinutes: { min: Math.max(2, calculatedEta - 3), max: calculatedEta + 3 },
+    etaLabel: `${calculatedEta} Mins Express SLA`,
     fulfillmentNode: {
       id: process.env.STORE_MASTER_ID || 'STORE_MASTER_001',
       name: process.env.STORE_MASTER_NAME || 'Commerce OS Central Fulfillment Hub',
-      latitude: Number(process.env.STORE_MASTER_LAT) || 28.2021899,
-      longitude: Number(process.env.STORE_MASTER_LNG) || 76.6153954,
-      slaMinutes: 10,
+      latitude: storeLat,
+      longitude: storeLng,
+      slaMinutes: calculatedEta,
     },
     deliveryFee: DELIVERY_FEE,
     coldChainFee: cold ? COLD_CHAIN_FEE : 0,
-    estimatedDeliveryWindow: { min: 8, max: 15 },
+    estimatedDeliveryWindow: { min: Math.max(2, calculatedEta - 3), max: calculatedEta + 3 },
   };
 }
 
