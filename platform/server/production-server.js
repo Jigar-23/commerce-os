@@ -682,6 +682,71 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------------------------------------
+    // Seller Order Reject: POST /api/v1/orders/:id/reject-by-seller
+    // -------------------------------------------------------------
+    const rejectMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/reject-by-seller$/);
+    if (rejectMatch && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const sellerRes = await pool.query(
+        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
+        [authClaims.sub]
+      );
+      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE') {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      }
+      const authorizedStoreId = sellerRes.rows[0].store_id;
+
+      const orderId = rejectMatch[1];
+      const body = await parseJsonBody(req);
+      const result = await appRepositories.orderRepo.rejectOrderBySeller(orderId, authorizedStoreId, authClaims.sub, body.reason || 'REJECTED_BY_MERCHANT');
+      return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
+    }
+
+    // -------------------------------------------------------------
+    // Seller Store Settings: GET & PATCH /api/v1/seller/store/settings
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/seller/store/settings' && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const sellerRes = await pool.query(
+        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
+        [authClaims.sub]
+      );
+      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE' || !sellerRes.rows[0].store_id) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      }
+      const authorizedStoreId = sellerRes.rows[0].store_id;
+      const settings = await appRepositories.storeRepo.getStoreSettings(authorizedStoreId);
+      return sendJson(res, 200, settings);
+    }
+
+    if (pathname === '/api/v1/seller/store/settings' && method === 'PATCH') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const sellerRes = await pool.query(
+        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
+        [authClaims.sub]
+      );
+      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE' || !sellerRes.rows[0].store_id) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      }
+      const authorizedStoreId = sellerRes.rows[0].store_id;
+      const body = await parseJsonBody(req);
+      const updateRes = await appRepositories.storeRepo.updateStoreSettings(authorizedStoreId, body);
+      return sendJson(res, updateRes.httpStatus || (updateRes.ok ? 200 : 400), updateRes);
+    }
+
+    // -------------------------------------------------------------
     // Seller Order Pack: POST /api/v1/orders/:id/pack
     // -------------------------------------------------------------
     const packMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/pack$/);

@@ -4186,6 +4186,72 @@ async function handleRequest(port, req, res) {
         return json(res, 200, order);
       }
 
+      // POST /api/v1/orders/:id/reject-by-seller
+      const sellerRejectMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/reject-by-seller$/);
+      if (sellerRejectMatch && req.method === 'POST') {
+        const authClaims = verifyAndDecodeJwt(req);
+        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
+          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Seller authentication required.' });
+        }
+        const orderId = sellerRejectMatch[1];
+        const storeId = authClaims.storeId;
+        const body = await parseBody(req);
+        if (appRepositories && appRepositories.orderRepo) {
+          const resDomain = await appRepositories.orderRepo.rejectOrderBySeller(orderId, storeId, authClaims.sub, body.reason || 'REJECTED_BY_MERCHANT');
+          if (!resDomain.ok) return json(res, resDomain.httpStatus || 400, { error: resDomain.error, message: resDomain.message });
+          return json(res, 200, resDomain.order);
+        }
+        const order = findOrder(orderId);
+        if (!order) return json(res, 404, { error: 'Order not found' });
+        setOrderStatus(order, 'CANCELLED', authClaims.sub, body.reason || 'Rejected by merchant');
+        order.sellerApprovalStatus = 'REJECTED';
+        saveDb();
+        return json(res, 200, order);
+      }
+
+      // GET & PATCH /api/v1/seller/store/settings
+      if (path === '/api/v1/seller/store/settings' && req.method === 'GET') {
+        const authClaims = verifyAndDecodeJwt(req);
+        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
+          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Seller authentication required.' });
+        }
+        const storeId = authClaims.storeId || 'STORE_REWARI_01';
+        if (appRepositories && appRepositories.storeRepo) {
+          const settings = await appRepositories.storeRepo.getStoreSettings(storeId);
+          return json(res, 200, settings);
+        }
+        db.stores = db.stores || {};
+        const store = db.stores[storeId] || {
+          storeId,
+          storeName: 'Central Warehouse Outlet',
+          sellerApprovalRequired: false,
+          slaMinutes: 10,
+          isActive: true
+        };
+        return json(res, 200, store);
+      }
+
+      if (path === '/api/v1/seller/store/settings' && req.method === 'PATCH') {
+        const authClaims = verifyAndDecodeJwt(req);
+        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
+          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Seller authentication required.' });
+        }
+        const storeId = authClaims.storeId || 'STORE_REWARI_01';
+        const body = await parseBody(req);
+        if (appRepositories && appRepositories.storeRepo) {
+          const updateRes = await appRepositories.storeRepo.updateStoreSettings(storeId, body);
+          return json(res, updateRes.httpStatus || (updateRes.ok ? 200 : 400), updateRes);
+        }
+        db.stores = db.stores || {};
+        db.stores[storeId] = {
+          ...(db.stores[storeId] || {}),
+          ...body,
+          storeId
+        };
+        saveDb();
+        return json(res, 200, { ok: true, store: db.stores[storeId] });
+      }
+
       // POST /api/v1/orders/:id/pack
       const packMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/pack$/);
       if (packMatch && req.method === 'POST') {

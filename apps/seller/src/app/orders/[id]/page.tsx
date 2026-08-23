@@ -347,23 +347,17 @@ export default function DedicatedSingleOrderPage({ params }: { params: { id: str
             <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm space-y-4">
               <h3 className="text-base font-black text-content-primary border-b border-border-subtle pb-3">Full Database Operations Control Panel</h3>
               <div className="flex flex-wrap items-center gap-3">
-                {order.orderStatus === 'PLACED' && (
-                  <button onClick={() => handleTransition('SELLER_ACCEPTED')} className="px-5 py-3 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl font-bold text-xs shadow-md">
-                    Accept Order & Dispatch Delivery Partner
-                  </button>
+                {(order.orderStatus === 'PLACED' || order.sellerApprovalStatus === 'PENDING') && (
+                  <>
+                    <button onClick={() => handleDomainTransition('accept')} className="px-5 py-3 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Accept Order &amp; Dispatch Delivery Partner</span>
+                    </button>
+                    <button onClick={() => setCancelModal(true)} className="px-5 py-3 border border-border-danger hover:bg-surface-dangerSubtle text-content-danger rounded-xl font-bold text-xs cursor-pointer">
+                      <span>Reject Order &amp; Release Stock</span>
+                    </button>
+                  </>
                 )}
-                {/* Pack and India Post steps commented out per single local store workflow
-                {order.orderStatus === 'SELLER_ACCEPTED' && (
-                  <button onClick={() => handleTransition('PACKED')} className="px-5 py-3 bg-action-editorialBg hover:bg-action-editorialHover text-white rounded-xl font-bold text-xs shadow-md">
-                    Pack Order
-                  </button>
-                )}
-                {order.orderStatus === 'PACKED' && (
-                  <button onClick={handleShipWithConsignment} className="px-5 py-3 bg-action-primaryBg hover:bg-action-primaryHover text-white rounded-xl font-bold text-xs shadow-md">
-                    Ship via India Post & Set Consignment #
-                  </button>
-                )}
-                */}
                 {order.orderStatus === 'SHIPPED' && (
                   <button onClick={() => handleTransition('OUT_FOR_DELIVERY')} className="px-5 py-3 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl font-bold text-xs shadow-md">
                     Mark Out for Delivery
@@ -374,7 +368,7 @@ export default function DedicatedSingleOrderPage({ params }: { params: { id: str
                     Collect COD Cash & Reconcile
                   </button>
                 )}
-                {order.orderStatus !== 'DELIVERED' && order.orderStatus !== 'CANCELLED' && (
+                {order.orderStatus !== 'DELIVERED' && order.orderStatus !== 'CANCELLED' && order.orderStatus !== 'PLACED' && (
                   <button onClick={() => setCancelModal(true)} className="px-5 py-3 border border-border-danger hover:bg-surface-dangerSubtle text-content-danger rounded-xl font-bold text-xs">
                     Cancel Order & Release Stock
                   </button>

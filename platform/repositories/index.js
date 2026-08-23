@@ -3076,13 +3076,16 @@ class TransactionalOrderRepository {
       const hasRxRequiredItem = resolvedItemSnapshots.some(item => item.rxRequired);
       const authoritativeInitialStatus = hasRxRequiredItem ? 'PRESCRIPTION_VERIFICATION_PENDING' : 'PLACED';
 
+      const isSellerApprovalRequired = store.seller_approval_required === true;
+      const initialSellerApprovalStatus = isSellerApprovalRequired ? 'PENDING' : 'NOT_REQUIRED';
+
       const orderInsertQuery = `
         INSERT INTO orders (
           id, order_id, customer_id, store_id, prescription_id, order_type,
-          status, total_amount, tax_amount, delivery_fee, payment_method, payment_status,
+          status, seller_approval_status, total_amount, tax_amount, delivery_fee, payment_method, payment_status,
           is_cod, cod_amount, idempotency_key, request_hash, delivery_address, items, delivery_otp_hash,
           otp_expires_at, otp_attempts, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 0, NOW(), NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 0, NOW(), NOW())
         RETURNING *;
       `;
       const orderValues = [
@@ -3093,6 +3096,7 @@ class TransactionalOrderRepository {
         data.prescriptionId || null,
         authoritativeOrderType,
         authoritativeInitialStatus,
+        initialSellerApprovalStatus,
         totalAmount,
         taxAmount,
         deliveryFee,
@@ -3181,22 +3185,43 @@ class TransactionalOrderRepository {
         );
       }
 
-      // 17. Insert Transactional Outbox Event for DISPATCH_REQUESTED
-      await client.query(
-        `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
-         VALUES ('DELIVERY_SESSION', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', 0, NOW(), NOW())`,
-        [
-          deliveryId,
-          JSON.stringify({
-            deliveryId,
+      // 17. Insert Transactional Outbox Event based on store dispatch mode
+      if (isSellerApprovalRequired) {
+        // Marketplace mode: Notify seller immediately. Rider dispatch is gated until seller approval.
+        await client.query(
+          `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
+           VALUES ('ORDER', $1, 'ORDER_PLACED', $2, 'PENDING', 0, NOW(), NOW())`,
+          [
             orderId,
-            storeId: store.id,
-            customerId: customer.id,
-            totalAmount,
-            isCod
-          })
-        ]
-      );
+            JSON.stringify({
+              orderId,
+              storeId: store.id,
+              customerId: customer.id,
+              sellerApprovalRequired: true,
+              totalAmount,
+              isCod
+            })
+          ]
+        );
+      } else {
+        // Dark store mode: Instant auto-dispatch to riders
+        await client.query(
+          `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
+           VALUES ('DELIVERY_SESSION', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', 0, NOW(), NOW())`,
+          [
+            deliveryId,
+            JSON.stringify({
+              deliveryId,
+              orderId,
+              storeId: store.id,
+              customerId: customer.id,
+              sellerApprovalRequired: false,
+              totalAmount,
+              isCod
+            })
+          ]
+        );
+      }
 
       await client.query('COMMIT');
 
@@ -3311,14 +3336,59 @@ class TransactionalOrderRepository {
           return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'. Must be PLACED.` };
         }
 
-        await client.query(`UPDATE orders SET status = 'SELLER_ACCEPTED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
+        await client.query(`UPDATE orders SET status = 'SELLER_ACCEPTED', seller_approval_status = 'ACCEPTED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
            VALUES ($1, $2, $3, $4, 'PENDING')`,
           ['ORDER', order.order_id || order.id, 'ORDER_SELLER_ACCEPTED', JSON.stringify({ orderId: order.order_id || order.id, sellerId })]
         );
         await client.query('COMMIT');
-        return { ok: true, order: { ...order, status: 'SELLER_ACCEPTED' } };
+        return { ok: true, order: { ...order, status: 'SELLER_ACCEPTED', seller_approval_status: 'ACCEPTED' } };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        if (err.code === '40001' && attempt < MAX_RETRIES - 1) {
+          await new Promise(r => setTimeout(r, 20 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  async rejectOrderBySeller(orderId, storeId, sellerId, reason = 'REJECTED_BY_MERCHANT') {
+    if (!this.pool) return { ok: false, error: 'NO_POOL' };
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+        const orderRes = await client.query(`SELECT * FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`, [orderId]);
+        const order = orderRes.rows[0];
+        if (!order) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
+        }
+        if (storeId && order.store_id && order.store_id !== storeId) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' };
+        }
+
+        if (order.status === 'CANCELLED') {
+          await client.query('COMMIT');
+          return { ok: true, order, isIdempotent: true };
+        }
+
+        await client.query(`UPDATE orders SET status = 'CANCELLED', seller_approval_status = 'REJECTED', cancellation = $2, updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id, JSON.stringify({ reason, actor: 'SELLER', sellerId, timestamp: new Date().toISOString() })]);
+        await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
+        await client.query(
+          `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
+           VALUES ($1, $2, $3, $4, 'PENDING')`,
+          ['ORDER', order.order_id || order.id, 'ORDER_CANCELLED', JSON.stringify({ orderId: order.order_id || order.id, sellerId, reason })]
+        );
+        await client.query('COMMIT');
+        return { ok: true, order: { ...order, status: 'CANCELLED', seller_approval_status: 'REJECTED' } };
       } catch (err) {
         await client.query('ROLLBACK');
         if (err.code === '40001' && attempt < MAX_RETRIES - 1) {
@@ -4038,6 +4108,60 @@ class TransactionalStoreRepository {
     const res = await this.pool.query(`SELECT * FROM stores WHERE id = $1`, [storeId]);
     return res.rows[0] || null;
   }
+
+  async getStoreSettings(storeId) {
+    if (!this.pool) return { storeId, sellerApprovalRequired: false };
+    const res = await this.pool.query(`SELECT id, store_name, address, latitude, longitude, sla_minutes, seller_approval_required, is_active FROM stores WHERE id = $1`, [storeId]);
+    if (res.rows.length === 0) return { storeId, sellerApprovalRequired: false };
+    const row = res.rows[0];
+    return {
+      storeId: row.id,
+      storeName: row.store_name,
+      address: row.address,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      slaMinutes: row.sla_minutes,
+      sellerApprovalRequired: row.seller_approval_required === true,
+      isActive: row.is_active
+    };
+  }
+
+  async updateStoreSettings(storeId, settings = {}) {
+    if (!this.pool) return { ok: false, error: 'NO_POOL' };
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (settings.sellerApprovalRequired !== undefined) {
+      fields.push(`seller_approval_required = $${idx++}`);
+      values.push(settings.sellerApprovalRequired === true);
+    }
+    if (settings.storeName !== undefined) {
+      fields.push(`store_name = $${idx++}`);
+      values.push(settings.storeName);
+    }
+    if (settings.slaMinutes !== undefined) {
+      fields.push(`sla_minutes = $${idx++}`);
+      values.push(Number(settings.slaMinutes));
+    }
+    if (fields.length === 0) return { ok: true, message: 'NO_CHANGES' };
+
+    fields.push(`updated_at = NOW()`);
+    values.push(storeId);
+    const query = `UPDATE stores SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
+    const res = await this.pool.query(query, values);
+    if (res.rows.length === 0) return { ok: false, httpStatus: 404, error: 'STORE_NOT_FOUND' };
+    const row = res.rows[0];
+    return {
+      ok: true,
+      store: {
+        storeId: row.id,
+        storeName: row.store_name,
+        sellerApprovalRequired: row.seller_approval_required === true,
+        slaMinutes: row.sla_minutes
+      }
+    };
+  }
 }
 
 class LocalDevelopmentStoreRepository {
@@ -4055,6 +4179,34 @@ class LocalDevelopmentStoreRepository {
 
   async getAllActiveStores() {
     return [AUTHORITATIVE_STORE_MASTER];
+  }
+
+  async getStoreSettings(storeId) {
+    return {
+      storeId: AUTHORITATIVE_STORE_MASTER.id,
+      storeName: AUTHORITATIVE_STORE_MASTER.name,
+      sellerApprovalRequired: Boolean(AUTHORITATIVE_STORE_MASTER.sellerApprovalRequired),
+      slaMinutes: 10,
+      isActive: true
+    };
+  }
+
+  async updateStoreSettings(storeId, settings = {}) {
+    if (settings.sellerApprovalRequired !== undefined) {
+      AUTHORITATIVE_STORE_MASTER.sellerApprovalRequired = settings.sellerApprovalRequired === true;
+    }
+    if (settings.storeName) {
+      AUTHORITATIVE_STORE_MASTER.name = settings.storeName;
+    }
+    return {
+      ok: true,
+      store: {
+        storeId: AUTHORITATIVE_STORE_MASTER.id,
+        storeName: AUTHORITATIVE_STORE_MASTER.name,
+        sellerApprovalRequired: AUTHORITATIVE_STORE_MASTER.sellerApprovalRequired === true,
+        slaMinutes: 10
+      }
+    };
   }
 }
 
