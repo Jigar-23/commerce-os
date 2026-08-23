@@ -48,28 +48,38 @@ object OfferPayloadValidator {
             }
 
             val merchantName = json.optString("merchantName").takeIf { it.isNotBlank() }
-                ?: "Rewari Central Master Store"
+                ?: return logReject("merchantName missing")
 
             val merchantAddress = json.optString("merchantAddress").takeIf { it.isNotBlank() }
-                ?: "Main Market, Rewari, Haryana 123401"
+                ?: return logReject("merchantAddress missing")
 
-            val merchantLat = json.optDoubleOrNull("merchantLat") ?: 28.2021899
-            val merchantLng = json.optDoubleOrNull("merchantLng") ?: 76.6153954
+            val merchantLat = json.optDoubleOrNull("merchantLat")
+            val merchantLng = json.optDoubleOrNull("merchantLng")
+            if (!isValidLat(merchantLat) || !isValidLng(merchantLng)) {
+                return logReject("Invalid merchant coordinates: ($merchantLat, $merchantLng)")
+            }
 
-            val customerName = json.optString("customerName").takeIf { it.isNotBlank() }
-                ?: "Customer"
+            val customerName = json.optString("customerName").takeIf { it.isNotBlank() } ?: "Customer"
 
             val customerAddress = json.optString("customerAddress").takeIf { it.isNotBlank() }
-                ?: "Rewari Central, Haryana"
+                ?: return logReject("customerAddress missing")
 
-            val customerLat = json.optDoubleOrNull("customerLat") ?: 28.1970
-            val customerLng = json.optDoubleOrNull("customerLng") ?: 76.6190
+            val customerLat = json.optDoubleOrNull("customerLat")
+            val customerLng = json.optDoubleOrNull("customerLng")
+            if (!isValidLat(customerLat) || !isValidLng(customerLng)) {
+                return logReject("Invalid customer coordinates: ($customerLat, $customerLng)")
+            }
 
-            val earningsAmount = json.optDoubleOrNull("earningsAmount") ?: json.optDoubleOrNull("totalEarnings") ?: 45.0
-            val deliveryDistanceKm = json.optDoubleOrNull("deliveryDistanceKm") ?: 1.5
-            val pickupDistanceKm = json.optDoubleOrNull("pickupDistanceKm") ?: 1.0
+            val earningsAmount = (json.optDoubleOrNull("earningsAmount") ?: json.optDoubleOrNull("totalEarnings"))
+            if (!isValidPositiveNumber(earningsAmount)) {
+                return logReject("earningsAmount must be positive: $earningsAmount")
+            }
+
+            val deliveryDistanceKm = json.optDoubleOrNull("deliveryDistanceKm") ?: 0.0
+            val pickupDistanceKm = json.optDoubleOrNull("pickupDistanceKm") ?: 0.0
             val totalDistanceKm = json.optDoubleOrNull("totalDistanceKm") ?: (pickupDistanceKm + deliveryDistanceKm)
-            val estimatedDurationMins = json.optInt("estimatedDurationMins", 15).takeIf { it > 0 } ?: 15
+            val estimatedDurationMins = json.optInt("estimatedDurationMins", 0).takeIf { it > 0 }
+                ?: return logReject("estimatedDurationMins must be positive")
 
             val expiresAt = if (json.has("offerExpiresAt") && !json.isNull("offerExpiresAt")) json.getLong("offerExpiresAt")
                 else if (json.has("expiresAt") && !json.isNull("expiresAt")) json.getLong("expiresAt")
@@ -93,7 +103,7 @@ object OfferPayloadValidator {
                 orderId = orderId,
                 riderId = riderId,
                 status = json.optString("status", "CREATED"),
-                earningsAmount = earningsAmount,
+                earningsAmount = earningsAmount!!,
                 pickupDistanceKm = pickupDistanceKm,
                 deliveryDistanceKm = deliveryDistanceKm,
                 totalDistanceKm = totalDistanceKm,
@@ -102,12 +112,12 @@ object OfferPayloadValidator {
                 codAmount = codAmount,
                 customerName = customerName,
                 customerAddress = customerAddress,
-                customerLat = customerLat,
-                customerLng = customerLng,
+                customerLat = customerLat!!,
+                customerLng = customerLng!!,
                 merchantName = merchantName,
                 merchantAddress = merchantAddress,
-                merchantLat = merchantLat,
-                merchantLng = merchantLng,
+                merchantLat = merchantLat!!,
+                merchantLng = merchantLng!!,
                 offerCreatedAt = offerCreatedAt,
                 offerExpiresAt = expiresAt,
                 serverTime = serverTime
@@ -144,28 +154,38 @@ object OfferPayloadValidator {
             }
 
             val merchantName = data["merchantName"]?.takeIf { it.isNotBlank() }
-                ?: "Rewari Central Master Store"
+                ?: return logReject("FCM merchantName missing")
 
             val merchantAddress = data["merchantAddress"]?.takeIf { it.isNotBlank() }
-                ?: "Main Market, Rewari, Haryana 123401"
+                ?: return logReject("FCM merchantAddress missing")
 
-            val merchantLat = data["merchantLat"]?.toDoubleOrNull() ?: 28.2021899
-            val merchantLng = data["merchantLng"]?.toDoubleOrNull() ?: 76.6153954
+            val merchantLat = data["merchantLat"]?.toDoubleOrNull()
+            val merchantLng = data["merchantLng"]?.toDoubleOrNull()
+            if (!isValidLat(merchantLat) || !isValidLng(merchantLng)) {
+                return logReject("FCM invalid merchant coordinates: ($merchantLat, $merchantLng)")
+            }
 
-            val customerName = data["customerName"]?.takeIf { it.isNotBlank() }
-                ?: "Customer"
+            val customerName = data["customerName"]?.takeIf { it.isNotBlank() } ?: "Customer"
 
             val customerAddress = data["customerAddress"]?.takeIf { it.isNotBlank() }
-                ?: "Rewari Central, Haryana"
+                ?: return logReject("FCM customerAddress missing")
 
-            val customerLat = data["customerLat"]?.toDoubleOrNull() ?: 28.1970
-            val customerLng = data["customerLng"]?.toDoubleOrNull() ?: 76.6190
+            val customerLat = data["customerLat"]?.toDoubleOrNull()
+            val customerLng = data["customerLng"]?.toDoubleOrNull()
+            if (!isValidLat(customerLat) || !isValidLng(customerLng)) {
+                return logReject("FCM invalid customer coordinates: ($customerLat, $customerLng)")
+            }
 
-            val earningsAmount = data["earningsAmount"]?.toDoubleOrNull() ?: data["totalEarnings"]?.toDoubleOrNull() ?: 45.0
-            val deliveryDistanceKm = data["deliveryDistanceKm"]?.toDoubleOrNull() ?: 1.5
-            val pickupDistanceKm = data["pickupDistanceKm"]?.toDoubleOrNull() ?: 1.0
+            val earningsAmount = data["earningsAmount"]?.toDoubleOrNull() ?: data["totalEarnings"]?.toDoubleOrNull()
+            if (!isValidPositiveNumber(earningsAmount)) {
+                return logReject("FCM earningsAmount must be positive: $earningsAmount")
+            }
+
+            val deliveryDistanceKm = data["deliveryDistanceKm"]?.toDoubleOrNull() ?: 0.0
+            val pickupDistanceKm = data["pickupDistanceKm"]?.toDoubleOrNull() ?: 0.0
             val totalDistanceKm = data["totalDistanceKm"]?.toDoubleOrNull() ?: (pickupDistanceKm + deliveryDistanceKm)
-            val estimatedDurationMins = data["estimatedDurationMins"]?.toIntOrNull()?.takeIf { it > 0 } ?: 15
+            val estimatedDurationMins = data["estimatedDurationMins"]?.toIntOrNull()?.takeIf { it > 0 }
+                ?: return logReject("FCM estimatedDurationMins must be positive")
 
             val expiresAt = data["expiresAt"]?.toLongOrNull()
                 ?: data["offerExpiresAt"]?.toLongOrNull()
@@ -188,7 +208,7 @@ object OfferPayloadValidator {
                 orderId = orderId,
                 riderId = riderId,
                 status = "CREATED",
-                earningsAmount = earningsAmount,
+                earningsAmount = earningsAmount!!,
                 pickupDistanceKm = pickupDistanceKm,
                 deliveryDistanceKm = deliveryDistanceKm,
                 totalDistanceKm = totalDistanceKm,
@@ -197,12 +217,12 @@ object OfferPayloadValidator {
                 codAmount = codAmount,
                 customerName = customerName,
                 customerAddress = customerAddress,
-                customerLat = customerLat,
-                customerLng = customerLng,
+                customerLat = customerLat!!,
+                customerLng = customerLng!!,
                 merchantName = merchantName,
                 merchantAddress = merchantAddress,
-                merchantLat = merchantLat,
-                merchantLng = merchantLng,
+                merchantLat = merchantLat!!,
+                merchantLng = merchantLng!!,
                 offerCreatedAt = offerCreatedAt,
                 offerExpiresAt = expiresAt,
                 serverTime = serverTime

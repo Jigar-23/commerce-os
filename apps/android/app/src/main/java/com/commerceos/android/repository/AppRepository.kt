@@ -45,12 +45,7 @@ open class AppRepository {
     /** Server-composed home shelves (hero, buy-again, honest popular, deals, feed). */
     open suspend fun getHomeFeed(customerId: String, addressId: String? = null): ApiResult<HomeFeedResponse> =
         withContext(Dispatchers.IO) {
-            val res = Api.run { NetworkClient.catalogApi.getHomeFeed(customerId, addressId) }
-            if (res is ApiResult.Failure) {
-                ApiResult.Success(FallbackHomeFeed.createDefaultFeed(customerId))
-            } else {
-                res
-            }
+            Api.run { NetworkClient.catalogApi.getHomeFeed(customerId, addressId) }
         }
 
     /** Server-composed vertical hub feed for health, food, grocery, fashion, electronics, services. */
