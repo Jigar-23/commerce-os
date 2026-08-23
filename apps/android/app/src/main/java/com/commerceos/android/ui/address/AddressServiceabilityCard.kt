@@ -70,13 +70,13 @@ fun AddressServiceabilityCard(
                 }
                 !isTargetMatched || serviceabilityState is ServiceabilityState.Checking -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = CommerceColors.Success, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Info, contentDescription = null, tint = CommerceColors.TextMuted, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            "All items in cart available for rapid dispatch • 10-Min Express SLA Guaranteed",
+                            "Checking delivery feasibility for selected address...",
                             style = CommerceTypography.Caption,
-                            fontWeight = FontWeight.Bold,
-                            color = CommerceColors.TextPrimary
+                            fontWeight = FontWeight.SemiBold,
+                            color = CommerceColors.TextSecondary
                         )
                     }
                 }

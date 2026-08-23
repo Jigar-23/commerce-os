@@ -4110,7 +4110,79 @@ async function handleRequest(port, req, res) {
         const order = findOrder(orderId);
         if (!order) return json(res, 404, { error: 'Order not found' });
         setOrderStatus(order, 'SELLER_ACCEPTED', authClaims.sub, 'Order accepted by merchant');
+        order.sellerApprovalStatus = 'ACCEPTED';
+        order.sellerApprovedAt = Date.now();
+        order.sellerApprovedBy = authClaims.sub;
+
+        // Auto-create/dispatch delivery offer immediately on seller acceptance
+        const deliverySession = findDeliverySession(orderId) || {
+          deliveryId: 'del_' + order.id,
+          orderId: order.id,
+          state: 'LOOKING_FOR_RIDER',
+          assignedRiderId: null,
+          merchantAddress: order.merchantAddress || '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
+          merchantLat: order.merchantLat || 28.202218,
+          merchantLng: order.merchantLng || 76.615403,
+          customerAddress: order.deliveryAddress || order.shippingAddress?.addressLine || 'Customer Location, Rewari',
+          customerLat: order.deliveryLat || order.shippingAddress?.latitude || 28.1970,
+          customerLng: order.deliveryLng || order.shippingAddress?.longitude || 76.6190,
+          createdAt: Date.now(),
+        };
+        deliverySession.state = 'LOOKING_FOR_RIDER';
+        db.deliverySessions = db.deliverySessions || {};
+        db.deliverySessions[deliverySession.deliveryId] = deliverySession;
+        db.deliverySessions[order.id] = deliverySession;
+
+        const offerId = 'off_' + crypto.randomUUID();
+        const totalAmt = Number(order.totalAmount || order.payableAmount || 150);
+        const estimatedEarn = Math.max(35, Math.round(totalAmt * 0.15));
+        const offerRecord = {
+          offerId,
+          orderId: order.id,
+          deliveryId: deliverySession.deliveryId,
+          riderId: null,
+          broadcast: true,
+          status: 'CREATED',
+          pickupAddress: deliverySession.merchantAddress,
+          pickupLatitude: deliverySession.merchantLat,
+          pickupLongitude: deliverySession.merchantLng,
+          deliveryAddress: deliverySession.customerAddress,
+          deliveryLatitude: deliverySession.customerLat,
+          deliveryLongitude: deliverySession.customerLng,
+          estimatedEarnings: estimatedEarn,
+          estimatedEarningsFormatted: '₹' + estimatedEarn,
+          distanceKm: 2.2,
+          durationMins: 8,
+          isCod: order.paymentMethod === 'COD',
+          codAmountToCollect: order.paymentMethod === 'COD' ? totalAmt : 0,
+          offerCreatedAt: Date.now(),
+          offerExpiresAt: Date.now() + 180000,
+        };
+        db.offers = db.offers || {};
+        db.offers[offerId] = offerRecord;
         saveDb();
+
+        try {
+          broadcastToRiderStream('ALL', 'NEW_OFFER', offerRecord);
+          broadcastToRiderStream('rdr_rewari_01', 'NEW_OFFER', offerRecord);
+          dispatchNotificationEvent('rdr_rewari_01', {
+            notificationId: 'notif_' + crypto.randomUUID(),
+            eventId: offerId,
+            type: 'ORDER_OFFER',
+            category: 'ORDERS',
+            priority: 'HIGH',
+            riderId: 'rdr_rewari_01',
+            orderId: order.id,
+            deliveryId: deliverySession.deliveryId,
+            offerId: offerId,
+            title: '⚡ New Delivery Job Alert!',
+            body: `Store confirmed order #${order.id.slice(0, 8)}. Earn ₹${estimatedEarn}`,
+            deepLink: `commerceos://rider/offer/${offerId}`,
+            createdAt: nowIso(),
+            expiresAt: offerRecord.offerExpiresAt,
+          }).catch(() => {});
+        } catch (_) {}
+
         return json(res, 200, order);
       }
 

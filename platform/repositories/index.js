@@ -5298,6 +5298,33 @@ async function initApplicationRepositories(options = {}) {
         await notificationService.dispatchOfferNotification(payload.offerId, payload.targetRiderId, payload.offer);
       } else if (event.event_type === 'DISPATCH_REQUESTED') {
         await dispatchService.processDispatch(payload.deliverySession || payload);
+      } else if (event.event_type === 'ORDER_SELLER_ACCEPTED') {
+        let deliverySession = payload.deliverySession || payload;
+        if (!deliverySession.orderId && event.aggregate_id) {
+          const sRes = await pool.query('SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1', [event.aggregate_id]);
+          if (sRes.rows.length > 0) {
+            deliverySession = sRes.rows[0];
+          } else {
+            const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
+            if (oRes.rows.length > 0) {
+              const ord = oRes.rows[0];
+              const dId = 'del_' + (ord.order_id || ord.id);
+              await pool.query(
+                `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
+                 VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT (delivery_id) DO UPDATE SET state = 'LOOKING_FOR_RIDER'`,
+                [dId, ord.order_id || ord.id, ord.store_id || 'STORE_REWARI_01', ord.customer_id, ord.store_address || 'Commerce OS Rewari Hub', ord.delivery_address || 'Customer Location', 28.202218, 76.615403, ord.delivery_lat || 28.1970, ord.delivery_lng || 76.6190]
+              );
+              deliverySession = { deliveryId: dId, orderId: ord.order_id || ord.id, storeId: ord.store_id, state: 'LOOKING_FOR_RIDER' };
+            }
+          }
+        }
+        if (deliverySession) {
+          await dispatchService.processDispatch(deliverySession);
+        }
+        if (sseBroadcaster) {
+          await sseBroadcaster(event.aggregate_id || 'global', 'ORDER_SELLER_ACCEPTED', payload);
+        }
       } else if (event.event_type === 'RIDER_ACCEPTED' || event.event_type === 'DELIVERY_STATE_CHANGED') {
         await notificationService.dispatchDeliveryStateEvent(payload.deliveryId, event.event_type);
       }
@@ -5465,13 +5492,34 @@ function createProductionRepositories(pool, options = {}) {
       try { payload = JSON.parse(payload); } catch { payload = {}; }
     }
 
-    if (event.event_type === 'DISPATCH_REQUESTED') {
+    if (event.event_type === 'DISPATCH_REQUESTED' || event.event_type === 'ORDER_SELLER_ACCEPTED') {
       let deliverySession = payload.deliverySession || payload;
       if (!deliverySession.orderId && event.aggregate_id) {
         const sRes = await pool.query('SELECT * FROM delivery_sessions WHERE delivery_id = $1 OR order_id = $1', [event.aggregate_id]);
-        if (sRes.rows.length > 0) deliverySession = sRes.rows[0];
+        if (sRes.rows.length > 0) {
+          deliverySession = sRes.rows[0];
+        } else {
+          const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
+          if (oRes.rows.length > 0) {
+            const ord = oRes.rows[0];
+            const dId = 'del_' + (ord.order_id || ord.id);
+            await pool.query(
+              `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
+               VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
+               ON CONFLICT (delivery_id) DO UPDATE SET state = 'LOOKING_FOR_RIDER'`,
+              [dId, ord.order_id || ord.id, ord.store_id || 'STORE_REWARI_01', ord.customer_id, ord.store_address || 'Commerce OS Rewari Hub', ord.delivery_address || 'Customer Location', 28.202218, 76.615403, ord.delivery_lat || 28.1970, ord.delivery_lng || 76.6190]
+            );
+            deliverySession = { deliveryId: dId, orderId: ord.order_id || ord.id, storeId: ord.store_id, state: 'LOOKING_FOR_RIDER' };
+          }
+        }
       }
-      return await dispatchService.processDispatch(deliverySession);
+      if (deliverySession) {
+        await dispatchService.processDispatch(deliverySession);
+      }
+      if (options.sseBroadcaster) {
+        await options.sseBroadcaster(event.aggregate_id || 'global', 'ORDER_SELLER_ACCEPTED', payload);
+      }
+      return { ok: true };
     }
 
     if (event.event_type === 'NEW_DISPATCH_OFFER') {
@@ -5479,7 +5527,7 @@ function createProductionRepositories(pool, options = {}) {
       return await notificationService.dispatchOfferNotification(offer);
     }
 
-    if (['ORDER_PLACED', 'RIDER_ACCEPTED', 'DELIVERY_STATUS_CHANGED', 'ORDER_CANCELLED', 'ORDER_PACKED'].includes(event.event_type)) {
+    if (['ORDER_PLACED', 'RIDER_ACCEPTED', 'DELIVERY_STATUS_CHANGED', 'ORDER_CANCELLED', 'ORDER_PACKED', 'ORDER_SELLER_ACCEPTED'].includes(event.event_type)) {
       if (options.sseBroadcaster) {
         await options.sseBroadcaster(event.aggregate_id || 'global', event.event_type, payload);
       }
