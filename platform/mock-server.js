@@ -247,77 +247,13 @@ function findDeliverySession(idOrOrderId) {
   return null;
 }
 
+const { buildEnrichedTrackingDTO } = require('./location-tracking');
+
 function buildCustomerTrackingDTO(session) {
   if (!session) return null;
-  const isStale = (Date.now() - (session.telemetry?.serverTimestamp || 0)) > 15000;
-  
-  // Resolve live telemetry from session or live rider presence
-  let telemetry = session.telemetry;
-  if (!telemetry && session.riderId && db.riderPresence && db.riderPresence[session.riderId]) {
-    const presence = db.riderPresence[session.riderId];
-    if (presence.latitude && presence.longitude) {
-      telemetry = {
-        latitude: presence.latitude,
-        longitude: presence.longitude,
-        speedKmh: 20,
-        heading: 0,
-        sequenceNumber: 1,
-        serverTimestamp: presence.lastSeenTimestamp || Date.now(),
-        isStale: false
-      };
-    }
-  }
-
-  // A rider is only considered assigned when session is in an active delivery state and has a real riderId
-  const isAssigned = session.state && !['PENDING', 'CREATED', 'DISPATCHED', 'PLACED'].includes(session.state) && !!session.riderId && session.riderId !== 'unassigned';
-
-  return {
-    orderId: session.orderId,
-    deliveryId: session.deliveryId,
-    state: session.state,
-    riderName: (isAssigned && session.riderName) ? session.riderName : null,
-    riderPhone: (isAssigned && session.riderPhone) ? session.riderPhone : null,
-    riderVehicle: (isAssigned && session.riderVehicle) ? session.riderVehicle : null,
-    merchantLat: session.merchantLat || 28.202218,
-    merchantLng: session.merchantLng || 76.615403,
-    customerLat: session.customerLat || 28.1970,
-    customerLng: session.customerLng || 76.6190,
-    liveRiderTelemetry: (isAssigned && telemetry) ? {
-      latitude: telemetry.latitude,
-      longitude: telemetry.longitude,
-      speedKmh: telemetry.speedKmh || 0,
-      heading: telemetry.heading || 0,
-      sequenceNumber: telemetry.sequenceNumber || 0,
-      serverTimestamp: telemetry.serverTimestamp || Date.now(),
-      isStale: telemetry.isStale || isStale,
-    } : null,
-    trackingStatusText: session.state === 'DELIVERED' ? 'Order Delivered' : (session.state === 'ARRIVED_CUSTOMER' || session.state === 'HANDOFF_STARTED' ? 'Rider at your doorstep' : (isAssigned ? 'Out for delivery' : 'Assigning delivery partner...')),
-    estimatedArrivalMins: (() => {
-      if (session.state === 'DELIVERED') return 0;
-      if (session.state === 'ARRIVED_CUSTOMER' || session.state === 'HANDOFF_STARTED') return 1;
-      const mLat = session.merchantLat || 28.202218;
-      const mLng = session.merchantLng || 76.615403;
-      const cLat = session.customerLat || 28.1970;
-      const cLng = session.customerLng || 76.6190;
-      const calcDist = (la1, lo1, la2, lo2) => {
-        const dLat = (la2 - la1) * Math.PI / 180;
-        const dLon = (lo2 - lo1) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(la1 * Math.PI / 180) * Math.cos(la2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      };
-      if (['PICKED_UP', 'EN_ROUTE_CUSTOMER', 'OUT_FOR_DELIVERY'].includes(session.state)) {
-        const rLat = telemetry?.latitude || mLat;
-        const rLng = telemetry?.longitude || mLng;
-        return Math.max(1, Math.ceil(calcDist(rLat, rLng, cLat, cLng) * 2.5));
-      } else {
-        const rLat = telemetry?.latitude || (mLat - 0.005);
-        const rLng = telemetry?.longitude || (mLng - 0.005);
-        return Math.min(45, Math.max(4, Math.ceil(calcDist(rLat, rLng, mLat, mLng) * 2.5) + 2 + Math.ceil(calcDist(mLat, mLng, cLat, cLng) * 2.5)));
-      }
-    })(),
-    isStale: isStale,
-    lastUpdatedTimestamp: telemetry?.serverTimestamp || Date.now(),
-  };
+  const presence = (session.riderId && db.riderPresence) ? db.riderPresence[session.riderId] : null;
+  const waypoints = session.waypoints || [];
+  return buildEnrichedTrackingDTO(session, session.telemetry, presence, waypoints);
 }
 
 function buildRiderDeliveryDTO(session) {

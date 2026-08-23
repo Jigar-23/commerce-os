@@ -43,6 +43,7 @@ try {
   }
 }
 const { createProductionRepositories, DeliveryOtpService, ServiceabilityService, InternalDispatchCommand, FulfillmentDecision, NotificationDeliveryResult } = require('../repositories');
+const { buildEnrichedTrackingDTO } = require('../location-tracking');
 
 // 1. Production Configuration & Mandatory Fail-Fast Preconditions (Zero Source Code Fallback Strings)
 function validateProductionConfiguration(env = process.env) {
@@ -1083,22 +1084,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery tracking record not found.' });
       }
       const telemetry = await appRepositories.telemetryRepo.getLatestTelemetry(delivery.rider_id || '');
-      const isAssigned = !!delivery.rider_id;
-      return sendJson(res, 200, {
-        orderId: delivery.order_id,
-        deliveryId: delivery.delivery_id,
-        state: delivery.state,
-        riderName: isAssigned ? delivery.rider_name : null,
-        riderPhone: isAssigned ? delivery.rider_phone : null,
-        riderVehicle: isAssigned ? delivery.rider_vehicle : null,
-        merchantLat: Number(delivery.merchant_lat || 28.202218),
-        merchantLng: Number(delivery.merchant_lng || 76.615403),
-        customerLat: Number(delivery.customer_lat || 28.1970),
-        customerLng: Number(delivery.customer_lng || 76.6190),
-        liveRiderTelemetry: (isAssigned && telemetry) ? telemetry : null,
-        trackingStatusText: delivery.state === 'DELIVERED' ? 'Order Delivered' : (delivery.state === 'ARRIVED_CUSTOMER' ? 'Rider at your doorstep' : (isAssigned ? 'Out for delivery' : 'Assigning delivery partner...')),
-        estimatedArrivalMins: delivery.estimated_duration_mins || 8
-      });
+      const waypoints = delivery.waypoints || [];
+      const dto = buildEnrichedTrackingDTO(delivery, telemetry, null, waypoints);
+      return sendJson(res, 200, dto);
     }
 
     // -------------------------------------------------------------

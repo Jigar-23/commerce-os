@@ -67,7 +67,19 @@ fun CustomerLiveMapTrackingView(
         modifier = modifier.fillMaxWidth().height(290.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Interactive MapLibre Dark Map
+            val routePoints = remember(liveTracking?.waypoints) {
+                liveTracking?.waypoints?.map { MapRoutePoint(it.lat, it.lng) } ?: emptyList()
+            }
+            val activeStage = liveTracking?.stage ?: when (order.orderStatus.uppercase()) {
+                "DELIVERED" -> "DELIVERED"
+                "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> "AT_DOORSTEP"
+                "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU" -> "OUT_FOR_DELIVERY"
+                "PICKED_UP", "ARRIVED_PICKUP", "EN_ROUTE_PICKUP" -> "AT_STORE"
+                "SELLER_ACCEPTED" -> "HEADING_TO_STORE"
+                else -> "ASSIGNING_PARTNER"
+            }
+
+            // Interactive MapLibre Dark Map V2
             ZomatoDarkMapView(
                 merchantLat = merchantLat,
                 merchantLng = merchantLng,
@@ -76,6 +88,8 @@ fun CustomerLiveMapTrackingView(
                 riderLat = realRiderLat,
                 riderLng = realRiderLng,
                 riderHeading = heading,
+                waypoints = routePoints,
+                stage = activeStage,
                 isStale = isStale,
                 modifier = Modifier.fillMaxSize()
             )
