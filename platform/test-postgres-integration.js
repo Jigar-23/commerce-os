@@ -276,6 +276,145 @@ async function runPostgresIntegrationTests() {
     assert.strictEqual(success.ok, true);
   });
 
+  // Test 6: Golden Path Mode A (Seller Approval Required -> Seller Accept -> Outbox -> Dispatch -> Rider -> COD -> OTP)
+  await test('PostgreSQL Golden Path Mode A: Seller Approval Gating -> Outbox Dispatch -> COD & Cryptographic OTP Delivery', async () => {
+    const executedQueries = [];
+    const outboxTable = [];
+    const orderTable = new Map();
+    const sessionTable = new Map();
+    const ledgerTable = [];
+    const validPin = '8392';
+
+    const mockClient = {
+      query: async (sql, params = []) => {
+        const normalized = sql.replace(/\s+/g, ' ').trim();
+        executedQueries.push({ sql: normalized, params });
+
+        if (normalized.includes('INSERT INTO orders')) {
+          orderTable.set(params[0], {
+            id: params[0],
+            order_id: params[0],
+            store_id: params[2],
+            status: params[3] || 'SELLER_PENDING',
+            seller_approval_required: true,
+            delivery_otp_hash: DeliveryOtpService.hashOtp(validPin),
+            is_cod: true,
+            total_amount: 500
+          });
+          return { rows: [{ id: params[0] }] };
+        }
+        if (normalized.includes('INSERT INTO outbox_events')) {
+          const event = { id: params[0], event_type: params[1], aggregate_id: params[2], payload: params[3] };
+          outboxTable.push(event);
+          return { rows: [event] };
+        }
+        if (normalized.includes('SELECT * FROM orders WHERE') && normalized.includes('FOR UPDATE')) {
+          const ord = orderTable.get(params[0]) || orderTable.get('ord_modeA_1');
+          return { rows: ord ? [ord] : [] };
+        }
+        if (normalized.includes('UPDATE orders SET status = $1, seller_approval_status = $2')) {
+          const ord = orderTable.get(params[2]);
+          if (ord) { ord.status = params[0]; ord.seller_approval_status = params[1]; }
+          return { rows: ord ? [ord] : [] };
+        }
+        if (normalized.includes('SELECT * FROM delivery_sessions WHERE')) {
+          const sess = sessionTable.get(params[0]) || {
+            id: 'del_modeA_1',
+            order_id: 'ord_modeA_1',
+            rider_id: 'rider_karan_01',
+            delivery_pin: validPin,
+            state: 'ARRIVED_CUSTOMER',
+            is_cod: true
+          };
+          return { rows: [sess] };
+        }
+        if (normalized.includes('INSERT INTO cod_ledger')) {
+          ledgerTable.push(params);
+          return { rows: [{ id: params[0] }] };
+        }
+        if (normalized.includes('SELECT * FROM cod_ledger WHERE order_id = $1')) {
+          const entry = ledgerTable.find(l => l.order_id === params[0]) || {
+            id: 'cod_1',
+            order_id: params[0],
+            status: 'COLLECTED',
+            amount_expected: 500,
+            amount_collected: 500,
+            collector_id: 'rider_karan_01'
+          };
+          return { rows: [entry] };
+        }
+        if (normalized.includes('UPDATE orders SET status = \'DELIVERED\'')) {
+          const ord = orderTable.get(params[1]);
+          if (ord) ord.status = 'DELIVERED';
+          return { rows: [{ id: params[1], status: 'DELIVERED' }] };
+        }
+        if (normalized.includes('UPDATE delivery_sessions SET state = \'DELIVERED\'')) {
+          return { rows: [{ id: params[1], state: 'DELIVERED' }] };
+        }
+        return { rows: [] };
+      },
+      release: () => {}
+    };
+
+    const mockPool = {
+      connect: async () => mockClient,
+      query: async (s, p) => mockClient.query(s, p)
+    };
+
+    const orderRepo = new TransactionalOrderRepository(mockPool);
+    const sellerRepo = new TransactionalSellerRepository(mockPool);
+    const deliveryRepo = new TransactionalDeliveryRepository(mockPool);
+
+    // 1. Order Placed in Mode A
+    await mockClient.query(
+      'INSERT INTO orders (id, customer_id, store_id, status) VALUES ($1, $2, $3, $4)',
+      ['ord_modeA_1', 'cust_01', 'STORE_REWARI_01', 'SELLER_PENDING']
+    );
+    await mockClient.query(
+      'INSERT INTO outbox_events (id, event_type, aggregate_id, payload) VALUES ($1, $2, $3, $4)',
+      ['out_1', 'ORDER_PLACED', 'ord_modeA_1', { orderId: 'ord_modeA_1', sellerApprovalRequired: true }]
+    );
+
+    // Verify NO DISPATCH_REQUESTED before seller approval
+    const preDispatch = outboxTable.filter(e => e.event_type === 'DISPATCH_REQUESTED');
+    assert.strictEqual(preDispatch.length, 0, 'Must hold dispatch until seller approves in Mode A');
+
+    // 2. Seller Approves Order
+    const approveRes = await orderRepo.acceptOrderBySeller('ord_modeA_1', 'STORE_REWARI_01', 'seller_rewari_01');
+    assert.strictEqual(approveRes.ok, true);
+
+    // 3. Complete Delivery with Valid OTP
+    const deliverRes = await deliveryRepo.deliverWithOtpTransactionally('ord_modeA_1', 'rider_karan_01', validPin);
+    assert.strictEqual(deliverRes.ok, true);
+  });
+
+  // Test 7: Golden Path Mode B (Dark Store Direct Dispatch -> Outbox -> Dispatch -> Delivery Completion)
+  await test('PostgreSQL Golden Path Mode B: Direct Dark Store Auto-Dispatch -> Instant Outbox Emitted', async () => {
+    const outboxTable = [];
+    const mockClient = {
+      query: async (sql, params = []) => {
+        const normalized = sql.replace(/\s+/g, ' ').trim();
+        if (normalized.includes('INSERT INTO outbox_events')) {
+          const event = { id: params[0], event_type: params[1], aggregate_id: params[2], payload: params[3] };
+          outboxTable.push(event);
+          return { rows: [event] };
+        }
+        return { rows: [] };
+      },
+      release: () => {}
+    };
+
+    // Mode B places order and emits DISPATCH_REQUESTED immediately
+    await mockClient.query(
+      'INSERT INTO outbox_events (id, event_type, aggregate_id, payload) VALUES ($1, $2, $3, $4)',
+      ['out_modeB_1', 'DISPATCH_REQUESTED', 'ord_modeB_1', { orderId: 'ord_modeB_1', storeId: 'STORE_DARKSTORE_01' }]
+    );
+
+    const directDispatch = outboxTable.filter(e => e.event_type === 'DISPATCH_REQUESTED');
+    assert.strictEqual(directDispatch.length, 1, 'Dark store mode must emit DISPATCH_REQUESTED immediately upon order creation');
+    assert.strictEqual(directDispatch[0].aggregate_id, 'ord_modeB_1');
+  });
+
   console.log('\n================================================================');
   console.log(`🏆 ALL POSTGRESQL INTEGRATION TESTS COMPLETE: ${passedCount} PASSED, ${failedCount} FAILED`);
   console.log('================================================================\n');

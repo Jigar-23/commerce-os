@@ -27,7 +27,7 @@ services:
       - key: COMMERCEOS_OTP_PEPPER
         generateValue: true
       - key: FCM_SERVER_KEY
-        value: fcm_prod_server_key_placeholder
+        sync: false
       - key: FCM_ENDPOINT_URL
         value: https://fcm.googleapis.com/fcm/send
 

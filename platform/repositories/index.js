@@ -3418,10 +3418,10 @@ class TransactionalOrderRepository {
           return { ok: true, order, isIdempotent: true };
         }
 
-        // Precondition Check: Must be in PLACED or PAYMENT_PENDING
-        if (!['PLACED', 'PAYMENT_PENDING'].includes(order.status)) {
+        // Precondition Check: Must be in PLACED, PAYMENT_PENDING, SELLER_PENDING, or CREATED
+        if (!['PLACED', 'PAYMENT_PENDING', 'SELLER_PENDING', 'CREATED'].includes(order.status)) {
           await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'. Must be PLACED.` };
+          return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'. Must be PLACED or SELLER_PENDING.` };
         }
 
         await client.query(`UPDATE orders SET status = 'SELLER_ACCEPTED', seller_approval_status = 'ACCEPTED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);

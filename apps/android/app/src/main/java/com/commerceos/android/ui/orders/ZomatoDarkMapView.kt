@@ -438,16 +438,15 @@ private fun generateBlinkitGradeDarkMapHtml(
             }
         }
 
-        // 3. Rider Marker with 60fps Road Snapping & Continuous Heading Rotation
+        // 3. Persistent Rider Marker with Smooth Road Snapping & Heading Rotation
         if (rider && rider.lat && rider.lng) {
             var rot = (rider.heading != null) ? rider.heading : currentMarkerHeading;
-            var markerHtml = '<div class="biker-container">' +
-                             (rider.isStale ? '' : '<div class="biker-pulse"></div>') +
-                             '<div class="biker-core" style="transform: rotate(' + currentMarkerHeading + 'deg);">' + bikeSvg + '</div>' +
-                             '</div>';
-            var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [40, 40], iconAnchor: [20, 20] });
-
             if (!riderMarker) {
+                var markerHtml = '<div class="biker-container">' +
+                                 '<div class="biker-pulse"></div>' +
+                                 '<div class="biker-core" style="transform: rotate(' + rot + 'deg);">' + bikeSvg + '</div>' +
+                                 '</div>';
+                var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [40, 40], iconAnchor: [20, 20] });
                 riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
                 currentMarkerHeading = rot;
             } else {
@@ -456,6 +455,8 @@ private fun generateBlinkitGradeDarkMapHtml(
                 if (el) {
                     var core = el.querySelector('.biker-core');
                     if (core) core.style.transform = 'rotate(' + rot + 'deg)';
+                    var pulse = el.querySelector('.biker-pulse');
+                    if (pulse) pulse.style.display = rider.isStale ? 'none' : 'block';
                 }
                 if (rider.isStale) {
                     riderMarker.setLatLng([rider.lat, rider.lng]);
@@ -544,6 +545,10 @@ private fun generateBlinkitGradeDarkMapHtml(
         }
     }
 
+    var lastCameraLat = null;
+    var lastCameraLng = null;
+    var lastCameraStage = null;
+
     function smartChoreographCamera(mLat, mLng, cLat, cLng, rider, stage) {
         if (!initialFramed) {
             initialFramed = true;
@@ -555,6 +560,18 @@ private fun generateBlinkitGradeDarkMapHtml(
                 return;
             }
         }
+
+        // Camera Hysteresis: prevent jitter if rider moved < 35 meters within same stage
+        if (rider && rider.lat && rider.lng && lastCameraLat != null && lastCameraStage === stage) {
+            var movedKm = Math.hypot(rider.lat - lastCameraLat, rider.lng - lastCameraLng) * 111.0;
+            if (movedKm < 0.035) return;
+        }
+
+        if (rider && rider.lat) {
+            lastCameraLat = rider.lat;
+            lastCameraLng = rider.lng;
+        }
+        lastCameraStage = stage;
 
         if (stage === 'AT_DOORSTEP' || stage === 'NEARBY') {
             // High-resolution doorstep zoom

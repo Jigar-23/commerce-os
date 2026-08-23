@@ -90,11 +90,19 @@ function mapMatchRiderToRoute(riderLat, riderLng, waypoints) {
 
 function resolveDeliveryStage(state, isAssigned, distToCustomerKm, distToStoreKm) {
   if (state === 'DELIVERED') return 'DELIVERED';
-  if (state === 'ARRIVED_CUSTOMER' || (distToCustomerKm != null && distToCustomerKm < 0.06)) return 'AT_DOORSTEP';
-  if (distToCustomerKm != null && distToCustomerKm < 0.25) return 'NEARBY';
-  if (['PICKED_UP', 'OUT_FOR_DELIVERY', 'EN_ROUTE_CUSTOMER'].includes(state)) return 'OUT_FOR_DELIVERY';
+  if (state === 'CANCELLED' || state === 'FAILED') return 'CANCELLED';
+
+  const isPostPickup = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'EN_ROUTE_CUSTOMER', 'ARRIVED_CUSTOMER'].includes(state);
+
+  if (isPostPickup) {
+    if (state === 'ARRIVED_CUSTOMER' || (distToCustomerKm != null && distToCustomerKm < 0.06)) return 'AT_DOORSTEP';
+    if (distToCustomerKm != null && distToCustomerKm < 0.30) return 'NEARBY';
+    return 'OUT_FOR_DELIVERY';
+  }
+
+  // Pre-pickup states (LOOKING_FOR_RIDER, ASSIGNED, ACCEPTED, EN_ROUTE_STORE, ARRIVED_AT_STORE, PACKED, SELLER_ACCEPTED)
   if (state === 'ARRIVED_AT_STORE' || (distToStoreKm != null && distToStoreKm < 0.08)) return 'AT_STORE';
-  if (isAssigned) return 'HEADING_TO_STORE';
+  if (isAssigned || ['ACCEPTED', 'EN_ROUTE_STORE'].includes(state)) return 'HEADING_TO_STORE';
   return 'ASSIGNING_PARTNER';
 }
 
@@ -117,11 +125,23 @@ function getTrackingStatusText(stage, isAssigned, riderName) {
   }
 }
 
+function detectRouteDeviation(riderLat, riderLng, waypoints, thresholdMeters = 75) {
+  if (!waypoints || waypoints.length < 2) return { isOffRoute: false, deviationMeters: 0 };
+  const match = mapMatchRiderToRoute(riderLat, riderLng, waypoints);
+  const deviationMeters = Math.round(haversineDistanceKm(riderLat, riderLng, match.snappedLat, match.snappedLng) * 1000);
+  return {
+    isOffRoute: deviationMeters > thresholdMeters,
+    deviationMeters,
+    match
+  };
+}
+
 function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null, waypoints = []) {
   if (!session) return null;
 
   const now = Date.now();
   const isStale = (now - (rawTelemetry?.serverTimestamp || rawTelemetry?.recordedAt || 0)) > 15000;
+  const telemetrySource = rawTelemetry ? 'LIVE_TELEMETRY' : (fallbackPresence ? 'LAST_KNOWN_LOCATION' : 'NONE');
   
   let telemetry = rawTelemetry;
   if (!telemetry && fallbackPresence) {
@@ -169,7 +189,7 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
   const stage = resolveDeliveryStage(session.state, isAssigned, distToCustomerKm, distToStoreKm);
   const statusText = getTrackingStatusText(stage, isAssigned, session.riderName || session.rider_name);
 
-  // Dynamic 2-Phase ETA based on Road Distance & Urban Flow Model
+  // Dynamic ETA Computation: Prefer real OSRM duration, fallback to urban flow model
   let etaMins = 8;
   if (session.state === 'DELIVERED') {
     etaMins = 0;
@@ -178,15 +198,19 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
   } else if (stage === 'NEARBY') {
     etaMins = 2;
   } else if (['OUT_FOR_DELIVERY', 'PICKED_UP', 'EN_ROUTE_CUSTOMER'].includes(session.state)) {
-    const activeKm = mapMatched.remainingDistanceKm != null ? mapMatched.remainingDistanceKm : (distToCustomerKm || 1.5);
-    etaMins = Math.max(1, Math.ceil(activeKm * 2.2 + 1));
+    if (session.remainingDurationMins != null && session.remainingDurationMins > 0) {
+      etaMins = Math.max(1, Math.ceil(session.remainingDurationMins + 1));
+    } else {
+      const activeKm = mapMatched.remainingDistanceKm != null ? mapMatched.remainingDistanceKm : (distToCustomerKm || 1.5);
+      etaMins = Math.max(1, Math.ceil(activeKm * 2.5 + 1));
+    }
   } else {
     // Pre-pickup (Rider -> Store -> Customer)
     const riderToStoreKm = distToStoreKm || 0.8;
     const storeToCustKm = (mLat && mLng && cLat && cLng) ? haversineDistanceKm(mLat, mLng, cLat, cLng) : 2.0;
-    const rToStoreMins = Math.ceil(riderToStoreKm * 2.2);
-    const storeToCustMins = Math.ceil(storeToCustKm * 2.2);
-    etaMins = Math.min(45, Math.max(3, rToStoreMins + 2 + storeToCustMins));
+    const rToStoreMins = session.riderToStoreMins != null ? session.riderToStoreMins : Math.ceil(riderToStoreKm * 2.5);
+    const storeToCustMins = session.storeToCustomerMins != null ? session.storeToCustomerMins : Math.ceil(storeToCustKm * 2.5);
+    etaMins = Math.min(45, Math.max(3, rToStoreMins + 2 + storeToCustMins)); // +2 min store pickup
   }
 
   let traversedWaypoints = [];
@@ -213,9 +237,10 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     merchantLng: mLng,
     customerLat: cLat,
     customerLng: cLng,
+    telemetrySource,
     liveRiderTelemetry: (isAssigned && telemetry) ? {
-      latitude: mapMatched.snappedLat, // Snapped road latitude for 60fps render
-      longitude: mapMatched.snappedLng, // Snapped road longitude for 60fps render
+      latitude: mapMatched.snappedLat, // Snapped road latitude
+      longitude: mapMatched.snappedLng, // Snapped road longitude
       rawLatitude: telemetry.latitude,
       rawLongitude: telemetry.longitude,
       speedKmh: telemetry.speedKmh || telemetry.speed || 0,
@@ -226,10 +251,13 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
       remainingDistanceKm: mapMatched.remainingDistanceKm,
       isSnapped: mapMatched.isSnapped,
       isStale: telemetry.isStale || isStale,
+      source: telemetrySource
     } : null,
     trackingStatusText: statusText,
     estimatedArrivalMins: etaMins,
     remainingDistanceKm: mapMatched.remainingDistanceKm,
+    routeProgressPct: mapMatched.routeProgressPct,
+    snappedSegmentIndex: mapMatched.segmentIndex,
     isStale: isStale,
     lastUpdatedTimestamp: telemetry?.serverTimestamp || telemetry?.recordedAt || now,
     waypoints: waypoints || [],
@@ -242,6 +270,7 @@ module.exports = {
   haversineDistanceKm,
   projectPointToSegment,
   mapMatchRiderToRoute,
+  detectRouteDeviation,
   resolveDeliveryStage,
   getTrackingStatusText,
   buildEnrichedTrackingDTO

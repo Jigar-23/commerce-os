@@ -151,38 +151,46 @@ open class AppRepository {
     suspend fun getLiveTracking(orderId: String): ApiResult<CustomerOrderTrackingDto> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.orderApi.getLiveTracking(orderId) } }
 
-    /** Realtime Server-Sent Events (SSE) Stream for Continuous Live Order Telemetry */
+    /** Realtime Server-Sent Events (SSE) Stream with Resilient Reconnect & Backoff */
     fun streamLiveOrderTracking(orderId: String): kotlinx.coroutines.flow.Flow<CustomerOrderTrackingDto> = kotlinx.coroutines.flow.callbackFlow {
-        val call = NetworkClient.openOrderSseCall(orderId)
         val gson = com.google.gson.Gson()
+        var retryDelayMs = 1000L
         val job = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val response = call.execute()
-                val source = response.body?.source()
-                if (response.isSuccessful && source != null) {
-                    while (!source.exhausted() && isActive) {
-                        val line = source.readUtf8Line() ?: break
-                        if (line.startsWith("data:")) {
-                            val dataJson = line.removePrefix("data:").trim()
-                            if (dataJson.isNotEmpty() && dataJson != "{}") {
-                                try {
-                                    val dto = gson.fromJson(dataJson, CustomerOrderTrackingDto::class.java)
-                                    if (dto != null) {
-                                        trySend(dto)
-                                    }
-                                } catch (_: Exception) {}
+            while (isActive) {
+                var call: okhttp3.Call? = null
+                try {
+                    call = NetworkClient.openOrderSseCall(orderId)
+                    val response = call.execute()
+                    val source = response.body?.source()
+                    if (response.isSuccessful && source != null) {
+                        retryDelayMs = 1000L // Reset backoff on successful connection
+                        while (!source.exhausted() && isActive) {
+                            val line = source.readUtf8Line() ?: break
+                            if (line.startsWith("data:")) {
+                                val dataJson = line.removePrefix("data:").trim()
+                                if (dataJson.isNotEmpty() && dataJson != "{}") {
+                                    try {
+                                        val dto = gson.fromJson(dataJson, CustomerOrderTrackingDto::class.java)
+                                        if (dto != null) {
+                                            trySend(dto)
+                                        }
+                                    } catch (_: Exception) {}
+                                }
                             }
                         }
                     }
+                } catch (_: Exception) {
+                } finally {
+                    try { call?.cancel() } catch (_: Exception) {}
                 }
-            } catch (_: Exception) {
-            } finally {
-                try { call.cancel() } catch (_: Exception) {}
+                if (isActive) {
+                    kotlinx.coroutines.delay(retryDelayMs)
+                    retryDelayMs = (retryDelayMs * 2).coerceAtMost(10000L)
+                }
             }
         }
         awaitClose {
             job.cancel()
-            try { call.cancel() } catch (_: Exception) {}
         }
     }
 

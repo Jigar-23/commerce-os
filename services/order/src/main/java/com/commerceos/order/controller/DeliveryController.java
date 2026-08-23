@@ -29,6 +29,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * @deprecated Internal legacy adapter. The authoritative delivery lifecycle, real-time dispatch, 
+ * road-snapping telemetry, and state machine are owned and orchestrated by the Node Production Core 
+ * (platform/server/production-server.js & platform/repositories/index.js).
+ */
+@Deprecated
 @RestController
 @RequestMapping("/api/v1/delivery")
 @CrossOrigin(origins = {"http://localhost:3000", "http://localhost:8080", "http://localhost:8090"})

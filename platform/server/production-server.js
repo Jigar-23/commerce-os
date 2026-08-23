@@ -228,14 +228,27 @@ class ProductionFcmSender {
 class ProductionSseBroadcaster {
   constructor() {
     this.clients = new Map(); // channel -> Set<res>
+    this.history = []; // Array<{ id, channel, event, payload, timestamp }>
+    this.seq = 0;
+    this.maxHistorySize = 500;
   }
 
-  subscribe(channel, res) {
+  subscribe(channel, res, lastEventId = null) {
     if (!channel) return;
     if (!this.clients.has(channel)) {
       this.clients.set(channel, new Set());
     }
     this.clients.get(channel).add(res);
+
+    // Durable Replay: If client reconnected with Last-Event-ID, replay missed events
+    if (lastEventId) {
+      const replayEvents = this.getEventsSince(lastEventId, channel);
+      for (const evt of replayEvents) {
+        try {
+          res.write(`id: ${evt.id}\nevent: ${evt.event}\ndata: ${JSON.stringify(evt.payload)}\n\n`);
+        } catch {}
+      }
+    }
 
     res.on('close', () => {
       const set = this.clients.get(channel);
@@ -246,8 +259,22 @@ class ProductionSseBroadcaster {
     });
   }
 
+  getEventsSince(lastEventId, channel) {
+    const idx = this.history.findIndex(e => e.id === lastEventId);
+    const candidateEvents = idx >= 0 ? this.history.slice(idx + 1) : this.history.slice(-20);
+    return candidateEvents.filter(e => e.channel === channel || e.channel === 'global');
+  }
+
   async broadcast(channel, event, payload = {}) {
-    const dataString = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+    const eventId = `evt_${Date.now()}_${++this.seq}`;
+    const dataString = `id: ${eventId}\nevent: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+
+    // Record in durable history buffer
+    this.history.push({ id: eventId, channel, event, payload, timestamp: Date.now() });
+    if (this.history.length > this.maxHistorySize) {
+      this.history.shift();
+    }
+
     let delivered = false;
 
     // Collect all recipient channels (direct channel, prefixed aliases, customer, rider, and seller channels)
@@ -533,21 +560,23 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': connected\n\n');
 
+      const lastEventId = req.headers['last-event-id'] || null;
+
       // Subscribe primary identity
-      sseBroadcasterInstance.subscribe(authClaims.sub, res);
-      sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res);
-      sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res);
+      sseBroadcasterInstance.subscribe(authClaims.sub, res, lastEventId);
+      sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res, lastEventId);
+      sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res, lastEventId);
       if (authClaims.storeId) {
-        sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res);
-        sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res);
+        sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res, lastEventId);
+        sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res, lastEventId);
       }
 
       // Subscribe specific order/session channel if requested via URI
       if (orderStreamMatch) {
         const id = orderStreamMatch[2];
-        sseBroadcasterInstance.subscribe(id, res);
-        sseBroadcasterInstance.subscribe(`order_${id}`, res);
-        sseBroadcasterInstance.subscribe(`delivery_${id}`, res);
+        sseBroadcasterInstance.subscribe(id, res, lastEventId);
+        sseBroadcasterInstance.subscribe(`order_${id}`, res, lastEventId);
+        sseBroadcasterInstance.subscribe(`delivery_${id}`, res, lastEventId);
       }
       return;
     }
