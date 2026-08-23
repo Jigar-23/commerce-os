@@ -169,7 +169,7 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
   const stage = resolveDeliveryStage(session.state, isAssigned, distToCustomerKm, distToStoreKm);
   const statusText = getTrackingStatusText(stage, isAssigned, session.riderName || session.rider_name);
 
-  // Dynamic 2-Phase ETA
+  // Dynamic 2-Phase ETA based on Road Distance & Urban Flow Model
   let etaMins = 8;
   if (session.state === 'DELIVERED') {
     etaMins = 0;
@@ -177,13 +177,28 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     etaMins = 1;
   } else if (stage === 'NEARBY') {
     etaMins = 2;
-  } else if (['OUT_FOR_DELIVERY', 'PICKED_UP', 'EN_ROUTE_CUSTOMER'].includes(session.state) && distToCustomerKm != null) {
-    etaMins = Math.max(1, Math.ceil(distToCustomerKm * 2.4));
+  } else if (['OUT_FOR_DELIVERY', 'PICKED_UP', 'EN_ROUTE_CUSTOMER'].includes(session.state)) {
+    const activeKm = mapMatched.remainingDistanceKm != null ? mapMatched.remainingDistanceKm : (distToCustomerKm || 1.5);
+    etaMins = Math.max(1, Math.ceil(activeKm * 2.2 + 1));
   } else {
-    // Pre-pickup
-    const riderToStore = Math.ceil(distToStoreKm * 2.4);
-    const storeToCust = Math.ceil(haversineDistanceKm(mLat, mLng, cLat, cLng) * 2.4);
-    etaMins = Math.min(45, Math.max(3, riderToStore + 2 + storeToCust));
+    // Pre-pickup (Rider -> Store -> Customer)
+    const riderToStoreKm = distToStoreKm || 0.8;
+    const storeToCustKm = (mLat && mLng && cLat && cLng) ? haversineDistanceKm(mLat, mLng, cLat, cLng) : 2.0;
+    const rToStoreMins = Math.ceil(riderToStoreKm * 2.2);
+    const storeToCustMins = Math.ceil(storeToCustKm * 2.2);
+    etaMins = Math.min(45, Math.max(3, rToStoreMins + 2 + storeToCustMins));
+  }
+
+  let traversedWaypoints = [];
+  let remainingWaypoints = [];
+  if (Array.isArray(waypoints) && waypoints.length >= 2) {
+    const splitIdx = mapMatched.segmentIndex != null ? mapMatched.segmentIndex : 0;
+    traversedWaypoints = waypoints.slice(0, splitIdx + 1);
+    if (mapMatched.snappedLat && mapMatched.snappedLng) {
+      traversedWaypoints.push({ lat: mapMatched.snappedLat, lng: mapMatched.snappedLng });
+      remainingWaypoints.push({ lat: mapMatched.snappedLat, lng: mapMatched.snappedLng });
+    }
+    remainingWaypoints = remainingWaypoints.concat(waypoints.slice(splitIdx + 1));
   }
 
   return {
@@ -217,7 +232,9 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     remainingDistanceKm: mapMatched.remainingDistanceKm,
     isStale: isStale,
     lastUpdatedTimestamp: telemetry?.serverTimestamp || telemetry?.recordedAt || now,
-    waypoints: waypoints || []
+    waypoints: waypoints || [],
+    traversedWaypoints,
+    remainingWaypoints
   };
 }
 

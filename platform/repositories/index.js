@@ -2805,6 +2805,9 @@ class LocalDevelopmentDeliveryRepository {
     if (riderId && session.riderId && session.riderId !== riderId) {
       return { ok: false, error: 'RIDER_MISMATCH' };
     }
+    if (newState === 'DELIVERED' && !metadata.otpVerified) {
+      return { ok: false, httpStatus: 400, error: 'OTP_AND_COD_REQUIRED', message: 'DELIVERED state requires completeDeliveryWithOtp verification.' };
+    }
     session.state = newState;
     if (metadata.otpVerified) session.otpVerified = true;
     this.saveDb();
@@ -4809,7 +4812,21 @@ class DispatchService {
         ? await this.presenceRepo.getEligibleOnlineRiders()
         : [];
       if (eligibleRiders.length > 0) {
-        selectedRiderId = eligibleRiders[0].riderId;
+        // Quick-Commerce Dispatch Ranking Engine:
+        // 1. Proximity to fulfillment store (40% weight)
+        // 2. Verified tier reliability bonus (15% bonus for PRO_EXPRESS)
+        const scoredRiders = eligibleRiders.map(r => {
+          const rLat = Number(r.lastKnownLat != null ? r.lastKnownLat : (r.last_known_lat != null ? r.last_known_lat : r.latitude));
+          const rLng = Number(r.lastKnownLng != null ? r.lastKnownLng : (r.last_known_lng != null ? r.last_known_lng : r.longitude));
+          const distKm = (!isNaN(rLat) && !isNaN(rLng)) ? haversineDistanceKm(rLat, rLng, mLat, mLng) : 99.0;
+          const proximityScore = Math.max(0, 100 - distKm * 15);
+          const tierBonus = r.tier === 'PRO_EXPRESS' ? 15 : (r.tier === 'EXPRESS' ? 10 : 0);
+          const totalScore = proximityScore + tierBonus;
+          return { ...r, totalScore, distKm };
+        });
+
+        scoredRiders.sort((a, b) => b.totalScore - a.totalScore);
+        selectedRiderId = scoredRiders[0].riderId || scoredRiders[0].rider_id;
       }
     }
 

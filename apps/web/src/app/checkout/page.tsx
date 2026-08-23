@@ -52,7 +52,7 @@ export default function ExpressCheckoutPage() {
   const removeItem = useCart((s) => s.removeItem);
   const clearCart = useCart((s) => s.clearCart);
 
-  const [paymentMethod, setPaymentMethod] = useState('UPI_INSTANT');
+  const [paymentMethod, setPaymentMethod] = useState('COD');
   const [address, setAddress] = useState('');
   const [deliveryInstruction, setDeliveryInstruction] = useState<string | null>('LEAVE_AT_DOOR');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -431,29 +431,35 @@ export default function ExpressCheckoutPage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
                   {
+                    id: 'COD',
+                    title: 'Cash on Delivery (COD)',
+                    subtitle: 'Pay cash to rider at doorstep',
+                    icon: <Banknote className="h-5 w-5" />,
+                    active: true,
+                  },
+                  {
                     id: 'UPI_INSTANT',
                     title: 'UPI Instant',
-                    subtitle: 'GPay, PhonePe, Paytm',
+                    subtitle: 'Coming Soon (Next Release)',
                     icon: <QrCode className="h-5 w-5" />,
+                    active: false,
                   },
                   {
                     id: 'CARD',
                     title: 'Credit / Debit Card',
-                    subtitle: 'Visa, Mastercard, RuPay',
+                    subtitle: 'Coming Soon (Next Release)',
                     icon: <CreditCard className="h-5 w-5" />,
-                  },
-                  {
-                    id: 'CASH_ON_DELIVERY',
-                    title: 'Cash on Delivery',
-                    subtitle: 'Pay at Doorstep',
-                    icon: <Banknote className="h-5 w-5" />,
+                    active: false,
                   },
                 ].map((pm) => (
                   <button
                     key={pm.id}
                     type="button"
-                    onClick={() => setPaymentMethod(pm.id)}
-                    className={`p-4 rounded-2xl border text-left flex flex-col justify-between space-y-3 transition-all cursor-pointer ${
+                    disabled={!pm.active}
+                    onClick={() => pm.active && setPaymentMethod(pm.id)}
+                    className={`p-4 rounded-2xl border text-left flex flex-col justify-between space-y-3 transition-all ${
+                      pm.active ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+                    } ${
                       paymentMethod === pm.id
                         ? 'bg-surface-brandSubtle border-border-brand shadow-subtle ring-2 ring-border-brand/20'
                         : 'bg-surface-subtle border-border-subtle hover:bg-surface-muted'
@@ -463,7 +469,12 @@ export default function ExpressCheckoutPage() {
                       {pm.icon}
                     </div>
                     <div>
-                      <h4 className="text-xs font-extrabold text-content-primary">{pm.title}</h4>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="text-xs font-extrabold text-content-primary">{pm.title}</h4>
+                        {pm.active && (
+                          <span className="px-1.5 py-0.5 rounded text-2xs font-black bg-surface-brandSubtle text-content-brand border border-border-brandSubtle">ACTIVE</span>
+                        )}
+                      </div>
                       <p className="text-2xs text-content-secondary mt-0.5">{pm.subtitle}</p>
                     </div>
                   </button>

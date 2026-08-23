@@ -5,8 +5,10 @@ import com.commerceos.android.network.Api
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.network.DeleteAddressResponse
 import com.commerceos.android.network.NetworkClient
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import java.math.BigDecimal
 
 /**
@@ -148,6 +150,41 @@ open class AppRepository {
 
     suspend fun getLiveTracking(orderId: String): ApiResult<CustomerOrderTrackingDto> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.orderApi.getLiveTracking(orderId) } }
+
+    /** Realtime Server-Sent Events (SSE) Stream for Continuous Live Order Telemetry */
+    fun streamLiveOrderTracking(orderId: String): kotlinx.coroutines.flow.Flow<CustomerOrderTrackingDto> = kotlinx.coroutines.flow.callbackFlow {
+        val call = NetworkClient.openOrderSseCall(orderId)
+        val gson = com.google.gson.Gson()
+        val job = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val response = call.execute()
+                val source = response.body?.source()
+                if (response.isSuccessful && source != null) {
+                    while (!source.exhausted() && isActive) {
+                        val line = source.readUtf8Line() ?: break
+                        if (line.startsWith("data:")) {
+                            val dataJson = line.removePrefix("data:").trim()
+                            if (dataJson.isNotEmpty() && dataJson != "{}") {
+                                try {
+                                    val dto = gson.fromJson(dataJson, CustomerOrderTrackingDto::class.java)
+                                    if (dto != null) {
+                                        trySend(dto)
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { call.cancel() } catch (_: Exception) {}
+            }
+        }
+        awaitClose {
+            job.cancel()
+            try { call.cancel() } catch (_: Exception) {}
+        }
+    }
 
     suspend fun getCancellationPolicy(orderId: String): ApiResult<CancellationPolicy> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.orderApi.getCancellationPolicy(orderId) } }

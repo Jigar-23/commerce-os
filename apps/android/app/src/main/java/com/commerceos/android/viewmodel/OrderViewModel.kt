@@ -115,18 +115,28 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
     private fun startLiveTrackingPolling(orderId: String) {
         trackingJob?.cancel()
         trackingJob = viewModelScope.launch {
-            while (isActive) {
-                when (val result = repository.getLiveTracking(orderId)) {
-                    is ApiResult.Success -> {
-                        liveTracking = result.data
-                        if (result.data.state == "DELIVERED" || result.data.stage == "DELIVERED") {
-                            break
-                        }
-                    }
-                    else -> {}
+            // 1. Initial REST Snapshot fetch
+            when (val result = repository.getLiveTracking(orderId)) {
+                is ApiResult.Success -> {
+                    liveTracking = result.data
                 }
+                else -> {}
+            }
 
-                // Periodically sync latest order status
+            // 2. Realtime SSE Event Stream (Sub-second live telemetry pushes)
+            launch {
+                repository.streamLiveOrderTracking(orderId).collect { update ->
+                    liveTracking = update
+                    val state = (update.state ?: update.stage ?: "").uppercase()
+                    if (state == "DELIVERED" || state == "CANCELLED" || state == "FAILED") {
+                        trackingJob?.cancel()
+                    }
+                }
+            }
+
+            // 3. Heartbeat Reconciliation Fallback (Every 12 seconds)
+            while (isActive) {
+                delay(12000)
                 when (val orderResult = repository.getOrderById(orderId)) {
                     is ApiResult.Success -> {
                         detail = OrderDetailUiState.Content(orderResult.data)
@@ -137,8 +147,6 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
                     }
                     else -> {}
                 }
-
-                delay(4000)
             }
         }
     }

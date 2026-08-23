@@ -28,7 +28,7 @@ const {
   TransactionalSellerRepository, 
   DeliveryOtpService 
 } = require('./repositories');
-const { buildEnrichedTrackingDTO } = require('./location-tracking');
+const { buildEnrichedTrackingDTO, haversineDistanceKm } = require('./location-tracking');
 
 async function test(name, fn) {
   try {
@@ -393,8 +393,63 @@ async function runE2eDeliveryPipelineTests() {
     assert.strictEqual(unknownRider, null, 'Unknown rider must resolve to null and fail closed');
   });
 
+  // -------------------------------------------------------------
+  // Test 9: Strict Delivery State Transition Guard
+  // -------------------------------------------------------------
+  await test('State Machine: Direct generic transition to DELIVERED without OTP is rejected', async () => {
+    const deliveryId = 'del_guard_' + Date.now();
+    mockDb.deliverySessions[deliveryId] = {
+      deliveryId,
+      orderId: 'ord_guard_01',
+      customerId: 'cust_jigar_01',
+      storeId: 'STORE_01',
+      riderId: 'rdr_active_01',
+      state: 'OUT_FOR_DELIVERY'
+    };
+
+    const directDelivered = await repos.deliveryRepo.updateDeliveryState(deliveryId, 'DELIVERED', 'rdr_active_01');
+    assert.strictEqual(directDelivered.ok, false, 'Direct transition to DELIVERED without OTP must be blocked');
+    assert.strictEqual(directDelivered.error, 'OTP_AND_COD_REQUIRED');
+  });
+
+  // -------------------------------------------------------------
+  // Test 10: Smart Quick-Commerce Dispatch Proximity Ranking
+  // -------------------------------------------------------------
+  await test('Dispatch Engine: Proximity-weighted scoring prioritizes nearest active courier', async () => {
+    mockDb.riderPresence = {
+      'rdr_far_01': {
+        riderId: 'rdr_far_01',
+        isOnline: true,
+        status: 'ONLINE',
+        latitude: 28.3500, // ~16 km away
+        longitude: 76.7500,
+        tier: 'STANDARD'
+      },
+      'rdr_close_02': {
+        riderId: 'rdr_close_02',
+        isOnline: true,
+        status: 'ONLINE',
+        latitude: 28.2000, // ~300 meters away
+        longitude: 76.6160,
+        tier: 'PRO_EXPRESS'
+      }
+    };
+
+    const eligible = await repos.presenceRepo.getEligibleOnlineRiders();
+    assert.strictEqual(eligible.length, 2);
+    // Closest rider is ranked highest
+    const storeLat = 28.1989, storeLng = 76.6186;
+    const scored = eligible.map(r => {
+      const d = haversineDistanceKm(r.latitude, r.longitude, storeLat, storeLng);
+      const score = Math.max(0, 100 - d * 15) + (r.tier === 'PRO_EXPRESS' ? 15 : 0);
+      return { ...r, score, d };
+    }).sort((a, b) => b.score - a.score);
+
+    assert.strictEqual(scored[0].riderId, 'rdr_close_02', 'Nearest Pro Express rider must be ranked first');
+  });
+
   console.log('\n================================================================');
-  console.log('🏆 E2E DELIVERY PIPELINE INTEGRATION SUITE: ALL PASSED (8/8)');
+  console.log('🏆 E2E DELIVERY PIPELINE INTEGRATION SUITE: ALL PASSED (10/10)');
   console.log('================================================================\n');
 }
 

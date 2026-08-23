@@ -411,4 +411,21 @@ object NetworkClient {
     val orderApi: OrderApi get() = service(OrderApi::class.java)
     val customerApi: CustomerApi get() = service(CustomerApi::class.java)
     val prescriptionApi: PrescriptionApi get() = service(PrescriptionApi::class.java)
+
+    /** Authoritative Server-Sent Events (SSE) Stream Call for Live Order Telemetry */
+    fun openOrderSseCall(orderId: String): okhttp3.Call {
+        val token = authTokenProvider()
+        val streamUrl = "$baseUrl/api/v1/delivery/order/$orderId/stream${if (token.isNotBlank()) "?token=${java.net.URLEncoder.encode(token, "UTF-8")}" else ""}"
+        val request = Request.Builder()
+            .url(streamUrl)
+            .header("Accept", "text/event-stream")
+            .apply {
+                if (token.isNotBlank()) header("Authorization", "Bearer $token")
+            }
+            .build()
+        val streamingClient = rawClient.newBuilder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+        return streamingClient.newCall(request)
+    }
 }

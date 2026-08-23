@@ -452,7 +452,11 @@ private fun generateBlinkitGradeDarkMapHtml(
                 currentMarkerHeading = rot;
             } else {
                 var prevLatLng = riderMarker.getLatLng();
-                riderMarker.setIcon(bikerIcon);
+                var el = riderMarker.getElement();
+                if (el) {
+                    var core = el.querySelector('.biker-core');
+                    if (core) core.style.transform = 'rotate(' + rot + 'deg)';
+                }
                 if (rider.isStale) {
                     riderMarker.setLatLng([rider.lat, rider.lng]);
                 } else {
