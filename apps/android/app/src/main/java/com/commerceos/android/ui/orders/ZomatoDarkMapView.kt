@@ -412,6 +412,8 @@ private fun generateBlinkitGradeDarkMapHtml(
         animFrameId = requestAnimationFrame(step);
     }
 
+    var currentMarkerHeading = 0;
+
     function updateSmartMap(mLat, mLng, cLat, cLng, rider, waypoints, stage) {
         currentStage = stage || 'ASSIGNING_PARTNER';
         allWaypoints = waypoints || [];
@@ -436,24 +438,26 @@ private fun generateBlinkitGradeDarkMapHtml(
             }
         }
 
-        // 3. Rider Marker with 60fps Road Snapping & Gliding
+        // 3. Rider Marker with 60fps Road Snapping & Continuous Heading Rotation
         if (rider && rider.lat && rider.lng) {
-            var rot = (rider.heading != null) ? rider.heading : 0;
+            var rot = (rider.heading != null) ? rider.heading : currentMarkerHeading;
             var markerHtml = '<div class="biker-container">' +
                              (rider.isStale ? '' : '<div class="biker-pulse"></div>') +
-                             '<div class="biker-core" style="transform: rotate(' + rot + 'deg);">' + bikeSvg + '</div>' +
+                             '<div class="biker-core" style="transform: rotate(' + currentMarkerHeading + 'deg);">' + bikeSvg + '</div>' +
                              '</div>';
             var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [40, 40], iconAnchor: [20, 20] });
 
             if (!riderMarker) {
                 riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
+                currentMarkerHeading = rot;
             } else {
                 var prevLatLng = riderMarker.getLatLng();
                 riderMarker.setIcon(bikerIcon);
                 if (rider.isStale) {
                     riderMarker.setLatLng([rider.lat, rider.lng]);
                 } else {
-                    smoothGlideTo(riderMarker, [prevLatLng.lat, prevLatLng.lng], [rider.lat, rider.lng], 0, rot, 800);
+                    smoothGlideTo(riderMarker, [prevLatLng.lat, prevLatLng.lng], [rider.lat, rider.lng], currentMarkerHeading, rot, 800);
+                    currentMarkerHeading = rot;
                 }
             }
         } else {
@@ -464,26 +468,69 @@ private fun generateBlinkitGradeDarkMapHtml(
             }
         }
 
-        // 4. Dual-Tone Dynamic Polylines (Traversed vs Remaining)
-        if (allWaypoints.length > 0) {
+        // 4. Dual-Tone Dynamic Polylines (Traversed Path vs Active Remaining Path)
+        if (allWaypoints.length >= 2) {
             var latLngs = allWaypoints.map(function(pt) { return [pt.lat, pt.lng]; });
             
+            // Find closest waypoint segment to rider if rider is active
+            var splitIdx = 0;
+            if (rider && rider.lat && rider.lng) {
+                var minD = Infinity;
+                for (var i = 0; i < latLngs.length; i++) {
+                    var d = Math.hypot(latLngs[i][0] - rider.lat, latLngs[i][1] - rider.lng);
+                    if (d < minD) {
+                        minD = d;
+                        splitIdx = i;
+                    }
+                }
+            }
+
+            var traversedPts = latLngs.slice(0, splitIdx + 1);
+            if (rider && rider.lat && rider.lng) traversedPts.push([rider.lat, rider.lng]);
+            var remainingPts = [];
+            if (rider && rider.lat && rider.lng) remainingPts.push([rider.lat, rider.lng]);
+            remainingPts = remainingPts.concat(latLngs.slice(splitIdx));
+
+            // Traversed Faded Route
+            if (traversedPts.length >= 2 && splitIdx > 0) {
+                if (!traversedPolyline) {
+                    traversedPolyline = L.polyline(traversedPts, {
+                        color: '#334155',
+                        weight: 4,
+                        opacity: 0.5,
+                        lineCap: 'round',
+                        lineJoin: 'round'
+                    }).addTo(map);
+                } else {
+                    traversedPolyline.setLatLngs(traversedPts);
+                }
+            } else if (traversedPolyline) {
+                map.removeLayer(traversedPolyline);
+                traversedPolyline = null;
+            }
+
+            // Active Glowing Remaining Route
+            var activePts = remainingPts.length >= 2 ? remainingPts : latLngs;
             if (!activePolyline) {
-                activePolyline = L.polyline(latLngs, {
+                activePolyline = L.polyline(activePts, {
                     color: '#10B981',
                     weight: 5,
-                    opacity: 0.9,
+                    opacity: 0.95,
                     className: 'active-route',
                     lineCap: 'round',
                     lineJoin: 'round'
                 }).addTo(map);
             } else {
-                activePolyline.setLatLngs(latLngs);
+                activePolyline.setLatLngs(activePts);
             }
         } else {
             if (activePolyline) {
                 map.removeLayer(activePolyline);
                 activePolyline = null;
+            }
+            if (traversedPolyline) {
+                map.removeLayer(traversedPolyline);
+                traversedPolyline = null;
             }
         }
 

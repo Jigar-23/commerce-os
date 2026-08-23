@@ -33,7 +33,7 @@ class DeliveryOtpService {
     return crypto.createHmac('sha256', pepper).update(String(otp).trim()).digest('hex');
   }
 
-  static verifyOtp(enteredPin, authoritativePinOrHash, currentAttempts = 0, maxAttempts = 5, isExpired = false) {
+  static verifyOtp(enteredPin, authoritativePinOrHash, currentAttempts = 0, maxAttempts = 5, isExpired = false, pepper = null) {
     if (isExpired) {
       return { ok: false, error: 'OTP_EXPIRED', message: 'Delivery PIN has expired. Please request customer to refresh PIN.' };
     }
@@ -45,11 +45,11 @@ class DeliveryOtpService {
     }
     const cleanEntered = String(enteredPin).trim();
     const cleanAuth = String(authoritativePinOrHash).trim();
-    const enteredHash = this.hashOtp(cleanEntered);
+    const enteredHash = this.hashOtp(cleanEntered, pepper);
 
     const isProd = process.env.COMMERCEOS_ENV === 'production' || process.env.COMMERCEOS_PERSISTENCE_MODE === 'postgres';
 
-    // In production, strictly enforce cryptographic hash comparison
+    // In production / hashed storage, strictly enforce cryptographic hash comparison
     if (cleanAuth.length === 64) {
       try {
         const hashA = Buffer.from(enteredHash, 'hex');
@@ -62,7 +62,7 @@ class DeliveryOtpService {
       }
     } else if (!isProd) {
       // Local development fallback only
-      if (cleanEntered === cleanAuth || enteredHash === this.hashOtp(cleanAuth)) {
+      if (cleanEntered === cleanAuth || enteredHash === this.hashOtp(cleanAuth, pepper)) {
         return { ok: true };
       }
     }
@@ -2273,6 +2273,10 @@ class TransactionalOfferRepository {
       client.release();
     }
   }
+
+  async declineOffer(offerId, riderId) {
+    return this.declineOfferTransactionally(offerId, riderId);
+  }
 }
 
 class LocalDevelopmentOfferRepository {
@@ -2457,6 +2461,10 @@ class LocalDevelopmentOfferRepository {
     offer.history.push({ status: 'DECLINED', timestamp: nowIso, riderId });
     this.saveDb();
     return { ok: true, httpStatus: 200, status: 'DECLINED' };
+  }
+
+  async declineOffer(offerId, riderId) {
+    return this.declineOfferTransactionally(offerId, riderId);
   }
 }
 
@@ -2748,6 +2756,18 @@ class TransactionalDeliveryRepository {
       client.release();
     }
   }
+
+  async updateDeliveryState(deliveryId, newState, riderId) {
+    return this.transitionStateTransactionally(deliveryId, newState, riderId);
+  }
+
+  async completeDeliveryWithOtp(deliveryId, riderId, submittedOtp, pepper = null) {
+    return this.deliverWithOtpTransactionally(deliveryId, riderId, submittedOtp, pepper);
+  }
+
+  async getDeliveryById(deliveryId) {
+    return this.findSessionById(deliveryId);
+  }
 }
 
 class LocalDevelopmentDeliveryRepository {
@@ -2756,24 +2776,25 @@ class LocalDevelopmentDeliveryRepository {
     this.saveDb = saveDbFn || (() => {});
   }
 
-  async deliverWithOtpTransactionally(orderId, riderId, submittedOtp) {
+  async deliverWithOtpTransactionally(orderId, riderId, submittedOtp, pepper = null) {
     const session = ((this.db.deliverySessions || {})[orderId] || Object.values(this.db.deliverySessions || {}).find(s => s.deliveryId === orderId || s.orderId === orderId));
     if (!session) return { ok: false, httpStatus: 404, error: 'DELIVERY_NOT_FOUND' };
     if (session.riderId && session.riderId !== riderId) {
       return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Only the assigned rider can complete delivery.' };
     }
     const order = (this.db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
-    if (!order) return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
     
-    const expectedOtp = session.deliveryPin || session.deliveryOtp || order.deliveryOtp;
-    const otpRes = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtp, order.otpAttempts || 0, 5);
+    const expectedOtp = session.delivery_otp_hash || session.deliveryPin || session.deliveryOtp || order?.delivery_otp_hash || order?.deliveryOtp;
+    const otpRes = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtp, order?.otpAttempts || 0, 5, false, pepper);
     if (!otpRes.ok) return { ok: false, httpStatus: 400, error: 'INVALID_OTP', message: otpRes.message };
 
     session.state = 'DELIVERED';
     session.otpVerified = true;
-    order.orderStatus = 'DELIVERED';
-    order.status = 'DELIVERED';
-    order.otpVerifiedAt = new Date().toISOString();
+    if (order) {
+      order.orderStatus = 'DELIVERED';
+      order.status = 'DELIVERED';
+      order.otpVerifiedAt = new Date().toISOString();
+    }
     this.saveDb();
     return { ok: true, httpStatus: 200, order, session };
   }
@@ -2788,6 +2809,18 @@ class LocalDevelopmentDeliveryRepository {
     if (metadata.otpVerified) session.otpVerified = true;
     this.saveDb();
     return { ok: true, session };
+  }
+
+  async updateDeliveryState(deliveryId, newState, riderId) {
+    return this.transitionStateTransactionally(deliveryId, newState, riderId);
+  }
+
+  async completeDeliveryWithOtp(deliveryId, riderId, submittedOtp, pepper = null) {
+    return this.deliverWithOtpTransactionally(deliveryId, riderId, submittedOtp, pepper);
+  }
+
+  async getDeliveryById(deliveryId) {
+    return this.findSessionById(deliveryId);
   }
 
   async createSessionTransactionally(sessionData) {
@@ -3185,7 +3218,7 @@ class TransactionalOrderRepository {
         );
       }
 
-      // 17. Insert Transactional Outbox Event based on store dispatch mode
+      // 17. Insert Transactional Outbox Event based on store dispatch mode and payment status
       if (isSellerApprovalRequired) {
         // Marketplace mode: Notify seller immediately. Rider dispatch is gated until seller approval.
         await client.query(
@@ -3195,16 +3228,19 @@ class TransactionalOrderRepository {
             orderId,
             JSON.stringify({
               orderId,
+              deliveryId,
               storeId: store.id,
               customerId: customer.id,
               sellerApprovalRequired: true,
+              sellerApprovalStatus: 'PENDING',
               totalAmount,
-              isCod
+              isCod,
+              paymentStatus: isCod ? 'COD_PENDING_COLLECTION' : 'PAYMENT_PENDING'
             })
           ]
         );
-      } else {
-        // Dark store mode: Instant auto-dispatch to riders
+      } else if (isCod || paymentStatus === 'PAID') {
+        // Dark store mode + (COD OR Captured Payment): Instant auto-dispatch to riders
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
            VALUES ('DELIVERY_SESSION', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', 0, NOW(), NOW())`,
@@ -3216,8 +3252,31 @@ class TransactionalOrderRepository {
               storeId: store.id,
               customerId: customer.id,
               sellerApprovalRequired: false,
+              sellerApprovalStatus: 'NOT_REQUIRED',
               totalAmount,
-              isCod
+              isCod,
+              paymentStatus: isCod ? 'COD_PENDING_COLLECTION' : 'PAID'
+            })
+          ]
+        );
+      } else {
+        // Dark store mode + Prepaid (Payment Pending): Await payment authorization/capture
+        await client.query(
+          `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
+           VALUES ('ORDER', $1, 'ORDER_PLACED', $2, 'PENDING', 0, NOW(), NOW())`,
+          [
+            orderId,
+            JSON.stringify({
+              orderId,
+              deliveryId,
+              storeId: store.id,
+              customerId: customer.id,
+              sellerApprovalRequired: false,
+              sellerApprovalStatus: 'NOT_REQUIRED',
+              totalAmount,
+              isCod: false,
+              paymentStatus: 'PAYMENT_PENDING',
+              awaitingPayment: true
             })
           ]
         );
@@ -3778,7 +3837,7 @@ class LocalDevelopmentOrderRepository {
       riderId: 'rdr_rewari_01',
       deliveryId: session.deliveryId,
       orderId: order.id,
-      status: 'DISPATCHED',
+      status: 'OFFERED',
       notificationStatus: 'DEVICE_RECEIVED',
       merchantName,
       merchantAddress,
@@ -3910,7 +3969,17 @@ class LocalDevelopmentOrderRepository {
       this.db.deliverySessions[orderData.id] = deliverySessionData;
     }
 
-    // 4. Persist COD ledger
+    // 4. Resolve Seller Approval Mode
+    const storeObj = (this.db.stores || []).find(s => s.id === orderData.storeId || s.storeId === orderData.storeId)
+      || (this.db.stores && this.db.stores[orderData.storeId]);
+    const isSellerApprovalRequired = Boolean(
+      orderData.sellerApprovalRequired ?? storeObj?.sellerApprovalRequired ?? storeObj?.seller_approval_required ?? false
+    );
+
+    orderData.sellerApprovalRequired = isSellerApprovalRequired;
+    orderData.sellerApprovalStatus = isSellerApprovalRequired ? 'PENDING' : 'NOT_REQUIRED';
+
+    // 5. Persist COD ledger
     if (orderData.isCod) {
       this.db.codLedger = this.db.codLedger || [];
       this.db.codLedger.unshift({
@@ -3928,40 +3997,75 @@ class LocalDevelopmentOrderRepository {
       });
     }
 
-    // 5. Record Transactional Outbox Events
+    // 6. Record Transactional Outbox Events based on approval mode & payment gating
     this.db.outboxEvents = this.db.outboxEvents || [];
-    this.db.outboxEvents.push({
-      id: 'evt_outbox_' + crypto.randomUUID(),
-      aggregateType: 'DELIVERY_SESSION',
-      aggregateId: deliverySessionData.deliveryId,
-      eventType: 'DISPATCH_REQUESTED',
-      payload: {
-        orderId: orderData.id,
-        deliveryId: deliverySessionData.deliveryId,
-        customerId: orderData.customerId,
-        totalAmount: orderData.totalAmount,
-        isCod: orderData.isCod,
-        deliverySession: deliverySessionData
-      },
-      status: 'PENDING',
-      createdAt: new Date().toISOString()
-    });
 
-    this.db.outboxEvents.push({
-      id: 'evt_outbox_' + crypto.randomUUID(),
-      aggregateType: 'ORDER',
-      aggregateId: orderData.id,
-      eventType: 'ORDER_PLACED',
-      payload: {
-        orderId: orderData.id,
-        deliveryId: deliverySessionData.deliveryId,
-        customerId: orderData.customerId,
-        totalAmount: orderData.totalAmount,
-        isCod: orderData.isCod
-      },
-      status: 'PENDING',
-      createdAt: new Date().toISOString()
-    });
+    if (isSellerApprovalRequired) {
+      // Marketplace Mode: Hold dispatch until seller accepts
+      this.db.outboxEvents.push({
+        id: 'evt_outbox_' + crypto.randomUUID(),
+        aggregateType: 'ORDER',
+        aggregateId: orderData.id,
+        eventType: 'ORDER_PLACED',
+        payload: {
+          orderId: orderData.id,
+          deliveryId: deliverySessionData.deliveryId,
+          storeId: orderData.storeId,
+          customerId: orderData.customerId,
+          sellerApprovalRequired: true,
+          sellerApprovalStatus: 'PENDING',
+          totalAmount: orderData.totalAmount,
+          isCod: orderData.isCod,
+          paymentStatus: orderData.isCod ? 'COD_PENDING_COLLECTION' : (orderData.paymentStatus || 'PAYMENT_PENDING')
+        },
+        status: 'PENDING',
+        createdAt: new Date().toISOString()
+      });
+    } else if (orderData.isCod || orderData.paymentStatus === 'PAID') {
+      // Dark Store Mode: Instant auto-dispatch for COD or paid orders
+      this.db.outboxEvents.push({
+        id: 'evt_outbox_' + crypto.randomUUID(),
+        aggregateType: 'DELIVERY_SESSION',
+        aggregateId: deliverySessionData.deliveryId,
+        eventType: 'DISPATCH_REQUESTED',
+        payload: {
+          orderId: orderData.id,
+          deliveryId: deliverySessionData.deliveryId,
+          storeId: orderData.storeId,
+          customerId: orderData.customerId,
+          sellerApprovalRequired: false,
+          sellerApprovalStatus: 'NOT_REQUIRED',
+          totalAmount: orderData.totalAmount,
+          isCod: orderData.isCod,
+          paymentStatus: orderData.isCod ? 'COD_PENDING_COLLECTION' : 'PAID',
+          deliverySession: deliverySessionData
+        },
+        status: 'PENDING',
+        createdAt: new Date().toISOString()
+      });
+    } else {
+      // Dark Store Mode + Prepaid Pending: Await payment capture
+      this.db.outboxEvents.push({
+        id: 'evt_outbox_' + crypto.randomUUID(),
+        aggregateType: 'ORDER',
+        aggregateId: orderData.id,
+        eventType: 'ORDER_PLACED',
+        payload: {
+          orderId: orderData.id,
+          deliveryId: deliverySessionData.deliveryId,
+          storeId: orderData.storeId,
+          customerId: orderData.customerId,
+          sellerApprovalRequired: false,
+          sellerApprovalStatus: 'NOT_REQUIRED',
+          totalAmount: orderData.totalAmount,
+          isCod: false,
+          paymentStatus: 'PAYMENT_PENDING',
+          awaitingPayment: true
+        },
+        status: 'PENDING',
+        createdAt: new Date().toISOString()
+      });
+    }
 
     this.saveDb();
     return { ok: true, httpStatus: 200, order: orderData, session: deliverySessionData };
@@ -5368,7 +5472,8 @@ class OutboxProcessor {
 }
 
 async function initApplicationRepositories(options = {}) {
-  const isProdEnv = process.env.COMMERCEOS_ENV === 'production' || 
+  const isProdEnv = Boolean(options.pgPool) ||
+                    process.env.COMMERCEOS_ENV === 'production' || 
                     process.env.COMMERCEOS_PERSISTENCE_MODE === 'postgres' || 
                     process.env.NODE_ENV === 'production';
   const forceLocal = options.forceLocal === true || process.env.COMMERCEOS_PERSISTENCE_MODE === 'local' || process.env.COMMERCEOS_ENV === 'local_test';
@@ -5383,12 +5488,9 @@ async function initApplicationRepositories(options = {}) {
     pricingCalculator = null
   } = options;
 
-  const hasPostgresConfig = Boolean(pgPool || (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()));
-  const shouldUsePostgres = hasPostgresConfig && !forceLocal;
-
-  if (shouldUsePostgres) {
+  if (isProdEnv && !forceLocal) {
     let pool = pgPool;
-    if (!pool && process.env.DATABASE_URL) {
+    if (!pool && process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
       try {
         const { Pool } = require('pg');
         pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -5396,9 +5498,11 @@ async function initApplicationRepositories(options = {}) {
         throw new Error(`FATAL_STARTUP_ERROR: Failed to initialize PostgreSQL pool from DATABASE_URL: ${err.message}`);
       }
     }
+    if (!pool) {
+      throw new Error('FATAL_STARTUP_ERROR: PostgreSQL pool or DATABASE_URL is strictly required in production mode');
+    }
 
-    if (pool) {
-      console.log('[PersistenceLayer] Mode: PRODUCTION (PostgreSQL Transactional Repositories)');
+    console.log('[PersistenceLayer] Mode: PRODUCTION (PostgreSQL Transactional Repositories)');
     const catalogRepo = new TransactionalCatalogRepository(pool);
     const customerRepo = new TransactionalCustomerRepository(pool);
     const addressRepo = new TransactionalAddressRepository(pool);
@@ -5511,7 +5615,6 @@ async function initApplicationRepositories(options = {}) {
       notificationService,
       outboxProcessor
     };
-    }
   }
 
   console.log('[PersistenceLayer] Initialized LocalDevelopmentRepository harness.');

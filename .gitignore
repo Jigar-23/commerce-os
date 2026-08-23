@@ -12,6 +12,7 @@ target/
 .turbo/
 *.apk
 *.aab
+*.zip
 
 # Android & Gradle
 .gradle/

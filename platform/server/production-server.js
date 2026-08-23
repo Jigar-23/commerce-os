@@ -231,6 +231,7 @@ class ProductionSseBroadcaster {
   }
 
   subscribe(channel, res) {
+    if (!channel) return;
     if (!this.clients.has(channel)) {
       this.clients.set(channel, new Set());
     }
@@ -245,27 +246,56 @@ class ProductionSseBroadcaster {
     });
   }
 
-  async broadcast(channel, event, payload) {
+  async broadcast(channel, event, payload = {}) {
     const dataString = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
     let delivered = false;
 
-    const targetSet = this.clients.get(channel);
-    if (targetSet && targetSet.size > 0) {
-      for (const client of targetSet) {
-        try {
-          client.write(dataString);
-          delivered = true;
-        } catch {}
+    // Collect all recipient channels (direct channel, prefixed aliases, customer, rider, and seller channels)
+    const channelsToNotify = new Set(['global']);
+    if (channel) {
+      channelsToNotify.add(channel);
+      if (!channel.startsWith('order_')) channelsToNotify.add(`order_${channel}`);
+      if (!channel.startsWith('customer_')) channelsToNotify.add(`customer_${channel}`);
+      if (!channel.startsWith('rider_')) channelsToNotify.add(`rider_${channel}`);
+      if (!channel.startsWith('seller_')) channelsToNotify.add(`seller_${channel}`);
+    }
+    if (payload && typeof payload === 'object') {
+      if (payload.customerId) {
+        channelsToNotify.add(payload.customerId);
+        channelsToNotify.add(`customer_${payload.customerId}`);
+      }
+      if (payload.riderId) {
+        channelsToNotify.add(payload.riderId);
+        channelsToNotify.add(`rider_${payload.riderId}`);
+      }
+      if (payload.storeId) {
+        channelsToNotify.add(payload.storeId);
+        channelsToNotify.add(`seller_${payload.storeId}`);
+        channelsToNotify.add(`store_${payload.storeId}`);
+      }
+      if (payload.orderId) {
+        channelsToNotify.add(payload.orderId);
+        channelsToNotify.add(`order_${payload.orderId}`);
+      }
+      if (payload.deliveryId) {
+        channelsToNotify.add(payload.deliveryId);
+        channelsToNotify.add(`delivery_${payload.deliveryId}`);
       }
     }
 
-    const globalSet = this.clients.get('global');
-    if (globalSet && globalSet.size > 0 && channel !== 'global') {
-      for (const client of globalSet) {
-        try {
-          client.write(dataString);
-          delivered = true;
-        } catch {}
+    const notifiedClients = new Set();
+    for (const ch of channelsToNotify) {
+      const targetSet = this.clients.get(ch);
+      if (targetSet && targetSet.size > 0) {
+        for (const client of targetSet) {
+          if (!notifiedClients.has(client)) {
+            notifiedClients.add(client);
+            try {
+              client.write(dataString);
+              delivered = true;
+            } catch {}
+          }
+        }
       }
     }
 
@@ -393,9 +423,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------------------------------------
-    // Realtime Server-Sent Events (SSE) Stream Subscription
+    // Realtime Server-Sent Events (SSE) Stream Subscriptions
     // -------------------------------------------------------------
-    if (pathname === '/api/v1/realtime/stream' && method === 'GET') {
+    const isSseRoute = pathname === '/api/v1/realtime/stream' ||
+                       pathname === '/api/v1/delivery/rider/stream' ||
+                       pathname === '/api/v1/orders/active-delivery/stream' ||
+                       pathname.match(/^\/api\/v1\/delivery\/(?:order|session)\/[^/]+\/stream$/);
+
+    if (isSseRoute && method === 'GET') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required for SSE stream.' });
@@ -408,7 +443,23 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': connected\n\n');
 
+      // Subscribe primary identity
       sseBroadcasterInstance.subscribe(authClaims.sub, res);
+      sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res);
+      sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res);
+      if (authClaims.storeId) {
+        sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res);
+        sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res);
+      }
+
+      // Subscribe specific order/session channel if requested via URI
+      const orderStreamMatch = pathname.match(/^\/api\/v1\/delivery\/(order|session)\/([^/]+)\/stream$/);
+      if (orderStreamMatch) {
+        const id = orderStreamMatch[2];
+        sseBroadcasterInstance.subscribe(id, res);
+        sseBroadcasterInstance.subscribe(`order_${id}`, res);
+        sseBroadcasterInstance.subscribe(`delivery_${id}`, res);
+      }
       return;
     }
 
@@ -849,12 +900,33 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
     }
 
+    // GET /api/v1/delivery/offers/:id
+    const riderSingleOfferMatch = pathname.match(/^\/api\/v1\/delivery\/offers\/([^/]+)$/);
+    if (riderSingleOfferMatch && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const offer = await appRepositories.offerRepo.findOfferById(riderSingleOfferMatch[1]);
+      if (!offer) {
+        return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Offer not found.' });
+      }
+      if (offer.rider_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN' && authClaims.role !== 'ADMIN') {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have access to this delivery offer.' });
+      }
+      return sendJson(res, 200, offer);
+    }
+
     // POST /api/v1/delivery/offers/:id/decline
     const riderOfferDeclineMatch = pathname.match(/^\/api\/v1\/delivery\/offers\/([^/]+)\/decline$/);
     if (riderOfferDeclineMatch && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const offer = await appRepositories.offerRepo.findOfferById(riderOfferDeclineMatch[1]);
+      if (offer && offer.rider_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN' && authClaims.role !== 'ADMIN') {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not own this offer.' });
       }
       const result = await appRepositories.offerRepo.declineOffer(riderOfferDeclineMatch[1], authClaims.sub);
       return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
@@ -950,6 +1022,16 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
       const deliveryId = telemetryMatch[1];
+      const delivery = await appRepositories.deliveryRepo.getDeliveryById(deliveryId);
+      if (!delivery) {
+        return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery session not found.' });
+      }
+      const isAssignedRider = (delivery.rider_id === authClaims.sub || delivery.rider_id === authClaims.riderId);
+      const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
+      if (!isAssignedRider && !isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not the assigned rider for this delivery.' });
+      }
+
       const body = await parseJsonBody(req);
       const lat = Number(body.latitude);
       const lng = Number(body.longitude);
@@ -967,6 +1049,12 @@ const server = http.createServer(async (req, res) => {
         sequenceNumber: seq,
         recordedAt: Date.now()
       });
+
+      // Broadcast real-time map-matched tracking update to customer and order streams
+      const waypoints = delivery.waypoints || [];
+      const enrichedDto = buildEnrichedTrackingDTO(delivery, { latitude: lat, longitude: lng, speedKmh: Number(body.speedKmh || 0), heading: Number(body.heading || 0) }, null, waypoints);
+      sseBroadcasterInstance.broadcast(delivery.order_id, 'TRACKING_UPDATE', enrichedDto);
+
       return sendJson(res, 200, { ok: true, ackSequenceNumber: seq, latitude: lat, longitude: lng });
     }
 
@@ -1083,6 +1171,17 @@ const server = http.createServer(async (req, res) => {
       if (!delivery) {
         return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery tracking record not found.' });
       }
+
+      // Ownership authorization: Customer owner, Assigned rider, Store seller, or Admin
+      const isCustomerOwner = delivery.customer_id === authClaims.sub;
+      const isAssignedRider = delivery.rider_id === authClaims.sub || delivery.rider_id === authClaims.riderId;
+      let isStoreSeller = Boolean(authClaims.storeId && authClaims.storeId === delivery.store_id);
+      const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
+
+      if (!isCustomerOwner && !isAssignedRider && !isStoreSeller && !isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to view tracking for this delivery.' });
+      }
+
       const telemetry = await appRepositories.telemetryRepo.getLatestTelemetry(delivery.rider_id || '');
       const waypoints = delivery.waypoints || [];
       const dto = buildEnrichedTrackingDTO(delivery, telemetry, null, waypoints);

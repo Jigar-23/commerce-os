@@ -17,7 +17,7 @@ export interface CartDrawerItem {
   id?: string;
   sku?: string;
   productId?: string;
-  name: string;
+  name?: string;
   price?: number;
   unitPrice?: number;
   discountedPrice?: number;

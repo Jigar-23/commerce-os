@@ -143,15 +143,15 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     session.riderId !== 'unassigned'
   );
 
-  const mLat = Number(session.merchantLat || session.merchant_lat || 28.202218);
-  const mLng = Number(session.merchantLng || session.merchant_lng || 76.615403);
-  const cLat = Number(session.customerLat || session.customer_lat || 28.1970);
-  const cLng = Number(session.customerLng || session.customer_lng || 76.6190);
+  const mLat = (session.merchantLat != null || session.merchant_lat != null) ? Number(session.merchantLat || session.merchant_lat) : null;
+  const mLng = (session.merchantLng != null || session.merchant_lng != null) ? Number(session.merchantLng || session.merchant_lng) : null;
+  const cLat = (session.customerLat != null || session.customer_lat != null) ? Number(session.customerLat || session.customer_lat) : null;
+  const cLng = (session.customerLng != null || session.customer_lng != null) ? Number(session.customerLng || session.customer_lng) : null;
 
   let mapMatched = {
-    snappedLat: telemetry?.latitude || mLat,
-    snappedLng: telemetry?.longitude || mLng,
-    remainingDistanceKm: 2.2,
+    snappedLat: telemetry?.latitude || null,
+    snappedLng: telemetry?.longitude || null,
+    remainingDistanceKm: null,
     routeProgressPct: 0,
     isSnapped: false
   };
@@ -160,11 +160,11 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     mapMatched = mapMatchRiderToRoute(telemetry.latitude, telemetry.longitude, waypoints);
   }
 
-  const riderCurrentLat = isAssigned ? mapMatched.snappedLat : mLat;
-  const riderCurrentLng = isAssigned ? mapMatched.snappedLng : mLng;
+  const riderCurrentLat = isAssigned ? mapMatched.snappedLat : null;
+  const riderCurrentLng = isAssigned ? mapMatched.snappedLng : null;
 
-  const distToCustomerKm = haversineDistanceKm(riderCurrentLat, riderCurrentLng, cLat, cLng);
-  const distToStoreKm = haversineDistanceKm(riderCurrentLat, riderCurrentLng, mLat, mLng);
+  const distToCustomerKm = (riderCurrentLat != null && cLat != null) ? haversineDistanceKm(riderCurrentLat, riderCurrentLng, cLat, cLng) : null;
+  const distToStoreKm = (riderCurrentLat != null && mLat != null) ? haversineDistanceKm(riderCurrentLat, riderCurrentLng, mLat, mLng) : null;
 
   const stage = resolveDeliveryStage(session.state, isAssigned, distToCustomerKm, distToStoreKm);
   const statusText = getTrackingStatusText(stage, isAssigned, session.riderName || session.rider_name);
@@ -177,7 +177,7 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     etaMins = 1;
   } else if (stage === 'NEARBY') {
     etaMins = 2;
-  } else if (['OUT_FOR_DELIVERY', 'PICKED_UP', 'EN_ROUTE_CUSTOMER'].includes(session.state)) {
+  } else if (['OUT_FOR_DELIVERY', 'PICKED_UP', 'EN_ROUTE_CUSTOMER'].includes(session.state) && distToCustomerKm != null) {
     etaMins = Math.max(1, Math.ceil(distToCustomerKm * 2.4));
   } else {
     // Pre-pickup

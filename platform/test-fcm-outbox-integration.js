@@ -440,7 +440,7 @@ async function runAllTests() {
         data: { earnings: '55.00' }
       });
 
-      assert.strictEqual(Boolean(result && (result.ok || result === true)), true, 'FCM send must return true / DELIVERED on 200');
+      assert.strictEqual(Boolean(result && (result.status === 'DELIVERED' || result.ok || result === true)), true, 'FCM send must return true / DELIVERED on 200');
       assert.ok(capturedBody, 'Must send HTTP body to FCM endpoint');
       assert.strictEqual(capturedBody.to, 'token_xyz');
       assert.ok(capturedBody.data, 'Must contain data payload object');
@@ -482,7 +482,7 @@ async function runAllTests() {
         offerId: 'off_1'
       });
 
-      assert.strictEqual(Boolean(result && (result.ok || result === true)), false, 'Must return false / REJECTED when FCM provider returns application failure (InvalidRegistration)');
+      assert.strictEqual(Boolean(result && (result.status === 'DELIVERED' || result.ok || result === true)), false, 'Must return false / REJECTED when FCM provider returns application failure (InvalidRegistration)');
     } finally {
       mockServer.close();
     }

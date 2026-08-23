@@ -39,7 +39,7 @@ interface CartState {
   lines: CartLineItem[];
   serverTotals: AuthoritativeCartResponse | null;
   isLoading: boolean;
-  addItem: (item: { sku: string; name?: string; image?: string }, quantity?: number) => Promise<void>;
+  addItem: (item: Partial<CartLineItem> & { sku: string }, quantity?: number) => Promise<void>;
   removeItem: (sku: string) => Promise<void>;
   updateQuantity: (sku: string, quantity: number) => Promise<void>;
   refreshFromServer: () => Promise<AuthoritativeCartResponse | null>;
@@ -92,7 +92,7 @@ export const useCart = create<CartState>()(
         const existing = get().lines.find((l) => l.sku === item.sku);
         const optimisticLines = existing
           ? get().lines.map((l) => (l.sku === item.sku ? { ...l, quantity: l.quantity + quantity } : l))
-          : [...get().lines, { sku: item.sku, name: item.name, image: item.image, quantity }];
+          : [...get().lines, { ...item, quantity }];
         set({ lines: optimisticLines });
 
         if (!API_GATEWAY_URL || !customerId) return;
