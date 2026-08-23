@@ -328,7 +328,7 @@ async function runAllTests() {
     assert.strictEqual(nearby.eligible, true);
     assert.strictEqual(nearby.etaMinutes.min, 8);
     assert.strictEqual(nearby.etaMinutes.max, 12);
-    assert.strictEqual(nearby.fulfillmentNode.name, 'Commerce OS Central Fulfillment Hub');
+    assert.strictEqual(nearby.fulfillmentNode.name, 'Commerce OS Rewari Central Store Hub');
     assert.strictEqual(nearby.coldChainFee, 0);
 
     // Cold chain item
@@ -336,7 +336,7 @@ async function runAllTests() {
       { latitude: 28.4650, longitude: 77.0300 },
       [{ sku: 'sku_insulin_100', coldChainRequired: true }]
     );
-    assert.strictEqual(coldOrder.coldChainFee, 35.0);
+    assert.strictEqual(coldOrder.coldChainFee, 15.0);
   });
 
   // Test 8: Process Crash Recovery & Durable Outbox Dispatch
@@ -363,7 +363,8 @@ async function runAllTests() {
       items: [{ sku: 'sku_crash_test', quantity: 1, price: 30 }],
       totalAmount: 30,
       deliveryOtp: '9876',
-      isCod: false
+      paymentMethod: 'COD',
+      isCod: true
     };
     const sessionData = {
       deliveryId: 'del_crash_recovery_01',

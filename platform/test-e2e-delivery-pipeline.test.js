@@ -173,11 +173,13 @@ async function runE2eDeliveryPipelineTests() {
   // -------------------------------------------------------------
   // Test 3: Prepaid Payment Gating
   // -------------------------------------------------------------
-  await test('Prepaid Gating: Prepaid order remains in PAYMENT_PENDING and holds dispatch until payment is captured', async () => {
-    const orderId = 'ord_prepaid_' + Date.now();
+  // Test 3: Strict COD-Only Payment Method Enforcement
+  // -------------------------------------------------------------
+  await test('COD Enforcement: Non-COD payment methods are strictly rejected with PAYMENT_METHOD_NOT_SUPPORTED', async () => {
+    const orderId = 'ord_rejected_upi_' + Date.now();
     const deliveryId = 'del_' + orderId;
 
-    const orderData = {
+    const nonCodOrder = {
       id: orderId,
       customerId: 'cust_jigar_01',
       storeId: 'STORE_DARKSTORE_01',
@@ -196,15 +198,12 @@ async function runE2eDeliveryPipelineTests() {
       state: 'ASSIGNED'
     };
 
-    const placeResult = await repos.orderRepo.placeOrderTransactionally(orderData, sessionData);
-    assert.strictEqual(placeResult.ok, true);
-
-    // Verify DISPATCH_REQUESTED is NOT emitted while payment is pending
-    const dispatchEvents = mockDb.outboxEvents.filter(e => e.eventType === 'DISPATCH_REQUESTED' && e.payload.orderId === orderId);
-    assert.strictEqual(dispatchEvents.length, 0, 'Prepaid order must NOT dispatch while paymentStatus is PAYMENT_PENDING');
-
-    const orderPlaced = mockDb.outboxEvents.filter(e => e.eventType === 'ORDER_PLACED' && e.payload.orderId === orderId);
-    assert.strictEqual(orderPlaced.length, 1, 'ORDER_PLACED event emitted awaiting payment capture');
+    const placeResult = await repos.orderRepo.placeOrderTransactionally(nonCodOrder, sessionData);
+    assert.strictEqual(placeResult.ok, false);
+    assert.ok(
+      placeResult.error === 'PAYMENT_METHOD_NOT_SUPPORTED' || placeResult.error === 'INVALID_PAYMENT_METHOD' || placeResult.code === 'PAYMENT_METHOD_NOT_SUPPORTED',
+      'Non-COD payment method must be rejected with PAYMENT_METHOD_NOT_SUPPORTED'
+    );
   });
 
   // -------------------------------------------------------------

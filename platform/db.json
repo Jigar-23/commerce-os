@@ -51886,6 +51886,34 @@
         "recordedAt": 1787340906812
       },
       "timestamp": 1787340906812
+    },
+    {
+      "riderId": "admin_ops",
+      "eventType": {
+        "deliveryId": "ORD-E2E-1787508899413",
+        "latitude": 28.4595,
+        "longitude": 77.0266,
+        "speed": 30,
+        "heading": 90,
+        "accuracy": 2,
+        "sequenceNumber": 1,
+        "recordedAt": 1787508899442
+      },
+      "timestamp": 1787508899442
+    },
+    {
+      "riderId": "admin_ops",
+      "eventType": {
+        "deliveryId": "ORD-E2E-1787508899413",
+        "latitude": 28.4595,
+        "longitude": 77.0266,
+        "speed": 0,
+        "heading": 0,
+        "accuracy": 10,
+        "sequenceNumber": 1,
+        "recordedAt": 1787508899462
+      },
+      "timestamp": 1787508899462
     }
   ],
   "stores": [
@@ -51939,6 +51967,19 @@
       "accuracyMeters": 24.489796,
       "isOnline": true,
       "lastSeenTimestamp": 1787058281019
+    },
+    "admin_ops": {
+      "riderId": "admin_ops",
+      "latitude": 28.4595,
+      "longitude": 77.0266,
+      "speedKmh": 0,
+      "heading": 0,
+      "accuracyMeters": 10,
+      "sequenceNumber": 1,
+      "serverTimestamp": 1787508899453,
+      "isStale": false,
+      "isOnline": true,
+      "lastSeenTimestamp": 1787508899453
     }
   }
 }

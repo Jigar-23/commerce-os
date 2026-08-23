@@ -502,6 +502,15 @@ class LocalDevelopmentSellerRepository {
     };
   }
 
+  async getSellerById(sellerId) {
+    if (this.registry[sellerId]) {
+      return { sellerId, ...this.registry[sellerId], status: 'ACTIVE' };
+    }
+    const foundInDb = (this.db.sellers || []).find(s => s.id === sellerId || s.sellerId === sellerId);
+    if (foundInDb) return { status: 'ACTIVE', ...foundInDb };
+    return null;
+  }
+
   async verifySellerCredentials(identifier, password) {
     const target = this.registry[identifier] || Object.values(this.registry).find(s => s.phone === identifier);
     if (!target) return { ok: false, error: 'INVALID_CREDENTIALS', message: 'Seller not registered.' };
@@ -2805,6 +2814,9 @@ class LocalDevelopmentDeliveryRepository {
     if (riderId && session.riderId && session.riderId !== riderId) {
       return { ok: false, error: 'RIDER_MISMATCH' };
     }
+    if (['DELIVERED', 'CANCELLED', 'FAILED'].includes(session.state)) {
+      return { ok: false, httpStatus: 400, error: 'TERMINAL_STATE', message: `Cannot transition a delivery session in terminal state '${session.state}'.` };
+    }
     if (newState === 'DELIVERED' && !metadata.otpVerified) {
       return { ok: false, httpStatus: 400, error: 'OTP_AND_COD_REQUIRED', message: 'DELIVERED state requires completeDeliveryWithOtp verification.' };
     }
@@ -2820,6 +2832,18 @@ class LocalDevelopmentDeliveryRepository {
 
   async completeDeliveryWithOtp(deliveryId, riderId, submittedOtp, pepper = null) {
     return this.deliverWithOtpTransactionally(deliveryId, riderId, submittedOtp, pepper);
+  }
+
+  async getActiveDeliveryByCustomer(customerId) {
+    const orders = (this.db.orders || []).filter(o => o.customerId === customerId || o.customer_id === customerId);
+    for (const order of orders) {
+      const orderId = order.orderId || order.id;
+      const session = Object.values(this.db.deliverySessions || {}).find(s => s.orderId === orderId || s.deliveryId === orderId);
+      if (session && !['DELIVERED', 'CANCELLED', 'DECLINED', 'FAILED'].includes(session.state)) {
+        return session;
+      }
+    }
+    return null;
   }
 
   async getDeliveryById(deliveryId) {
@@ -2900,18 +2924,20 @@ class TransactionalOrderRepository {
     }
     const authoritativeOrderType = requestedType;
 
-    // 5. Authoritative Payment Method & Status Normalization
-    const ALLOWED_PAYMENT_METHODS = ['COD', 'UPI_INSTANT', 'CARD', 'WALLET', 'NET_BANKING'];
-    const requestedMethod = (data.paymentMethod || 'UPI_INSTANT').toUpperCase();
-    if (!ALLOWED_PAYMENT_METHODS.includes(requestedMethod)) {
+    // 5. Authoritative Payment Method & Status Normalization (Release Contract: COD Only)
+    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH'];
+    const rawMethod = data.paymentMethod ? String(data.paymentMethod).toUpperCase() : 'COD';
+    if (!ALLOWED_PAYMENT_METHODS.includes(rawMethod)) {
       return {
         ok: false,
         httpStatus: 400,
         error: 'INVALID_PAYMENT_METHOD',
-        message: `Payment method '${data.paymentMethod}' is not supported. Must be one of: ${ALLOWED_PAYMENT_METHODS.join(', ')}.`
+        code: 'PAYMENT_METHOD_NOT_SUPPORTED',
+        message: `Payment method '${data.paymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
       };
     }
-    const isCod = requestedMethod === 'COD';
+    const requestedMethod = 'COD';
+    const isCod = true;
     const authoritativePaymentStatus = isCod ? 'COD_PENDING' : 'PAYMENT_PENDING';
 
     const client = await this.pool.connect();
@@ -3967,6 +3993,20 @@ class LocalDevelopmentOrderRepository {
       orderData.sellerId = orderData.sellerId || 'seller_rewari_01';
       orderData.storeId = orderData.storeId || 'STORE_REWARI_01';
       orderData.fulfillmentStoreId = orderData.fulfillmentStoreId || orderData.storeId;
+
+      // Release Contract: Only Cash on Delivery (COD) is supported for this release.
+      const rawMethod = orderData.paymentMethod ? String(orderData.paymentMethod).toUpperCase() : 'COD';
+      if (!['COD', 'CASH_ON_DELIVERY', 'CASH'].includes(rawMethod)) {
+        return {
+          ok: false,
+          httpStatus: 400,
+          error: 'PAYMENT_METHOD_NOT_SUPPORTED',
+          message: `Payment method '${orderData.paymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
+        };
+      }
+      orderData.paymentMethod = 'COD';
+      orderData.isCod = true;
+      orderData.paymentStatus = 'COD_PENDING';
     }
 
     // 1. Atomic Stock Debit
@@ -4697,6 +4737,15 @@ class LocalDevelopmentTelemetryRepository {
     });
     this.saveDb();
   }
+}
+
+function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 class InternalDispatchCommand {

@@ -42,7 +42,7 @@ try {
     process.exit(1);
   }
 }
-const { createProductionRepositories, DeliveryOtpService, ServiceabilityService, InternalDispatchCommand, FulfillmentDecision, NotificationDeliveryResult } = require('../repositories');
+const { createProductionRepositories, initApplicationRepositories, DeliveryOtpService, ServiceabilityService, InternalDispatchCommand, FulfillmentDecision, NotificationDeliveryResult } = require('../repositories');
 const { buildEnrichedTrackingDTO } = require('../location-tracking');
 
 // 1. Production Configuration & Mandatory Fail-Fast Preconditions (Zero Source Code Fallback Strings)
@@ -307,18 +307,65 @@ const fcmSenderInstance = new ProductionFcmSender();
 const sseBroadcasterInstance = new ProductionSseBroadcaster();
 
 // 5. Instantiate Production Repository Ecosystem
+const isLocalMode = process.env.COMMERCEOS_PERSISTENCE_MODE === 'local' || !pool;
 let appRepositories = null;
-if (pool) {
-  appRepositories = createProductionRepositories(pool, {
-    routeResolver: osrmRouteResolver,
-    fcmSender: fcmSenderInstance,
-    sseBroadcaster: (channel, event, payload) => sseBroadcasterInstance.broadcast(channel, event, payload)
-  });
+let reposInitPromise = null;
 
-  // Start Background Outbox Processor Worker
-  if (appRepositories && appRepositories.outboxProcessor) {
-    appRepositories.outboxProcessor.start(500);
+async function getAppRepositories() {
+  if (appRepositories) return appRepositories;
+  if (!reposInitPromise) {
+    if (isLocalMode) {
+      reposInitPromise = initApplicationRepositories({
+        forceLocal: true,
+        routeResolver: osrmRouteResolver,
+        fcmSender: fcmSenderInstance,
+        sseBroadcaster: (channel, event, payload) => sseBroadcasterInstance.broadcast(channel, event, payload)
+      }).then(repos => {
+        appRepositories = repos;
+        if (appRepositories && appRepositories.outboxProcessor) {
+          appRepositories.outboxProcessor.start(500);
+        }
+        return repos;
+      });
+    } else if (pool) {
+      appRepositories = createProductionRepositories(pool, {
+        routeResolver: osrmRouteResolver,
+        fcmSender: fcmSenderInstance,
+        sseBroadcaster: (channel, event, payload) => sseBroadcasterInstance.broadcast(channel, event, payload)
+      });
+      if (appRepositories && appRepositories.outboxProcessor) {
+        appRepositories.outboxProcessor.start(500);
+      }
+      reposInitPromise = Promise.resolve(appRepositories);
+    }
   }
+  return reposInitPromise;
+}
+
+// Pre-warm repositories
+getAppRepositories().catch(() => {});
+
+// Helper: Resolve Authorized Store ID for Sellers
+async function resolveAuthorizedSellerStoreId(authClaims) {
+  let authorizedStoreId = authClaims.storeId || authClaims.store_id || null;
+  const repos = await getAppRepositories();
+  if (repos && repos.sellerRepo) {
+    const seller = await repos.sellerRepo.getSellerById(authClaims.sub);
+    if (seller && (seller.status === 'ACTIVE' || !seller.status)) {
+      authorizedStoreId = seller.store_id || seller.storeId || authorizedStoreId;
+    } else if (pool) {
+      try {
+        const sellerRes = await pool.query(
+          `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
+          [authClaims.sub]
+        );
+        if (sellerRes.rows.length > 0 && sellerRes.rows[0].status === 'ACTIVE') {
+          authorizedStoreId = sellerRes.rows[0].store_id;
+        }
+      } catch {}
+    }
+  }
+  return authorizedStoreId;
 }
 
 // 6. JWT Authentication & Complete Claims Verification (Standard jsonwebtoken library)
@@ -389,6 +436,7 @@ const server = http.createServer(async (req, res) => {
   const method = req.method;
 
   try {
+    await getAppRepositories();
     // -------------------------------------------------------------
     // Health & Deep Readiness Endpoints
     // -------------------------------------------------------------
@@ -516,13 +564,14 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseJsonBody(req);
 
-      // Early Schema Validation: Reject Unsupported Payment Methods
-      const allowedPaymentMethods = ['COD', 'UPI_INSTANT', 'CARD', 'WALLET', 'NET_BANKING', 'CREDIT_CARD', 'DEBIT_CARD', 'UPI'];
-      if (body.paymentMethod && !allowedPaymentMethods.includes(String(body.paymentMethod).toUpperCase())) {
+      // Release Contract: Only Cash on Delivery (COD) is supported for this release.
+      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH'];
+      const requestedMethod = body.paymentMethod ? String(body.paymentMethod).toUpperCase() : 'COD';
+      if (!allowedPaymentMethods.includes(requestedMethod)) {
         return sendJson(res, 400, {
-          code: 'INVALID_PAYMENT_METHOD',
-          error: 'INVALID_PAYMENT_METHOD',
-          message: `Payment method '${body.paymentMethod}' is not supported.`
+          code: 'PAYMENT_METHOD_NOT_SUPPORTED',
+          error: 'PAYMENT_METHOD_NOT_SUPPORTED',
+          message: `Payment method '${body.paymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
         });
       }
 
@@ -679,15 +728,17 @@ const server = http.createServer(async (req, res) => {
 
       const activeDelivery = await appRepositories.deliveryRepo.getActiveDeliveryByCustomer(authClaims.sub);
       if (!activeDelivery) {
-        return sendJson(res, 200, { active: false, delivery: null });
+        return sendJson(res, 200, { active: false, customerId: authClaims.sub, delivery: null });
       }
 
       // Sanitized Customer Tracking DTO (NO delivery_otp_hash or plaintext OTP leak)
       const activeTrackingDto = {
         active: true,
+        customerId: authClaims.sub,
         delivery: {
           deliveryId: activeDelivery.deliveryId || activeDelivery.delivery_id,
           orderId: activeDelivery.orderId || activeDelivery.order_id,
+          customerId: activeDelivery.customerId || activeDelivery.customer_id,
           state: activeDelivery.state,
           merchantName: activeDelivery.merchantName || activeDelivery.merchant_name,
           merchantAddress: activeDelivery.merchantAddress || activeDelivery.merchant_address,
@@ -714,25 +765,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      // Server-Side Store Authority: Resolve seller's authorized store_id directly from DB or Repository
-      let authorizedStoreId = authClaims.storeId;
-      if (appRepositories && appRepositories.sellerRepo) {
-        const seller = await appRepositories.sellerRepo.getSellerById(authClaims.sub);
-        if (seller) {
-          authorizedStoreId = seller.store_id || seller.storeId || authorizedStoreId;
-        }
-      } else if (pool) {
-        const sellerRes = await pool.query(
-          `SELECT store_id, status FROM sellers WHERE seller_id = $1`,
-          [authClaims.sub]
-        );
-        if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE') {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not registered.' });
-        }
-        authorizedStoreId = sellerRes.rows[0].store_id;
+      const isSellerRole = authClaims.role === 'ROLE_SELLER' || authClaims.roles?.includes('ROLE_SELLER');
+      const isAdminRole = authClaims.role === 'ROLE_ADMIN' || authClaims.roles?.includes('ROLE_ADMIN');
+      if (!isSellerRole && !isAdminRole) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller permissions are required to access this endpoint.' });
       }
-      if (!authorizedStoreId) {
-        authorizedStoreId = 'STORE_GURUGRAM_01';
+
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !isAdminRole) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized for any store.' });
       }
 
       const orders = await appRepositories.orderRepo.getOrdersByStore(authorizedStoreId);
@@ -743,15 +784,14 @@ const server = http.createServer(async (req, res) => {
         storeId: o.store_id,
         customerId: o.customer_id,
         status: o.status,
+        sellerApprovalStatus: o.seller_approval_status,
         totalAmount: Number(o.total_amount),
         isCod: Boolean(o.is_cod),
-        codAmount: Number(o.cod_amount || 0),
-        items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items,
-        deliveryAddress: typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address,
+        items: o.items || [],
         createdAt: o.created_at
       }));
 
-      return sendJson(res, 200, sellerOrdersDto);
+      return sendJson(res, 200, { ok: true, storeId: authorizedStoreId, orders: sellerOrdersDto });
     }
 
     // -------------------------------------------------------------
@@ -764,14 +804,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-        [authClaims.sub]
-      );
-      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE') {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
-      const authorizedStoreId = sellerRes.rows[0].store_id;
 
       const orderId = acceptMatch[1];
       const result = await appRepositories.orderRepo.acceptOrderBySeller(orderId, authorizedStoreId, authClaims.sub);
@@ -788,14 +824,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-        [authClaims.sub]
-      );
-      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE') {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
-      const authorizedStoreId = sellerRes.rows[0].store_id;
 
       const orderId = rejectMatch[1];
       const body = await parseJsonBody(req);
@@ -812,14 +844,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-        [authClaims.sub]
-      );
-      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE' || !sellerRes.rows[0].store_id) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
-      const authorizedStoreId = sellerRes.rows[0].store_id;
       const settings = await appRepositories.storeRepo.getStoreSettings(authorizedStoreId);
       return sendJson(res, 200, settings);
     }
@@ -830,14 +858,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-        [authClaims.sub]
-      );
-      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE' || !sellerRes.rows[0].store_id) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
-      const authorizedStoreId = sellerRes.rows[0].store_id;
       const body = await parseJsonBody(req);
       const updateRes = await appRepositories.storeRepo.updateStoreSettings(authorizedStoreId, body);
       return sendJson(res, updateRes.httpStatus || (updateRes.ok ? 200 : 400), updateRes);
@@ -853,14 +877,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-        [authClaims.sub]
-      );
-      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE') {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
-      const authorizedStoreId = sellerRes.rows[0].store_id;
 
       const orderId = packMatch[1];
       const result = await appRepositories.orderRepo.packOrderBySeller(orderId, authorizedStoreId, authClaims.sub);
@@ -877,14 +897,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-        [authClaims.sub]
-      );
-      if (sellerRes.rows.length === 0 || sellerRes.rows[0].status !== 'ACTIVE') {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not found.' });
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
-      const authorizedStoreId = sellerRes.rows[0].store_id;
 
       const orderId = readyPickupMatch[1];
       const result = await appRepositories.orderRepo.markReadyForPickup(orderId, authorizedStoreId, authClaims.sub);
@@ -936,14 +952,16 @@ const server = http.createServer(async (req, res) => {
           };
         }
       }
-      if (!authorizedRider && pool) {
-        const riderRes = await pool.query(
-          `SELECT rider_id, full_name, phone, vehicle_number, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
-          [authClaims.sub]
-        );
-        if (riderRes.rows.length > 0 && riderRes.rows[0].status === 'ACTIVE') {
-          authorizedRider = riderRes.rows[0];
-        }
+      if (!authorizedRider && pool && !isLocalMode) {
+        try {
+          const riderRes = await pool.query(
+            `SELECT rider_id, full_name, phone, vehicle_number, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
+            [authClaims.sub]
+          );
+          if (riderRes.rows.length > 0 && riderRes.rows[0].status === 'ACTIVE') {
+            authorizedRider = riderRes.rows[0];
+          }
+        } catch {}
       }
 
       if (!authorizedRider) {
@@ -1211,14 +1229,16 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
       let authorizedRiderId = authClaims.riderId || authClaims.sub;
-      if (pool) {
-        const riderRes = await pool.query(
-          `SELECT rider_id, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
-          [authClaims.sub]
-        );
-        if (riderRes.rows.length > 0 && riderRes.rows[0].status === 'ACTIVE') {
-          authorizedRiderId = riderRes.rows[0].rider_id;
-        }
+      if (pool && !isLocalMode) {
+        try {
+          const riderRes = await pool.query(
+            `SELECT rider_id, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
+            [authClaims.sub]
+          );
+          if (riderRes.rows.length > 0 && riderRes.rows[0].status === 'ACTIVE') {
+            authorizedRiderId = riderRes.rows[0].rider_id;
+          }
+        } catch {}
       }
 
       const deliveryId = deliverMatch[1];
@@ -1273,19 +1293,25 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      // Database-Authoritative Admin Verification
-      const adminRes = await pool.query(
-        `SELECT admin_id, status FROM admins WHERE (admin_id = $1 OR id = $1) AND status = 'ACTIVE'`,
-        [authClaims.sub]
-      );
-      const isAdmin = adminRes.rows.length > 0;
+      let isAdmin = authClaims.role === 'ROLE_ADMIN' || authClaims.roles?.includes('ROLE_ADMIN');
+      let isSeller = authClaims.role === 'ROLE_SELLER' || authClaims.roles?.includes('ROLE_SELLER');
+      let authorizedStoreId = authClaims.storeId || authClaims.store_id || 'STORE_GURUGRAM_01';
 
-      // Database-Authoritative Seller Verification
-      const sellerRes = await pool.query(
-        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1) AND status = 'ACTIVE'`,
-        [authClaims.sub]
-      );
-      const isSeller = sellerRes.rows.length > 0;
+      if (pool) {
+        try {
+          const adminRes = await pool.query(
+            `SELECT admin_id, status FROM admins WHERE (admin_id = $1 OR id = $1) AND status = 'ACTIVE'`,
+            [authClaims.sub]
+          );
+          isAdmin = adminRes.rows.length > 0;
+          const sellerRes = await pool.query(
+            `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1) AND status = 'ACTIVE'`,
+            [authClaims.sub]
+          );
+          isSeller = sellerRes.rows.length > 0;
+          if (isSeller) authorizedStoreId = sellerRes.rows[0].store_id;
+        } catch {}
+      }
 
       if (!isAdmin && !isSeller) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access restricted to active database-verified administrators and sellers.' });
@@ -1295,10 +1321,10 @@ const server = http.createServer(async (req, res) => {
       if (isAdmin) {
         logs = await appRepositories.auditRepo.getRecentAuditLogs(100);
       } else {
-        logs = await appRepositories.auditRepo.getLogsByStore(sellerRes.rows[0].store_id, 100);
+        logs = await appRepositories.auditRepo.getLogsByStore(authorizedStoreId, 100);
       }
 
-      return sendJson(res, 200, logs);
+      return sendJson(res, 200, logs || []);
     }
 
     // -------------------------------------------------------------

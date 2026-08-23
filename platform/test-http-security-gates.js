@@ -16,6 +16,16 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const path = require('path');
 
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://mock:mock@localhost:5432/mockdb';
+process.env.OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'http://localhost:5000';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'commerceos_master_jwt_secret_key_2026_production';
+process.env.JWT_ISSUER = process.env.JWT_ISSUER || 'commerce-os-auth';
+process.env.JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'commerce-os-api';
+process.env.COMMERCEOS_OTP_PEPPER = process.env.COMMERCEOS_OTP_PEPPER || 'c0mm3rc3_0s_0tp_p3pp3r_s3cr3t_k3y_2026_pr0duct10n';
+process.env.FCM_SERVER_KEY = process.env.FCM_SERVER_KEY || 'test_fcm_server_key_production_2026';
+process.env.FCM_ENDPOINT_URL = process.env.FCM_ENDPOINT_URL || 'https://fcm.googleapis.com/fcm/send';
+process.env.COMMERCEOS_PERSISTENCE_MODE = 'local';
+
 console.log('================================================================');
 console.log('🧪 RUNNING HTTP AUTHORIZATION & MULTI-TENANT GATE TEST SUITE');
 console.log('================================================================\n');
@@ -97,17 +107,12 @@ async function waitForServerReady(port = TEST_PORT, retries = 30) {
   return false;
 }
 
-async function runHttpSecurityTests() {
-  let serverProcess = null;
+const { server } = require('./server/production-server');
 
-  let isReady = await waitForServerReady(TEST_PORT, 5);
-  if (!isReady) {
-    serverProcess = spawn(process.execPath, [path.join(__dirname, 'mock-server.js')], {
-      env: { ...process.env, JWT_SECRET, COMMERCEOS_ENV: 'local_test', COMMERCEOS_PERSISTENCE_MODE: 'local' },
-      stdio: 'pipe'
-    });
-    await waitForServerReady(TEST_PORT, 40);
-  }
+async function runHttpSecurityTests() {
+  await new Promise((resolve) => {
+    server.listen(TEST_PORT, '127.0.0.1', resolve);
+  });
 
   try {
     const jwtSellerA = makeJwt({ sub: 'seller_gurugram_01', sellerId: 'seller_gurugram_01', storeId: 'STORE_GURUGRAM_01', role: 'ROLE_SELLER', roles: ['ROLE_SELLER'] });
@@ -356,11 +361,9 @@ async function runHttpSecurityTests() {
     console.log(`🏆 ALL HTTP AUTHORIZATION TESTS COMPLETE: ${passedCount} PASSED, ${failedCount} FAILED`);
     console.log('================================================================\n');
   } finally {
-    if (serverProcess) {
-      try {
-        serverProcess.kill('SIGKILL');
-      } catch (_) {}
-    }
+    try {
+      server.close();
+    } catch (_) {}
   }
 
   if (failedCount > 0) {
