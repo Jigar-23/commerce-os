@@ -155,10 +155,14 @@ fun ActiveDeliveryDetailDialog(
                     Button(
                         onClick = {
                             val isPickupPhase = session.state in listOf("ASSIGNED", "ACCEPTED", "EN_ROUTE_PICKUP", "ARRIVED_PICKUP")
-                            val targetLat = (if (isPickupPhase) session.merchantLat else session.customerLat) ?: 28.4595
-                            val targetLng = (if (isPickupPhase) session.merchantLng else session.customerLng) ?: 77.0266
+                            val targetLat = if (isPickupPhase) session.merchantLat else session.customerLat
+                            val targetLng = if (isPickupPhase) session.merchantLng else session.customerLng
                             val targetName = if (isPickupPhase) session.merchantName else session.customerName
-                            launchExternalMaps(context, targetLat, targetLng, targetName)
+                            if (targetLat != null && targetLng != null && targetLat != 0.0 && targetLng != 0.0) {
+                                launchExternalMaps(context, targetLat, targetLng, targetName)
+                            } else {
+                                Toast.makeText(context, "Location coordinates unavailable", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
                         modifier = Modifier.weight(1.5f).height(48.dp),

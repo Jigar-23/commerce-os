@@ -5555,23 +5555,60 @@ async function initApplicationRepositories(options = {}) {
         await dispatchService.processDispatch(payload.deliverySession || payload);
       } else if (event.event_type === 'ORDER_SELLER_ACCEPTED') {
         let deliverySession = payload.deliverySession || payload;
+        const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
+        const ord = oRes.rows[0] || null;
+
+        // Payment Gating: Prepaid orders with PAYMENT_PENDING must NOT dispatch until payment is captured
+        const isCod = ord ? (ord.payment_method === 'COD' || ord.is_cod === true || ord.payment_status === 'COD_PENDING') : true;
+        const isPaid = ord ? (ord.payment_status === 'PAID' || ord.payment_status === 'CAPTURED') : true;
+        const canDispatch = isCod || isPaid;
+
+        if (!canDispatch) {
+          if (sseBroadcaster) {
+            await sseBroadcaster(event.aggregate_id || 'global', 'ORDER_SELLER_ACCEPTED', { ...payload, dispatchGated: 'AWAITING_PAYMENT' });
+          }
+          return;
+        }
+
         if (!deliverySession.orderId && event.aggregate_id) {
           const sRes = await pool.query('SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1', [event.aggregate_id]);
           if (sRes.rows.length > 0) {
             deliverySession = sRes.rows[0];
-          } else {
-            const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
-            if (oRes.rows.length > 0) {
-              const ord = oRes.rows[0];
-              const dId = 'del_' + (ord.order_id || ord.id);
-              await pool.query(
-                `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
-                 VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
-                 ON CONFLICT (delivery_id) DO UPDATE SET state = 'LOOKING_FOR_RIDER'`,
-                [dId, ord.order_id || ord.id, ord.store_id || 'STORE_REWARI_01', ord.customer_id, ord.store_address || 'Commerce OS Rewari Hub', ord.delivery_address || 'Customer Location', 28.202218, 76.615403, ord.delivery_lat || 28.1970, ord.delivery_lng || 76.6190]
-              );
-              deliverySession = { deliveryId: dId, orderId: ord.order_id || ord.id, storeId: ord.store_id, state: 'LOOKING_FOR_RIDER' };
+          } else if (ord) {
+            const stRes = ord.store_id ? await pool.query('SELECT * FROM stores WHERE id = $1', [ord.store_id]) : { rows: [] };
+            const store = stRes.rows[0] || null;
+            if (!store) {
+              console.error(`[OutboxProcessor] Authoritative store not found for order ${ord.order_id || ord.id}`);
+              return;
             }
+            const dId = 'del_' + (ord.order_id || ord.id);
+            await pool.query(
+              `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
+               VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
+               ON CONFLICT (delivery_id) DO UPDATE SET state = 'LOOKING_FOR_RIDER'`,
+              [
+                dId, 
+                ord.order_id || ord.id, 
+                store.id, 
+                ord.customer_id, 
+                store.address, 
+                ord.delivery_address || '', 
+                store.latitude, 
+                store.longitude, 
+                ord.delivery_lat || null, 
+                ord.delivery_lng || null
+              ]
+            );
+            deliverySession = { 
+              deliveryId: dId, 
+              orderId: ord.order_id || ord.id, 
+              storeId: store.id, 
+              merchantLat: store.latitude,
+              merchantLng: store.longitude,
+              customerLat: ord.delivery_lat,
+              customerLng: ord.delivery_lng,
+              state: 'LOOKING_FOR_RIDER' 
+            };
           }
         }
         if (deliverySession) {
@@ -5748,23 +5785,60 @@ function createProductionRepositories(pool, options = {}) {
 
     if (event.event_type === 'DISPATCH_REQUESTED' || event.event_type === 'ORDER_SELLER_ACCEPTED') {
       let deliverySession = payload.deliverySession || payload;
+      const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
+      const ord = oRes.rows[0] || null;
+
+      // Payment Gating: Prepaid orders with PAYMENT_PENDING must NOT dispatch until payment is captured
+      const isCod = ord ? (ord.payment_method === 'COD' || ord.is_cod === true || ord.payment_status === 'COD_PENDING') : true;
+      const isPaid = ord ? (ord.payment_status === 'PAID' || ord.payment_status === 'CAPTURED') : true;
+      const canDispatch = isCod || isPaid;
+
+      if (!canDispatch) {
+        if (options.sseBroadcaster) {
+          await options.sseBroadcaster(event.aggregate_id || 'global', 'ORDER_SELLER_ACCEPTED', { ...payload, dispatchGated: 'AWAITING_PAYMENT' });
+        }
+        return { ok: true, dispatchGated: true };
+      }
+
       if (!deliverySession.orderId && event.aggregate_id) {
         const sRes = await pool.query('SELECT * FROM delivery_sessions WHERE delivery_id = $1 OR order_id = $1', [event.aggregate_id]);
         if (sRes.rows.length > 0) {
           deliverySession = sRes.rows[0];
-        } else {
-          const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
-          if (oRes.rows.length > 0) {
-            const ord = oRes.rows[0];
-            const dId = 'del_' + (ord.order_id || ord.id);
-            await pool.query(
-              `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
-               VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
-               ON CONFLICT (delivery_id) DO UPDATE SET state = 'LOOKING_FOR_RIDER'`,
-              [dId, ord.order_id || ord.id, ord.store_id || 'STORE_REWARI_01', ord.customer_id, ord.store_address || 'Commerce OS Rewari Hub', ord.delivery_address || 'Customer Location', 28.202218, 76.615403, ord.delivery_lat || 28.1970, ord.delivery_lng || 76.6190]
-            );
-            deliverySession = { deliveryId: dId, orderId: ord.order_id || ord.id, storeId: ord.store_id, state: 'LOOKING_FOR_RIDER' };
+        } else if (ord) {
+          const stRes = ord.store_id ? await pool.query('SELECT * FROM stores WHERE id = $1', [ord.store_id]) : { rows: [] };
+          const store = stRes.rows[0] || null;
+          if (!store) {
+            console.error(`[OutboxProcessor] Authoritative store not found for order ${ord.order_id || ord.id}`);
+            return { ok: false, error: 'STORE_NOT_FOUND' };
           }
+          const dId = 'del_' + (ord.order_id || ord.id);
+          await pool.query(
+            `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
+             VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (delivery_id) DO UPDATE SET state = 'LOOKING_FOR_RIDER'`,
+            [
+              dId, 
+              ord.order_id || ord.id, 
+              store.id, 
+              ord.customer_id, 
+              store.address, 
+              ord.delivery_address || '', 
+              store.latitude, 
+              store.longitude, 
+              ord.delivery_lat || null, 
+              ord.delivery_lng || null
+            ]
+          );
+          deliverySession = { 
+            deliveryId: dId, 
+            orderId: ord.order_id || ord.id, 
+            storeId: store.id, 
+            merchantLat: store.latitude,
+            merchantLng: store.longitude,
+            customerLat: ord.delivery_lat,
+            customerLng: ord.delivery_lng,
+            state: 'LOOKING_FOR_RIDER' 
+          };
         }
       }
       if (deliverySession) {

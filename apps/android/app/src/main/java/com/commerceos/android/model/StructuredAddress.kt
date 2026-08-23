@@ -158,8 +158,8 @@ data class StructuredAddress(
             "${street.trim()}, ${city.trim()}".trim().trim(',')
         }
 
-        val boundLat = geoLocation?.latitude ?: 28.1970
-        val boundLng = geoLocation?.longitude ?: 76.6190
+        val boundLat = geoLocation?.latitude ?: 0.0
+        val boundLng = geoLocation?.longitude ?: 0.0
         val boundAccuracy = geoLocation?.accuracyMeters ?: 10.0
 
         return AddAddressRequest(

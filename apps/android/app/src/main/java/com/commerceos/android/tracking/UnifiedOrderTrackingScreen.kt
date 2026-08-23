@@ -125,7 +125,7 @@ private fun LiveLocationTrackingWidget(session: UnifiedTrackingSession) {
                 CustomerTrackingSignalState.LIVE -> Triple(
                     "● LIVE RIDER GPS STREAM",
                     CommerceColors.Primary,
-                    "Lat: ${session.liveRiderLat ?: 28.4595}, Lng: ${session.liveRiderLng ?: 77.0266}"
+                    if (session.liveRiderLat != null && session.liveRiderLng != null) "Lat: ${session.liveRiderLat}, Lng: ${session.liveRiderLng}" else "Awaiting live telemetry..."
                 )
                 CustomerTrackingSignalState.DELAYED -> Triple(
                     "⚠️ RIDER LOCATION SIGNAL PAUSED",

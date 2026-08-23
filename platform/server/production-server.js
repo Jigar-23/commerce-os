@@ -323,11 +323,17 @@ if (pool) {
 
 // 6. JWT Authentication & Complete Claims Verification (Standard jsonwebtoken library)
 function verifyAndDecodeJwt(req, secret = JWT_SECRET, expectedIssuer = JWT_ISSUER, expectedAudience = JWT_AUDIENCE) {
+  let token = null;
   const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (req.url) {
+    try {
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      token = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('access_token');
+    } catch (_) {}
   }
-  const token = authHeader.slice(7).trim();
+
   if (!token) return null;
 
   try {

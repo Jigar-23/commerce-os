@@ -153,10 +153,10 @@ fun RiderLiveNavigationView(
                 contentAlignment = Alignment.Center
             ) {
                 ZomatoDarkMapView(
-                    merchantLat = session.merchantLat ?: 28.4595,
-                    merchantLng = session.merchantLng ?: 77.0266,
-                    customerLat = session.customerLat ?: 28.4595,
-                    customerLng = session.customerLng ?: 77.0266,
+                    merchantLat = session.merchantLat ?: 0.0,
+                    merchantLng = session.merchantLng ?: 0.0,
+                    customerLat = session.customerLat ?: 0.0,
+                    customerLng = session.customerLng ?: 0.0,
                     riderLat = riderLat,
                     riderLng = riderLng,
                     riderHeading = riderHeading,
