@@ -119,19 +119,26 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
                 when (val result = repository.getLiveTracking(orderId)) {
                     is ApiResult.Success -> {
                         liveTracking = result.data
+                        if (result.data.state == "DELIVERED" || result.data.stage == "DELIVERED") {
+                            break
+                        }
                     }
                     else -> {}
                 }
 
-                // Also periodically sync latest order status
+                // Periodically sync latest order status
                 when (val orderResult = repository.getOrderById(orderId)) {
                     is ApiResult.Success -> {
                         detail = OrderDetailUiState.Content(orderResult.data)
+                        val status = orderResult.data.orderStatus.uppercase()
+                        if (status == "DELIVERED" || status == "CANCELLED" || status == "FAILED") {
+                            break
+                        }
                     }
                     else -> {}
                 }
 
-                delay(1000)
+                delay(4000)
             }
         }
     }

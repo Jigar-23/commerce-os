@@ -3785,6 +3785,11 @@ class LocalDevelopmentOrderRepository {
     const codAmount = isCod ? Number(order.totalAmount || order.grandTotal || 0) : 0;
     const earningsAmount = Math.max(40, Math.round(35 + (totalDistanceKm * 12) + (isCod ? 15 : 0) + Math.max(0, (itemCount - 2) * 5)));
 
+    // Discover eligible online rider dynamically from presence repository
+    const candidateRiders = Object.values(this.db.riderPresence || {}).filter(p => p.isOnline || p.status === 'ONLINE');
+    const selectedRider = candidateRiders[0] || (Array.isArray(this.db.riders) && this.db.riders[0]) || { riderId: 'RIDER_001', name: 'Active Delivery Partner' };
+    const targetRiderId = selectedRider.riderId || selectedRider.id || 'RIDER_001';
+
     // 6. Create or Sync Delivery Session
     this.db.deliverySessions = this.db.deliverySessions || {};
     let session = this.db.deliverySessions[order.id] || Object.values(this.db.deliverySessions).find(s => s.orderId === order.id);
@@ -3807,7 +3812,7 @@ class LocalDevelopmentOrderRepository {
       merchantLat,
       merchantLng,
       state: 'ASSIGNED',
-      riderId: 'rdr_rewari_01',
+      riderId: targetRiderId,
       payoutFormatted: `₹${earningsAmount}`,
       distanceKm: totalDistanceKm,
       estimatedTimeMins: estimatedDurationMins,
@@ -3834,7 +3839,7 @@ class LocalDevelopmentOrderRepository {
       id: offerId,
       eventId,
       notificationId: notifId,
-      riderId: 'rdr_rewari_01',
+      riderId: targetRiderId,
       deliveryId: session.deliveryId,
       orderId: order.id,
       status: 'OFFERED',
@@ -3865,13 +3870,13 @@ class LocalDevelopmentOrderRepository {
     };
     this.db.offers[offerId] = offerData;
 
-    // 8. Create Persistent Rider Notification
+    // 8. Create Persistent Rider Notification & Outbox Event
     this.db.riderNotifications = this.db.riderNotifications || [];
     this.db.riderNotifications.unshift({
       id: notifId,
       notificationId: notifId,
       eventId: eventId,
-      riderId: 'rdr_rewari_01',
+      riderId: targetRiderId,
       category: 'ORDERS',
       priority: 'HIGH',
       title: '🚀 New Delivery Job Offer!',
@@ -3880,6 +3885,17 @@ class LocalDevelopmentOrderRepository {
       orderId: order.id,
       deliveryId: session.deliveryId,
       isRead: false,
+      createdAt: nowIso
+    });
+
+    this.db.outboxEvents = this.db.outboxEvents || [];
+    this.db.outboxEvents.push({
+      id: eventId,
+      aggregateType: 'ORDER',
+      aggregateId: order.id,
+      eventType: 'ORDER_SELLER_ACCEPTED',
+      payload: { orderId: order.id, storeId: targetStoreId, sellerId, deliverySession: session, offer: offerData },
+      status: 'PENDING',
       createdAt: nowIso
     });
 
@@ -4179,26 +4195,9 @@ class LocalDevelopmentRiderRepository {
   }
 
   async findRiderById(riderId) {
-    let rider = (Array.isArray(this.db.riders) ? this.db.riders.find((r) => r.id === riderId || r.riderId === riderId) : this.db.riders?.[riderId]);
-    if (!rider) {
-      const phoneDigits = String(riderId || '').replace(/\D/g, '');
-      const cleanPhone = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : (phoneDigits.length > 0 ? phoneDigits : '9876543210');
-      rider = {
-        id: riderId || 'rdr_' + cleanPhone,
-        riderId: riderId || 'rdr_' + cleanPhone,
-        name: 'Partner ' + cleanPhone.slice(-4),
-        realName: 'Partner ' + cleanPhone.slice(-4),
-        phone: '+91' + cleanPhone,
-        realPhone: '+91' + cleanPhone,
-        vehicle: 'HR-26-AB-1234',
-        realVehicle: 'HR-26-AB-1234',
-        vehicleNumber: 'HR-26-AB-1234',
-        vehicleType: 'TWO_WHEELER',
-        rating: 4.9,
-        status: 'ACTIVE'
-      };
-    }
-    return rider;
+    if (!riderId) return null;
+    const rider = (Array.isArray(this.db.riders) ? this.db.riders.find((r) => r.id === riderId || r.riderId === riderId) : this.db.riders?.[riderId]);
+    return rider || null;
   }
 }
 

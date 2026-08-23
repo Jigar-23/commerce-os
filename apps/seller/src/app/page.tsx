@@ -68,10 +68,32 @@ export default function MerchantOperationsPage() {
 
   useEffect(() => {
     fetchOverviewData(true);
+
+    // 1. Realtime SSE Stream Subscription
+    let eventSource: EventSource | null = null;
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('seller_token') || sessionStorage.getItem('seller_token') : null;
+      const gatewayUrl = (process.env.NEXT_PUBLIC_API_GATEWAY_URL || '').replace(/\/$/, '') || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8083');
+      const streamUrl = `${gatewayUrl}/api/v1/realtime/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      
+      eventSource = new EventSource(streamUrl);
+      eventSource.onmessage = () => fetchOverviewData(false);
+      eventSource.addEventListener('ORDER_PLACED', () => fetchOverviewData(false));
+      eventSource.addEventListener('ORDER_STATUS_CHANGED', () => fetchOverviewData(false));
+      eventSource.addEventListener('DISPATCH_REQUESTED', () => fetchOverviewData(false));
+      eventSource.addEventListener('SELLER_ORDER_ACCEPTED', () => fetchOverviewData(false));
+      eventSource.onerror = () => {};
+    } catch (_) {}
+
+    // 2. Heartbeat Reconciliation Fallback
     const timer = setInterval(() => {
       fetchOverviewData(false);
-    }, 3000);
-    return () => clearInterval(timer);
+    }, 20000);
+
+    return () => {
+      clearInterval(timer);
+      if (eventSource) eventSource.close();
+    };
   }, []);
 
   const activeOrders = orders.filter((o) => !['DELIVERED', 'CANCELLED', 'FAILED'].includes(o.orderStatus || o.status));

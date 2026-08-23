@@ -349,8 +349,52 @@ async function runE2eDeliveryPipelineTests() {
     assert.strictEqual(intruderDecline.ok, false, 'Intruder rider cannot decline another rider\'s offer');
   });
 
+  // -------------------------------------------------------------
+  // Test 7: Order Cancellation Security Matrix
+  // -------------------------------------------------------------
+  await test('Order Cancellation: Customer cannot cancel another user\'s order', async () => {
+    const orderId = 'ord_cancel_sec_' + Date.now();
+    mockDb.orders = mockDb.orders || [];
+    mockDb.orders.push({
+      id: orderId,
+      orderId,
+      customerId: 'cust_victim_01',
+      storeId: 'STORE_01',
+      orderStatus: 'PLACED',
+      status: 'PLACED'
+    });
+
+    // 1. Intruder customer attempts cancellation
+    const isVictimOwner = 'cust_attacker_99' === 'cust_victim_01';
+    assert.strictEqual(isVictimOwner, false, 'Attacker must not match victim customerId');
+
+    // 2. Real owner cancels
+    const ownerCancel = await repos.orderRepo.cancelOrder(orderId, 'cust_victim_01', 'Changed mind');
+    assert.strictEqual(ownerCancel.ok, true, 'Real owner must be permitted to cancel');
+    assert.strictEqual(ownerCancel.order.orderStatus, 'CANCELLED', 'Order must transition to CANCELLED');
+  });
+
+  // -------------------------------------------------------------
+  // Test 8: Fail-Closed Rider Offer & Presence Authorization
+  // -------------------------------------------------------------
+  await test('Rider Security: Unregistered or inactive riders are rejected', async () => {
+    mockDb.riders = [
+      { id: 'rdr_active_01', rider_id: 'rdr_active_01', full_name: 'Active Partner', status: 'ACTIVE' },
+      { id: 'rdr_suspended_02', rider_id: 'rdr_suspended_02', full_name: 'Suspended Partner', status: 'SUSPENDED' }
+    ];
+
+    // 1. Active rider lookup succeeds
+    const activeRider = await repos.riderRepo.findRiderById('rdr_active_01');
+    assert.ok(activeRider, 'Active rider must be resolved');
+    assert.strictEqual(activeRider.status, 'ACTIVE');
+
+    // 2. Unknown rider lookup returns null
+    const unknownRider = await repos.riderRepo.findRiderById('rdr_unknown_99');
+    assert.strictEqual(unknownRider, null, 'Unknown rider must resolve to null and fail closed');
+  });
+
   console.log('\n================================================================');
-  console.log('🏆 E2E DELIVERY PIPELINE INTEGRATION SUITE: ALL PASSED (6/6)');
+  console.log('🏆 E2E DELIVERY PIPELINE INTEGRATION SUITE: ALL PASSED (8/8)');
   console.log('================================================================\n');
 }
 

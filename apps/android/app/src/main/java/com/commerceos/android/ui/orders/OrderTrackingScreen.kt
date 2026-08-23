@@ -161,10 +161,10 @@ fun OrderTrackingContent(
                 .fillMaxSize()
                 .background(Color(0xFF0B1120))
         ) {
-            val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.202218
-            val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.615403
-            val customerLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 28.1970)
-            val customerLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 76.6190)
+            val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 0.0
+            val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 0.0
+            val customerLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 0.0)
+            val customerLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 0.0)
             val telemetry = liveTracking?.liveRiderTelemetry
 
             ZomatoDarkMapView(
@@ -419,10 +419,10 @@ fun OrderTrackingContent(
                             Spacer(modifier = Modifier.height(8.dp))
 
                             val dynamicEtaMins: Int = remember(liveTracking, order) {
-                                val storeLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.202218
-                                val storeLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.615403
-                                val custLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 28.1970)
-                                val custLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 76.6190)
+                                val storeLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 0.0
+                                val storeLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 0.0
+                                val custLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 0.0)
+                                val custLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 0.0)
                                 val riderLat = liveTracking?.liveRiderTelemetry?.latitude
                                 val riderLng = liveTracking?.liveRiderTelemetry?.longitude
 

@@ -252,33 +252,11 @@ private fun DeliveryAddressWidget(
 ) {
     val hasAddress = context?.hasAddress == true || selectedAddress != null
 
-    // Dynamic ETA calculation: distance between Store (28.202218, 76.615403) and Customer Coordinates
     val etaDisplay = remember(selectedAddress, context) {
-        val selLat = selectedAddress?.latitude?.let { if (it != 0.0) it else null }
-        val selLng = selectedAddress?.longitude?.let { if (it != 0.0) it else null }
-
-        val geoParts = context?.geoPoint?.split(",")
-        val geoLat = geoParts?.getOrNull(0)?.trim()?.toDoubleOrNull()?.let { if (it != 0.0) it else null }
-        val geoLng = geoParts?.getOrNull(1)?.trim()?.toDoubleOrNull()?.let { if (it != 0.0) it else null }
-
-        val finalLat = selLat ?: geoLat
-        val finalLng = selLng ?: geoLng
-
-        if (finalLat != null && finalLng != null) {
-            val r = 6371.0
-            val dLat = Math.toRadians(finalLat - 28.202218)
-            val dLon = Math.toRadians(finalLng - 76.615403)
-            val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                    Math.cos(Math.toRadians(28.202218)) * Math.cos(Math.toRadians(finalLat)) *
-                    Math.sin(dLon / 2) * Math.sin(dLon / 2)
-            val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-            val distKm = r * c
-            val eta = (3 + Math.ceil(distKm * 2.5).toInt()).coerceIn(4, 45)
-            "$eta MINS"
-        } else if (!context?.formattedEta.isNullOrBlank()) {
+        if (!context?.formattedEta.isNullOrBlank()) {
             context!!.formattedEta!!
         } else {
-            "8 MINS"
+            "10 MINS"
         }
     }
 

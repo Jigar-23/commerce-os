@@ -39,10 +39,32 @@ export default function OrdersPage() {
 
   useEffect(() => {
     fetchOrders(true);
+
+    // 1. Realtime SSE Stream Subscription
+    let eventSource: EventSource | null = null;
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('seller_token') || sessionStorage.getItem('seller_token') : null;
+      const gatewayUrl = (process.env.NEXT_PUBLIC_API_GATEWAY_URL || '').replace(/\/$/, '') || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8083');
+      const streamUrl = `${gatewayUrl}/api/v1/realtime/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      
+      eventSource = new EventSource(streamUrl);
+      eventSource.onmessage = () => fetchOrders(false);
+      eventSource.addEventListener('ORDER_PLACED', () => fetchOrders(false));
+      eventSource.addEventListener('ORDER_STATUS_CHANGED', () => fetchOrders(false));
+      eventSource.addEventListener('DISPATCH_REQUESTED', () => fetchOrders(false));
+      eventSource.addEventListener('SELLER_ORDER_ACCEPTED', () => fetchOrders(false));
+      eventSource.onerror = () => {};
+    } catch (_) {}
+
+    // 2. Heartbeat Reconciliation Fallback
     const timer = setInterval(() => {
       fetchOrders(false);
-    }, 3000);
-    return () => clearInterval(timer);
+    }, 20000);
+
+    return () => {
+      clearInterval(timer);
+      if (eventSource) eventSource.close();
+    };
   }, []);
 
   const filteredOrders = useMemo(() => {

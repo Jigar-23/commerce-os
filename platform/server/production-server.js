@@ -436,6 +436,42 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required for SSE stream.' });
       }
 
+      // Check order/session stream authorization if scoped to specific ID
+      const orderStreamMatch = pathname.match(/^\/api\/v1\/delivery\/(order|session)\/([^/]+)\/stream$/);
+      if (orderStreamMatch) {
+        const streamType = orderStreamMatch[1];
+        const streamId = orderStreamMatch[2];
+        let targetOrder = null;
+        let targetDelivery = null;
+
+        if (streamType === 'order') {
+          if (appRepositories && appRepositories.orderRepo) {
+            targetOrder = await appRepositories.orderRepo.getOrderById(streamId);
+          }
+          if (appRepositories && appRepositories.deliveryRepo) {
+            targetDelivery = await appRepositories.deliveryRepo.getDeliveryByOrderId(streamId);
+          }
+        } else {
+          if (appRepositories && appRepositories.deliveryRepo) {
+            targetDelivery = await appRepositories.deliveryRepo.getDeliveryById(streamId);
+            if (targetDelivery && targetDelivery.orderId && appRepositories.orderRepo) {
+              targetOrder = await appRepositories.orderRepo.getOrderById(targetDelivery.orderId);
+            }
+          }
+        }
+
+        if (targetOrder || targetDelivery) {
+          const isCustomer = targetOrder && (targetOrder.customerId === authClaims.sub || targetOrder.customer_id === authClaims.sub);
+          const isRider = targetDelivery && (targetDelivery.riderId === authClaims.sub || targetDelivery.rider_id === authClaims.sub);
+          const isStoreSeller = targetOrder && authClaims.storeId && (targetOrder.storeId === authClaims.storeId || targetOrder.store_id === authClaims.storeId);
+          const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+
+          if (!isCustomer && !isRider && !isStoreSeller && !isAdmin) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to access this delivery stream.' });
+          }
+        }
+      }
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -453,7 +489,6 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Subscribe specific order/session channel if requested via URI
-      const orderStreamMatch = pathname.match(/^\/api\/v1\/delivery\/(order|session)\/([^/]+)\/stream$/);
       if (orderStreamMatch) {
         const id = orderStreamMatch[2];
         sseBroadcasterInstance.subscribe(id, res);
@@ -616,8 +651,12 @@ const server = http.createServer(async (req, res) => {
       const orderCustomerId = order.customer_id || order.customerId;
       const orderStoreId = order.store_id || order.storeId;
       const isOwnerCustomer = orderCustomerId === authClaims.sub;
-      const isAdmin = authClaims.roles && authClaims.roles.includes('ROLE_ADMIN');
-      const isSeller = authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && (authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id);
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+      const isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && (authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id));
+
+      if (!isOwnerCustomer && !isAdmin && !isSeller) {
+        return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to cancel this order.' });
+      }
 
       const cancelResult = await appRepositories.orderRepo.cancelOrder(orderId, authClaims.sub, body.reason || 'USER_REQUESTED_CANCELLATION');
       return sendJson(res, cancelResult.httpStatus || (cancelResult.ok ? 200 : 400), cancelResult);
@@ -879,8 +918,19 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
 
-      let authorizedRider = { rider_id: authClaims.sub, full_name: authClaims.name || 'Rider', phone: authClaims.phone || '+919876543210', vehicle_number: 'HR-26-AB-1234' };
-      if (pool) {
+      let authorizedRider = null;
+      if (appRepositories && appRepositories.riderRepo) {
+        const r = await appRepositories.riderRepo.findRiderById(authClaims.sub);
+        if (r && (r.status === 'ACTIVE' || !r.status)) {
+          authorizedRider = {
+            rider_id: r.rider_id || r.id || authClaims.sub,
+            full_name: r.full_name || r.name || authClaims.name || 'Rider',
+            phone: r.phone || authClaims.phone || '',
+            vehicle_number: r.vehicle_number || r.vehicleNumber || authClaims.vehicle || ''
+          };
+        }
+      }
+      if (!authorizedRider && pool) {
         const riderRes = await pool.query(
           `SELECT rider_id, full_name, phone, vehicle_number, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
           [authClaims.sub]
@@ -889,12 +939,17 @@ const server = http.createServer(async (req, res) => {
           authorizedRider = riderRes.rows[0];
         }
       }
+
+      if (!authorizedRider) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider profile not found. You are not authorized to accept delivery offers.' });
+      }
+
       const offerId = riderOfferAcceptMatch[1];
 
       const result = await appRepositories.offerRepo.acceptOfferTransactionally(offerId, authorizedRider.rider_id, {
-        realName: authorizedRider.full_name,
-        realPhone: authorizedRider.phone,
-        realVehicle: authorizedRider.vehicle_number
+        realName: authorizedRider.full_name || 'Rider',
+        realPhone: authorizedRider.phone || '',
+        realVehicle: authorizedRider.vehicle_number || ''
       });
 
       return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
@@ -997,6 +1052,21 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
+
+      let isAuthorizedRider = authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'));
+      if (!isAuthorizedRider && appRepositories && appRepositories.riderRepo) {
+        const r = await appRepositories.riderRepo.findRiderById(authClaims.sub);
+        if (r && (r.status === 'ACTIVE' || !r.status)) isAuthorizedRider = true;
+      }
+      if (!isAuthorizedRider && pool) {
+        const rRes = await pool.query(`SELECT status FROM riders WHERE (rider_id = $1 OR id = $1) AND status = 'ACTIVE'`, [authClaims.sub]);
+        if (rRes.rows.length > 0) isAuthorizedRider = true;
+      }
+
+      if (!isAuthorizedRider) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider account is required for presence updates.' });
+      }
+
       const body = await parseJsonBody(req);
       const lat = Number(body.latitude);
       const lng = Number(body.longitude);

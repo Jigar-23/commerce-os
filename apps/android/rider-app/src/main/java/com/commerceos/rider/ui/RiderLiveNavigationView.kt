@@ -190,9 +190,9 @@ fun RiderLiveNavigationView(
             // Primary Glove/Sunlight-Friendly Workflow Action
             when (session.state) {
                 "ASSIGNED", "ACCEPTED", "EN_ROUTE_PICKUP", "ARRIVED_PICKUP" -> {
-                    val storeLat = session.merchantLat ?: 28.202218
-                    val storeLng = session.merchantLng ?: 76.615403
-                    val distanceToStoreMeters: Float? = if (riderLat != null && riderLng != null && riderLat != 0.0) {
+                    val storeLat = session.merchantLat
+                    val storeLng = session.merchantLng
+                    val distanceToStoreMeters: Float? = if (riderLat != null && riderLng != null && riderLat != 0.0 && storeLat != null && storeLng != null && storeLat != 0.0) {
                         val results = FloatArray(1)
                         android.location.Location.distanceBetween(riderLat, riderLng, storeLat, storeLng, results)
                         results[0]
