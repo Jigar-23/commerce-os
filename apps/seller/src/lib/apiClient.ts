@@ -11,17 +11,11 @@
 const isProduction = process.env.NODE_ENV === 'production';
 
 function resolveSellerApiUrl(): string {
-  if (typeof window !== 'undefined' && window.location.hostname) {
-    return `http://${window.location.hostname}:8090`;
+  const envUrl = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && envUrl.trim().length > 0 && !envUrl.includes('api.commerceos.io') && !envUrl.includes('example.com')) {
+    return envUrl.trim().replace(/\/$/, '');
   }
-  const url = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
-  if (url && url.trim().length > 0) {
-    return url.trim();
-  }
-  if (isProduction) {
-    return ''; // Fail closed in production rather than silently connecting to localhost
-  }
-  return 'http://localhost:8090';
+  return 'https://commerce-os-api.onrender.com';
 }
 
 const API_BASE_URL = resolveSellerApiUrl();
@@ -47,10 +41,11 @@ class SellerApiClient {
   }
 
   public getBaseUrl(): string {
-    if (typeof window !== 'undefined' && window.location.hostname) {
-      return `http://${window.location.hostname}:8090`;
+    const envUrl = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
+    if (envUrl && envUrl.trim().length > 0 && !envUrl.includes('api.commerceos.io') && !envUrl.includes('example.com')) {
+      return envUrl.trim().replace(/\/$/, '');
     }
-    return this.baseUrl || 'http://localhost:8090';
+    return this.baseUrl || 'https://commerce-os-api.onrender.com';
   }
 
   public getSession(): SellerSession | null {
@@ -139,17 +134,7 @@ class SellerApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<{ data: T; ok: boolean; status: number; error?: string }> {
-    let session = this.getSession();
-    
-    // Auto-login in dev if session is missing
-    if (!session && !isProduction && !endpoint.includes('/auth/seller/login')) {
-      try {
-        await this.login('seller_rewari_01', 'rewari_hub_sec_881');
-        session = this.getSession();
-      } catch {
-        // Continue if dev login fails
-      }
-    }
+    const session = this.getSession();
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -183,12 +168,6 @@ class SellerApiClient {
       if (!res.ok) {
         if (res.status === 401 && !endpoint.includes('/auth/seller/login')) {
           this.clearSession();
-          if (!isProduction) {
-            const loginRes = await this.login('seller_rewari_01', 'rewari_hub_sec_881');
-            if (loginRes.ok) {
-              return this.request<T>(endpoint, options);
-            }
-          }
         }
         const errorMsg = (typeof data === 'object' && data?.message) || (typeof data === 'object' && data?.error) || `HTTP error ${res.status}`;
         return { data: data as T, ok: false, status: res.status, error: errorMsg };

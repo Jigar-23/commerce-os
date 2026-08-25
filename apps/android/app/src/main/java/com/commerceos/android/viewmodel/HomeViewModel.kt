@@ -54,12 +54,14 @@ class HomeViewModel(private val repository: AppRepository) : ViewModel() {
 
         val requestId = java.util.UUID.randomUUID().toString()
         activeHomeRequestId = requestId
+        android.util.Log.d("HomeViewModel", "loadHomeData called: customerId=$customerId, addressId=$addressId, requestId=$requestId")
 
         viewModelScope.launch {
             isLoading = true
             errorMessage = null
             when (val result = repository.getHomeFeed(customerId, addressId)) {
                 is ApiResult.Success -> {
+                    android.util.Log.d("HomeViewModel", "getHomeFeed SUCCESS: hero=${result.data.hero?.title}, sectionsCount=${result.data.sections?.size}, feedCount=${result.data.feed.size}")
                     // Latest-request-wins protection: discard if address changed or newer request initiated
                     if (activeHomeRequestId == requestId) {
                         sections = mapFeedToSections(result.data)
@@ -68,9 +70,11 @@ class HomeViewModel(private val repository: AppRepository) : ViewModel() {
                         loadedCustomerId = customerId
                         loadedAddressId = addressId
                         generatedAt = result.data.generatedAt ?: System.currentTimeMillis()
+                        android.util.Log.d("HomeViewModel", "Mapped into ${sections.size} UI sections successfully")
                     }
                 }
                 is ApiResult.Failure -> {
+                    android.util.Log.e("HomeViewModel", "getHomeFeed FAILURE: ${result.error.message}, errorType=${result.error.javaClass.simpleName}")
                     if (activeHomeRequestId == requestId) {
                         // Non-destructive error handling: if content already exists, keep it & expose error message
                         if (sections.isEmpty()) {

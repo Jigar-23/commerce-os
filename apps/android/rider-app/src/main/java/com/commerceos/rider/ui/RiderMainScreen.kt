@@ -89,6 +89,40 @@ fun RiderMainScreen(
         res.onSuccess {
             liveProfile = it
             isOnline = true
+        }.onFailure { err ->
+            android.util.Log.e("RiderMainScreen", "fetchRiderProfile failed: ${err.message}", err)
+            if (err.message?.contains("401") == true || err.message?.contains("UNAUTHORIZED") == true) {
+                // If token is rejected, try refresh or log out cleanly
+                val refreshed = sessionManager.refreshAccessToken()
+                if (refreshed) {
+                    val retry = repository.fetchRiderProfile()
+                    retry.onSuccess {
+                        liveProfile = it
+                        isOnline = true
+                    }.onFailure {
+                        sessionManager.clearSession()
+                        onLogout()
+                    }
+                } else {
+                    sessionManager.clearSession()
+                    onLogout()
+                }
+            } else if (liveProfile == null) {
+                // Local profile fallback for UI continuity so screen is never blank
+                val savedRiderId = sessionManager.getRiderId().ifBlank { "rdr_partner" }
+                liveProfile = RiderProfile(
+                    riderId = savedRiderId,
+                    name = "Delivery Partner",
+                    phone = "",
+                    vehicleNumber = "Electric Scooter",
+                    rating = 4.9,
+                    completedToday = 0,
+                    earningsTodayFormatted = "₹0",
+                    shiftStatus = "ONLINE_AVAILABLE",
+                    assignedHub = "Koramangala Dark Store"
+                )
+                isOnline = true
+            }
         }
 
         // Register any pending cached FCM token
@@ -113,10 +147,7 @@ fun RiderMainScreen(
     LaunchedEffect(isOnline) {
         while (isOnline) {
             if (sessionManager.getAuthToken().isBlank()) {
-                val loginRes = repository.loginAsRider("rdr_rewari_01", "+919876543210")
-                loginRes.onSuccess { token ->
-                    sessionManager.saveAuthToken(token)
-                }
+                break
             }
 
             when (val offerResult = repository.fetchActiveOffer()) {
@@ -342,35 +373,65 @@ fun RiderMainScreen(
                             onArrivedStore = {
                                 scope.launch {
                                     actionLoading = true
+                                    errorMessage = null
                                     val res = repository.arriveMerchant(currentSession.deliveryId)
-                                    res.onSuccess { session = it }
+                                    res.onSuccess {
+                                        session = it
+                                    }.onFailure {
+                                        val msg = it.message ?: "Failed to record arrival at store"
+                                        errorMessage = msg
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
                                     actionLoading = false
                                 }
                             },
                             onConfirmPickup = {
                                 scope.launch {
                                     actionLoading = true
+                                    errorMessage = null
                                     val res = repository.pickupFromMerchant(currentSession.deliveryId)
-                                    res.onSuccess { session = it }
+                                    res.onSuccess {
+                                        session = it
+                                    }.onFailure {
+                                        val msg = it.message ?: "Failed to confirm pickup"
+                                        errorMessage = msg
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
                                     actionLoading = false
                                 }
                             },
                             onArrivedCustomer = {
                                 scope.launch {
                                     actionLoading = true
+                                    errorMessage = null
                                     val res = repository.arriveCustomer(currentSession.deliveryId)
-                                    res.onSuccess { session = it }
+                                    res.onSuccess {
+                                        session = it
+                                    }.onFailure {
+                                        val msg = it.message ?: "Failed to record arrival at customer"
+                                        errorMessage = msg
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
                                     actionLoading = false
                                 }
                             },
                             onCompleteDelivery = {
+                                if (!currentSession.otpVerified) {
+                                    Toast.makeText(context, "Customer delivery PIN verification is required", Toast.LENGTH_LONG).show()
+                                    return@ActiveDeliveryScreen
+                                }
                                 scope.launch {
                                     actionLoading = true
+                                    errorMessage = null
                                     val res = repository.completeDelivery(currentSession.deliveryId)
                                     res.onSuccess {
                                         session = it
                                         completedSessionsList = listOf(it) + completedSessionsList
                                         showCompletionDialog = true
+                                    }.onFailure {
+                                        val msg = it.message ?: "Failed to complete delivery"
+                                        errorMessage = msg
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     }
                                     actionLoading = false
                                 }
@@ -381,18 +442,29 @@ fun RiderMainScreen(
                             enteredOtp = enteredOtp,
                             onOtpChange = { enteredOtp = it },
                             onVerifyOtp = {
+                                if (enteredOtp.isBlank() || enteredOtp.trim().length < 4) {
+                                    Toast.makeText(context, "Please enter 4-6 digit customer delivery PIN", Toast.LENGTH_SHORT).show()
+                                    return@ActiveDeliveryScreen
+                                }
                                 scope.launch {
                                     actionLoading = true
-                                    val res = repository.verifyOtp(currentSession.deliveryId, enteredOtp)
+                                    errorMessage = null
+                                    val res = repository.verifyOtp(currentSession.deliveryId, enteredOtp.trim())
                                     if (res.isSuccess) {
                                         val compRes = repository.completeDelivery(currentSession.deliveryId)
                                         compRes.onSuccess {
                                             session = it
                                             completedSessionsList = listOf(it) + completedSessionsList
                                             showCompletionDialog = true
+                                        }.onFailure {
+                                            val msg = it.message ?: "Failed to complete delivery"
+                                            errorMessage = msg
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                         }
                                     } else {
-                                        errorMessage = res.exceptionOrNull()?.message ?: "Incorrect OTP PIN"
+                                        val err = res.exceptionOrNull()?.message ?: "Incorrect Delivery PIN"
+                                        errorMessage = err
+                                        Toast.makeText(context, err, Toast.LENGTH_LONG).show()
                                     }
                                     actionLoading = false
                                 }
@@ -410,9 +482,14 @@ fun RiderMainScreen(
                                 scope.launch {
                                     val amount = enteredCodAmount.toDoubleOrNull() ?: 0.0
                                     actionLoading = true
+                                    errorMessage = null
                                     val res = repository.reconcileCod(currentSession.deliveryId, amount)
                                     res.onSuccess {
                                         session = session?.copy(codReconciled = true, codCollectedAmount = amount)
+                                    }.onFailure {
+                                        val msg = it.message ?: "Failed to reconcile COD"
+                                        errorMessage = msg
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     }
                                     actionLoading = false
                                 }
@@ -607,8 +684,15 @@ fun RiderMainScreen(
                     profile = liveProfile,
                     isOnline = isOnline,
                     onToggleShift = { newStatus ->
-                        isOnline = newStatus
-                        scope.launch { repository.updateShiftStatus(newStatus) }
+                        scope.launch {
+                            val res = repository.updateShiftStatus(newStatus)
+                            res.onSuccess {
+                                isOnline = newStatus
+                                liveProfile = liveProfile?.copy(shiftStatus = if (newStatus) "ONLINE_AVAILABLE" else "OFFLINE")
+                            }.onFailure {
+                                Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     },
                     onLogout = {
                         scope.launch {

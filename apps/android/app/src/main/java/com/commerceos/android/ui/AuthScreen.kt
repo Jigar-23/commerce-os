@@ -284,27 +284,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                             NetworkClient.baseUrl = serverHost
                             Toast.makeText(context, "Connected to Render Cloud API", Toast.LENGTH_SHORT).show()
                         },
-                        label = { Text("Render Cloud", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold) }
-                    )
-                    SuggestionChip(
-                        onClick = {
-                            serverHost = "http://127.0.0.1:8090"
-                            val prefs = context.getSharedPreferences("commerce_os_prefs", android.content.Context.MODE_PRIVATE)
-                            prefs.edit().putString("custom_api_base_url", serverHost).apply()
-                            NetworkClient.baseUrl = serverHost
-                            Toast.makeText(context, "Switched to USB ADB (127.0.0.1)", Toast.LENGTH_SHORT).show()
-                        },
-                        label = { Text("USB ADB", style = CommerceTypography.Meta) }
-                    )
-                    SuggestionChip(
-                        onClick = {
-                            serverHost = "http://10.0.2.2:8090"
-                            val prefs = context.getSharedPreferences("commerce_os_prefs", android.content.Context.MODE_PRIVATE)
-                            prefs.edit().putString("custom_api_base_url", serverHost).apply()
-                            NetworkClient.baseUrl = serverHost
-                            Toast.makeText(context, "Switched to Emulator (10.0.2.2)", Toast.LENGTH_SHORT).show()
-                        },
-                        label = { Text("Emulator", style = CommerceTypography.Meta) }
+                        label = { Text("Render Cloud API", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold) }
                     )
                 }
                 

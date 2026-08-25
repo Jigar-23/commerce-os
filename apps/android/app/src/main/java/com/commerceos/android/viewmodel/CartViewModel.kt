@@ -98,16 +98,46 @@ class CartViewModel(
         get() = if (totals != null) mrpTotal.subtract(totals!!.itemsSubtotal).coerceAtLeast(BigDecimal.ZERO)
                 else mrpTotal.subtract(effectiveSubtotal).coerceAtLeast(BigDecimal.ZERO)
 
+    private val LOCAL_OFFLINE_CART_KEY = "local_offline_cart"
+
     init {
-        loadFromLocalStorage("guest_customer")
+        loadFromLocalStorage(LOCAL_OFFLINE_CART_KEY)
     }
 
     fun init(customerId: String) {
-        val targetId = if (customerId.isNotBlank()) customerId else "guest_customer"
+        val targetId = customerId.trim()
         if (this.customerId != targetId) {
             this.customerId = targetId
-            loadFromLocalStorage(targetId)
-            loadCart()
+            if (targetId.isNotBlank()) {
+                // Merge any offline guest cart items to authoritative server account upon login
+                viewModelScope.launch {
+                    if (cartDao != null) {
+                        try {
+                            val guestEntities = cartDao.getCartItems(LOCAL_OFFLINE_CART_KEY)
+                            if (guestEntities.isNotEmpty()) {
+                                var hasFailure = false
+                                for (guestItem in guestEntities) {
+                                    val res = repository.addCartItem(targetId, guestItem.toCartItem())
+                                    if (res is com.commerceos.android.network.ApiResult.Success) {
+                                        cartDao.deleteBySku(guestItem.sku, LOCAL_OFFLINE_CART_KEY)
+                                    } else {
+                                        hasFailure = true
+                                    }
+                                }
+                                if (hasFailure) {
+                                    errorMessage = "Some offline guest cart items could not be synced to your account."
+                                }
+                            }
+                        } catch (e: Exception) {
+                            errorMessage = "Cart synchronization encountered an error: ${e.message}"
+                        }
+                    }
+                    loadFromLocalStorage(targetId)
+                    loadCart()
+                }
+            } else {
+                loadFromLocalStorage(LOCAL_OFFLINE_CART_KEY)
+            }
         }
     }
 
@@ -126,7 +156,12 @@ class CartViewModel(
     }
 
     fun loadCart() {
-        val activeCustId = if (customerId.isNotBlank()) customerId else "guest_customer"
+        val activeCustId = customerId.trim()
+        if (activeCustId.isBlank()) {
+            // Unauthenticated: load from local offline cache only
+            loadFromLocalStorage(LOCAL_OFFLINE_CART_KEY)
+            return
+        }
         viewModelScope.launch {
             // 1. Immediately hydrate from Room DB so UI never flashes empty
             if (cartDao != null) {
@@ -171,7 +206,6 @@ class CartViewModel(
     private val cartMutex = kotlinx.coroutines.sync.Mutex()
 
     fun addItem(product: CommerceProduct) {
-        val activeCustId = if (customerId.isNotBlank()) customerId else "guest_customer"
         viewModelScope.launch {
             cartMutex.withLock {
                 val pharmacyAttr = product.medicineDetails?.let {
@@ -194,41 +228,44 @@ class CartViewModel(
                     pharmacyAttributes = pharmacyAttr
                 )
 
-                // Persist locally in Room DB first
-                if (cartDao != null) {
-                    try {
-                        cartDao.insertOrUpdate(CartItemEntity.fromCartItem(item, activeCustId))
-                    } catch (e: Exception) {
-                        // ignore local error
-                    }
-                }
-
-                val updated = repository.addCartItem(activeCustId, item)
-                when (updated) {
-                    is ApiResult.Success -> {
-                        cartItems = updated.data.items ?: (cartItems + item)
-                        totals = updated.data
-                        errorMessage = null
-                        _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
-                    }
-                    is ApiResult.Failure -> {
-                        // Optimistic local add
-                        val existing = cartItems.find { it.sku == item.sku }
-                        val next = if (existing != null) {
-                            cartItems.map { if (it.sku == item.sku) it.copy(quantity = it.quantity + 1) else it }
-                        } else {
-                            cartItems + item
+                if (customerId.isNotBlank()) {
+                    // Server-first authoritative mutation: only persist locally if server accepts
+                    val updated = repository.addCartItem(customerId, item)
+                    when (updated) {
+                        is ApiResult.Success -> {
+                            val backendItems = updated.data.items ?: (cartItems + item)
+                            cartItems = backendItems
+                            totals = updated.data
+                            errorMessage = null
+                            _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
+                            if (cartDao != null) {
+                                try {
+                                    cartDao.clearCart(customerId)
+                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, customerId) })
+                                } catch (_: Exception) {}
+                            }
                         }
-                        cartItems = next
-                        _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
+                        is ApiResult.Failure -> {
+                            val errMsg = updated.error.message ?: "Could not add item to cart. Please check your network connection."
+                            errorMessage = errMsg
+                            _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                        }
                     }
+                } else {
+                    // Local offline guest add
+                    cartItems = cartItems + item
+                    if (cartDao != null) {
+                        try {
+                            cartDao.insertOrUpdate(CartItemEntity.fromCartItem(item, LOCAL_OFFLINE_CART_KEY))
+                        } catch (_: Exception) {}
+                    }
+                    _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
                 }
             }
         }
     }
 
     fun addReorderItem(item: OrderItem) {
-        val activeCustId = if (customerId.isNotBlank()) customerId else "guest_customer"
         viewModelScope.launch {
             cartMutex.withLock {
                 val pharmacyAttr = if (item.rxRequired) PharmacyCartAttributes(prescriptionRequired = true, coldChain = false) else null
@@ -244,26 +281,35 @@ class CartViewModel(
                     pharmacyAttributes = pharmacyAttr
                 )
 
-                // Persist locally in Room DB
-                if (cartDao != null) {
-                    try {
-                        cartDao.insertOrUpdate(CartItemEntity.fromCartItem(cartItem, activeCustId))
-                    } catch (e: Exception) {
-                        // ignore local error
+                if (customerId.isNotBlank()) {
+                    when (val updated = repository.addCartItem(customerId, cartItem)) {
+                        is ApiResult.Success -> {
+                            val backendItems = updated.data.items ?: (cartItems + cartItem)
+                            cartItems = backendItems
+                            totals = updated.data
+                            errorMessage = null
+                            _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))
+                            if (cartDao != null) {
+                                try {
+                                    cartDao.clearCart(customerId)
+                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, customerId) })
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        is ApiResult.Failure -> {
+                            val errMsg = updated.error.message ?: "Could not reorder item. Please check your network connection."
+                            errorMessage = errMsg
+                            _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                        }
                     }
-                }
-
-                when (val updated = repository.addCartItem(activeCustId, cartItem)) {
-                    is ApiResult.Success -> {
-                        cartItems = updated.data.items ?: (cartItems + cartItem)
-                        totals = updated.data
-                        errorMessage = null
-                        _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))
+                } else {
+                    cartItems = cartItems + cartItem
+                    if (cartDao != null) {
+                        try {
+                            cartDao.insertOrUpdate(CartItemEntity.fromCartItem(cartItem, LOCAL_OFFLINE_CART_KEY))
+                        } catch (_: Exception) {}
                     }
-                    is ApiResult.Failure -> {
-                        cartItems = cartItems + cartItem
-                        _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))
-                    }
+                    _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))
                 }
             }
         }
@@ -274,26 +320,35 @@ class CartViewModel(
             removeItem(sku)
             return
         }
-        val activeCustId = if (customerId.isNotBlank()) customerId else "guest_customer"
         viewModelScope.launch {
             cartMutex.withLock {
-                val targetItem = cartItems.find { it.sku == sku }
-                if (targetItem != null && cartDao != null) {
-                    try {
-                        cartDao.insertOrUpdate(CartItemEntity.fromCartItem(targetItem.copy(quantity = quantity), activeCustId))
-                    } catch (e: Exception) {
-                        // ignore local error
+                if (customerId.isNotBlank()) {
+                    when (val updated = repository.updateCartQuantity(customerId, sku, quantity)) {
+                        is ApiResult.Success -> {
+                            val backendItems = updated.data.items ?: cartItems.map { if (it.sku == sku) it.copy(quantity = quantity) else it }
+                            cartItems = backendItems
+                            totals = updated.data
+                            errorMessage = null
+                            if (cartDao != null) {
+                                try {
+                                    cartDao.clearCart(customerId)
+                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, customerId) })
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        is ApiResult.Failure -> {
+                            errorMessage = updated.error.message ?: "Could not update item quantity."
+                        }
                     }
-                }
-
-                when (val updated = repository.updateCartQuantity(activeCustId, sku, quantity)) {
-                    is ApiResult.Success -> {
-                        cartItems = updated.data.items ?: cartItems.map { if (it.sku == sku) it.copy(quantity = quantity) else it }
-                        totals = updated.data
-                        errorMessage = null
-                    }
-                    is ApiResult.Failure -> {
-                        cartItems = cartItems.map { if (it.sku == sku) it.copy(quantity = quantity) else it }
+                } else {
+                    cartItems = cartItems.map { if (it.sku == sku) it.copy(quantity = quantity) else it }
+                    if (cartDao != null) {
+                        val targetItem = cartItems.find { it.sku == sku }
+                        if (targetItem != null) {
+                            try {
+                                cartDao.insertOrUpdate(CartItemEntity.fromCartItem(targetItem, LOCAL_OFFLINE_CART_KEY))
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
             }
@@ -301,21 +356,33 @@ class CartViewModel(
     }
 
     fun removeItem(sku: String) {
-        val activeCustId = if (customerId.isNotBlank()) customerId else "guest_customer"
         viewModelScope.launch {
             cartMutex.withLock {
-                cartItems = cartItems.filter { it.sku != sku }
-                if (cartDao != null) {
-                    try {
-                        cartDao.deleteBySku(sku, activeCustId)
-                    } catch (e: Exception) {
-                        // ignore local error
+                if (customerId.isNotBlank()) {
+                    val updated = repository.removeCartItem(customerId, sku)
+                    when (updated) {
+                        is ApiResult.Success -> {
+                            val backendItems = updated.data.items ?: cartItems.filter { it.sku != sku }
+                            cartItems = backendItems
+                            totals = updated.data
+                            errorMessage = null
+                            if (cartDao != null) {
+                                try {
+                                    cartDao.deleteBySku(sku, customerId)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        is ApiResult.Failure -> {
+                            errorMessage = updated.error.message ?: "Could not remove item from cart."
+                        }
                     }
-                }
-
-                val updated = repository.removeCartItem(activeCustId, sku)
-                if (updated is ApiResult.Success) {
-                    totals = updated.data
+                } else {
+                    cartItems = cartItems.filter { it.sku != sku }
+                    if (cartDao != null) {
+                        try {
+                            cartDao.deleteBySku(sku, LOCAL_OFFLINE_CART_KEY)
+                        } catch (_: Exception) {}
+                    }
                 }
             }
         }
@@ -368,7 +435,7 @@ class CartViewModel(
     }
 
     fun clear() {
-        val activeCustId = if (customerId.isNotBlank()) customerId else "guest_customer"
+        val activeCustId = if (customerId.isNotBlank()) customerId else LOCAL_OFFLINE_CART_KEY
         cartItems = emptyList()
         totals = null
         appliedCouponCode = null

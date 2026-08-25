@@ -196,10 +196,10 @@ fun CategoryGridSection(
                                             color = CommerceColors.TextPrimary,
                                             maxLines = 1
                                         )
-                                        if (group.subtitle.isNotBlank()) {
+                                        if (!group.subtitle.isNullOrBlank()) {
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                group.subtitle,
+                                                group.subtitle!!,
                                                 style = CommerceTypography.Meta,
                                                 color = CommerceColors.TextMuted,
                                                 maxLines = 1

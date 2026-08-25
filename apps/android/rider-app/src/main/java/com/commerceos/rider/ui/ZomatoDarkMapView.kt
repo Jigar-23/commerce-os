@@ -39,6 +39,9 @@ fun ZomatoDarkMapView(
     riderLat: Double? = null,
     riderLng: Double? = null,
     riderHeading: Float? = null,
+    speedKmh: Float? = null,
+    routeProgressPct: Float? = null,
+    snappedSegmentIndex: Int? = null,
     waypoints: List<RoutePoint> = emptyList(),
     isRouteLoading: Boolean = false,
     routeUnavailable: Boolean = false,
@@ -59,7 +62,7 @@ fun ZomatoDarkMapView(
         )
     }
 
-    LaunchedEffect(riderLat, riderLng, riderHeading, isStale, waypoints, isMapLoaded) {
+    LaunchedEffect(riderLat, riderLng, riderHeading, speedKmh, routeProgressPct, snappedSegmentIndex, isStale, waypoints, isMapLoaded) {
         val webView = webViewRef ?: return@LaunchedEffect
         if (!isMapLoaded) return@LaunchedEffect
 
@@ -71,6 +74,9 @@ fun ZomatoDarkMapView(
             riderLat = riderLat,
             riderLng = riderLng,
             riderHeading = riderHeading,
+            speedKmh = speedKmh,
+            routeProgressPct = routeProgressPct,
+            snappedSegmentIndex = snappedSegmentIndex,
             isStale = isStale,
             waypoints = waypoints
         )
@@ -112,6 +118,9 @@ fun ZomatoDarkMapView(
                                 riderLat = riderLat,
                                 riderLng = riderLng,
                                 riderHeading = riderHeading,
+                                speedKmh = speedKmh,
+                                routeProgressPct = routeProgressPct,
+                                snappedSegmentIndex = snappedSegmentIndex,
                                 isStale = isStale,
                                 waypoints = waypoints
                             )
@@ -225,6 +234,9 @@ private fun buildUpdateScript(
     riderLat: Double?,
     riderLng: Double?,
     riderHeading: Float?,
+    speedKmh: Float?,
+    routeProgressPct: Float?,
+    snappedSegmentIndex: Int?,
     isStale: Boolean,
     waypoints: List<RoutePoint>
 ): String {
@@ -241,6 +253,9 @@ private fun buildUpdateScript(
         ro.put("lat", riderLat)
         ro.put("lng", riderLng)
         ro.put("heading", riderHeading ?: JSONObject.NULL)
+        ro.put("speedKmh", speedKmh ?: 0f)
+        ro.put("routeProgressPct", routeProgressPct ?: JSONObject.NULL)
+        ro.put("snappedSegmentIndex", snappedSegmentIndex ?: JSONObject.NULL)
         ro.put("isStale", isStale)
         ro.put("timestamp", System.currentTimeMillis())
         ro
@@ -269,58 +284,58 @@ private fun generateHardenedDarkMapHtml(
         .leaflet-container { background: #0B1120; }
         .store-icon {
             background: #0284C7;
-            border: 2px solid #38BDF8;
+            border: 2px solid #FFFFFF;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 2px 8px rgba(2, 132, 199, 0.5);
+            box-shadow: 0 2px 10px rgba(2, 132, 199, 0.8);
         }
-        .store-icon svg { width: 14px; height: 14px; fill: white; }
+        .store-icon svg { width: 16px; height: 16px; fill: white; }
         .customer-icon {
-            background: #F59E0B;
-            border: 2px solid #FDE68A;
+            background: #EA580C;
+            border: 2px solid #FFFFFF;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.5);
+            box-shadow: 0 2px 10px rgba(234, 88, 12, 0.8);
         }
-        .customer-icon svg { width: 14px; height: 14px; fill: black; }
+        .customer-icon svg { width: 16px; height: 16px; fill: white; }
         
         /* Clean Quick-Commerce Branded Rider Marker */
         .biker-container {
-            width: 32px;
-            height: 32px;
+            width: 36px;
+            height: 36px;
             position: relative;
             transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
         }
         .biker-pulse {
             position: absolute;
-            width: 32px;
-            height: 32px;
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
-            background: rgba(16, 185, 129, 0.2);
+            background: rgba(16, 185, 129, 0.3);
             animation: pulse 2.5s infinite;
         }
         .biker-core {
             position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 28px;
-            height: 28px;
+            top: 3px;
+            left: 3px;
+            width: 30px;
+            height: 30px;
             background: #10B981;
-            border: 2px solid #0F172A;
+            border: 2px solid #FFFFFF;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.6);
         }
         .biker-core svg {
-            width: 16px;
-            height: 16px;
-            fill: #0F172A;
+            width: 18px;
+            height: 18px;
+            fill: #FFFFFF;
         }
         @keyframes pulse {
             0% { transform: scale(0.9); opacity: 0.7; }
@@ -343,11 +358,30 @@ private fun generateHardenedDarkMapHtml(
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
     }).addTo(map);
 
+    var storeSvg = '<svg viewBox="0 0 24 24"><path d="M4 4h16v3H4zm0 5h16v11H4zm3 2v7h10v-7z"/></svg>';
+    var customerSvg = '<svg viewBox="0 0 24 24"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm0 4.7l4 3.6V18h-8v-6.7l4-3.6z"/></svg>';
+    var bikeSvg = '<svg viewBox="0 0 24 24"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm14-8.5c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm-8.2-7.5l-2.4-4H5v2h2.2l1.6 2.7c-.8.8-1.3 1.8-1.5 3h2.1c.2-.7.6-1.3 1.1-1.8l1.7 2.1h3.7v-2h-2.5l-1.9-2.4.9-2.6 1.8 1.4v2.6h2v-3.7l-2.8-2.2c-.3-.2-.7-.3-1.1-.3-.4 0-.8.2-1.1.5l-1.6 2.4z"/></svg>';
+
+    var storeIcon = L.divIcon({ className: 'store-icon', html: storeSvg, iconSize: [30, 30], iconAnchor: [15, 15] });
+    var customerIcon = L.divIcon({ className: 'customer-icon', html: customerSvg, iconSize: [30, 30], iconAnchor: [15, 15] });
+
     var storeMarker = null;
     var customerMarker = null;
+    if ($merchantLat && $merchantLng && $merchantLat !== 0) {
+        storeMarker = L.marker([$merchantLat, $merchantLng], { icon: storeIcon }).addTo(map);
+    }
+    if ($customerLat && $customerLng && $customerLat !== 0) {
+        customerMarker = L.marker([$customerLat, $customerLng], { icon: customerIcon }).addTo(map);
+    }
+
     var riderMarker = null;
     var routePolyline = null;
     var boundsGroup = [];
+    if ($merchantLat && $merchantLng && $merchantLat !== 0) boundsGroup.push([$merchantLat, $merchantLng]);
+    if ($customerLat && $customerLng && $customerLat !== 0) boundsGroup.push([$customerLat, $customerLng]);
+    if (boundsGroup.length > 0) {
+        map.fitBounds(L.latLngBounds(boundsGroup), { padding: [30, 30], maxZoom: 15 });
+    }
     var lastAcceptedTimestamp = 0;
 
     // Smooth Monotonic Interpolation Engine with Immediate Stale Freeze
@@ -374,10 +408,6 @@ private fun generateHardenedDarkMapHtml(
         animFrame = requestAnimationFrame(step);
     }
 
-    var storeSvg = '<svg viewBox="0 0 24 24"><path d="M4 4h16v3H4zm0 5h16v11H4zm3 2v7h10v-7z"/></svg>';
-    var customerSvg = '<svg viewBox="0 0 24 24"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm0 4.7l4 3.6V18h-8v-6.7l4-3.6z"/></svg>';
-    var bikeSvg = '<svg viewBox="0 0 24 24"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm14-8.5c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm-8.2-7.5l-2.4-4H5v2h2.2l1.6 2.7c-.8.8-1.3 1.8-1.5 3h2.1c.2-.7.6-1.3 1.1-1.8l1.7 2.1h3.7v-2h-2.5l-1.9-2.4.9-2.6 1.8 1.4v2.6h2v-3.7l-2.8-2.2c-.3-.2-.7-.3-1.1-.3-.4 0-.8.2-1.1.5l-1.6 2.4z"/></svg>';
-
     var autoFollow = true;
     map.on('dragstart', function() { autoFollow = false; });
     map.on('zoomstart', function(e) { if (e && e.originalEvent) autoFollow = false; });
@@ -385,24 +415,27 @@ private fun generateHardenedDarkMapHtml(
     function updateMapData(mLat, mLng, cLat, cLng, rider, waypoints) {
         boundsGroup = [];
 
-        if (mLat && mLng) {
+        var effectiveMLat = (mLat && mLat !== 0) ? mLat : $merchantLat;
+        var effectiveMLng = (mLng && mLng !== 0) ? mLng : $merchantLng;
+        var effectiveCLat = (cLat && cLat !== 0) ? cLat : $customerLat;
+        var effectiveCLng = (cLng && cLng !== 0) ? cLng : $customerLng;
+
+        if (effectiveMLat && effectiveMLng) {
             if (!storeMarker) {
-                var icon = L.divIcon({ className: 'store-icon', html: storeSvg, iconSize: [26, 26], iconAnchor: [13, 13] });
-                storeMarker = L.marker([mLat, mLng], { icon: icon }).addTo(map);
+                storeMarker = L.marker([effectiveMLat, effectiveMLng], { icon: storeIcon }).addTo(map);
             } else {
-                storeMarker.setLatLng([mLat, mLng]);
+                storeMarker.setLatLng([effectiveMLat, effectiveMLng]);
             }
-            boundsGroup.push([mLat, mLng]);
+            boundsGroup.push([effectiveMLat, effectiveMLng]);
         }
 
-        if (cLat && cLng) {
+        if (effectiveCLat && effectiveCLng) {
             if (!customerMarker) {
-                var icon = L.divIcon({ className: 'customer-icon', html: customerSvg, iconSize: [26, 26], iconAnchor: [13, 13] });
-                customerMarker = L.marker([cLat, cLng], { icon: icon }).addTo(map);
+                customerMarker = L.marker([effectiveCLat, effectiveCLng], { icon: customerIcon }).addTo(map);
             } else {
-                customerMarker.setLatLng([cLat, cLng]);
+                customerMarker.setLatLng([effectiveCLat, effectiveCLng]);
             }
-            boundsGroup.push([cLat, cLng]);
+            boundsGroup.push([effectiveCLat, effectiveCLng]);
         }
 
         // Monotonic Filtered Rider Marker with Immediate Stale Freeze

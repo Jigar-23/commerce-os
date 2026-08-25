@@ -59,7 +59,9 @@ fun ActiveDeliveryScreen(
             onArrivedCustomer = onArrivedCustomer,
             onCompleteDelivery = onCompleteDelivery,
             onViewOrderDetails = onViewOrderDetails,
-            onCancelDelivery = onCancelDelivery
+            onCancelDelivery = onCancelDelivery,
+            enteredOtp = enteredOtp,
+            onVerifyOtp = onVerifyOtp
         )
 
         // Scrollable Contextual Stage Details (Pickup Checklist / OTP Handoff Form)

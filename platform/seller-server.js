@@ -1,737 +1,66 @@
 const http = require('http');
+const https = require('https');
 const url = require('url');
-
-const PORT = 3003;
-const API_URL = process.env.API_GATEWAY_URL || 'https://commerce-os-api.onrender.com';
-const LOCAL_API_URL = 'http://127.0.0.1:8090';
-
-const HTML_CONTENT = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Commerce OS — Pharmacy Partner Merchant Portal</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
-          colors: {
-            brand: { 50: '#F0FDF4', 100: '#DCFCE7', 500: '#16A34A', 600: '#15803D', 700: '#166534' },
-            navy: { 800: '#0F172A', 900: '#0B132B', 950: '#030712' },
-            accent: { 500: '#4F46E5', 600: '#4338CA' }
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    body { font-family: 'Inter', sans-serif; }
-    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scroll::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
-    .custom-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
-  </style>
-</head>
-<body class="bg-[#0B132B] text-slate-100 min-h-screen flex flex-col antialiased select-none">
-
-  <!-- TOP APP BAR -->
-  <header class="h-16 border-b border-slate-800/80 bg-slate-900/90 backdrop-blur px-6 flex items-center justify-between sticky top-0 z-40">
-    <div class="flex items-center space-x-3">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-emerald-500/20">
-        S
-      </div>
-      <div>
-        <div class="flex items-center space-x-2">
-          <span class="font-black text-lg tracking-tight text-white">Commerce<span class="text-emerald-400">OS</span></span>
-          <span class="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-md">MERCHANT HUB</span>
-        </div>
-        <p id="store-subtitle" class="text-xs text-slate-400 font-medium">Rewari Central Hub (STORE_REWARI_01)</p>
-      </div>
-    </div>
-
-    <!-- SEARCH & STATUS -->
-    <div class="flex items-center space-x-4">
-      <div class="relative w-80 hidden md:block">
-        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-xs text-slate-400"></i>
-        <input id="quick-search" type="text" placeholder="Search orders, SKU, customer..." class="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition-colors">
-      </div>
-
-      <div class="flex items-center space-x-2 bg-slate-800/60 border border-slate-700/60 rounded-xl px-3 py-1.5 text-xs">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span class="text-slate-300 font-medium" id="cloud-status">Cloud API Connected</span>
-      </div>
-
-      <button onclick="logout()" class="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/10 hover:text-rose-400 text-slate-400 border border-slate-700/80 transition-all text-xs flex items-center space-x-1.5">
-        <i class="fa-solid fa-arrow-right-from-bracket"></i>
-        <span class="hidden sm:inline">Logout</span>
-      </button>
-    </div>
-  </header>
-
-  <!-- MAIN BODY LAYOUT -->
-  <div class="flex flex-1 overflow-hidden">
-
-    <!-- SIDEBAR NAVIGATION -->
-    <aside class="w-64 border-r border-slate-800/80 bg-slate-900/60 flex flex-col justify-between p-4 shrink-0 hidden md:flex">
-      <div class="space-y-1">
-        <button onclick="switchTab('dashboard')" id="nav-dashboard" class="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all">
-          <i class="fa-solid fa-chart-pie w-4 text-center"></i>
-          <span>Dashboard Overview</span>
-        </button>
-        <button onclick="switchTab('orders')" id="nav-orders" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all">
-          <div class="flex items-center space-x-3">
-            <i class="fa-solid fa-box-open w-4 text-center"></i>
-            <span>Orders & Dispatch</span>
-          </div>
-          <span id="badge-orders" class="px-1.5 py-0.5 rounded-md bg-slate-800 text-[10px] font-bold text-slate-300">0</span>
-        </button>
-        <button onclick="switchTab('inventory')" id="nav-inventory" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all">
-          <div class="flex items-center space-x-3">
-            <i class="fa-solid fa-warehouse w-4 text-center"></i>
-            <span>Live Stock & Inventory</span>
-          </div>
-          <span id="badge-stock" class="px-1.5 py-0.5 rounded-md bg-slate-800 text-[10px] font-bold text-slate-300">0</span>
-        </button>
-        <button onclick="switchTab('cod')" id="nav-cod" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all">
-          <div class="flex items-center space-x-3">
-            <i class="fa-solid fa-indian-rupee-sign w-4 text-center"></i>
-            <span>COD Cash Ledger</span>
-          </div>
-          <span id="badge-cod" class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">₹0</span>
-        </button>
-        <button onclick="switchTab('products')" id="nav-products" class="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all">
-          <i class="fa-solid fa-pills w-4 text-center"></i>
-          <span>Catalog Products</span>
-        </button>
-        <button onclick="switchTab('audit')" id="nav-audit" class="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all">
-          <i class="fa-solid fa-shield-halved w-4 text-center"></i>
-          <span>Audit & Compliance</span>
-        </button>
-        <button onclick="switchTab('settings')" id="nav-settings" class="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all">
-          <i class="fa-solid fa-sliders w-4 text-center"></i>
-          <span>Store Settings</span>
-        </button>
-      </div>
-
-      <!-- SELLER IDENTITY CARD -->
-      <div class="p-3 bg-slate-800/40 border border-slate-700/50 rounded-2xl">
-        <div class="flex items-center space-x-2.5">
-          <div class="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-xs">
-            <i class="fa-solid fa-store"></i>
-          </div>
-          <div class="truncate">
-            <p id="seller-name" class="text-xs font-bold text-white truncate">Commerce OS Retail</p>
-            <p id="seller-id" class="text-[10px] text-slate-400 font-mono">seller_rewari_01</p>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- CONTENT VIEW AREA -->
-    <main class="flex-1 overflow-y-auto custom-scroll p-6 space-y-6">
-
-      <!-- 1. DASHBOARD VIEW -->
-      <div id="tab-dashboard" class="space-y-6">
-        <!-- TOP KPI METRICS -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 shadow-lg">
-            <div class="flex items-center justify-between text-slate-400 text-xs font-semibold">
-              <span>Total Orders</span>
-              <i class="fa-solid fa-truck-fast text-emerald-400"></i>
-            </div>
-            <p id="kpi-orders" class="text-2xl font-black text-white mt-2">0</p>
-            <p class="text-[10px] text-emerald-400 mt-1 font-medium"><i class="fa-solid fa-arrow-trend-up mr-1"></i>Live fulfillment active</p>
-          </div>
-
-          <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 shadow-lg">
-            <div class="flex items-center justify-between text-slate-400 text-xs font-semibold">
-              <span>Active Stock Units</span>
-              <i class="fa-solid fa-boxes-stacked text-blue-400"></i>
-            </div>
-            <p id="kpi-stock" class="text-2xl font-black text-white mt-2">0</p>
-            <p class="text-[10px] text-slate-400 mt-1 font-medium">Across all medicine SKUs</p>
-          </div>
-
-          <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 shadow-lg">
-            <div class="flex items-center justify-between text-slate-400 text-xs font-semibold">
-              <span>Pending COD Cash</span>
-              <i class="fa-solid fa-indian-rupee-sign text-amber-400"></i>
-            </div>
-            <p id="kpi-cod" class="text-2xl font-black text-amber-400 mt-2">₹0</p>
-            <p class="text-[10px] text-slate-400 mt-1 font-medium">To be collected & settled</p>
-          </div>
-
-          <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 shadow-lg">
-            <div class="flex items-center justify-between text-slate-400 text-xs font-semibold">
-              <span>Platform Health</span>
-              <i class="fa-solid fa-heart-pulse text-emerald-400"></i>
-            </div>
-            <p class="text-2xl font-black text-emerald-400 mt-2">99.9%</p>
-            <p class="text-[10px] text-slate-400 mt-1 font-medium">Real-time sync operational</p>
-          </div>
-        </div>
-
-        <!-- RECENT ORDERS & INVENTORY PREVIEW -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 space-y-4">
-            <div class="flex items-center justify-between">
-              <h2 class="text-sm font-bold text-white flex items-center space-x-2">
-                <i class="fa-solid fa-list-check text-emerald-400"></i>
-                <span>Active Store Orders</span>
-              </h2>
-              <button onclick="switchTab('orders')" class="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center space-x-1">
-                <span>View All</span>
-                <i class="fa-solid fa-arrow-right text-[10px]"></i>
-              </button>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-xs">
-                <thead>
-                  <tr class="text-slate-400 border-b border-slate-800">
-                    <th class="pb-2.5 font-semibold">Order ID</th>
-                    <th class="pb-2.5 font-semibold">Items</th>
-                    <th class="pb-2.5 font-semibold">Total</th>
-                    <th class="pb-2.5 font-semibold">Status</th>
-                    <th class="pb-2.5 font-semibold text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody id="dashboard-orders-table" class="divide-y divide-slate-800/60">
-                  <tr><td colspan="5" class="py-6 text-center text-slate-500">Loading live orders...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 space-y-4">
-            <div class="flex items-center justify-between">
-              <h2 class="text-sm font-bold text-white flex items-center space-x-2">
-                <i class="fa-solid fa-pills text-emerald-400"></i>
-                <span>Inventory Quick Check</span>
-              </h2>
-              <button onclick="switchTab('inventory')" class="text-xs text-emerald-400 hover:text-emerald-300 font-semibold">Manage</button>
-            </div>
-            <div id="dashboard-inventory-list" class="space-y-3">
-              <p class="text-slate-500 text-xs text-center py-6">Loading catalog...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. ORDERS VIEW -->
-      <div id="tab-orders" class="space-y-6 hidden">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 class="text-lg font-black text-white">Merchant Order Management</h1>
-            <p class="text-xs text-slate-400">Process, pack, dispatch, and track active prescriptions and medicines</p>
-          </div>
-          <div class="flex items-center space-x-2">
-            <button onclick="loadAllData()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 transition-all flex items-center space-x-1.5">
-              <i class="fa-solid fa-rotate-right"></i>
-              <span>Refresh Orders</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
-              <thead>
-                <tr class="text-slate-400 border-b border-slate-800">
-                  <th class="pb-3 font-semibold">Order ID</th>
-                  <th class="pb-3 font-semibold">Customer & Delivery Details</th>
-                  <th class="pb-3 font-semibold">Medicines Ordered</th>
-                  <th class="pb-3 font-semibold">Amount & Mode</th>
-                  <th class="pb-3 font-semibold">Fulfillment State</th>
-                  <th class="pb-3 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="full-orders-table" class="divide-y divide-slate-800/60">
-                <tr><td colspan="6" class="py-8 text-center text-slate-500">Loading orders...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 3. INVENTORY VIEW -->
-      <div id="tab-inventory" class="space-y-6 hidden">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 class="text-lg font-black text-white">Store Inventory & Stock Levels</h1>
-            <p class="text-xs text-slate-400">Real-time inventory levels, reorder alerts, and custom SKU management</p>
-          </div>
-          <div class="flex items-center space-x-3">
-            <button onclick="openAddItemModal()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all">
-              <i class="fa-solid fa-plus"></i>
-              <span>Add New Item / SKU</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
-              <thead>
-                <tr class="text-slate-400 border-b border-slate-800">
-                  <th class="pb-3 font-semibold">SKU / Medicine Name</th>
-                  <th class="pb-3 font-semibold">Brand / Manufacturer</th>
-                  <th class="pb-3 font-semibold">Category</th>
-                  <th class="pb-3 font-semibold">MRP / Price</th>
-                  <th class="pb-3 font-semibold">Current Stock</th>
-                  <th class="pb-3 font-semibold text-right">Quick Stock Adjustment</th>
-                </tr>
-              </thead>
-              <tbody id="full-inventory-table" class="divide-y divide-slate-800/60">
-                <tr><td colspan="6" class="py-8 text-center text-slate-500">Loading stock...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 4. COD LEDGER VIEW -->
-      <div id="tab-cod" class="space-y-6 hidden">
-        <div>
-          <h1 class="text-lg font-black text-white">Cash on Delivery (COD) Reconciliation</h1>
-          <p class="text-xs text-slate-400">Track and deposit collected cash deliveries directly into merchant settlement account</p>
-        </div>
-
-        <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
-              <thead>
-                <tr class="text-slate-400 border-b border-slate-800">
-                  <th class="pb-3 font-semibold">Order ID</th>
-                  <th class="pb-3 font-semibold">Customer Phone</th>
-                  <th class="pb-3 font-semibold">COD Amount</th>
-                  <th class="pb-3 font-semibold">Status</th>
-                  <th class="pb-3 font-semibold text-right">Reconcile Action</th>
-                </tr>
-              </thead>
-              <tbody id="cod-table" class="divide-y divide-slate-800/60">
-                <tr><td colspan="5" class="py-8 text-center text-slate-500">Loading COD ledger...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 5. PRODUCTS VIEW -->
-      <div id="tab-products" class="space-y-6 hidden">
-        <div>
-          <h1 class="text-lg font-black text-white">Medicine Catalog</h1>
-          <p class="text-xs text-slate-400">All registered medicine items and specifications</p>
-        </div>
-        <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5">
-          <div id="products-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <p class="text-slate-500 text-xs py-8">Loading products...</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 6. AUDIT LOGS VIEW -->
-      <div id="tab-audit" class="space-y-6 hidden">
-        <div>
-          <h1 class="text-lg font-black text-white">Audit & Compliance Log</h1>
-          <p class="text-xs text-slate-400">Immutable record of all merchant state transitions and actions</p>
-        </div>
-        <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5">
-          <div id="audit-list" class="space-y-3 text-xs">
-            <p class="text-slate-500 py-6 text-center">Loading audit events...</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 7. SETTINGS VIEW -->
-      <div id="tab-settings" class="space-y-6 hidden">
-        <div>
-          <h1 class="text-lg font-black text-white">Fulfillment Hub Settings</h1>
-          <p class="text-xs text-slate-400">Configuration and compliance licensing details</p>
-        </div>
-        <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 space-y-4 max-w-2xl">
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-slate-400">Store Hub Name</label>
-            <input type="text" value="Rewari Central Hub" disabled class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white">
-          </div>
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-slate-400">Drug Retail License (Form 20/21)</label>
-            <input type="text" value="DL-HR-REW-2026-98102" disabled class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-emerald-400 font-mono">
-          </div>
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-slate-400">Authoritative Cloud Gateway</label>
-            <input type="text" value="https://commerce-os-api.onrender.com" disabled class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-300 font-mono">
-          </div>
-        </div>
-      </div>
-
-    </main>
-  </div>
-
-  <!-- ADD ITEM MODAL -->
-  <div id="add-item-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-4">
-        <div class="flex items-center space-x-2.5">
-          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-            <i class="fa-solid fa-plus font-bold"></i>
-          </div>
-          <div>
-            <h3 class="text-sm font-black text-white">Add New Product to Inventory</h3>
-            <p class="text-[10px] text-slate-400">Add SKU and make it immediately available for quick-commerce orders</p>
-          </div>
-        </div>
-        <button onclick="closeAddItemModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800">
-          <i class="fa-solid fa-xmark text-sm"></i>
-        </button>
-      </div>
-
-      <form id="add-item-form" onsubmit="submitAddItem(event)" class="space-y-3.5 text-xs">
-        <div class="grid grid-cols-2 gap-3">
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Item / Product Name *</label>
-            <input type="text" id="form-name" required placeholder="e.g. Paracip 500mg" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">SKU Code *</label>
-            <input type="text" id="form-sku" required placeholder="e.g. SKU-PCM-500" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-emerald-400 font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Category *</label>
-            <select id="form-category" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
-              <option value="Health & Medicine">Health & Pharmacy</option>
-              <option value="Grocery & Daily Needs">Grocery & Daily Needs</option>
-              <option value="Food & Beverages">Food & Beverages</option>
-              <option value="Personal Care">Personal Care</option>
-              <option value="Electronics">Electronics</option>
-            </select>
-          </div>
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Brand / Manufacturer</label>
-            <input type="text" id="form-brand" placeholder="e.g. Cipla" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-3 gap-3">
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Selling Price (₹) *</label>
-            <input type="number" step="0.5" id="form-price" required placeholder="25" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">MRP (₹) *</label>
-            <input type="number" step="0.5" id="form-mrp" required placeholder="30" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Initial Stock *</label>
-            <input type="number" id="form-stock" required placeholder="50" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-emerald-400 font-bold placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Pack Size / Unit</label>
-            <input type="text" id="form-unit" placeholder="e.g. 10 Tablets / 1 Strip" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
-          </div>
-          <div class="space-y-1">
-            <label class="font-bold text-slate-300">Rx Requirement</label>
-            <select id="form-rx" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
-              <option value="OTC">OTC (No Rx Needed)</option>
-              <option value="RX">Rx Required (Pharmacist approval)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
-          <button type="button" onclick="closeAddItemModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-all">Cancel</button>
-          <button type="submit" id="btn-save-item" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-600/30 transition-all flex items-center space-x-2">
-            <i class="fa-solid fa-check"></i>
-            <span>Add to Stock</span>
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- JAVASCRIPT APP LOGIC -->
-  <script>
-    const API_BASE = '';
-    let currentTab = 'dashboard';
-    let searchQuery = '';
-    let appState = {
-      orders: [],
-      inventory: [],
-      products: [],
-      codLedger: [],
-      audit: []
-    };
-
-    function switchTab(tabId) {
-      currentTab = tabId;
-      document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
-      const active = document.getElementById('tab-' + tabId);
-      if (active) active.classList.remove('hidden');
-
-      document.querySelectorAll('[id^="nav-"]').forEach(btn => {
-        btn.className = 'w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all';
-      });
-      const activeNav = document.getElementById('nav-' + tabId);
-      if (activeNav) {
-        activeNav.className = 'w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all';
-      }
-    }
-
-    function openAddItemModal() {
-      document.getElementById('add-item-modal').classList.remove('hidden');
-      document.getElementById('form-sku').value = 'SKU-' + Math.random().toString(36).substring(2, 7).toUpperCase();
-    }
-
-    function closeAddItemModal() {
-      document.getElementById('add-item-modal').classList.add('hidden');
-    }
-
-    async function submitAddItem(e) {
-      e.preventDefault();
-      const btn = document.getElementById('btn-save-item');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
-
-      const newItem = {
-        name: document.getElementById('form-name').value.trim(),
-        sku: document.getElementById('form-sku').value.trim(),
-        category: document.getElementById('form-category').value,
-        brandName: document.getElementById('form-brand').value.trim() || 'CommerceOS Partner',
-        price: parseFloat(document.getElementById('form-price').value) || 10,
-        mrp: parseFloat(document.getElementById('form-mrp').value) || 12,
-        stockCount: parseInt(document.getElementById('form-stock').value) || 50,
-        packSize: document.getElementById('form-unit').value.trim() || '1 Unit',
-        rxRequirement: document.getElementById('form-rx').value
-      };
-
-      try {
-        const res = await fetch(API_BASE + '/api/v1/seller/inventory/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newItem)
-        });
-        if (res.ok) {
-          closeAddItemModal();
-          await loadAllData();
-          alert('Successfully added SKU: ' + newItem.name);
-        } else {
-          alert('Failed to register SKU in inventory');
-        }
-      } catch (err) {
-        console.error('Error adding SKU:', err);
-        alert('Could not save product');
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-check"></i> Add to Stock';
-      }
-    }
-
-    async function fetchFromApi(endpoint, options = {}) {
-      try {
-        const res = await fetch(API_BASE + endpoint, {
-          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-          ...options
-        });
-        if (!res.ok) return null;
-        return await res.json();
-      } catch (err) {
-        console.error('Fetch error:', err);
-        return null;
-      }
-    }
-
-    async function loadAllData() {
-      try {
-        const [ordData, prodData] = await Promise.all([
-          fetchFromApi('/api/v1/orders/seller'),
-          fetchFromApi('/api/v1/catalog/products')
-        ]);
-
-        appState.orders = Array.isArray(ordData) ? ordData : (ordData?.orders || []);
-        appState.products = Array.isArray(prodData?.content) ? prodData.content : (Array.isArray(prodData) ? prodData : []);
-        appState.inventory = appState.products;
-
-        renderUI();
-      } catch (err) {
-        console.error('Error loading data:', err);
-      }
-    }
-
-    async function updateOrderStatus(orderId, status) {
-      try {
-        await fetch(API_BASE + '/api/v1/orders/' + encodeURIComponent(orderId) + '/status', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status })
-        });
-        await loadAllData();
-      } catch (err) {
-        console.error('Failed to update status:', err);
-      }
-    }
-
-    function renderUI() {
-      const q = searchQuery.toLowerCase().trim();
-      const filteredOrders = q
-        ? appState.orders.filter(o => (o.id + ' ' + (o.customerPhone || '') + ' ' + (o.items || []).map(i => i.name).join(' ')).toLowerCase().includes(q))
-        : appState.orders;
-      const filteredProducts = q
-        ? appState.products.filter(p => (p.name + ' ' + p.sku + ' ' + (p.brandName || '')).toLowerCase().includes(q))
-        : appState.products;
-
-      // 1. KPI Badges
-      const ordersCount = appState.orders.length;
-      const totalStock = appState.products.reduce((acc, p) => acc + (Number(p.stockCount) || 0), 0);
-      
-      document.getElementById('kpi-orders').textContent = ordersCount;
-      document.getElementById('badge-orders').textContent = ordersCount;
-      document.getElementById('kpi-stock').textContent = totalStock;
-      document.getElementById('badge-stock').textContent = appState.products.length;
-
-      // 2. Dashboard Orders Table
-      const dOrdersTable = document.getElementById('dashboard-orders-table');
-      if (filteredOrders.length === 0) {
-        dOrdersTable.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500">No recent orders in this fulfillment hub</td></tr>';
-      } else {
-        dOrdersTable.innerHTML = filteredOrders.slice(0, 6).map(o => {
-          const itemsText = (o.items || []).map(i => i.name || 'Medicine').join(', ') || 'Prescription Medicines';
-          return '<tr class="hover:bg-slate-800/40 transition-colors">' +
-            '<td class="py-3 font-mono text-emerald-400 font-bold">' + o.id + '</td>' +
-            '<td class="py-3 max-w-[200px] truncate text-slate-300">' + itemsText + '</td>' +
-            '<td class="py-3 font-bold text-white">₹' + (o.totalAmount || 0) + '</td>' +
-            '<td class="py-3">' + renderStatusBadge(o.orderStatus || o.status) + '</td>' +
-            '<td class="py-3 text-right"><button onclick="switchTab(\'orders\')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-300">Inspect</button></td>' +
-          '</tr>';
-        }).join('');
-      }
-
-      // 3. Full Orders Table
-      const fOrdersTable = document.getElementById('full-orders-table');
-      if (filteredOrders.length === 0) {
-        fOrdersTable.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No store orders found. Place an order from the mobile app to see it live here!</td></tr>';
-      } else {
-        fOrdersTable.innerHTML = filteredOrders.map(o => {
-          const itemsList = (o.items || []).map(i => '<span class="inline-block px-2 py-0.5 bg-slate-800 rounded text-[10px] text-slate-300 mr-1 mb-1">' + (i.name || 'Item') + ' x' + (i.quantity || 1) + '</span>').join('');
-          const addr = typeof o.deliveryAddress === 'object' && o.deliveryAddress ? (o.deliveryAddress.addressLine || o.deliveryAddress.city || 'Address Saved') : (o.deliveryAddress || 'Delivery Address');
-          return '<tr class="hover:bg-slate-800/40 transition-colors">' +
-            '<td class="py-3.5 font-mono text-emerald-400 font-bold">' + o.id + '</td>' +
-            '<td class="py-3.5 text-slate-300"><div>' + (o.customerPhone || '+919876543210') + '</div><div class="text-[10px] text-slate-400 truncate max-w-[180px]">' + addr + '</div></td>' +
-            '<td class="py-3.5">' + itemsList + '</td>' +
-            '<td class="py-3.5 font-bold text-white"><div>₹' + (o.totalAmount || 0) + '</div><div class="text-[10px] text-slate-400 uppercase">' + (o.paymentMethod || 'COD') + '</div></td>' +
-            '<td class="py-3.5">' + renderStatusBadge(o.orderStatus || o.status) + '</td>' +
-            '<td class="py-3.5 text-right space-x-1.5">' +
-              '<button onclick="updateOrderStatus(\'' + o.id + '\', \'PACKED\')" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]">Pack</button>' +
-              '<button onclick="updateOrderStatus(\'' + o.id + '\', \'DISPATCHED\')" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px]">Ship</button>' +
-            '</td>' +
-          '</tr>';
-        }).join('');
-      }
-
-      // 4. Inventory Quick Preview & Full Table
-      const dInvList = document.getElementById('dashboard-inventory-list');
-      dInvList.innerHTML = filteredProducts.slice(0, 4).map(p => {
-        return '<div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/40">' +
-          '<div class="truncate mr-2">' +
-            '<p class="text-xs font-bold text-white truncate">' + p.name + '</p>' +
-            '<p class="text-[10px] text-slate-400 font-mono">' + p.sku + '</p>' +
-          '</div>' +
-          '<span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-bold text-xs shrink-0">' + (p.stockCount || 0) + ' in stock</span>' +
-        '</div>';
-      }).join('');
-
-      const fInvTable = document.getElementById('full-inventory-table');
-      fInvTable.innerHTML = filteredProducts.map(p => {
-        return '<tr class="hover:bg-slate-800/40 transition-colors">' +
-          '<td class="py-3 font-bold text-white">' + p.name + '<div class="text-[10px] text-slate-400 font-mono">' + p.sku + '</div></td>' +
-          '<td class="py-3 text-slate-300">' + (p.brandName || p.manufacturer || 'Cipla') + '</td>' +
-          '<td class="py-3"><span class="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300">' + (p.therapeuticCategory || 'Medicine') + '</span></td>' +
-          '<td class="py-3 font-bold text-white">₹' + (p.discountedPrice || p.price || 0) + ' <span class="text-[10px] line-through text-slate-500 font-normal">₹' + (p.mrp || 0) + '</span></td>' +
-          '<td class="py-3 font-bold text-emerald-400">' + (p.stockCount || 0) + ' units</td>' +
-          '<td class="py-3 text-right space-x-1">' +
-            '<button onclick="adjustStock(\'' + p.sku + '\', 10)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold rounded text-xs">+10</button>' +
-            '<button onclick="adjustStock(\'' + p.sku + '\', -5)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 font-bold rounded text-xs">-5</button>' +
-          '</td>' +
-        '</tr>';
-      }).join('');
-
-      // 5. Products Grid
-      const pGrid = document.getElementById('products-grid');
-      pGrid.innerHTML = filteredProducts.map(p => {
-        return '<div class="p-4 rounded-2xl bg-slate-800/50 border border-slate-700/50 space-y-2">' +
-          '<div class="flex items-center justify-between">' +
-            '<span class="text-[10px] font-mono text-emerald-400 font-bold">' + p.sku + '</span>' +
-            '<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-bold">' + (p.rxRequirement || 'OTC') + '</span>' +
-          '</div>' +
-          '<h3 class="text-xs font-bold text-white line-clamp-1">' + p.name + '</h3>' +
-          '<div class="flex items-center justify-between pt-2 border-t border-slate-700/60">' +
-            '<span class="text-sm font-black text-white">₹' + (p.discountedPrice || p.price || 0) + '</span>' +
-            '<span class="text-xs text-slate-400 font-medium">' + (p.stockCount || 0) + ' in stock</span>' +
-          '</div>' +
-        '</div>';
-      }).join('');
-    }
-
-    function renderStatusBadge(status) {
-      const s = String(status || 'PLACED').toUpperCase();
-      if (s.includes('DELIVER')) return '<span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">DELIVERED</span>';
-      if (s.includes('TRANSIT') || s.includes('DISPATCH')) return '<span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold">IN TRANSIT</span>';
-      if (s.includes('PACK')) return '<span class="px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-bold">PACKED</span>';
-      if (s.includes('CANCEL')) return '<span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold">CANCELLED</span>';
-      return '<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">PLACED</span>';
-    }
-
-    async function adjustStock(sku, delta) {
-      try {
-        await fetch(API_BASE + '/api/v1/catalog/products/' + encodeURIComponent(sku) + '/stock', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ delta })
-        });
-        await loadAllData();
-      } catch (err) {
-        console.error('Adjust stock error:', err);
-      }
-    }
-
-    function logout() {
-      alert('Logged out from Seller Portal');
-    }
-
-    // Quick search input binding
-    const searchInput = document.getElementById('quick-search');
-    if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
-        searchQuery = e.target.value;
-        renderUI();
-      });
-    }
-
-    // Auto-load and poll every 3 seconds
-    loadAllData();
-    setInterval(loadAllData, 3000);
-  </script>
-</body>
-</html>`;
-
 const fs = require('fs');
 const path = require('path');
+
+const PORT = 3003;
 const dbPath = path.join(__dirname, 'db.json');
+
+const BACKEND_URL = process.env.BACKEND_URL || 'https://commerce-os-api.onrender.com';
+
+function fetchFromGateway(gatewayPath) {
+  return new Promise((resolve) => {
+    const isHttps = BACKEND_URL.startsWith('https');
+    const client = isHttps ? https : http;
+    client.get(`${BACKEND_URL}${gatewayPath}`, { timeout: 4000 }, (res) => {
+      let raw = '';
+      res.on('data', chunk => raw += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(raw));
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    }).on('error', () => resolve(null));
+  });
+}
+
+function postToGateway(gatewayPath, data = {}, method = 'POST') {
+  return new Promise((resolve) => {
+    const payload = JSON.stringify(data);
+    const isHttps = BACKEND_URL.startsWith('https');
+    const client = isHttps ? https : http;
+    const req = client.request(`${BACKEND_URL}${gatewayPath}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      },
+      timeout: 4000
+    }, (res) => {
+      let raw = '';
+      res.on('data', chunk => raw += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(raw));
+        } catch (e) {
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, raw });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.write(payload);
+    req.end();
+  });
+}
 
 function getDbData() {
   try {
     return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   } catch (e) {
-    return { orders: [], products: [] };
+    return { orders: [], products: [], auditLogs: [] };
   }
 }
 
@@ -757,11 +86,635 @@ function parseJsonBody(req) {
   });
 }
 
+const HTML_CONTENT = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commerce OS — Pharmacy Partner Merchant Portal</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0B132B;
+      color: #F1F5F9;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    a, button { cursor: pointer; user-select: none; }
+    
+    /* App Bar */
+    .header {
+      height: 64px;
+      background: rgba(15, 23, 42, 0.95);
+      border-bottom: 1px solid #1E293B;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      flex-shrink: 0;
+      z-index: 40;
+    }
+    .brand-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #10B981, #059669);
+      color: white;
+      font-size: 20px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    .brand-title { font-size: 18px; font-weight: 900; color: #FFFFFF; }
+    .brand-title span { color: #34D399; }
+    .badge-hub {
+      font-size: 10px;
+      font-weight: 800;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34D399;
+      padding: 2px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      margin-left: 8px;
+    }
+    
+    /* Layout */
+    .app-body { display: flex; flex: 1; overflow: hidden; }
+    
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      background: rgba(15, 23, 42, 0.75);
+      border-right: 1px solid #1E293B;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 16px;
+      flex-shrink: 0;
+      z-index: 30;
+    }
+    .nav-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      margin-bottom: 6px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #94A3B8;
+      background: transparent;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      text-align: left;
+    }
+    .nav-btn:hover { background: #1E293B; color: #FFFFFF; }
+    .nav-btn.active {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34D399;
+      border-color: rgba(16, 185, 129, 0.3);
+      font-weight: 700;
+    }
+    .nav-icon { width: 18px; height: 18px; margin-right: 10px; display: inline-flex; align-items: center; justify-content: center; }
+    .nav-badge {
+      font-size: 11px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: #1E293B;
+      color: #CBD5E1;
+    }
+    .nav-badge.warn { background: rgba(245, 158, 11, 0.2); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    /* Main Area */
+    .main-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 32px;
+      background: #0B132B;
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    
+    /* Cards & Grids */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #0F172A;
+      border: 1px solid #1E293B;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+    .card-title { font-size: 12px; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .card-val { font-size: 28px; font-weight: 900; color: #FFFFFF; margin-top: 8px; }
+    .card-sub { font-size: 11px; color: #34D399; margin-top: 4px; font-weight: 600; }
+    
+    /* Tables */
+    .table-container {
+      background: #0F172A;
+      border: 1px solid #1E293B;
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .table-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #1E293B;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+    th { padding: 12px 16px; color: #64748B; font-weight: 700; border-bottom: 1px solid #1E293B; font-size: 11px; text-transform: uppercase; }
+    td { padding: 14px 16px; border-bottom: 1px solid rgba(30, 41, 59, 0.6); color: #E2E8F0; }
+    tr:hover td { background: rgba(30, 41, 59, 0.4); }
+    
+    /* Buttons & Inputs */
+    .btn {
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      border: none;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-emerald { background: #059669; color: white; }
+    .btn-emerald:hover { background: #10B981; }
+    .btn-indigo { background: #4F46E5; color: white; }
+    .btn-indigo:hover { background: #6366F1; }
+    .btn-purple { background: #9333EA; color: white; }
+    .btn-purple:hover { background: #A855F7; }
+    .btn-slate { background: #1E293B; color: #CBD5E1; border: 1px solid #334155; }
+    .btn-slate:hover { background: #334155; color: white; }
+    .btn-rose { background: rgba(225, 29, 72, 0.2); color: #FB7185; border: 1px solid rgba(225, 29, 72, 0.3); }
+    .btn-rose:hover { background: #E11D48; color: white; }
+    .btn-amber { background: #D97706; color: white; }
+    .btn-amber:hover { background: #F59E0B; }
+    
+    .input-box {
+      background: #1E293B;
+      border: 1px solid #334155;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      outline: none;
+    }
+    .input-box:focus { border-color: #10B981; }
+    
+    /* Badges */
+    .status-badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      display: inline-block;
+    }
+    .st-placed { background: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .st-accepted { background: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .st-packed { background: rgba(168, 85, 247, 0.15); color: #C084FC; border: 1px solid rgba(168, 85, 247, 0.3); }
+    .st-transit { background: rgba(59, 130, 246, 0.15); color: #60A5FA; border: 1px solid rgba(59, 130, 246, 0.3); }
+    .st-delivered { background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid #10B981; }
+    .st-cancelled { background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    /* Modal */
+    #item-modal {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(3, 7, 18, 0.8);
+      backdrop-filter: blur(4px);
+      z-index: 999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-card {
+      background: #0F172A;
+      border: 1px solid #334155;
+      border-radius: 20px;
+      width: 100%;
+      max-width: 480px;
+      padding: 24px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .form-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; color: #94A3B8; }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #059669;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      display: none;
+      z-index: 1000;
+      animation: fadeIn 0.2s ease-out;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+  <!-- APP HEADER -->
+  <header class="header">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="brand-logo">S</div>
+      <div>
+        <div style="display: flex; align-items: center;">
+          <span class="brand-title">Commerce<span>OS</span></span>
+          <span class="badge-hub">MERCHANT HUB</span>
+        </div>
+        <p style="font-size: 11px; color: #64748B;">Rewari Central Fulfillment Store (STORE_REWARI_01)</p>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <input id="quick-search" type="text" placeholder="Search Order ID, SKU, Customer..." class="input-box" style="width: 280px;">
+      <div style="display: flex; align-items: center; gap: 6px; background: #1E293B; padding: 6px 12px; border-radius: 8px; font-size: 11px; color: #34D399; font-weight: 700;">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #10B981;"></span>
+        <span>Gateway Connected</span>
+      </div>
+      <button class="btn btn-slate" onclick="loadData(true); showToast('✓ Refreshed latest store state');" style="cursor: pointer; font-weight: 700;">🔄 Refresh</button>
+    </div>
+  </header>
+
+  <!-- APP BODY -->
+  <div class="app-body">
+    
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+      <div>
+        <button type="button" class="nav-btn active" id="btn-dashboard" onclick="setTab('dashboard')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">📊</span>
+            <span>Dashboard Overview</span>
+          </div>
+        </button>
+
+        <button type="button" class="nav-btn" id="btn-orders" onclick="setTab('orders')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">📦</span>
+            <span>Orders & Dispatch</span>
+          </div>
+          <span id="badge-orders" class="nav-badge">0</span>
+        </button>
+
+        <button type="button" class="nav-btn" id="btn-inventory" onclick="setTab('inventory')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">🏬</span>
+            <span>Stock & Inventory</span>
+          </div>
+          <span id="badge-stock" class="nav-badge">0</span>
+        </button>
+
+        <button type="button" class="nav-btn" id="btn-cod" onclick="setTab('cod')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">💰</span>
+            <span>COD Cash Ledger</span>
+          </div>
+          <span id="badge-cod" class="nav-badge warn">₹0</span>
+        </button>
+
+        <button type="button" class="nav-btn" id="btn-products" onclick="setTab('products')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">💊</span>
+            <span>Catalog Products</span>
+          </div>
+        </button>
+
+        <button type="button" class="nav-btn" id="btn-audit" onclick="setTab('audit')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">🛡️</span>
+            <span>Audit Trail</span>
+          </div>
+        </button>
+
+        <button type="button" class="nav-btn" id="btn-settings" onclick="setTab('settings')">
+          <div style="display: flex; align-items: center;">
+            <span class="nav-icon">⚙️</span>
+            <span>Store Settings</span>
+          </div>
+        </button>
+      </div>
+
+      <div style="background: #1E293B; padding: 12px; border-radius: 12px; font-size: 11px;">
+        <p style="font-weight: 800; color: white;">Commerce OS Partner</p>
+        <p style="color: #64748B; font-family: monospace;">seller_rewari_01</p>
+      </div>
+    </aside>
+
+    <!-- MAIN SCROLLABLE CONTENT -->
+    <main class="main-content">
+
+      <!-- 1. TAB: DASHBOARD -->
+      <section id="pane-dashboard" class="tab-pane active">
+        <div class="kpi-grid">
+          <div class="card">
+            <p class="card-title">Live Active Orders</p>
+            <p class="card-val" id="kpi-orders">0</p>
+            <p class="card-sub">⚡ 10-Minute Express Fulfillment</p>
+          </div>
+          <div class="card">
+            <p class="card-title">Inventory Stock Qty</p>
+            <p class="card-val" id="kpi-stock">0</p>
+            <p class="card-sub" style="color: #60A5FA;">Across registered SKUs</p>
+          </div>
+          <div class="card">
+            <p class="card-title">Pending COD Cash</p>
+            <p class="card-val" id="kpi-cod" style="color: #FBBF24;">₹0</p>
+            <p class="card-sub" style="color: #FBBF24;">Awaiting rider settlement</p>
+          </div>
+          <div class="card">
+            <p class="card-title">Cloud Infrastructure</p>
+            <p class="card-val" style="color: #34D399;">99.9%</p>
+            <p class="card-sub">Active Render Gateway</p>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <div class="table-header">
+            <span style="font-weight: 800; font-size: 14px;">Recent Order Activity</span>
+            <button class="btn btn-emerald" onclick="setTab('orders')">View All Orders →</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Medicines</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th style="text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="dash-orders-table">
+              <tr><td colspan="5" style="text-align: center; color: #64748B; padding: 24px;">Loading live orders...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 2. TAB: ORDERS -->
+      <section id="pane-orders" class="tab-pane">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div>
+            <h2 style="font-size: 18px; font-weight: 900;">Order Management & Fulfillment</h2>
+            <p style="font-size: 12px; color: #64748B;">Review incoming orders, pack medicines, and dispatch to riders.</p>
+          </div>
+          <button class="btn btn-emerald" onclick="loadData()">Refresh Orders</button>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Customer & Address</th>
+                <th>Medicines</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th style="text-align: right;">Fulfillment Action</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table">
+              <tr><td colspan="6" style="text-align: center; color: #64748B; padding: 32px;">Loading orders...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 3. TAB: INVENTORY -->
+      <section id="pane-inventory" class="tab-pane">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div>
+            <h2 style="font-size: 18px; font-weight: 900;">Stock Inventory & Reorder Levels</h2>
+            <p style="font-size: 12px; color: #64748B;">Monitor on-hand stock and make instant quantity adjustments.</p>
+          </div>
+          <button class="btn btn-emerald" onclick="openModal()">+ Add New Product / SKU</button>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>SKU / Product Name</th>
+                <th>Brand / Manufacturer</th>
+                <th>Selling Price</th>
+                <th>Current Stock</th>
+                <th style="text-align: right;">Quick Stock Adjustment</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-table">
+              <tr><td colspan="5" style="text-align: center; color: #64748B; padding: 32px;">Loading stock...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 4. TAB: COD LEDGER -->
+      <section id="pane-cod" class="tab-pane">
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px; font-weight: 900;">Cash on Delivery (COD) Reconciliation</h2>
+          <p style="font-size: 12px; color: #64748B;">Track cash collected at customer doorstep and reconcile settlement.</p>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Customer Phone</th>
+                <th>COD Amount</th>
+                <th>Payment State</th>
+                <th style="text-align: right;">Reconciliation Action</th>
+              </tr>
+            </thead>
+            <tbody id="cod-table">
+              <tr><td colspan="5" style="text-align: center; color: #64748B; padding: 32px;">Loading COD ledger...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 5. TAB: PRODUCTS -->
+      <section id="pane-products" class="tab-pane">
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px; font-weight: 900;">Master Medicine Catalog</h2>
+          <p style="font-size: 12px; color: #64748B;">All registered product templates and specifications.</p>
+        </div>
+        <div id="products-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;"></div>
+      </section>
+
+      <!-- 6. TAB: AUDIT -->
+      <section id="pane-audit" class="tab-pane">
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px; font-weight: 900;">Immutable Compliance Audit Trail</h2>
+          <p style="font-size: 12px; color: #64748B;">Logged atomic events, inventory adjustments, and status transitions.</p>
+        </div>
+        <div id="audit-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </section>
+
+      <!-- 7. TAB: SETTINGS -->
+      <section id="pane-settings" class="tab-pane">
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px; font-weight: 900;">Merchant Store Settings &amp; Dispatch Priority</h2>
+          <p style="font-size: 12px; color: #64748B;">Control store acceptance priority, licensing, and gateway connections.</p>
+        </div>
+        <div class="card" style="max-width: 650px; display: flex; flex-direction: column; gap: 20px;">
+          
+          <!-- Dispatch Mode Priority Switch -->
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <h4 style="font-size: 14px; font-weight: 800; color: #FFFFFF;">Merchant Acceptance Priority (Manual Review)</h4>
+                <p style="font-size: 11px; color: #94A3B8; margin-top: 4px;" id="priority-desc">
+                  When enabled, you have the priority to accept incoming orders. Delivery riders are NOT notified until you accept.
+                </p>
+              </div>
+              <button id="btn-toggle-priority" class="btn btn-emerald" onclick="handleTogglePriority()" style="cursor: pointer; padding: 8px 16px; font-weight: 800;">
+                Toggle Mode
+              </button>
+            </div>
+            <div id="priority-status-text" style="font-size: 12px; font-weight: 800; color: #34D399; margin-top: 10px;">
+              ⚡ Mode: Auto-Dispatch (Dark Store Express)
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Store Hub Name</label>
+            <input type="text" class="input-box" value="Rewari Central Fulfillment Store (STORE_REWARI_01)" disabled>
+          </div>
+          <div class="form-group">
+            <label>Drug Retail License (Form 20/21)</label>
+            <input type="text" class="input-box" value="DL-HR-REW-2026-98102" disabled style="color: #34D399; font-family: monospace;">
+          </div>
+          <div class="form-group">
+            <label>Active Authoritative Gateway</label>
+            <input type="text" class="input-box" value="https://commerce-os-api.onrender.com" disabled style="font-family: monospace;">
+          </div>
+        </div>
+      </section>
+
+      <!-- 8. TAB: DEDICATED FULL ORDER DETAILS PAGE -->
+      <section id="pane-order-detail" class="tab-pane">
+        <!-- Top Navigation Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1E293B; padding-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <button class="btn btn-slate" onclick="setTab('orders')" style="padding: 8px 16px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 13px;">
+              ← Back to Orders List
+            </button>
+            <span style="color: #475569; font-size: 16px;">/</span>
+            <span style="background: rgba(16, 185, 129, 0.15); color: #34D399; font-family: monospace; font-size: 14px; font-weight: 800; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3);" id="page-od-id">
+              ord_...
+            </span>
+            <span id="page-od-status-badge" class="status-badge st-accepted">ACCEPTED</span>
+          </div>
+          <button class="btn btn-emerald" onclick="reloadCurrentOrderDetail()" style="cursor: pointer; padding: 8px 14px; font-weight: 700;">
+            🔄 Refresh Order
+          </button>
+        </div>
+
+        <div id="page-od-body" style="display: flex; flex-direction: column; gap: 20px; max-width: 960px;">
+          <!-- Loaded dynamically via viewOrderDetails() -->
+          <div style="text-align: center; color: #64748B; padding: 48px;">Loading order details...</div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ADD ITEM MODAL -->
+  <div id="item-modal">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #1E293B; padding-bottom: 12px;">
+        <h3 style="font-size: 16px; font-weight: 900;">Add Product to Stock</h3>
+        <button class="btn btn-slate" onclick="closeModal()">✕</button>
+      </div>
+
+      <form id="item-form" onsubmit="handleSaveItem(event)">
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Item Name *</label>
+            <input type="text" id="f-name" class="input-box" required placeholder="e.g. Paracip 500mg">
+          </div>
+          <div class="form-group">
+            <label>SKU Code *</label>
+            <input type="text" id="f-sku" class="input-box" required placeholder="SKU-XXX">
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Category</label>
+            <select id="f-cat" class="input-box">
+              <option>Health & Pharmacy</option>
+              <option>Grocery & Needs</option>
+              <option>Personal Care</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Brand Name</label>
+            <input type="text" id="f-brand" class="input-box" placeholder="e.g. Cipla">
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="form-group">
+            <label>Price (₹) *</label>
+            <input type="number" id="f-price" class="input-box" required value="20">
+          </div>
+          <div class="form-group">
+            <label>MRP (₹) *</label>
+            <input type="number" id="f-mrp" class="input-box" required value="25">
+          </div>
+          <div class="form-group">
+            <label>Stock Qty *</label>
+            <input type="number" id="f-stock" class="input-box" required value="50">
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn btn-slate" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-emerald">Save to Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TOAST MESSAGE -->
+  <div id="toast">Order state updated</div>
+
+  <script src="/seller-client.js"></script>
+</body>
+</html>`;
+
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -772,21 +725,128 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/seller-client.js') {
+    try {
+      const clientJs = fs.readFileSync(path.join(__dirname, 'seller-client.js'), 'utf8');
+      res.writeHead(200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(clientJs);
+    } catch (e) {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+    return;
+  }
+
   if (pathname === '/health' || pathname === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'healthy', app: 'CommerceOS Seller Portal' }));
     return;
   }
 
-  // API Route: GET /api/v1/orders/seller or /api/v1/orders
+  // GET /api/v1/seller/store/settings
+  if (pathname === '/api/v1/seller/store/settings' && req.method === 'GET') {
+    const db = getDbData();
+    let store = null;
+    if (Array.isArray(db.stores)) {
+      store = db.stores.find(s => s.id === 'STORE_REWARI_01' || s.storeId === 'STORE_REWARI_01');
+    } else if (db.stores) {
+      store = db.stores['STORE_REWARI_01'];
+    }
+    if (!store) {
+      store = {
+        storeId: 'STORE_REWARI_01',
+        name: 'Rewari Central Fulfillment Store',
+        sellerApprovalRequired: false
+      };
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, store }));
+    return;
+  }
+
+  // POST /api/v1/seller/store/settings
+  if (pathname === '/api/v1/seller/store/settings' && (req.method === 'POST' || req.method === 'PATCH')) {
+    const body = await parseJsonBody(req);
+    const db = getDbData();
+    let store = null;
+    if (Array.isArray(db.stores)) {
+      store = db.stores.find(s => s.id === 'STORE_REWARI_01' || s.storeId === 'STORE_REWARI_01');
+      if (!store) {
+        store = { id: 'STORE_REWARI_01', storeId: 'STORE_REWARI_01', name: 'Rewari Central Fulfillment Store' };
+        db.stores.push(store);
+      }
+    } else {
+      db.stores = db.stores || {};
+      store = db.stores['STORE_REWARI_01'] = db.stores['STORE_REWARI_01'] || {
+        storeId: 'STORE_REWARI_01',
+        name: 'Rewari Central Fulfillment Store',
+      };
+    }
+    if (body.sellerApprovalRequired !== undefined) {
+      store.sellerApprovalRequired = Boolean(body.sellerApprovalRequired);
+    }
+    saveDbData(db);
+    try {
+      await Promise.allSettled([
+        postToGateway('/api/v1/seller/store/settings', body, 'PATCH'),
+        postToGateway('/api/v1/seller/store/settings', body, 'POST')
+      ]);
+    } catch (_) {}
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, store }));
+    return;
+  }
+
+  // GET /api/v1/orders/seller
   if ((pathname === '/api/v1/orders/seller' || pathname === '/api/v1/orders') && req.method === 'GET') {
+    const cloudOrders = await fetchFromGateway('/api/v1/orders/seller');
+    if (Array.isArray(cloudOrders) && cloudOrders.length > 0) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(cloudOrders));
+      return;
+    }
     const db = getDbData();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(db.orders || []));
     return;
   }
 
-  // API Route: GET /api/v1/catalog/products
+  // GET /api/v1/orders/:id (Single order detail with deliverySession & rider history)
+  const singleOrderMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)$/);
+  if (singleOrderMatch && req.method === 'GET') {
+    const id = decodeURIComponent(singleOrderMatch[1]);
+    const cloudOrder = await fetchFromGateway(`/api/v1/orders/${encodeURIComponent(id)}`);
+    if (cloudOrder && (cloudOrder.id || cloudOrder.orderId)) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(cloudOrder));
+      return;
+    }
+    const db = getDbData();
+    const order = (db.orders || []).find(o => o.id === id || o.orderId === id);
+    if (order) {
+      db.deliverySessions = db.deliverySessions || {};
+      const session = db.deliverySessions[order.id] || db.deliverySessions['del_' + order.id] || Object.values(db.deliverySessions).find(s => s.orderId === order.id);
+      const enriched = {
+        ...order,
+        deliverySession: session || null,
+        rider: session?.riderId ? {
+          riderId: session.riderId,
+          name: session.riderName || 'Assigned Delivery Partner',
+          phone: session.riderPhone || '+91 98765 43210',
+          vehicle: session.riderVehicle || 'Electric Scooter'
+        } : null,
+        riderHistory: session?.history || []
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(enriched));
+      return;
+    }
+  }
+
+  // GET /api/v1/catalog/products
   if (pathname === '/api/v1/catalog/products' && req.method === 'GET') {
     const db = getDbData();
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -794,32 +854,31 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // API Route: POST /api/v1/seller/inventory/add or /api/v1/catalog/products
+  // GET /api/v1/orders/audit
+  if (pathname === '/api/v1/orders/audit' && req.method === 'GET') {
+    const db = getDbData();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ logs: db.auditLogs || [], total: (db.auditLogs || []).length }));
+    return;
+  }
+
+  // POST /api/v1/seller/inventory/add
   if ((pathname === '/api/v1/seller/inventory/add' || pathname === '/api/v1/catalog/products') && req.method === 'POST') {
     const body = await parseJsonBody(req);
     const db = getDbData();
     const product = {
       id: body.id || 'prod_' + Math.floor(10000 + Math.random() * 90000),
       sku: body.sku || 'SKU-' + Math.floor(1000 + Math.random() * 9000),
-      name: body.name || 'Untitled Commerce Item',
-      brandName: body.brandName || body.brand || 'Seller Brand',
-      manufacturer: body.manufacturer || 'Seller',
+      name: body.name || 'Untitled Item',
+      brandName: body.brandName || 'CommerceOS Partner',
+      manufacturer: body.manufacturer || 'Cipla',
       packSize: body.packSize || '1 unit',
-      rxRequirement: body.rxRequirement || 'OTC',
-      price: Number(body.mrp || body.price || 12),
-      mrp: Number(body.mrp || body.price || 12),
-      discountedPrice: Number(body.price || body.discountedPrice || 10),
-      sellingPrice: Number(body.price || body.discountedPrice || 10),
-      discountPercentage: 15,
-      inStock: Boolean(body.inStock ?? true),
-      stockCount: Number(body.stockCount ?? 100),
-      coldChainRequired: Boolean(body.coldChainRequired),
-      expressDeliverySlaMins: 15,
-      therapeuticCategory: body.category || body.therapeuticCategory || 'General Commerce',
-      templateType: 'MEDICINE_ITEM',
-      rating: 5.0,
-      reviewCount: 1,
-      image: body.image || '',
+      price: Number(body.price || 10),
+      mrp: Number(body.mrp || 12),
+      discountedPrice: Number(body.price || 10),
+      inStock: true,
+      stockCount: Number(body.stockCount || 50),
+      therapeuticCategory: body.category || 'General',
       sellerId: 'seller_rewari_01'
     };
     db.products = db.products || [];
@@ -830,16 +889,96 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // API Route: PATCH /api/v1/orders/:id/status
+  // POST /api/v1/orders/:id/accept-by-seller or /accept
+  const acceptMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/(?:accept-by-seller|accept)$/);
+  if (acceptMatch && req.method === 'POST') {
+    const orderId = decodeURIComponent(acceptMatch[1]);
+    try {
+      await Promise.allSettled([
+        postToGateway(`/api/v1/orders/${encodeURIComponent(orderId)}/accept`, {}, 'POST'),
+        postToGateway(`/api/v1/orders/${encodeURIComponent(orderId)}/accept-by-seller`, {}, 'POST')
+      ]);
+    } catch (_) {}
+    const db = getDbData();
+    const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
+    if (order) {
+      order.status = 'SELLER_ACCEPTED';
+      order.orderStatus = 'SELLER_ACCEPTED';
+      saveDbData(db);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, orderId, status: 'SELLER_ACCEPTED' }));
+    return;
+  }
+
+  // POST /api/v1/orders/:id/pack
+  const packMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/pack$/);
+  if (packMatch && req.method === 'POST') {
+    const orderId = decodeURIComponent(packMatch[1]);
+    try {
+      await postToGateway(`/api/v1/orders/${encodeURIComponent(orderId)}/pack`, {}, 'POST');
+    } catch (_) {}
+    const db = getDbData();
+    const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
+    if (order) {
+      order.status = 'PACKED';
+      order.orderStatus = 'PACKED';
+      saveDbData(db);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, orderId, status: 'PACKED' }));
+    return;
+  }
+
+  // POST /api/v1/orders/:id/ready-for-pickup
+  const readyMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/ready-for-pickup$/);
+  if (readyMatch && req.method === 'POST') {
+    const orderId = decodeURIComponent(readyMatch[1]);
+    const db = getDbData();
+    const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
+    if (order) {
+      order.status = 'OUT_FOR_DELIVERY';
+      order.orderStatus = 'OUT_FOR_DELIVERY';
+      saveDbData(db);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, orderId, status: 'OUT_FOR_DELIVERY' }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'ORDER_NOT_FOUND' }));
+    }
+    return;
+  }
+
+  // POST /api/v1/orders/:id/collect-cod
+  const codCollectMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/collect-cod$/);
+  if (codCollectMatch && req.method === 'POST') {
+    const orderId = decodeURIComponent(codCollectMatch[1]);
+    const db = getDbData();
+    const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
+    if (order) {
+      order.paymentStatus = 'COLLECTED';
+      order.codReconciled = true;
+      saveDbData(db);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, orderId, paymentStatus: 'COLLECTED' }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'ORDER_NOT_FOUND' }));
+    }
+    return;
+  }
+
+  // PATCH /api/v1/orders/:id/status
   const orderStatusMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/status$/);
-  if (orderStatusMatch && req.method === 'PATCH') {
+  if (orderStatusMatch && (req.method === 'PATCH' || req.method === 'POST')) {
     const orderId = decodeURIComponent(orderStatusMatch[1]);
     const body = await parseJsonBody(req);
     const db = getDbData();
     const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
     if (order) {
-      order.status = body.status || order.status;
-      order.orderStatus = body.status || order.orderStatus;
+      const newStatus = body.status || body.targetStatus || order.status;
+      order.status = newStatus;
+      order.orderStatus = newStatus;
       saveDbData(db);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(order));
@@ -850,7 +989,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // API Route: PATCH /api/v1/catalog/products/:id/stock
+  // PATCH /api/v1/catalog/products/:id/stock
   const stockMatch = pathname.match(/^\/api\/v1\/catalog\/products\/([^/]+)\/stock$/);
   if (stockMatch && req.method === 'PATCH') {
     const sku = decodeURIComponent(stockMatch[1]);
@@ -874,14 +1013,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Default: HTML Web Portal
+  // HTML Web Portal
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-cache'
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    'Pragma': 'no-cache',
+    'Expires': '0'
   });
   res.end(HTML_CONTENT);
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 CommerceOS High-Speed Seller Portal listening on http://localhost:${PORT} and http://0.0.0.0:${PORT}`);
+  console.log(`🚀 CommerceOS Clean Zero-CDN Seller Portal listening on http://localhost:${PORT} and http://0.0.0.0:${PORT}`);
 });

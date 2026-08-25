@@ -40,7 +40,7 @@ fun AddressBookContent(
     onDeleteAddress: (String) -> Unit,
     onSetDefaultAddress: (String) -> Unit,
     onAddNewLocation: () -> Unit,
-    onProceedToPayment: () -> Unit,
+    onProceedToPayment: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var addressSearchQuery by remember { mutableStateOf("") }
@@ -155,20 +155,46 @@ fun AddressBookContent(
                                 modifier = Modifier.padding(Spacing.xl),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(Icons.Default.LocationOn, contentDescription = null, tint = CommerceColors.TextMuted, modifier = Modifier.size(36.dp))
+                                Icon(
+                                    Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    tint = CommerceColors.Primary,
+                                    modifier = Modifier.size(44.dp)
+                                )
                                 Spacer(modifier = Modifier.height(Spacing.xs))
                                 Text(
                                     if (addresses.isEmpty()) "No saved addresses yet" else "No addresses match your search",
-                                    style = CommerceTypography.BodySmall,
+                                    style = CommerceTypography.Title,
                                     fontWeight = FontWeight.Bold,
                                     color = CommerceColors.TextPrimary
                                 )
                                 Spacer(modifier = Modifier.height(Spacing.xs))
                                 Text(
-                                    if (addresses.isEmpty()) "Add a delivery address to calculate fulfillment ETAs and proceed to checkout." else "Try searching for a different street, area, tag, or city.",
+                                    if (addresses.isEmpty())
+                                        "Add your delivery address to see live 10-minute delivery ETAs and place your order."
+                                    else
+                                        "Try searching for a different street, area, tag, or city.",
                                     style = CommerceTypography.Caption,
-                                    color = CommerceColors.TextMuted
+                                    color = CommerceColors.TextMuted,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
+                                if (addresses.isEmpty()) {
+                                    Spacer(modifier = Modifier.height(Spacing.md))
+                                    Button(
+                                        onClick = onAddNewLocation,
+                                        colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
+                                        shape = RoundedCornerShape(Radius.Button),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            "Add Delivery Address",
+                                            style = CommerceTypography.Label,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -189,16 +215,18 @@ fun AddressBookContent(
 
         Spacer(modifier = Modifier.height(Spacing.sm))
 
-        // Bottom CTA
-        val isServiceable = serviceability !is ServiceabilityState.Unavailable
-        Button(
-            onClick = onProceedToPayment,
-            enabled = selectedAddressId != null && isServiceable,
-            colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
-            shape = RoundedCornerShape(Radius.Button),
-            modifier = Modifier.fillMaxWidth().height(48.dp)
-        ) {
-            Text("Proceed to Checkout", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+        // Bottom CTA (Only visible during checkout flow)
+        if (onProceedToPayment != null) {
+            val isServiceable = serviceability !is ServiceabilityState.Unavailable
+            Button(
+                onClick = onProceedToPayment,
+                enabled = selectedAddressId != null && isServiceable,
+                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
+                shape = RoundedCornerShape(Radius.Button),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Proceed to Checkout", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+            }
         }
     }
 

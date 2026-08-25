@@ -8,13 +8,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -73,7 +76,10 @@ fun HomeScreen(
     cartItems: List<CartItem> = emptyList(),
     homeContext: HomeContext? = null,
     selectedAddress: ApiAddress? = null,
+    calculatedEtaMinutes: Int = 11,
+    locationHeaderLabel: String? = null,
     onChangeAddress: () -> Unit = {},
+    onProfileClick: () -> Unit = {},
     onEntityClick: (CommerceEntity) -> Unit = {},
     onAddToCart: (CommerceProduct) -> Unit = {},
     onUpdateQuantity: (String, Int) -> Unit = { _, _ -> },
@@ -109,7 +115,14 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             item {
-                DeliveryAddressWidget(context = homeContext, selectedAddress = selectedAddress, onChangeAddress = onChangeAddress)
+                DeliveryAddressWidget(
+                    context = homeContext,
+                    selectedAddress = selectedAddress,
+                    calculatedEtaMinutes = calculatedEtaMinutes,
+                    locationHeaderLabel = locationHeaderLabel,
+                    onChangeAddress = onChangeAddress,
+                    onProfileClick = onProfileClick
+                )
             }
 
             item {
@@ -161,23 +174,23 @@ fun HomeScreen(
 }
 
 private data class QuickCategoryTile(
-    val mark: String,
+    val icon: ImageVector,
     val label: String,
     val bgColor: Color,
-    val fgColor: Color
+    val iconTint: Color
 )
 
 @Composable
 private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
     val categories = listOf(
-        QuickCategoryTile("Rx", "Medicines", CommerceColors.SuccessSoft, CommerceColors.PrimaryDark),
-        QuickCategoryTile("D", "Dairy & Bread", Color(0xFFEFF7FF), Color(0xFF246B9F)),
-        QuickCategoryTile("F", "Fresh Fruits", Color(0xFFFFF4CD), Color(0xFF8A5A00)),
-        QuickCategoryTile("C", "Cold Drinks", Color(0xFFF2EEFF), Color(0xFF5A45A0)),
-        QuickCategoryTile("M", "Munchies", Color(0xFFFFF0DF), Color(0xFF9A4F00)),
-        QuickCategoryTile("B", "Bath & Body", Color(0xFFE7F8F4), Color(0xFF00796B)),
-        QuickCategoryTile("E", "Essentials", Color(0xFFFFEEF1), Color(0xFFB42345)),
-        QuickCategoryTile("Bk", "Bakery", Color(0xFFFFF7D6), Color(0xFF7A5A00))
+        QuickCategoryTile(Icons.Default.ShoppingCart, "Groceries", Color(0xFFE8F5E9), Color(0xFF16A34A)),
+        QuickCategoryTile(Icons.Default.Favorite, "Medicines", Color(0xFFE0F2FE), Color(0xFF0284C7)),
+        QuickCategoryTile(Icons.Default.Star, "Top Deals", Color(0xFFFEF3C7), Color(0xFFD97706)),
+        QuickCategoryTile(Icons.Default.Home, "Essentials", Color(0xFFEDE9FE), Color(0xFF7C3AED)),
+        QuickCategoryTile(Icons.Default.Person, "Personal Care", Color(0xFFFCE7F3), Color(0xFFDB2777)),
+        QuickCategoryTile(Icons.Default.Phone, "Electronics", Color(0xFFCCFBF1), Color(0xFF0D9488)),
+        QuickCategoryTile(Icons.Default.Build, "Home Repairs", Color(0xFFFFEDD5), Color(0xFFEA580C)),
+        QuickCategoryTile(Icons.Default.LocationOn, "Local Stores", Color(0xFFF1F5F9), Color(0xFF475569))
     )
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -196,12 +209,12 @@ private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
             ) {
                 rowList.forEach { item ->
                     Surface(
-                        color = CommerceColors.Surface,
-                        shape = RoundedCornerShape(Radius.Card),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, CommerceColors.Border),
+                        color = Color.White,
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                         modifier = Modifier
                             .weight(1f)
-                            .height(94.dp)
+                            .height(88.dp)
                             .clickable { onOpenCatalog() }
                     ) {
                         Column(
@@ -211,25 +224,25 @@ private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
                             Surface(
                                 color = item.bgColor,
                                 shape = CircleShape,
-                                modifier = Modifier.size(44.dp)
+                                modifier = Modifier.size(38.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = item.mark,
-                                        style = CommerceTypography.Label,
-                                        fontWeight = FontWeight.Black,
-                                        color = item.fgColor
+                                    Icon(
+                                        imageVector = item.icon,
+                                        contentDescription = item.label,
+                                        tint = item.iconTint,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = item.label,
-                                style = CommerceTypography.Meta,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = CommerceColors.TextPrimary,
+                                color = Color(0xFF1E293B),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                maxLines = 2,
+                                maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
@@ -241,99 +254,149 @@ private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
 }
 
 // ---------------------------------------------------------------------------
-// Fixed first-viewport chrome
+// Fixed first-viewport chrome (Blinkit & Zomato Native Top Header)
 // ---------------------------------------------------------------------------
 
 @Composable
 private fun DeliveryAddressWidget(
     context: HomeContext?,
     selectedAddress: ApiAddress? = null,
-    onChangeAddress: () -> Unit
+    calculatedEtaMinutes: Int = 11,
+    locationHeaderLabel: String? = null,
+    onChangeAddress: () -> Unit,
+    onProfileClick: () -> Unit
 ) {
-    val hasAddress = context?.hasAddress == true || selectedAddress != null
+    val hasAddress = context?.hasAddress == true || selectedAddress != null || !locationHeaderLabel.isNullOrBlank()
 
-    val etaDisplay = remember(selectedAddress, context) {
-        if (!context?.formattedEta.isNullOrBlank()) {
+    val etaDisplay = remember(calculatedEtaMinutes, context) {
+        if (calculatedEtaMinutes > 0) {
+            "$calculatedEtaMinutes mins"
+        } else if (!context?.formattedEta.isNullOrBlank()) {
             context!!.formattedEta!!
         } else {
-            "10 MINS"
+            "11 mins"
         }
     }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        shape = RoundedCornerShape(Radius.Card),
-        border = androidx.compose.foundation.BorderStroke(1.dp, CommerceColors.Border),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    val displayAddress = if (!locationHeaderLabel.isNullOrBlank()) {
+        locationHeaderLabel
+    } else if (hasAddress) {
+        val tag = selectedAddress?.tag?.ifBlank { "Home" } ?: "Home"
+        val line = selectedAddress?.addressLine?.takeIf { it.isNotBlank() }
+            ?: context?.displayLabel?.takeIf { it.isNotBlank() }
+            ?: "Delivery Location"
+        "$tag - $line"
+    } else {
+        "Select Delivery Location"
+    }
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onChangeAddress)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Left Column: Brand / Delivery SLA + Location Selector
+        Column(
+            modifier = Modifier.weight(1f)
         ) {
-            Surface(
-                color = CommerceColors.SpeedYellow,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = etaDisplay,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        color = CommerceColors.SushiInk
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (hasAddress) "Delivery to Home" else "Select Location",
-                        style = CommerceTypography.BodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = CommerceColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Change Address",
-                        tint = CommerceColors.TextMuted,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = context?.displayLabel ?: "Rewari Central, Haryana",
-                    style = CommerceTypography.Meta,
-                    fontWeight = FontWeight.Normal,
-                    color = CommerceColors.TextMuted,
-                    maxLines = 1
+                    text = "Delivery in ",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF0F172A)
+                )
+                Text(
+                    text = etaDisplay,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF059669) // Fresh Emerald Accent for ETA
                 )
             }
 
-            Text(
-                text = "Change",
-                style = CommerceTypography.Caption,
-                fontWeight = FontWeight.Bold,
-                color = CommerceColors.Primary
-            )
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable(onClick = onChangeAddress)
+                    .padding(vertical = 2.dp)
+            ) {
+                Icon(
+                    Icons.Default.LocationOn,
+                    contentDescription = null,
+                    tint = Color(0xFF0F172A),
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(
+                    text = displayAddress,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF334155),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Change Address",
+                    tint = Color(0xFF0F172A),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Right Profile Circle Button
+        Surface(
+            color = Color(0xFFF1F5F9),
+            shape = CircleShape,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier
+                .size(42.dp)
+                .clickable(onClick = onProfileClick)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = "Account",
+                    tint = Color(0xFF0F172A),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun UniversalSearchBar(onClick: () -> Unit) {
+    val searchHints = remember {
+        listOf(
+            "Search \"fresh milk, breads, fruits...\"",
+            "Search \"medicines, wellness & care...\"",
+            "Search \"chocolates, snacks & ice cream...\"",
+            "Search \"10-minute daily essentials...\""
+        )
+    }
+    var hintIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2800)
+            hintIndex = (hintIndex + 1) % searchHints.size
+        }
+    }
+
     Surface(
-        color = CommerceColors.Surface,
-        shape = RoundedCornerShape(Radius.Card),
-        border = androidx.compose.foundation.BorderStroke(1.dp, CommerceColors.Border),
-        shadowElevation = 1.dp,
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 3.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
@@ -342,17 +405,43 @@ private fun UniversalSearchBar(onClick: () -> Unit) {
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Search, contentDescription = null, tint = CommerceColors.TextPrimary, modifier = Modifier.size(20.dp))
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                tint = Color(0xFF059669),
+                modifier = Modifier.size(22.dp)
+            )
             Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Search for milk, eggs, medicines...",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = CommerceColors.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Box(modifier = Modifier.weight(1f)) {
+                AnimatedContent(
+                    targetState = hintIndex,
+                    transitionSpec = {
+                        fadeIn() togetherWith fadeOut()
+                    },
+                    label = "SearchHintAnimation"
+                ) { targetIndex ->
+                    Text(
+                        text = searchHints[targetIndex],
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF64748B),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+                color = Color(0xFFF1F5F9),
+                shape = CircleShape,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "🎙️",
+                        fontSize = 13.sp
+                    )
+                }
             }
         }
     }
@@ -435,28 +524,30 @@ private fun VerticalChip(
 
 @Composable
 private fun VerticalGlyph(iconKey: String, tint: Color) {
-    val symbol = when (iconKey.lowercase()) {
-        "grocery", "fresh" -> "🛒"
-        "food", "restaurant" -> "🍽️"
-        "fashion", "style" -> "👔"
-        "electronics", "tech" -> "📱"
-        "health", "pharmacy" -> "💊"
-        "local", "services" -> "🔧"
-        else -> "🛍️"
+    val icon = when (iconKey.lowercase()) {
+        "grocery", "fresh" -> Icons.Default.ShoppingCart
+        "food", "restaurant" -> Icons.Default.Star
+        "fashion", "style" -> Icons.Default.Person
+        "electronics", "tech" -> Icons.Default.Phone
+        "health", "pharmacy", "wellness" -> Icons.Default.Favorite
+        "local", "services" -> Icons.Default.Build
+        else -> Icons.Default.Home
     }
     Surface(
         color = tint.copy(alpha = 0.12f),
-        shape = RoundedCornerShape(12.dp)
+        shape = CircleShape
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
-                .padding(4.dp),
+                .size(40.dp)
+                .padding(8.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = symbol,
-                style = CommerceTypography.Title
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(22.dp)
             )
         }
     }

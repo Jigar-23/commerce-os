@@ -18,7 +18,8 @@ fun AddressScreen(
     viewModel: AddressViewModel,
     serviceability: ServiceabilityState,
     onSelectAddress: (ApiAddress) -> Unit,
-    onProceedToPayment: () -> Unit,
+    onProceedToPayment: (() -> Unit)? = null,
+    onSavedSuccessfully: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -26,14 +27,13 @@ fun AddressScreen(
         viewModel.attachContext(context)
     }
 
-    val currentSelectedAddress = viewModel.selectedAddress
-    LaunchedEffect(currentSelectedAddress) {
-        if (currentSelectedAddress != null) {
-            onSelectAddress(currentSelectedAddress)
+    val state = viewModel.platformUiState
+
+    LaunchedEffect(state.saveState) {
+        if (state.saveState is com.commerceos.android.viewmodel.SaveState.Success) {
+            onSavedSuccessfully?.invoke()
         }
     }
-
-    val state = viewModel.platformUiState
 
     if (state.isFlowActive) {
         AddAddressFlow(

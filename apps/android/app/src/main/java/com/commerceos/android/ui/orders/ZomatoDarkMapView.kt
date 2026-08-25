@@ -46,7 +46,12 @@ fun ZomatoDarkMapView(
     riderLat: Double? = null,
     riderLng: Double? = null,
     riderHeading: Float? = null,
+    speedKmh: Float? = null,
+    routeProgressPct: Float? = null,
+    snappedSegmentIndex: Int? = null,
     waypoints: List<MapRoutePoint> = emptyList(),
+    traversedWaypoints: List<MapRoutePoint> = emptyList(),
+    remainingWaypoints: List<MapRoutePoint> = emptyList(),
     stage: String = "ASSIGNING_PARTNER",
     isStale: Boolean = false,
     modifier: Modifier = Modifier
@@ -66,7 +71,7 @@ fun ZomatoDarkMapView(
         )
     }
 
-    LaunchedEffect(riderLat, riderLng, riderHeading, isStale, waypoints, stage, isMapLoaded) {
+    LaunchedEffect(riderLat, riderLng, riderHeading, speedKmh, routeProgressPct, snappedSegmentIndex, isStale, waypoints, traversedWaypoints, remainingWaypoints, stage, isMapLoaded) {
         val webView = webViewRef ?: return@LaunchedEffect
         if (!isMapLoaded) return@LaunchedEffect
 
@@ -78,8 +83,13 @@ fun ZomatoDarkMapView(
             riderLat = riderLat,
             riderLng = riderLng,
             riderHeading = riderHeading,
+            speedKmh = speedKmh,
+            routeProgressPct = routeProgressPct,
+            snappedSegmentIndex = snappedSegmentIndex,
             isStale = isStale,
             waypoints = waypoints,
+            traversedWaypoints = traversedWaypoints,
+            remainingWaypoints = remainingWaypoints,
             stage = stage
         )
         webView.evaluateJavascript(jsCall, null)
@@ -119,8 +129,13 @@ fun ZomatoDarkMapView(
                                 riderLat = riderLat,
                                 riderLng = riderLng,
                                 riderHeading = riderHeading,
+                                speedKmh = speedKmh,
+                                routeProgressPct = routeProgressPct,
+                                snappedSegmentIndex = snappedSegmentIndex,
                                 isStale = isStale,
                                 waypoints = waypoints,
+                                traversedWaypoints = traversedWaypoints,
+                                remainingWaypoints = remainingWaypoints,
                                 stage = stage
                             )
                             view?.evaluateJavascript(initialSync, null)
@@ -201,8 +216,13 @@ private fun buildSmartMapUpdateScript(
     riderLat: Double?,
     riderLng: Double?,
     riderHeading: Float?,
+    speedKmh: Float?,
+    routeProgressPct: Float?,
+    snappedSegmentIndex: Int?,
     isStale: Boolean,
     waypoints: List<MapRoutePoint>,
+    traversedWaypoints: List<MapRoutePoint>,
+    remainingWaypoints: List<MapRoutePoint>,
     stage: String
 ): String {
     val wpArray = JSONArray()
@@ -213,11 +233,30 @@ private fun buildSmartMapUpdateScript(
         wpArray.put(obj)
     }
 
+    val traversedArray = JSONArray()
+    traversedWaypoints.forEach {
+        val obj = JSONObject()
+        obj.put("lat", it.lat)
+        obj.put("lng", it.lng)
+        traversedArray.put(obj)
+    }
+
+    val remainingArray = JSONArray()
+    remainingWaypoints.forEach {
+        val obj = JSONObject()
+        obj.put("lat", it.lat)
+        obj.put("lng", it.lng)
+        remainingArray.put(obj)
+    }
+
     val riderObj = if (riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0) {
         val ro = JSONObject()
         ro.put("lat", riderLat)
         ro.put("lng", riderLng)
         ro.put("heading", riderHeading ?: JSONObject.NULL)
+        ro.put("speedKmh", speedKmh ?: 0f)
+        ro.put("routeProgressPct", routeProgressPct ?: JSONObject.NULL)
+        ro.put("snappedSegmentIndex", snappedSegmentIndex ?: JSONObject.NULL)
         ro.put("isStale", isStale)
         ro.put("timestamp", System.currentTimeMillis())
         ro
@@ -225,7 +264,7 @@ private fun buildSmartMapUpdateScript(
         JSONObject.NULL
     }
 
-    return "updateSmartMap($merchantLat, $merchantLng, $customerLat, $customerLng, $riderObj, $wpArray, '$stage');"
+    return "updateSmartMap($merchantLat, $merchantLng, $customerLat, $customerLng, $riderObj, $wpArray, '$stage', $traversedArray, $remainingArray);"
 }
 
 private fun generateBlinkitGradeDarkMapHtml(
@@ -335,13 +374,15 @@ private fun generateBlinkitGradeDarkMapHtml(
             100% { transform: scale(1.8); opacity: 0; }
         }
         
-        /* Active Route Glow */
-        .leaflet-interactive.active-route {
-            stroke-dasharray: 8, 8;
-            animation: dashMarch 1.5s linear infinite;
+        /* Blinkit-Grade Smooth Solid Neon Route */
+        .leaflet-interactive.active-route-core {
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
-        @keyframes dashMarch {
-            to { stroke-dashoffset: -16; }
+        .leaflet-interactive.active-route-halo {
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.45));
         }
     </style>
 </head>
@@ -362,6 +403,7 @@ private fun generateBlinkitGradeDarkMapHtml(
     var customerMarker = null;
     var riderMarker = null;
     var traversedPolyline = null;
+    var activePolylineGlow = null;
     var activePolyline = null;
     var allWaypoints = [];
     var currentStage = 'ASSIGNING_PARTNER';
@@ -375,46 +417,84 @@ private fun generateBlinkitGradeDarkMapHtml(
     var customerHtml = '<div class="pin-wrapper"><div class="pin-head customer-head"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div><div class="pin-needle customer-needle"></div><div class="pin-shadow"></div></div>';
     var bikeSvg = '<svg viewBox="0 0 24 24"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm14-8.5c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm-8.2-7.5l-2.4-4H5v2h2.2l1.6 2.7c-.8.8-1.3 1.8-1.5 3h2.1c.2-.7.6-1.3 1.1-1.8l1.7 2.1h3.7v-2h-2.5l-1.9-2.4.9-2.6 1.8 1.4v2.6h2v-3.7l-2.8-2.2c-.3-.2-.7-.3-1.1-.3-.4 0-.8.2-1.1.5l-1.6 2.4z"/></svg>';
 
-    var animFrameId = null;
-    function smoothGlideTo(marker, startPos, endPos, startHeading, endHeading, durationMs) {
-        if (animFrameId) {
-            cancelAnimationFrame(animFrameId);
-            animFrameId = null;
-        }
-        var startTime = performance.now();
-        function step(now) {
-            var elapsed = now - startTime;
-            var t = Math.min(1, elapsed / durationMs);
-            var ease = 1 - Math.pow(1 - t, 3); // Cubic ease out
-            
-            var lat = startPos[0] + (endPos[0] - startPos[0]) * ease;
-            var lng = startPos[1] + (endPos[1] - startPos[1]) * ease;
-            marker.setLatLng([lat, lng]);
+    var effectiveMLat = $merchantLat || 28.202224;
+    var effectiveMLng = $merchantLng || 76.615418;
+    var effectiveCLat = $customerLat || 28.202224;
+    var effectiveCLng = $customerLng || 76.615418;
 
-            if (startHeading != null && endHeading != null) {
+    var sIcon = L.divIcon({ className: '', html: storeHtml, iconSize: [48, 56], iconAnchor: [24, 56] });
+    storeMarker = L.marker([effectiveMLat, effectiveMLng], { icon: sIcon }).addTo(map);
+
+    var cIcon = L.divIcon({ className: '', html: customerHtml, iconSize: [48, 56], iconAnchor: [24, 56] });
+    customerMarker = L.marker([effectiveCLat, effectiveCLng], { icon: cIcon }).addTo(map);
+
+    var initBounds = [[effectiveMLat, effectiveMLng], [effectiveCLat, effectiveCLng]];
+    map.fitBounds(initBounds, { padding: [50, 50], maxZoom: 16 });
+
+    var motionFrameId = null;
+    var currentMarkerHeading = 0;
+
+    function applyPredictiveVehicleMotion(marker, targetLat, targetLng, heading, speedKmh, isPredictive) {
+        if (motionFrameId) {
+            cancelAnimationFrame(motionFrameId);
+            motionFrameId = null;
+        }
+
+        var startLatLng = marker.getLatLng();
+        var startPos = [startLatLng.lat, startLatLng.lng];
+        var endPos = [targetLat, targetLng];
+        var startHeading = currentMarkerHeading;
+        var endHeading = (heading != null) ? heading : currentMarkerHeading;
+        var blendDuration = 400; // 400ms correction blend to authoritative coordinate
+        var startTime = performance.now();
+
+        // Speed in degrees per millisecond for dead reckoning
+        var speedMs = (speedKmh || 0) / 3.6; // m/s
+        var headingRad = (endHeading * Math.PI) / 180.0;
+        var vLat = (speedMs * Math.cos(headingRad)) / 111320.0 / 1000.0; // deg/ms
+        var vLng = (speedMs * Math.sin(headingRad)) / (111320.0 * Math.cos((targetLat * Math.PI) / 180.0)) / 1000.0; // deg/ms
+        var maxDeadReckoningWindowMs = 2500;
+
+        function renderFrame(now) {
+            var elapsed = now - startTime;
+
+            if (elapsed <= blendDuration) {
+                // Phase 1: Smooth Cubic Ease-Out Correction to Authoritative Coordinate
+                var t = elapsed / blendDuration;
+                var ease = 1 - Math.pow(1 - t, 3);
+                var curLat = startPos[0] + (endPos[0] - startPos[0]) * ease;
+                var curLng = startPos[1] + (endPos[1] - startPos[1]) * ease;
+                marker.setLatLng([curLat, curLng]);
+
+                // Heading rotation
                 var diff = endHeading - startHeading;
                 if (diff > 180) diff -= 360;
                 if (diff < -180) diff += 360;
-                var currentHeading = startHeading + diff * ease;
+                var curHeading = startHeading + diff * ease;
+                currentMarkerHeading = curHeading;
                 var el = marker.getElement();
                 if (el) {
                     var core = el.querySelector('.biker-core');
-                    if (core) core.style.transform = 'rotate(' + currentHeading + 'deg)';
+                    if (core) core.style.transform = 'rotate(' + curHeading + 'deg)';
                 }
-            }
-
-            if (t < 1) {
-                animFrameId = requestAnimationFrame(step);
+                motionFrameId = requestAnimationFrame(renderFrame);
+            } else if (isPredictive && speedKmh > 3 && (elapsed - blendDuration) <= maxDeadReckoningWindowMs) {
+                // Phase 2: Dead Reckoning Extrapolation along Heading Vector
+                var extraMs = elapsed - blendDuration;
+                var predLat = endPos[0] + vLat * extraMs;
+                var predLng = endPos[1] + vLng * extraMs;
+                marker.setLatLng([predLat, predLng]);
+                motionFrameId = requestAnimationFrame(renderFrame);
             } else {
-                animFrameId = null;
+                marker.setLatLng(endPos);
+                motionFrameId = null;
             }
         }
-        animFrameId = requestAnimationFrame(step);
+
+        motionFrameId = requestAnimationFrame(renderFrame);
     }
 
-    var currentMarkerHeading = 0;
-
-    function updateSmartMap(mLat, mLng, cLat, cLng, rider, waypoints, stage) {
+    function updateSmartMap(mLat, mLng, cLat, cLng, rider, waypoints, stage, serverTraversedPts, serverRemainingPts) {
         currentStage = stage || 'ASSIGNING_PARTNER';
         allWaypoints = waypoints || [];
 
@@ -438,9 +518,10 @@ private fun generateBlinkitGradeDarkMapHtml(
             }
         }
 
-        // 3. Persistent Rider Marker with Smooth Road Snapping & Heading Rotation
+        // 3. Persistent Rider Marker with Predictive Road Snapping, Dead Reckoning & Heading Rotation
         if (rider && rider.lat && rider.lng) {
             var rot = (rider.heading != null) ? rider.heading : currentMarkerHeading;
+            var isPredictive = Boolean(rider.isPredictiveMotionEnabled && !rider.isStale);
             if (!riderMarker) {
                 var markerHtml = '<div class="biker-container">' +
                                  '<div class="biker-pulse"></div>' +
@@ -450,7 +531,6 @@ private fun generateBlinkitGradeDarkMapHtml(
                 riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
                 currentMarkerHeading = rot;
             } else {
-                var prevLatLng = riderMarker.getLatLng();
                 var el = riderMarker.getElement();
                 if (el) {
                     var core = el.querySelector('.biker-core');
@@ -459,28 +539,42 @@ private fun generateBlinkitGradeDarkMapHtml(
                     if (pulse) pulse.style.display = rider.isStale ? 'none' : 'block';
                 }
                 if (rider.isStale) {
+                    if (motionFrameId) cancelAnimationFrame(motionFrameId);
                     riderMarker.setLatLng([rider.lat, rider.lng]);
                 } else {
-                    smoothGlideTo(riderMarker, [prevLatLng.lat, prevLatLng.lng], [rider.lat, rider.lng], currentMarkerHeading, rot, 800);
-                    currentMarkerHeading = rot;
+                    applyPredictiveVehicleMotion(riderMarker, rider.lat, rider.lng, rot, rider.speedKmh || 0, isPredictive);
                 }
             }
         } else {
             if (riderMarker) {
-                if (animFrameId) cancelAnimationFrame(animFrameId);
+                if (motionFrameId) cancelAnimationFrame(motionFrameId);
                 map.removeLayer(riderMarker);
                 riderMarker = null;
             }
         }
 
-        // 4. Dual-Tone Dynamic Polylines (Traversed Path vs Active Remaining Path)
-        if (allWaypoints.length >= 2) {
-            var latLngs = allWaypoints.map(function(pt) { return [pt.lat, pt.lng]; });
-            
-            // Find closest waypoint segment to rider if rider is active
-            var splitIdx = 0;
-            if (rider && rider.lat && rider.lng) {
+        // 4. Exact Authoritative Dual-Tone Polylines (Server Sliced vs Dynamic Segments)
+        var latLngs = (allWaypoints && allWaypoints.length >= 2) ? allWaypoints.map(function(pt) { return [pt.lat, pt.lng]; }) : [];
+        if (latLngs.length < 2 && mLat && mLng && cLat && cLng) {
+            latLngs = [[mLat, mLng], [cLat, cLng]];
+        }
+
+        if (latLngs.length >= 2) {
+            var traversedPts = [];
+            var remainingPts = [];
+
+            if (serverTraversedPts && serverTraversedPts.length >= 2 && serverRemainingPts && serverRemainingPts.length >= 2) {
+                traversedPts = serverTraversedPts.map(function(pt) { return [pt.lat, pt.lng]; });
+                remainingPts = serverRemainingPts.map(function(pt) { return [pt.lat, pt.lng]; });
+            } else if (rider && rider.snappedSegmentIndex != null && rider.snappedSegmentIndex >= 0) {
+                var sIdx = Math.min(rider.snappedSegmentIndex, latLngs.length - 1);
+                traversedPts = latLngs.slice(0, sIdx + 1);
+                if (rider.lat && rider.lng) traversedPts.push([rider.lat, rider.lng]);
+                if (rider.lat && rider.lng) remainingPts.push([rider.lat, rider.lng]);
+                remainingPts = remainingPts.concat(latLngs.slice(sIdx + 1));
+            } else if (rider && rider.lat && rider.lng) {
                 var minD = Infinity;
+                var splitIdx = 0;
                 for (var i = 0; i < latLngs.length; i++) {
                     var d = Math.hypot(latLngs[i][0] - rider.lat, latLngs[i][1] - rider.lng);
                     if (d < minD) {
@@ -488,21 +582,21 @@ private fun generateBlinkitGradeDarkMapHtml(
                         splitIdx = i;
                     }
                 }
+                traversedPts = latLngs.slice(0, splitIdx + 1);
+                traversedPts.push([rider.lat, rider.lng]);
+                remainingPts.push([rider.lat, rider.lng]);
+                remainingPts = remainingPts.concat(latLngs.slice(splitIdx));
+            } else {
+                remainingPts = latLngs;
             }
 
-            var traversedPts = latLngs.slice(0, splitIdx + 1);
-            if (rider && rider.lat && rider.lng) traversedPts.push([rider.lat, rider.lng]);
-            var remainingPts = [];
-            if (rider && rider.lat && rider.lng) remainingPts.push([rider.lat, rider.lng]);
-            remainingPts = remainingPts.concat(latLngs.slice(splitIdx));
-
-            // Traversed Faded Route
-            if (traversedPts.length >= 2 && splitIdx > 0) {
+            // Traversed Faded Route (Smooth solid dark slate)
+            if (traversedPts.length >= 2) {
                 if (!traversedPolyline) {
                     traversedPolyline = L.polyline(traversedPts, {
                         color: '#334155',
-                        weight: 4,
-                        opacity: 0.5,
+                        weight: 4.5,
+                        opacity: 0.55,
                         lineCap: 'round',
                         lineJoin: 'round'
                     }).addTo(map);
@@ -514,14 +608,30 @@ private fun generateBlinkitGradeDarkMapHtml(
                 traversedPolyline = null;
             }
 
-            // Active Glowing Remaining Route
+            // Active Remaining Route (Blinkit-Grade Dual-Layer: Soft Ambient Glow + Solid Neon Emerald Core)
             var activePts = remainingPts.length >= 2 ? remainingPts : latLngs;
+            
+            // Outer Halo Layer
+            if (!activePolylineGlow) {
+                activePolylineGlow = L.polyline(activePts, {
+                    color: '#10B981',
+                    weight: 10,
+                    opacity: 0.25,
+                    className: 'active-route-halo',
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                }).addTo(map);
+            } else {
+                activePolylineGlow.setLatLngs(activePts);
+            }
+
+            // Inner Solid Core Layer
             if (!activePolyline) {
                 activePolyline = L.polyline(activePts, {
                     color: '#10B981',
-                    weight: 5,
-                    opacity: 0.95,
-                    className: 'active-route',
+                    weight: 5.5,
+                    opacity: 1.0,
+                    className: 'active-route-core',
                     lineCap: 'round',
                     lineJoin: 'round'
                 }).addTo(map);
@@ -529,6 +639,10 @@ private fun generateBlinkitGradeDarkMapHtml(
                 activePolyline.setLatLngs(activePts);
             }
         } else {
+            if (activePolylineGlow) {
+                map.removeLayer(activePolylineGlow);
+                activePolylineGlow = null;
+            }
             if (activePolyline) {
                 map.removeLayer(activePolyline);
                 activePolyline = null;
@@ -539,9 +653,9 @@ private fun generateBlinkitGradeDarkMapHtml(
             }
         }
 
-        // 5. Phase-Aware Camera Choreography
+        // 5. Forward-Corridor Aware Camera Choreography
         if (autoCamera) {
-            smartChoreographCamera(mLat, mLng, cLat, cLng, rider, stage);
+            smartChoreographCamera(mLat, mLng, cLat, cLng, rider, stage, allWaypoints);
         }
     }
 
@@ -549,7 +663,7 @@ private fun generateBlinkitGradeDarkMapHtml(
     var lastCameraLng = null;
     var lastCameraStage = null;
 
-    function smartChoreographCamera(mLat, mLng, cLat, cLng, rider, stage) {
+    function smartChoreographCamera(mLat, mLng, cLat, cLng, rider, stage, waypoints) {
         if (!initialFramed) {
             initialFramed = true;
             var initialBounds = [];
@@ -573,16 +687,27 @@ private fun generateBlinkitGradeDarkMapHtml(
         }
         lastCameraStage = stage;
 
-        if (stage === 'AT_DOORSTEP' || stage === 'NEARBY') {
+        var isDoorstep = (stage === 'AT_DOORSTEP' || stage === 'NEARBY' || stage === 'ARRIVED_CUSTOMER' || stage === 'HANDOFF_STARTED');
+        var isOutForDelivery = (stage === 'OUT_FOR_DELIVERY' || stage === 'EN_ROUTE_CUSTOMER' || stage === 'PICKED_UP');
+        var isPrePickup = (stage === 'HEADING_TO_STORE' || stage === 'AT_STORE' || stage === 'ASSIGNED' || stage === 'ACCEPTED' || stage === 'EN_ROUTE_PICKUP' || stage === 'OUT_FOR_PICKUP' || stage === 'EN_ROUTE_STORE' || stage === 'ARRIVED_PICKUP' || stage === 'ARRIVED_STORE' || stage === 'ARRIVED_AT_STORE');
+
+        if (isDoorstep) {
             // High-resolution doorstep zoom
             if (cLat && cLng) {
                 map.setView([cLat, cLng], 17, { animate: true, duration: 1.0 });
             }
-        } else if (stage === 'OUT_FOR_DELIVERY' && rider && rider.lat && rider.lng && cLat && cLng) {
-            // Dynamic bounds showing Rider + Customer Home
-            var bounds = L.latLngBounds([[rider.lat, rider.lng], [cLat, cLng]]);
+        } else if (isOutForDelivery && rider && rider.lat && rider.lng && cLat && cLng) {
+            // Forward route corridor anticipation bounds (rider + next 3 waypoints + destination)
+            var corridorPts = [[rider.lat, rider.lng], [cLat, cLng]];
+            if (waypoints && waypoints.length > 0 && rider.snappedSegmentIndex != null) {
+                var sIdx = rider.snappedSegmentIndex;
+                for (var k = sIdx + 1; k < Math.min(sIdx + 4, waypoints.length); k++) {
+                    corridorPts.push([waypoints[k].lat, waypoints[k].lng]);
+                }
+            }
+            var bounds = L.latLngBounds(corridorPts);
             map.fitBounds(bounds, { padding: [70, 70], maxZoom: 16, animate: true, duration: 0.8 });
-        } else if (stage === 'HEADING_TO_STORE' && rider && rider.lat && rider.lng && mLat && mLng) {
+        } else if (isPrePickup && rider && rider.lat && rider.lng && mLat && mLng) {
             // Dynamic bounds showing Rider + Store
             var bounds = L.latLngBounds([[rider.lat, rider.lng], [mLat, mLng]]);
             map.fitBounds(bounds, { padding: [70, 70], maxZoom: 16, animate: true, duration: 0.8 });

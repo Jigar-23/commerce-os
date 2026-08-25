@@ -11,7 +11,7 @@ sealed class Screen {
     data class ProductDetail(val productId: String) : Screen()
     data class Catalog(val query: CatalogQuery) : Screen()
     object Cart : Screen()
-    object AddressSelection : Screen()
+    data class AddressSelection(val fromCheckout: Boolean = false, val fromProfile: Boolean = false) : Screen()
     object PaymentGateway : Screen()
     data class OrderTracking(val orderId: String) : Screen()
     data class UnifiedOrderTracking(val orderId: String) : Screen()

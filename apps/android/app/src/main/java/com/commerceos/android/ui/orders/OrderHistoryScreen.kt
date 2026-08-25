@@ -1,6 +1,7 @@
 package com.commerceos.android.ui.orders
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -33,6 +35,8 @@ fun OrderHistoryScreen(
     onReorderItem: (OrderItem) -> Unit = {},
     onTrackOrder: (CustomerOrderApiResponse) -> Unit = {}
 ) {
+    var selectedFilterTab by remember { mutableStateOf("ALL") }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -40,14 +44,40 @@ fun OrderHistoryScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("Orders & Reorder", style = CommerceTypography.Title, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                Text("Track active deliveries and reorder medicines", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
+                Text("Your Orders", style = CommerceTypography.Title, fontWeight = FontWeight.Black, color = CommerceColors.TextPrimary)
+                Text("Track deliveries & rate past orders", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
             }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh Orders", tint = CommerceColors.Primary)
             }
         }
-        Spacer(modifier = Modifier.height(Spacing.md))
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Segmented Filter Rail (Domino's / Blinkit pattern)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("ALL" to "All", "ACTIVE" to "Active", "DELIVERED" to "Delivered").forEach { (tabKey, label) ->
+                val isSelected = selectedFilterTab == tabKey
+                Surface(
+                    color = if (isSelected) Color(0xFF0F172A) else Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.clickable { selectedFilterTab = tabKey }
+                ) {
+                    Text(
+                        text = label,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) Color.White else Color(0xFF475569),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         when (history) {
             is OrderHistoryUiState.Loading -> {
@@ -66,14 +96,28 @@ fun OrderHistoryScreen(
                 }
             }
             is OrderHistoryUiState.Content -> {
-                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                    items(history.orders) { order ->
-                        OrderHistoryCard(
-                            order = order,
-                            onCancelOrder = { onCancelOrder(order) },
-                            onReorderItem = onReorderItem,
-                            onTrackOrder = { onTrackOrder(order) }
-                        )
+                val filteredOrders = remember(history.orders, selectedFilterTab) {
+                    when (selectedFilterTab) {
+                        "ACTIVE" -> history.orders.filter { it.orderStatus.uppercase() !in listOf("DELIVERED", "CANCELLED") }
+                        "DELIVERED" -> history.orders.filter { it.orderStatus.uppercase() == "DELIVERED" }
+                        else -> history.orders
+                    }
+                }
+
+                if (filteredOrders.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text("No orders in this category.", style = CommerceTypography.BodySmall, color = CommerceColors.TextMuted)
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(filteredOrders) { order ->
+                            OrderHistoryCard(
+                                order = order,
+                                onCancelOrder = { onCancelOrder(order) },
+                                onReorderItem = onReorderItem,
+                                onTrackOrder = { onTrackOrder(order) }
+                            )
+                        }
                     }
                 }
             }
@@ -90,37 +134,44 @@ private fun OrderHistoryCard(
 ) {
     val presented = OrderStatusPresentationMapper.present(order.orderStatus)
     val items = order.items.orEmpty()
+    val isDelivered = order.orderStatus.uppercase() == "DELIVERED"
+    val isActive = !presented.isTerminal
+    var userRating by remember { mutableIntStateOf(0) }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        shape = RoundedCornerShape(Radius.lg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            if (isActive) 1.5.dp else 1.dp,
+            if (isActive) Color(0xFF059669) else Color(0xFFE2E8F0)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 3.dp else 1.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(Spacing.lg)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Order #${order.id.takeLast(8)}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                Text("Order #${order.id.takeLast(8).uppercase()}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Black, color = CommerceColors.TextPrimary)
                 Surface(
                     color = presented.chipBackground,
-                    shape = RoundedCornerShape(Radius.Chip)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         presented.presentedLabel,
                         style = CommerceTypography.Meta,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Black,
                         color = presented.chipContent,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(Spacing.md))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Product thumbnails + names make the card recognizable at a glance.
+            // Product thumbnails + names
             if (items.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val visible = items.take(3)
@@ -137,7 +188,7 @@ private fun OrderHistoryCard(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(Spacing.sm))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     items.take(2).joinToString(" + ") { it.name } + if (items.size > 2) " +${items.size - 2} more" else "",
                     style = CommerceTypography.BodySmall,
@@ -145,13 +196,13 @@ private fun OrderHistoryCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(Spacing.sm))
+                Spacer(modifier = Modifier.height(6.dp))
             }
 
             Text(
                 "${items.size} ${if (items.size == 1) "item" else "items"} • ${MoneyFormatter.format(order.totalAmount)}",
                 style = CommerceTypography.BodySmall,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 color = CommerceColors.TextPrimary
             )
             Text(
@@ -160,59 +211,70 @@ private fun OrderHistoryCard(
                 color = CommerceColors.TextMuted
             )
 
-            if (presented.isTerminal) {
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                OutlinedButton(
-                    onClick = onTrackOrder,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CommerceColors.Primary),
-                    border = BorderStroke(1.dp, CommerceColors.Primary.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(Radius.Button),
+            // Domino's Style 5-Star Interactive Rating for Delivered Orders
+            if (isDelivered) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("View order details", fontWeight = FontWeight.Bold) }
-            } else {
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    OutlinedButton(
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (userRating > 0) "Rated $userRating/5 ⭐" else "Rate your order:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF475569)
+                        )
+                        Row {
+                            (1..5).forEach { star ->
+                                Text(
+                                    text = if (star <= userRating) "⭐" else "☆",
+                                    fontSize = 16.sp,
+                                    modifier = Modifier
+                                        .clickable { userRating = star }
+                                        .padding(horizontal = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (isActive) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
                         onClick = onTrackOrder,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CommerceColors.Primary),
-                        border = BorderStroke(1.dp, CommerceColors.Primary.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(Radius.Button),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
-                    ) { Text("Track", fontWeight = FontWeight.Bold) }
+                    ) {
+                        Text("⚡ Track Order", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                     if (presented.hasCancelAction) {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = CommerceColors.Danger),
                             border = BorderStroke(1.dp, CommerceColors.Danger.copy(alpha = 0.4f)),
-                            shape = RoundedCornerShape(Radius.Button),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) { Text("Cancel", fontWeight = FontWeight.Bold) }
                     }
                 }
-            }
-
-            // Buy Again per item — the reorder journey starts from real line items.
-            if (items.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                items.forEach { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            item.name,
-                            style = CommerceTypography.Label,
-                            color = CommerceColors.TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { onReorderItem(item) }) {
-                            Text("Buy again", fontWeight = FontWeight.Bold, color = CommerceColors.Primary)
-                        }
-                    }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onTrackOrder,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("View Details", fontWeight = FontWeight.Bold) }
                 }
             }
         }

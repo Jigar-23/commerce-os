@@ -175,10 +175,10 @@ fun RiderAuthScreen(
                                         challengeId = chId
                                         isOtpSent = true
                                         isLoading = false
-                                        Toast.makeText(context, "OTP sent: 123456", Toast.LENGTH_SHORT).show()
-                                    }.onFailure {
-                                        challengeId = "mock_ch"
-                                        isOtpSent = true
+                                        Toast.makeText(context, "OTP sent to +91 $phone", Toast.LENGTH_SHORT).show()
+                                    }.onFailure { err ->
+                                        errorMessage = err.message ?: "Failed to send OTP. Please check your phone number and network."
+                                        isOtpSent = false
                                         isLoading = false
                                     }
                                 }
@@ -218,7 +218,7 @@ fun RiderAuthScreen(
                         }
 
                         Text(
-                            text = "Enter 6-digit code sent to +91 $phone (Default: 123456)",
+                            text = "Enter 6-digit code sent to +91 $phone",
                             fontSize = 13.sp,
                             color = Color(0xFF94A3B8)
                         )
@@ -229,7 +229,7 @@ fun RiderAuthScreen(
                             value = otp,
                             onValueChange = { if (it.length <= 6 && it.all { char -> char.isDigit() }) otp = it },
                             label = { Text("6-Digit OTP") },
-                            placeholder = { Text("123456") },
+                            placeholder = { Text("••••••") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -303,11 +303,15 @@ fun RiderAuthScreen(
                                     errorMessage = "Please enter the 6-digit OTP received on your mobile"
                                     return@Button
                                 }
+                                if (challengeId.isNullOrBlank()) {
+                                    errorMessage = "OTP session expired. Please request a new OTP."
+                                    return@Button
+                                }
                                 errorMessage = null
                                 isLoading = true
                                 scope.launch {
                                     val res = repository.verifyRiderOtp(
-                                        challengeId = challengeId ?: "ch_default",
+                                        challengeId = challengeId!!,
                                         phone = phone,
                                         otp = cleanOtp,
                                         name = riderName.trim(),

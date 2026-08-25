@@ -90,6 +90,7 @@ object Api {
         val body = response?.errorBody()?.string()
         val info = ErrorBodyParser.parse(body)
         val path = response?.raw()?.request?.url?.encodedPath ?: ""
+        android.util.Log.e("ApiRun", "HttpException on $path: code=${e.code()}, body=$body", e)
         // Wrong-OTP / bad-credential 401s carry structured, actionable payloads
         // (attemptsLeft, retryAfterSeconds). Only a 401 on a PROTECTED resource
         // after a failed refresh is a true session-expiry.
@@ -108,8 +109,10 @@ object Api {
             )
         }
     } catch (e: IOException) {
+        android.util.Log.e("ApiRun", "IOException in Api.run: ${e.message}", e)
         ApiResult.Failure(AppError.Network(e.message ?: "network"))
     } catch (e: Exception) {
+        android.util.Log.e("ApiRun", "Unexpected Exception in Api.run: ${e.javaClass.name}: ${e.message}", e)
         ApiResult.Failure(AppError.Unknown(e.message ?: e.javaClass.simpleName))
     }
 }

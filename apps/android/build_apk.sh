@@ -32,11 +32,6 @@ echo "Customer App APK: $APP_APK_PATH"
 echo "Rider App APK: $RIDER_APK_PATH"
 
 if adb devices | grep -q "device$"; then
-    echo "Configuring ADB reverse port forwarding for microservices (8080-8090)..."
-    for port in 8080 8081 8082 8083 8084 8085 8086 8087 8088 8089 8090; do
-        adb reverse tcp:$port tcp:$port || true
-    done
-
     echo "Installing Standalone Customer App (com.commerceos.android)..."
     adb install -r "$APP_APK_PATH"
 

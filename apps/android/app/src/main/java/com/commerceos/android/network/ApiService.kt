@@ -3,6 +3,7 @@ package com.commerceos.android.network
 import com.commerceos.android.BuildConfig
 import com.commerceos.android.model.*
 import com.google.gson.JsonParser
+import com.google.gson.annotations.SerializedName
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -137,9 +138,11 @@ interface CartApi {
 }
 
 interface AuthApi {
+    @Deprecated("Password login is deprecated in favor of authentic phone/OTP authentication flow")
     @POST("/api/v1/auth/login")
     suspend fun login(@Body request: LoginRequest): AuthResponse
 
+    @Deprecated("Direct registration is deprecated in favor of authentic phone/OTP verification flow")
     @POST("/api/v1/auth/register")
     suspend fun register(@Body request: RegisterRequest): AuthResponse
 
@@ -154,12 +157,15 @@ interface AuthApi {
 }
 
 interface PaymentApi {
+    @Deprecated("Release scope is COD ONLY. Online payment gateway is disabled in live flow.")
     @POST("/api/v1/payments/initiate")
     suspend fun initiatePayment(@Body request: PaymentIntentRequest): PaymentIntentResponse
 
+    @Deprecated("Release scope is COD ONLY. Online payment gateway is disabled in live flow.")
     @POST("/api/v1/payments/{paymentId}/capture")
     suspend fun capturePayment(@Path("paymentId") paymentId: String): PaymentStatusResponse
 
+    @Deprecated("Release scope is COD ONLY. Online payment gateway is disabled in live flow.")
     @GET("/api/v1/payments/{paymentId}")
     suspend fun getPaymentStatus(@Path("paymentId") paymentId: String): PaymentStatusResponse
 }
@@ -249,8 +255,10 @@ interface PrescriptionApi {
 }
 
 data class DeleteAddressResponse(
-    val deleted: Boolean,
-    val addressId: String
+    @SerializedName(value = "deleted", alternate = ["ok", "success"])
+    val deleted: Boolean = true,
+    @SerializedName(value = "addressId", alternate = ["deletedId", "id"])
+    val addressId: String = ""
 )
 
 object NetworkClient {
@@ -378,9 +386,10 @@ object NetworkClient {
                 .addInterceptor(authInterceptor)
                 .addInterceptor(refreshInterceptor)
                 .addInterceptor(
-                    HttpLoggingInterceptor().apply {
-                        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
-                        else HttpLoggingInterceptor.Level.NONE
+                    HttpLoggingInterceptor { msg ->
+                        android.util.Log.d("OkHttp", msg)
+                    }.apply {
+                        level = HttpLoggingInterceptor.Level.BODY
                     }
                 )
                 .build()

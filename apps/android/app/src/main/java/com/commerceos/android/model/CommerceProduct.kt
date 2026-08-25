@@ -34,13 +34,13 @@ data class ElectronicsAttributes(
  * and Catalog. Contains core product properties while supporting domain-specific attributes.
  */
 data class CommerceProduct(
-    val id: String,
-    val sku: String,
-    val name: String,
+    val id: String = "",
+    val sku: String = "",
+    val name: String = "",
     val brand: String? = null,
     @com.google.gson.annotations.SerializedName("price") val price: Double = 0.0,
     @com.google.gson.annotations.SerializedName("discountedPrice") val discountedPrice: Double = 0.0,
-    @com.google.gson.annotations.SerializedName("sellingPrice") val rawSellingPrice: Double = 0.0,
+    @com.google.gson.annotations.SerializedName("sellingPrice") val sellingPrice: Double = 0.0,
     @com.google.gson.annotations.SerializedName("mrp") val mrp: Double? = null,
     val image: String? = null,
     val inStock: Boolean? = null,
@@ -56,10 +56,10 @@ data class CommerceProduct(
     val fashionDetails: FashionAttributes? = null,
     val electronicsDetails: ElectronicsAttributes? = null
 ) {
-    val sellingPrice: Double
+    val effectiveSellingPrice: Double
         get() = when {
             discountedPrice > 0 -> discountedPrice
-            rawSellingPrice > 0 -> rawSellingPrice
+            sellingPrice > 0 -> sellingPrice
             price > 0 -> price
             (mrp ?: 0.0) > 0 -> mrp!!
             else -> 5.0
@@ -69,12 +69,12 @@ data class CommerceProduct(
         get() = when {
             (mrp ?: 0.0) > 0 -> mrp!!
             price > 0 -> price
-            else -> sellingPrice
+            else -> effectiveSellingPrice
         }
 
     val discountPercent: Int
-        get() = if (displayPrice > sellingPrice && displayPrice > 0) {
-            (((displayPrice - sellingPrice) / displayPrice) * 100).toInt()
+        get() = if (displayPrice > effectiveSellingPrice && displayPrice > 0) {
+            (((displayPrice - effectiveSellingPrice) / displayPrice) * 100).toInt()
         } else 0
 }
 

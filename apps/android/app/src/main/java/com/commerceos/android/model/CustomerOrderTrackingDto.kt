@@ -16,9 +16,13 @@ data class CustomerOrderTrackingDto(
     val trackingStatusText: String? = null,
     val estimatedArrivalMins: Int? = null,
     val remainingDistanceKm: Double? = null,
+    val routeProgressPct: Float? = null,
+    val snappedSegmentIndex: Int? = null,
     val isStale: Boolean = false,
     val lastUpdatedTimestamp: Long? = null,
-    val waypoints: List<TrackingWaypointDto> = emptyList()
+    val waypoints: List<TrackingWaypointDto> = emptyList(),
+    val traversedWaypoints: List<TrackingWaypointDto> = emptyList(),
+    val remainingWaypoints: List<TrackingWaypointDto> = emptyList()
 )
 
 data class TrackingWaypointDto(

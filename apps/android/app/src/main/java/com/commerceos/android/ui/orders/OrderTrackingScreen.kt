@@ -161,23 +161,107 @@ fun OrderTrackingContent(
                 .fillMaxSize()
                 .background(Color(0xFF0B1120))
         ) {
-            val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 0.0
-            val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 0.0
-            val customerLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 0.0)
-            val customerLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 0.0)
+            val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 }
+            val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 }
+            val customerLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: order.deliveryAddress?.latitude?.takeIf { it != 0.0 }
+            val customerLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: order.deliveryAddress?.longitude?.takeIf { it != 0.0 }
             val telemetry = liveTracking?.liveRiderTelemetry
+            val hasLocations = merchantLat != null && merchantLng != null && customerLat != null && customerLng != null
 
-            ZomatoDarkMapView(
-                merchantLat = merchantLat,
-                merchantLng = merchantLng,
-                customerLat = customerLat,
-                customerLng = customerLng,
-                riderLat = telemetry?.latitude,
-                riderLng = telemetry?.longitude,
-                riderHeading = telemetry?.heading,
-                isStale = liveTracking?.isStale ?: (telemetry?.isStale ?: false),
-                modifier = Modifier.fillMaxSize()
-            )
+            var dynamicRoadPoints by remember { mutableStateOf<List<MapRoutePoint>>(emptyList()) }
+            val realRiderLat = telemetry?.latitude?.takeIf { it != 0.0 }
+            val realRiderLng = telemetry?.longitude?.takeIf { it != 0.0 }
+            val activeStage = liveTracking?.stage ?: "OUT_FOR_DELIVERY"
+
+            LaunchedEffect(liveTracking?.waypoints, merchantLat, merchantLng, customerLat, customerLng, realRiderLat, realRiderLng, activeStage) {
+                if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
+                    dynamicRoadPoints = emptyList()
+                    return@LaunchedEffect
+                }
+                if (hasLocations) {
+                    val isPhase1 = activeStage in listOf("HEADING_TO_STORE", "ASSIGNING_PARTNER", "AT_STORE")
+                    val originLat = if (isPhase1) (realRiderLat ?: (merchantLat!! - 0.008)) else merchantLat!!
+                    val originLng = if (isPhase1) (realRiderLng ?: (merchantLng!! - 0.006)) else merchantLng!!
+                    val destLat = if (isPhase1) merchantLat!! else customerLat!!
+                    val destLng = if (isPhase1) merchantLng!! else customerLng!!
+
+                    if (originLat != destLat || originLng != destLng) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                val url = java.net.URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
+                                val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                                    requestMethod = "GET"
+                                    connectTimeout = 4000
+                                    readTimeout = 4000
+                                    setRequestProperty("User-Agent", "CommerceOS-Customer/2.0")
+                                }
+                                if (conn.responseCode == 200) {
+                                    val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                                    val json = org.json.JSONObject(jsonStr)
+                                    val routes = json.getJSONArray("routes")
+                                    if (routes.length() > 0) {
+                                        val geom = routes.getJSONObject(0).getJSONObject("geometry")
+                                        val coords = geom.getJSONArray("coordinates")
+                                        val pts = mutableListOf<MapRoutePoint>()
+                                        for (i in 0 until coords.length()) {
+                                            val c = coords.getJSONArray(i)
+                                            pts.add(MapRoutePoint(lat = c.getDouble(1), lng = c.getDouble(0)))
+                                        }
+                                        if (pts.size >= 2) {
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                dynamicRoadPoints = pts
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+
+            val routePoints = remember(liveTracking?.waypoints, dynamicRoadPoints, merchantLat, merchantLng, customerLat, customerLng) {
+                if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
+                    liveTracking!!.waypoints.map { MapRoutePoint(it.lat, it.lng) }
+                } else if (dynamicRoadPoints.isNotEmpty()) {
+                    dynamicRoadPoints
+                } else if (hasLocations && merchantLat != null && merchantLng != null && customerLat != null && customerLng != null) {
+                    listOf(MapRoutePoint(merchantLat, merchantLng), MapRoutePoint(customerLat, customerLng))
+                } else {
+                    emptyList()
+                }
+            }
+            val traversedPoints = remember(liveTracking?.traversedWaypoints) {
+                liveTracking?.traversedWaypoints?.map { MapRoutePoint(it.lat, it.lng) } ?: emptyList()
+            }
+            val remainingPoints = remember(liveTracking?.remainingWaypoints, routePoints) {
+                if (!liveTracking?.remainingWaypoints.isNullOrEmpty()) {
+                    liveTracking!!.remainingWaypoints.map { MapRoutePoint(it.lat, it.lng) }
+                } else {
+                    routePoints
+                }
+            }
+
+            if (hasLocations) {
+                ZomatoDarkMapView(
+                    merchantLat = merchantLat!!,
+                    merchantLng = merchantLng!!,
+                    customerLat = customerLat!!,
+                    customerLng = customerLng!!,
+                    riderLat = telemetry?.latitude?.takeIf { it != 0.0 },
+                    riderLng = telemetry?.longitude?.takeIf { it != 0.0 },
+                    riderHeading = telemetry?.heading,
+                    speedKmh = telemetry?.speedKmh,
+                    routeProgressPct = liveTracking?.routeProgressPct ?: telemetry?.routeProgressPct,
+                    snappedSegmentIndex = liveTracking?.snappedSegmentIndex,
+                    waypoints = routePoints,
+                    traversedWaypoints = traversedPoints,
+                    remainingWaypoints = remainingPoints,
+                    stage = liveTracking?.stage ?: "OUT_FOR_DELIVERY",
+                    isStale = liveTracking?.isStale ?: (telemetry?.isStale ?: false),
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // Floating Top Controls with Back Button
             Row(
@@ -419,38 +503,48 @@ fun OrderTrackingContent(
                             Spacer(modifier = Modifier.height(8.dp))
 
                             val dynamicEtaMins: Int = remember(liveTracking, order) {
-                                val storeLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 0.0
-                                val storeLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 0.0
-                                val custLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.latitude ?: 0.0)
-                                val custLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: (order.deliveryAddress?.longitude ?: 0.0)
-                                val riderLat = liveTracking?.liveRiderTelemetry?.latitude
-                                val riderLng = liveTracking?.liveRiderTelemetry?.longitude
+                                val storeLat = liveTracking?.merchantLat?.takeIf { it != 0.0 }
+                                val storeLng = liveTracking?.merchantLng?.takeIf { it != 0.0 }
+                                val custLat = liveTracking?.customerLat?.takeIf { it != 0.0 } ?: order.deliveryAddress?.latitude?.takeIf { it != 0.0 }
+                                val custLng = liveTracking?.customerLng?.takeIf { it != 0.0 } ?: order.deliveryAddress?.longitude?.takeIf { it != 0.0 }
+                                val riderLat = liveTracking?.liveRiderTelemetry?.latitude?.takeIf { it != 0.0 }
+                                val riderLng = liveTracking?.liveRiderTelemetry?.longitude?.takeIf { it != 0.0 }
 
                                 val status = order.orderStatus.uppercase()
                                 when (status) {
                                     "DELIVERED" -> 0
                                     "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> 1
                                     "OUT_FOR_DELIVERY", "IN_TRANSIT", "REACHING_YOU", "PICKED_UP" -> {
-                                        if (riderLat != null && riderLng != null && riderLat != 0.0) {
+                                        if (riderLat != null && riderLng != null && custLat != null && custLng != null) {
                                             val d = calculateDistanceInKm(riderLat, riderLng, custLat, custLng)
                                             Math.ceil(d * 2.5).toInt().coerceAtLeast(1)
-                                        } else {
+                                        } else if (storeLat != null && storeLng != null && custLat != null && custLng != null) {
                                             val d = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
                                             Math.ceil(d * 2.5).toInt().coerceAtLeast(2)
+                                        } else {
+                                            order.deliverySlaMins.coerceAtLeast(1)
                                         }
                                     }
                                     "AT_STORE", "ARRIVED_STORE", "ARRIVED_PICKUP", "PACKED" -> {
-                                        val dStoreCust = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
-                                        (2 + Math.ceil(dStoreCust * 2.5).toInt()).coerceAtLeast(3)
+                                        if (storeLat != null && storeLng != null && custLat != null && custLng != null) {
+                                            val dStoreCust = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
+                                            (2 + Math.ceil(dStoreCust * 2.5).toInt()).coerceAtLeast(3)
+                                        } else {
+                                            order.deliverySlaMins.coerceAtLeast(3)
+                                        }
                                     }
                                     else -> {
-                                        val dRiderStore = if (riderLat != null && riderLng != null && riderLat != 0.0) {
-                                            calculateDistanceInKm(riderLat, riderLng, storeLat, storeLng)
-                                        } else 1.2
-                                        val dStoreCust = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
-                                        val timeRiderStore = Math.ceil(dRiderStore * 2.5).toInt()
-                                        val timeStoreCust = Math.ceil(dStoreCust * 2.5).toInt()
-                                        (timeRiderStore + 2 + timeStoreCust).coerceIn(4, 45)
+                                        if (storeLat != null && storeLng != null && custLat != null && custLng != null) {
+                                            val dRiderStore = if (riderLat != null && riderLng != null) {
+                                                calculateDistanceInKm(riderLat, riderLng, storeLat, storeLng)
+                                            } else 1.2
+                                            val dStoreCust = calculateDistanceInKm(storeLat, storeLng, custLat, custLng)
+                                            val timeRiderStore = Math.ceil(dRiderStore * 2.5).toInt()
+                                            val timeStoreCust = Math.ceil(dStoreCust * 2.5).toInt()
+                                            (timeRiderStore + 2 + timeStoreCust).coerceIn(4, 45)
+                                        } else {
+                                            order.deliverySlaMins.coerceIn(4, 45)
+                                        }
                                     }
                                 }
                             }
@@ -471,7 +565,7 @@ fun OrderTrackingContent(
                             Spacer(modifier = Modifier.height(4.dp))
 
                             Text(
-                                text = "Rewari Central Master Store • Fast delivery guaranteed",
+                                text = "${order.storeName ?: "Partner Dark Store"} • Fast delivery guaranteed",
                                 color = Color(0xFF94A3B8),
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp
@@ -724,7 +818,14 @@ fun OrderTrackingContent(
                     Column {
                         Text("Delivery Location", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            text = "${order.deliveryAddress?.addressLine ?: "Rewari Central"}, ${order.deliveryAddress?.city ?: ""}",
+                            text = buildString {
+                                append(order.deliveryAddress?.addressLine ?: "Delivery address unavailable")
+                                val city = order.deliveryAddress?.city
+                                if (!city.isNullOrBlank()) {
+                                    append(", ")
+                                    append(city)
+                                }
+                            },
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -815,7 +916,7 @@ fun OrderTrackingContent(
 private fun FulfillmentTimeline(currentStatus: String) {
     val steps = listOf(
         "PLACED" to ("Order Placed" to "Order confirmed with store"),
-        "SELLER_ACCEPTED" to ("Packing Items" to "Rewari Central Hub is packing your order"),
+        "SELLER_ACCEPTED" to ("Packing Items" to "Store merchant is packing your order"),
         "OUT_FOR_DELIVERY" to ("Out for Delivery" to "Partner heading to your location"),
         "DELIVERED" to ("Delivered" to "Delivered at your doorstep")
     )

@@ -30,7 +30,7 @@ fun CommerceProduct.toProductCardModel(
     etaLabel: String? = null,
     isWishlisted: Boolean = false
 ): ProductCardModel {
-    val safeSellingPrice = sellingPrice
+    val safeSellingPrice = effectiveSellingPrice
     val safePrice = if (displayPrice > safeSellingPrice) displayPrice else (if (price > safeSellingPrice) price else safeSellingPrice)
     val discount = if (safePrice > safeSellingPrice && safePrice > 0) {
         (((safePrice - safeSellingPrice) / safePrice) * 100).toInt()

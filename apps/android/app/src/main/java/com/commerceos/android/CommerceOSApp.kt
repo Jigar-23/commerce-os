@@ -31,6 +31,7 @@ import com.commerceos.android.navigation.AppDestinationRouter
 import com.commerceos.android.ui.AuthScreen
 import com.commerceos.android.ui.account.AccountScreen
 import com.commerceos.android.ui.address.AddressScreen
+import com.commerceos.android.ui.address.AddressSelectionBottomSheet
 import com.commerceos.android.ui.cart.CartScreen
 import com.commerceos.android.ui.catalog.CatalogScreen
 import com.commerceos.android.ui.categories.CategoriesScreen
@@ -170,6 +171,10 @@ fun CommerceOSApp(
 
     val context = LocalContext.current
 
+    LaunchedEffect(context) {
+        addressViewModel.attachContext(context)
+    }
+
     LaunchedEffect(Unit) {
         cartViewModel.addEvents.collect { event ->
             when (event) {
@@ -231,7 +236,7 @@ fun CommerceOSApp(
         currentScreen is Screen.Cart ||
         currentScreen is Screen.Account
 
-    val headerTitle = when (currentScreen) {
+    val headerTitle = when (val screen = currentScreen) {
         is Screen.Home -> clientConfig.identity.appName
         is Screen.Categories -> "Categories"
         is Screen.OrderHistory -> terminology.orderLabel
@@ -239,7 +244,7 @@ fun CommerceOSApp(
         is Screen.Account -> "My Account"
         is Screen.Catalog -> "Catalog"
         is Screen.ProductDetail -> "Product"
-        is Screen.AddressSelection -> "Deliver to"
+        is Screen.AddressSelection -> if (screen.fromProfile) "Saved Addresses" else "Deliver to"
         is Screen.PaymentGateway -> terminology.checkoutLabel
         is Screen.OrderTracking -> "Order Status"
         is Screen.Prescriptions -> terminology.prescriptionLabel
@@ -249,6 +254,7 @@ fun CommerceOSApp(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var showAddressBottomSheet by remember { mutableStateOf(false) }
     val bottomNavColors = NavigationBarItemDefaults.colors(
         selectedIconColor = CommerceColors.PrimaryDark,
         selectedTextColor = CommerceColors.PrimaryDark,
@@ -260,7 +266,10 @@ fun CommerceOSApp(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            if (currentScreen !is Screen.Home) {
+            val hideTopBar = currentScreen is Screen.Home ||
+                (currentScreen is Screen.AddressSelection && addressViewModel.platformUiState.isFlowActive)
+
+            if (!hideTopBar) {
                 TopAppBar(
                     title = {
                         Text(headerTitle, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = CommerceColors.TextPrimary)
@@ -358,13 +367,6 @@ fun CommerceOSApp(
                             label = { Text(terminology.cartLabel, fontSize = 11.sp) },
                             colors = bottomNavColors
                         )
-                        NavigationBarItem(
-                            selected = currentScreen is Screen.Account,
-                            onClick = { navigateRoot(Screen.Account) },
-                            icon = { Icon(Icons.Default.Person, contentDescription = "Account") },
-                            label = { Text("Account", fontSize = 11.sp) },
-                            colors = bottomNavColors
-                        )
                     }
                 }
             }
@@ -379,6 +381,8 @@ fun CommerceOSApp(
                         customerId = authenticatedCustomerId,
                         cartItems = cartViewModel.cartItems,
                         selectedAddress = activeAddr,
+                        calculatedEtaMinutes = addressViewModel.calculatedEtaMinutes,
+                        locationHeaderLabel = addressViewModel.activeLocationHeaderLabel,
                         homeContext = activeAddr?.let { addr ->
                             val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
                             val status = when {
@@ -405,7 +409,10 @@ fun CommerceOSApp(
                         },
                         onChangeAddress = {
                             addressViewModel.init(authenticatedCustomerId)
-                            navigate(Screen.AddressSelection)
+                            showAddressBottomSheet = true
+                        },
+                        onProfileClick = {
+                            navigateRoot(Screen.Account)
                         },
                     onEntityClick = { entity ->
                         when (entity) {
@@ -574,30 +581,67 @@ fun CommerceOSApp(
                     onUploadPrescription = { showRxUploadDialog = true },
                     onAttachPrescription = { checkoutViewModel.attachPrescription(it) },
                     onProceedToAddress = {
-                        addressViewModel.init(authenticatedCustomerId)
+                        val currentSelected = addressViewModel.selectedAddress
+                            ?: addressViewModel.addresses.firstOrNull { it.isDefault }
+                            ?: addressViewModel.addresses.firstOrNull()
+
                         checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems)
-                        navigate(Screen.AddressSelection)
+                        if (currentSelected != null) {
+                            checkoutViewModel.selectAddress(currentSelected)
+                            navigate(Screen.PaymentGateway)
+                        } else {
+                            addressViewModel.init(authenticatedCustomerId, force = true)
+                            navigate(Screen.AddressSelection(fromCheckout = true))
+                        }
                     },
                     onStartShopping = { navigateRoot(Screen.Catalog(CatalogQuery())) }
                 )
-                is Screen.AddressSelection -> AddressScreen(
-                    viewModel = addressViewModel,
-                    serviceability = checkoutViewModel.uiState.serviceability,
-                    onSelectAddress = { address ->
-                        checkoutViewModel.selectAddress(address)
-                    },
-                    onProceedToPayment = {
-                        val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
-                        if (addr != null) {
-                            checkoutViewModel.selectAddress(addr)
+                is Screen.AddressSelection -> {
+                    val isFromCheckout = screen.fromCheckout
+                    val isFromProfile = screen.fromProfile
+                    AddressScreen(
+                        viewModel = addressViewModel,
+                        serviceability = checkoutViewModel.uiState.serviceability,
+                        onSelectAddress = { address ->
+                            if (isFromCheckout) {
+                                checkoutViewModel.selectAddress(address)
+                            } else if (isFromProfile) {
+                                addressViewModel.select(address)
+                            } else {
+                                addressViewModel.select(address)
+                                goBack()
+                            }
+                        },
+                        onProceedToPayment = if (isFromCheckout) {
+                            {
+                                val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                                if (addr != null) {
+                                    checkoutViewModel.selectAddress(addr)
+                                }
+                                navigate(Screen.PaymentGateway)
+                            }
+                        } else null,
+                        onSavedSuccessfully = {
+                            if (isFromCheckout) {
+                                val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                                if (addr != null) checkoutViewModel.selectAddress(addr)
+                                navigate(Screen.PaymentGateway)
+                            } else if (isFromProfile) {
+                                addressViewModel.loadAddresses()
+                            } else {
+                                goBack()
+                            }
                         }
-                        navigate(Screen.PaymentGateway)
-                    }
-                )
+                    )
+                }
                 is Screen.PaymentGateway -> PaymentScreen(
                     checkoutUiState = checkoutViewModel.uiState,
                     onAuthorize = { method ->
                         checkoutViewModel.executeCheckout(method)
+                    },
+                    onChangeAddress = {
+                        addressViewModel.init(authenticatedCustomerId, force = true)
+                        navigate(Screen.AddressSelection(fromCheckout = true))
                     }
                 )
                 is Screen.OrderTracking -> OrderTrackingScreen(
@@ -621,6 +665,7 @@ fun CommerceOSApp(
                     fallbackPhone = session.phone,
                     orderCount = (orderViewModel.history as? OrderHistoryUiState.Content)?.orders?.size ?: 0,
                     addressCount = addressViewModel.addresses.size,
+                    isLoadingAddresses = addressViewModel.isLoading && addressViewModel.addresses.isEmpty(),
                     prescriptionCount = prescriptionViewModel.prescriptions.size,
                     onOrders = {
                         navigateRoot(Screen.OrderHistory)
@@ -638,7 +683,7 @@ fun CommerceOSApp(
                     },
                     onAddresses = {
                         addressViewModel.init(authenticatedCustomerId)
-                        navigate(Screen.AddressSelection)
+                        navigate(Screen.AddressSelection(fromProfile = true))
                     },
                     onLogout = {
                         container.sessionManager.logout()
@@ -738,6 +783,35 @@ fun CommerceOSApp(
                     onReasonNoteChange = { orderViewModel.setReasonNote(it) },
                     onConfirm = { orderViewModel.confirmCancel() },
                     onDismiss = { orderViewModel.dismissCancelDialog() }
+                )
+            }
+
+            if (showAddressBottomSheet) {
+                AddressSelectionBottomSheet(
+                    addresses = addressViewModel.addresses,
+                    selectedAddressId = addressViewModel.selectedAddress?.id,
+                    onDismiss = { showAddressBottomSheet = false },
+                    onSelectAddress = { addr ->
+                        addressViewModel.select(addr)
+                        showAddressBottomSheet = false
+                    },
+                    onAddNewAddress = {
+                        showAddressBottomSheet = false
+                        addressViewModel.startAddAddressFlow()
+                        navigate(Screen.AddressSelection())
+                    },
+                    onUseCurrentLocation = {
+                        addressViewModel.useCurrentGpsLocationAndMatchSaved {
+                            showAddressBottomSheet = false
+                        }
+                    },
+                    onEditAddress = { addr ->
+                        showAddressBottomSheet = false
+                        addressViewModel.startEditAddressFlow(addr)
+                        navigate(Screen.AddressSelection())
+                    },
+                    onDeleteAddress = { id -> addressViewModel.deleteAddress(id) },
+                    onSetDefaultAddress = { id -> addressViewModel.setDefaultAddress(id) }
                 )
             }
         }

@@ -7,7 +7,10 @@ package com.commerceos.android.model
 object HomeFeedMapper {
     fun mapFeedToSections(feed: HomeFeedResponse): List<HomeSection> {
         if (!feed.sections.isNullOrEmpty()) {
-            return feed.sections
+            val validSections = feed.sections.filter { it.type != HomeSectionType.UNKNOWN }
+            if (validSections.isNotEmpty()) {
+                return validSections
+            }
         }
 
         val list = mutableListOf<HomeSection>()

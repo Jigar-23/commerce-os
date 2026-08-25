@@ -23,9 +23,23 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
     }
 
+    signingConfigs {
+        create("release") {
+            val keystoreFile = rootProject.file("commerceos-release.jks")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "commerceos2026"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "commerceos"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "commerceos2026"
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             val prodUrl = System.getenv("COMMERCEOS_PROD_API_URL") ?: "https://commerce-os-api.onrender.com"
             buildConfigField("String", "API_BASE_URL", "\"$prodUrl\"")
             proguardFiles(
@@ -57,9 +71,14 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")

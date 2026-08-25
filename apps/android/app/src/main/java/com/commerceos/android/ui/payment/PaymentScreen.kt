@@ -17,12 +17,17 @@ import com.commerceos.android.util.MoneyFormatter
 import com.commerceos.android.viewmodel.CheckoutUiState
 import com.commerceos.android.viewmodel.ServiceabilityState
 
+object PaymentConstants {
+    const val COD = "COD"
+}
+
 @Composable
 fun PaymentScreen(
     checkoutUiState: CheckoutUiState,
-    onAuthorize: (String) -> Unit
+    onAuthorize: (String) -> Unit,
+    onChangeAddress: (() -> Unit)? = null
 ) {
-    var selectedMethod by remember { mutableStateOf("COD") }
+    var selectedMethod by remember { mutableStateOf(PaymentConstants.COD) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Review and pay", style = CommerceTypography.Title, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
@@ -36,10 +41,26 @@ fun PaymentScreen(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                ReviewRow(
-                    label = "Deliver to",
-                    value = checkoutUiState.address?.let { "${it.tag} · ${it.addressLine}" } ?: "Address required"
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Deliver to", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
+                        Text(
+                            checkoutUiState.address?.let { "${it.tag} · ${it.addressLine}" } ?: "Address required",
+                            style = CommerceTypography.BodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CommerceColors.TextPrimary
+                        )
+                    }
+                    if (onChangeAddress != null) {
+                        TextButton(onClick = onChangeAddress) {
+                            Text("Change", style = CommerceTypography.Caption, fontWeight = FontWeight.Bold, color = CommerceColors.Primary)
+                        }
+                    }
+                }
                 ReviewRow(
                     label = "Arrives",
                     value = (checkoutUiState.serviceability as? ServiceabilityState.Success)?.response?.etaLabel ?: "After address confirmation"
@@ -67,11 +88,11 @@ fun PaymentScreen(
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = if (selectedMethod == "COD") CommerceColors.InfoContainer else CommerceColors.Surface),
-            modifier = Modifier.fillMaxWidth().clickable { selectedMethod = "COD" }.padding(bottom = 12.dp)
+            colors = CardDefaults.cardColors(containerColor = if (selectedMethod == PaymentConstants.COD) CommerceColors.InfoContainer else CommerceColors.Surface),
+            modifier = Modifier.fillMaxWidth().clickable { selectedMethod = PaymentConstants.COD }.padding(bottom = 12.dp)
         ) {
             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = selectedMethod == "COD", onClick = { selectedMethod = "COD" })
+                RadioButton(selected = selectedMethod == PaymentConstants.COD, onClick = { selectedMethod = PaymentConstants.COD })
                 Spacer(modifier = Modifier.width(Spacing.md))
                 Column {
                     Text("Cash on Delivery", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
@@ -79,22 +100,6 @@ fun PaymentScreen(
                 }
             }
         }
-
-        /*
-        Card(
-            colors = CardDefaults.cardColors(containerColor = if (selectedMethod == "UPI_INSTANT") CommerceColors.InfoContainer else CommerceColors.Surface),
-            modifier = Modifier.fillMaxWidth().clickable { selectedMethod = "UPI_INSTANT" }.padding(bottom = 12.dp)
-        ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = selectedMethod == "UPI_INSTANT", onClick = { selectedMethod = "UPI_INSTANT" })
-                Spacer(modifier = Modifier.width(Spacing.md))
-                Column {
-                    Text("UPI or NetBanking", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                    Text("Pay now using your preferred app or bank.", style = CommerceTypography.Caption, color = CommerceColors.TextMuted)
-                }
-            }
-        }
-        */
 
         if (checkoutUiState.errorMessage != null) {
             Text(checkoutUiState.errorMessage, style = CommerceTypography.Caption, color = CommerceColors.Danger, modifier = Modifier.padding(vertical = Spacing.sm))
@@ -111,7 +116,7 @@ fun PaymentScreen(
         ) {
             val buttonLabel = when {
                 checkoutUiState.isProcessing -> "Processing..."
-                selectedMethod == "COD" -> "Place Order"
+                selectedMethod == PaymentConstants.COD -> "Place Order"
                 else -> "Pay ${MoneyFormatter.format(checkoutUiState.grandTotal)}"
             }
             Text(buttonLabel, style = CommerceTypography.Label, fontWeight = FontWeight.Bold)

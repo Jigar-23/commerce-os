@@ -25,16 +25,15 @@ fun EarningsView(
     modifier: Modifier = Modifier
 ) {
     val activeProfile = profile ?: RiderProfile(
-        riderId = "rdr_rewari_01",
+        riderId = "rdr_partner",
         name = "Delivery Partner",
-        phone = "+919876543210",
-        vehicleNumber = "HR-26-AB-1234",
+        phone = "",
+        vehicleNumber = "Electric Scooter",
         rating = 4.9,
         completedToday = 0,
         earningsTodayFormatted = "₹0",
         shiftStatus = "ONLINE_AVAILABLE",
-        assignedHub = "Rewari Central Hub",
-        tier = "Diamond"
+        assignedHub = "Koramangala Hub"
     )
 
     val completedCount = activeProfile.completedToday ?: 0

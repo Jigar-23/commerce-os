@@ -32,33 +32,15 @@ class CategoryViewModel(private val repository: AppRepository) : ViewModel() {
                 is ApiResult.Success -> {
                     val categories = result.data ?: emptyList()
                     taxonomy = if (categories.isEmpty()) {
-                        fallbackFromClientTaxonomy()
+                        CategoryTaxonomyUiState.Error("No catalog categories available from server.")
                     } else {
                         CategoryTaxonomyUiState.Content(categories)
                     }
                 }
                 is ApiResult.Failure -> {
-                    taxonomy = fallbackFromClientTaxonomy()
+                    taxonomy = CategoryTaxonomyUiState.Error(result.error.message ?: "Unable to load catalog categories from server.")
                 }
             }
-        }
-    }
-
-    private fun fallbackFromClientTaxonomy(): CategoryTaxonomyUiState {
-        val taxonomyConfig = ClientConfigProvider.activeConfig().taxonomyConfig
-        val configCategories = taxonomyConfig.categories
-        return if (configCategories.isEmpty()) {
-            CategoryTaxonomyUiState.Error("Catalog taxonomy unavailable")
-        } else {
-            val mapped = configCategories.map { group ->
-                CatalogCategory(
-                    id = group.id,
-                    name = group.title,
-                    slug = group.id.removePrefix("cat_"),
-                    productCount = 12
-                )
-            }
-            CategoryTaxonomyUiState.Content(mapped)
         }
     }
 

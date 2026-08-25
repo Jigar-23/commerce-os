@@ -90,28 +90,18 @@ data class StructuredAddress(
 
     fun validate(): AddressValidationResult {
         var houseErr: String? = null
-        var streetErr: String? = null
-        var cityErr: String? = null
         var pinErr: String? = null
         var entranceErr: String? = null
         var nameErr: String? = null
         var phoneErr: String? = null
 
-        if (houseNumber.isBlank() && building.isBlank()) {
-            houseErr = "Flat / House No. or Building Name is required"
-        }
-        if (street.isBlank()) {
-            streetErr = "Street, Area, or Sector is required"
-        }
-        if (city.isBlank()) {
-            cityErr = "City is required"
+        if (houseNumber.trim().isBlank() && building.trim().isBlank() && street.trim().isBlank()) {
+            houseErr = "Address details are required"
         }
 
-        // Strict India PIN Code Validation (6 digits, first digit 1-9)
+        // India PIN Code Validation (6 digits, first digit 1-9 if provided)
         val cleanPin = postalCode.trim()
-        if (cleanPin.isBlank()) {
-            pinErr = "PIN code is required"
-        } else if (!cleanPin.matches(Regex("^[1-9][0-9]{5}$"))) {
+        if (cleanPin.isNotBlank() && !cleanPin.matches(Regex("^[1-9][0-9]{5}$"))) {
             pinErr = "Enter a valid 6-digit PIN code (e.g. 122001)"
         }
 
@@ -130,14 +120,14 @@ data class StructuredAddress(
             }
         }
 
-        val isValid = houseErr == null && streetErr == null && cityErr == null &&
+        val isValid = houseErr == null &&
                 pinErr == null && entranceErr == null && nameErr == null && phoneErr == null
 
         return AddressValidationResult(
             isValid = isValid,
             houseNumberError = houseErr,
-            streetError = streetErr,
-            cityError = cityErr,
+            streetError = null,
+            cityError = null,
             postalCodeError = pinErr,
             customEntranceDetailsError = entranceErr,
             contactNameError = nameErr,
@@ -161,13 +151,20 @@ data class StructuredAddress(
         val boundLat = geoLocation?.latitude ?: 0.0
         val boundLng = geoLocation?.longitude ?: 0.0
         val boundAccuracy = geoLocation?.accuracyMeters ?: 10.0
+        val boundCity = city.trim().ifBlank {
+            subLocality.trim().ifBlank {
+                locality.trim().ifBlank {
+                    district.trim().ifBlank { "Local Area" }
+                }
+            }
+        }
 
         return AddAddressRequest(
             tag = tag.ifBlank { "Home" },
             addressLine = finalAddressLine.ifBlank { "Selected Delivery Address" },
-            city = city.trim().ifBlank { "NCR" },
-            state = state.trim().ifBlank { "Haryana" },
-            postalCode = postalCode.trim().ifBlank { "122002" },
+            city = boundCity,
+            state = state.trim(),
+            postalCode = postalCode.trim(),
             country = country.ifBlank { "India" },
             landmark = landmark.trim(),
             contactName = if (recipientType == RecipientType.SOMEONE_ELSE) contactName.trim() else "",
@@ -183,18 +180,13 @@ data class StructuredAddress(
 
     companion object {
         fun fromApiAddress(api: ApiAddress): StructuredAddress {
-            val parts = api.addressLine.split(",").map { it.trim() }.filter { it.isNotBlank() }
-            val house = parts.getOrNull(0) ?: ""
-            val bldg = parts.getOrNull(1) ?: ""
-            val remainingStreet = if (parts.size > 2) parts.drop(2).joinToString(", ") else ""
-
             val recType = if (!api.contactName.isNullOrBlank() || !api.contactPhone.isNullOrBlank()) {
                 RecipientType.SOMEONE_ELSE
             } else {
                 RecipientType.ME
             }
 
-            val geo = if (api.latitude != null && api.longitude != null) {
+            val geo = if (api.latitude != null && api.longitude != null && api.latitude != 0.0 && api.longitude != 0.0) {
                 GeoPoint(
                     latitude = api.latitude,
                     longitude = api.longitude,
@@ -203,13 +195,17 @@ data class StructuredAddress(
                 )
             } else null
 
+            val parts = api.addressLine.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val house = if (parts.isNotEmpty()) parts.first() else api.addressLine
+            val streetPart = if (parts.size > 1) parts.drop(1).joinToString(", ") else ""
+
             return StructuredAddress(
                 id = api.id,
                 tag = api.tag.ifBlank { "Home" },
                 houseNumber = house,
-                building = bldg,
+                building = "",
                 floor = "",
-                street = remainingStreet.ifBlank { api.addressLine },
+                street = streetPart,
                 subLocality = "",
                 locality = api.city,
                 landmark = api.landmark,
@@ -221,8 +217,8 @@ data class StructuredAddress(
                 deliveryInstructions = api.deliveryInstructions ?: "",
                 entrance = EntranceType.MAIN_GATE,
                 recipientType = recType,
-                contactName = api.contactName,
-                contactPhone = api.contactPhone,
+                contactName = api.contactName ?: "",
+                contactPhone = api.contactPhone ?: "",
                 isDefault = api.isDefault,
                 geoLocation = geo,
                 placeId = api.placeId

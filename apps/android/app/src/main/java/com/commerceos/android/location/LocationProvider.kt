@@ -64,27 +64,35 @@ class DefaultLocationProvider(private val context: Context) : LocationProvider {
 
         val lm = locationManager ?: return@withContext LocationResult.Failure("Location manager unavailable")
 
-        // Try fast last-known location first if recent enough
+        // Try high-accuracy recent last-known location across Fused, GPS, and Network
         val lastGps = try { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) } catch (_: Exception) { null }
+        val lastFused = try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                lm.getLastKnownLocation(LocationManager.FUSED_PROVIDER)
+            } else null
+        } catch (_: Exception) { null }
         val lastNetwork = try { lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) } catch (_: Exception) { null }
 
-        val bestLastKnown = listOfNotNull(lastGps, lastNetwork)
-            .maxByOrNull { it.time }
+        val validLastKnown = listOfNotNull(lastGps, lastFused, lastNetwork)
+            .filter { (System.currentTimeMillis() - it.time) < 120_000 } // Under 2 mins old
+            .sortedBy { if (it.hasAccuracy()) it.accuracy else 9999f } // Prioritize highest accuracy (lowest meters)
 
-        if (bestLastKnown != null && (System.currentTimeMillis() - bestLastKnown.time) < 60_000) {
-            val accuracy = if (bestLastKnown.hasAccuracy()) bestLastKnown.accuracy else null
+        val bestLastKnown = validLastKnown.firstOrNull()
+
+        // If we have an accurate last-known location (< 35m accuracy), return it immediately
+        if (bestLastKnown != null && bestLastKnown.hasAccuracy() && bestLastKnown.accuracy <= 35f) {
             return@withContext LocationResult.Success(
                 GeoPoint(
                     latitude = bestLastKnown.latitude,
                     longitude = bestLastKnown.longitude,
-                    accuracyMeters = accuracy,
+                    accuracyMeters = bestLastKnown.accuracy,
                     timestamp = bestLastKnown.time,
                     provider = bestLastKnown.provider
                 )
             )
         }
 
-        // Fresh location fix request with timeout
+        // Fresh high-precision GPS location fix request with timeout
         val freshFix = withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<Location?> { continuation ->
                 val listener = object : LocationListener {
@@ -97,12 +105,18 @@ class DefaultLocationProvider(private val context: Context) : LocationProvider {
                 }
 
                 try {
-                    val provider = when {
-                        lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-                        lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-                        else -> LocationManager.PASSIVE_PROVIDER
+                    val enabledProviders = listOf(
+                        LocationManager.GPS_PROVIDER,
+                        LocationManager.NETWORK_PROVIDER
+                    ).filter { lm.isProviderEnabled(it) }
+
+                    if (enabledProviders.isNotEmpty()) {
+                        for (prov in enabledProviders) {
+                            lm.requestLocationUpdates(prov, 500L, 0f, listener)
+                        }
+                    } else {
+                        lm.requestSingleUpdate(LocationManager.PASSIVE_PROVIDER, listener, null)
                     }
-                    lm.requestSingleUpdate(provider, listener, null)
                 } catch (e: Exception) {
                     if (continuation.isActive) continuation.resume(null)
                 }

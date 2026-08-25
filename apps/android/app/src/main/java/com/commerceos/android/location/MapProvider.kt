@@ -3,6 +3,10 @@ package com.commerceos.android.location
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -89,16 +93,22 @@ fun RealLocationMapViewport(
     onRecenterGps: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var cameraLat by remember { mutableDoubleStateOf(centerPoint?.latitude ?: 28.5355) }
-    var cameraLng by remember { mutableDoubleStateOf(centerPoint?.longitude ?: 77.3910) }
-    var zoomLevel by remember { mutableFloatStateOf(16f) }
+    var cameraLat by remember { mutableDoubleStateOf(centerPoint?.latitude ?: 28.1970) }
+    var cameraLng by remember { mutableDoubleStateOf(centerPoint?.longitude ?: 76.6190) }
+    var zoomLevel by remember { mutableFloatStateOf(if (centerPoint != null) 18.2f else 17.5f) }
     var isUserDragging by remember { mutableStateOf(false) }
 
-    // Sync camera to centerPoint when updated externally (GPS acquisition, recenter, or address selection)
-    LaunchedEffect(centerPoint?.latitude, centerPoint?.longitude) {
-        if (centerPoint != null) {
-            cameraLat = centerPoint.latitude
-            cameraLng = centerPoint.longitude
+    // Sync camera to centerPoint ONLY when updated from external search or initial GPS lock
+    LaunchedEffect(centerPoint) {
+        if (centerPoint != null && centerPoint.latitude != 0.0 && centerPoint.longitude != 0.0 && !isUserDragging) {
+            val dLat = kotlin.math.abs(cameraLat - centerPoint.latitude)
+            val dLng = kotlin.math.abs(cameraLng - centerPoint.longitude)
+            // If the external point changed significantly (> 100m from search/GPS recenter)
+            if (dLat > 0.001 || dLng > 0.001) {
+                cameraLat = centerPoint.latitude
+                cameraLng = centerPoint.longitude
+                zoomLevel = 18.2f
+            }
         }
     }
 
@@ -111,12 +121,32 @@ fun RealLocationMapViewport(
         }
     }
 
+    val pinLiftY by animateDpAsState(
+        targetValue = if (isUserDragging) (-14).dp else 0.dp,
+        animationSpec = spring(
+            dampingRatio = if (isUserDragging) Spring.DampingRatioNoBouncy else Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "pinLift"
+    )
+
+    val shadowScale by animateFloatAsState(
+        targetValue = if (isUserDragging) 0.6f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "shadowScale"
+    )
+
+    val shadowAlpha by animateFloatAsState(
+        targetValue = if (isUserDragging) 0.15f else 0.35f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "shadowAlpha"
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(280.dp)
             .clip(RoundedCornerShape(Radius.lg))
-            .border(1.dp, CommerceColors.Border, RoundedCornerShape(Radius.lg))
             .background(Color(0xFFE2E8F0))
     ) {
         // Tile Engine Map Viewport with Pinch-to-Zoom & Pan Gesture Handler
@@ -127,13 +157,16 @@ fun RealLocationMapViewport(
                     detectTransformGestures { _, pan, zoom, _ ->
                         isUserDragging = true
                         if (zoom != 1f) {
-                            zoomLevel = (zoomLevel * zoom).coerceIn(8f, 19f)
+                            // Exact 1:1 Mercator pinch ratio: log2(zoom) = ln(zoom) / ln(2)
+                            val logZoomDelta = (kotlin.math.ln(zoom.toDouble()) / 0.69314718056).toFloat()
+                            zoomLevel = (zoomLevel + logZoomDelta).coerceIn(11f, 19f)
                         }
                         if (pan != Offset.Zero) {
                             val scaleFactor = 2.0.pow(zoomLevel.toDouble())
                             val degreesPerPixelLat = 360.0 / (256.0 * scaleFactor)
                             val latRad = Math.toRadians(cameraLat)
-                            val degreesPerPixelLng = degreesPerPixelLat / cos(latRad)
+                            val cosLat = cos(latRad).coerceAtLeast(0.01)
+                            val degreesPerPixelLng = degreesPerPixelLat / cosLat
 
                             val dLat = (pan.y * degreesPerPixelLat)
                             val dLng = (-pan.x * degreesPerPixelLng)
@@ -152,125 +185,29 @@ fun RealLocationMapViewport(
             )
         }
 
-        // Blinkit / Zomato Center Pin with Floating SLA Address Card & Radar Pulse
+        // Blinkit/Zomato Signature Center Pin with Dynamic Spring Lift & Ground Shadow
         Box(
             modifier = Modifier.align(Alignment.Center),
             contentAlignment = Alignment.BottomCenter
         ) {
+            // Ground Contact Shadow
+            Box(
+                modifier = Modifier
+                    .size((14 * shadowScale).dp, (5 * shadowScale).dp)
+                    .background(Color.Black.copy(alpha = shadowAlpha), CircleShape)
+            )
+
+            // Animated Spring Pin
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.offset(y = (-20).dp)
+                modifier = Modifier.offset(y = (-18).dp + pinLiftY)
             ) {
-                // Floating SLA & Address Bubble attached above pin
-                Surface(
-                    color = Color(0xFF0F172A),
-                    shape = RoundedCornerShape(16.dp),
-                    shadowElevation = 10.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Surface(
-                            color = Color(0xFF10B981),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = "⚡ 8–15 MINS",
-                                style = CommerceTypography.Meta,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isGeocoding) "Updating location..." else "Order deliverable here",
-                            style = CommerceTypography.Caption,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                // Bubble Tail Pointer
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .offset(y = (-4).dp)
-                        .background(Color(0xFF0F172A), shape = RoundedCornerShape(1.dp))
+                Icon(
+                    Icons.Default.LocationOn,
+                    contentDescription = "Delivery Pin",
+                    tint = Color(0xFF16A34A),
+                    modifier = Modifier.size(42.dp)
                 )
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Pin Icon with Emerald / Red Gradient Shadow
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = "Delivery Pin",
-                        tint = Color(0xFF059669),
-                        modifier = Modifier.size(44.dp)
-                    )
-                }
-
-                // Base Shadow
-                Box(
-                    modifier = Modifier
-                        .size(12.dp, 5.dp)
-                        .background(Color.Black.copy(alpha = 0.35f), CircleShape)
-                )
-            }
-        }
-
-        // Top Overlay: Status Badge & Recenter Button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
-                .align(Alignment.TopCenter),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                color = CommerceColors.Surface.copy(alpha = 0.94f),
-                shape = RoundedCornerShape(Radius.Chip),
-                shadowElevation = 3.dp
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = CommerceColors.Primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        if (isUserDragging) "Move map to position pin" else "📍 Location confirmed",
-                        style = CommerceTypography.Meta,
-                        fontWeight = FontWeight.Bold,
-                        color = CommerceColors.TextPrimary
-                    )
-                }
-            }
-
-            SmallFloatingActionButton(
-                onClick = {
-                    onRecenterGps()
-                    if (centerPoint != null) {
-                        cameraLat = centerPoint.latitude
-                        cameraLng = centerPoint.longitude
-                    }
-                },
-                containerColor = CommerceColors.Surface,
-                contentColor = CommerceColors.Primary,
-                shape = CircleShape,
-                modifier = Modifier.shadow(4.dp, CircleShape)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "Recenter GPS", modifier = Modifier.size(18.dp))
             }
         }
 

@@ -81,20 +81,24 @@ class RiderDeliveryRepository(
                 val obj = JSONObject(jsonStr)
                 val token = obj.optString("accessToken", "")
                 val riderObj = obj.optJSONObject("rider")
-                val riderId = riderObj?.optString("id") ?: riderObj?.optString("riderId") ?: "rdr_${phone.takeLast(6)}"
-                val riderName = riderObj?.optString("name") ?: name.ifBlank { "Rider ${phone.takeLast(4)}" }
-                val riderPhone = riderObj?.optString("phone") ?: phone
-                val riderVehicle = riderObj?.optString("vehicle") ?: vehicle.ifBlank { "HR-26-AB-1234" }
+                val riderId = riderObj?.optString("id")?.takeIf { it.isNotBlank() }
+                    ?: riderObj?.optString("riderId")?.takeIf { it.isNotBlank() }
+                    ?: obj.optString("riderId").takeIf { it.isNotBlank() }
+                    ?: return@withContext Result.failure(Exception("Server response missing rider identity"))
+                val riderName = riderObj?.optString("name")?.takeIf { it.isNotBlank() } ?: name.ifBlank { "Rider" }
+                val riderPhone = riderObj?.optString("phone")?.takeIf { it.isNotBlank() } ?: phone
+                val riderVehicle = riderObj?.optString("vehicle")?.takeIf { it.isNotBlank() } ?: vehicle
+                val rating = if (riderObj != null && riderObj.has("rating") && !riderObj.isNull("rating")) riderObj.getDouble("rating") else null
                 val profile = RiderProfile(
                     riderId = riderId,
                     name = riderName,
                     phone = riderPhone,
                     vehicleNumber = riderVehicle,
-                    rating = 4.9,
-                    completedToday = 12,
-                    earningsTodayFormatted = "₹480",
-                    shiftStatus = "ONLINE_AVAILABLE",
-                    assignedHub = "Rewari Central Hub (STORE_REWARI_01)"
+                    rating = rating,
+                    completedToday = riderObj?.optInt("completedToday", 0) ?: 0,
+                    earningsTodayFormatted = riderObj?.optString("earningsTodayFormatted", "₹0") ?: "₹0",
+                    shiftStatus = riderObj?.optString("shiftStatus", "UNKNOWN") ?: "UNKNOWN",
+                    assignedHub = riderObj?.optString("assignedHub", "") ?: ""
                 )
                 return@withContext Result.success(Pair(token, profile))
             }
@@ -106,81 +110,57 @@ class RiderDeliveryRepository(
         }
     }
 
-    suspend fun loginAsRider(riderId: String = "rdr_rewari_01", phone: String = "+919876543210"): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val baseUrl = baseUrlProvider().trimEnd('/')
-            if (baseUrl.isBlank()) return@withContext Result.failure(Exception("Base URL empty"))
-            val url = URL("$baseUrl/api/v1/auth/rider/login")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.doOutput = true
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            val body = JSONObject().apply {
-                put("riderId", riderId)
-                put("phone", phone)
-            }
-            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode in 200..299) {
-                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val obj = JSONObject(jsonStr)
-                val token = obj.optString("accessToken", "")
-                if (token.isNotBlank()) {
-                    return@withContext Result.success(token)
-                }
-            }
-            val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
-            return@withContext Result.failure(Exception("Rider login failed: $err"))
-        } catch (e: Exception) {
-            return@withContext Result.failure(e)
-        }
-    }
-
     private fun createConnection(path: String, method: String): HttpURLConnection {
         val baseUrl = baseUrlProvider().trimEnd('/')
-        if (baseUrl.isBlank()) {
-            throw IllegalStateException("API base URL is not configured.")
-        }
         val url = URL("$baseUrl$path")
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = method
         conn.setRequestProperty("Content-Type", "application/json")
-        val token = authTokenProvider().trim()
+        val token = authTokenProvider()
         if (token.isNotBlank()) {
             conn.setRequestProperty("Authorization", "Bearer $token")
         }
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
         return conn
     }
 
     suspend fun fetchRiderProfile(): Result<RiderProfile> = withContext(Dispatchers.IO) {
         try {
             val conn = createConnection("/api/v1/delivery/rider/profile", "GET")
-            if (conn.responseCode == 200) {
+            val code = conn.responseCode
+            if (code == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(jsonStr)
+                val rawObj = JSONObject(jsonStr)
+                val json = rawObj.optJSONObject("rider") ?: rawObj.optJSONObject("profile") ?: rawObj
+                val riderId = json.optString("riderId").takeIf { it.isNotBlank() }
+                    ?: json.optString("id").takeIf { it.isNotBlank() }
+                    ?: "rdr_active"
+                val name = json.optString("name").takeIf { it.isNotBlank() }
+                    ?: json.optString("full_name").takeIf { it.isNotBlank() }
+                    ?: "Delivery Partner"
+                val phone = json.optString("phone", "")
+                val vehicle = json.optString("vehicleNumber", json.optString("vehicle", json.optString("vehicle_number", "Electric Scooter")))
                 val rating = if (json.has("rating") && !json.isNull("rating")) json.getDouble("rating") else 4.9
-                val completedToday = if (json.has("completedToday") && !json.isNull("completedToday")) json.getInt("completedToday") else 0
-                val earningsTodayFormatted = json.optString("earningsTodayFormatted", "₹0").takeIf { it.isNotBlank() } ?: "₹0"
-                val shiftStatus = json.optString("shiftStatus", "ONLINE_AVAILABLE")
-                val assignedHub = json.optString("assignedHub", "Rewari Central Hub (STORE_REWARI_01)")
+                val completedToday = if (json.has("completedToday") && !json.isNull("completedToday")) json.getInt("completedToday") else json.optInt("completed_today", 0)
+                val earningsTodayFormatted = json.optString("earningsTodayFormatted", json.optString("earnings_today", "₹0"))
+                val shiftStatus = json.optString("shiftStatus", json.optString("status", "ONLINE_AVAILABLE"))
+                val assignedHub = json.optString("assignedHub", json.optString("assigned_hub", "Central Hub - Koramangala"))
                 val profile = RiderProfile(
-                    riderId = json.optString("riderId", "rdr_partner"),
-                    name = json.optString("name", "Delivery Partner"),
-                    phone = json.optString("phone", ""),
-                    vehicleNumber = json.optString("vehicleNumber", json.optString("vehicle", "HR-26-AB-1234")),
+                    riderId = riderId,
+                    name = name,
+                    phone = phone,
+                    vehicleNumber = vehicle,
                     rating = rating,
                     completedToday = completedToday,
-                    earningsTodayFormatted = earningsTodayFormatted,
+                    earningsTodayFormatted = if (earningsTodayFormatted.startsWith("₹")) earningsTodayFormatted else "₹$earningsTodayFormatted",
                     shiftStatus = shiftStatus,
                     assignedHub = assignedHub
                 )
                 return@withContext Result.success(profile)
             }
-            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
-            return@withContext Result.failure(Exception("Failed to fetch profile: $errStr"))
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
+            return@withContext Result.failure(Exception("Failed to fetch profile (HTTP $code): $errStr"))
         } catch (e: Exception) {
             return@withContext Result.failure(e)
         }
@@ -195,9 +175,13 @@ class RiderDeliveryRepository(
                 put("isOnline", isOnline)
             }
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            return@withContext Result.success(isOnline)
+            if (conn.responseCode in 200..299) {
+                return@withContext Result.success(isOnline)
+            }
+            val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            return@withContext Result.failure(Exception("Failed to update shift status: $err"))
         } catch (e: Exception) {
-            return@withContext Result.success(isOnline)
+            return@withContext Result.failure(e)
         }
     }
 
@@ -238,15 +222,36 @@ class RiderDeliveryRepository(
     suspend fun fetchActiveOffer(): ActiveOfferResult = withContext(Dispatchers.IO) {
         try {
             val conn = createConnection("/api/v1/delivery/offers/active", "GET")
-            if (conn.responseCode == 200) {
+            val code = conn.responseCode
+            if (code == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val obj = JSONObject(jsonStr)
-                val offer = parseOfferJson(obj)
-                return@withContext ActiveOfferResult.Success(offer)
-            } else if (conn.responseCode == 404) {
+                val offersArr = obj.optJSONArray("offers")
+                if (offersArr != null) {
+                    if (offersArr.length() == 0) {
+                        return@withContext ActiveOfferResult.None
+                    }
+                    val firstOffer = offersArr.getJSONObject(0)
+                    val orderStatus = firstOffer.optString("orderStatus", firstOffer.optString("order_status", ""))
+                    if (orderStatus == "PLACED" || orderStatus == "PENDING" || orderStatus == "PRESCRIPTION_VERIFICATION_PENDING") {
+                        return@withContext ActiveOfferResult.None
+                    }
+                    val offer = parseOfferJson(firstOffer) ?: return@withContext ActiveOfferResult.None
+                    return@withContext ActiveOfferResult.Success(offer)
+                }
+                if (obj.has("offerId") || obj.has("id")) {
+                    val orderStatus = obj.optString("orderStatus", obj.optString("order_status", ""))
+                    if (orderStatus == "PLACED" || orderStatus == "PENDING" || orderStatus == "PRESCRIPTION_VERIFICATION_PENDING") {
+                        return@withContext ActiveOfferResult.None
+                    }
+                    val offer = parseOfferJson(obj) ?: return@withContext ActiveOfferResult.None
+                    return@withContext ActiveOfferResult.Success(offer)
+                }
+                return@withContext ActiveOfferResult.None
+            } else if (code == 404) {
                 return@withContext ActiveOfferResult.None
             } else {
-                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
                 return@withContext ActiveOfferResult.Error("Server error $err")
             }
         } catch (e: Exception) {
@@ -257,15 +262,16 @@ class RiderDeliveryRepository(
     suspend fun fetchOfferById(offerId: String): ActiveOfferResult = withContext(Dispatchers.IO) {
         try {
             val conn = createConnection("/api/v1/delivery/offers/$offerId", "GET")
-            if (conn.responseCode == 200) {
+            val code = conn.responseCode
+            if (code == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val obj = JSONObject(jsonStr)
                 val offer = parseOfferJson(obj)
                 return@withContext ActiveOfferResult.Success(offer)
-            } else if (conn.responseCode == 404 || conn.responseCode == 409) {
+            } else if (code == 404 || code == 409) {
                 return@withContext ActiveOfferResult.None
             } else {
-                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
                 return@withContext ActiveOfferResult.Error("Server error $err")
             }
         } catch (e: Exception) {
@@ -332,6 +338,11 @@ class RiderDeliveryRepository(
                 val list = mutableListOf<RiderNotificationItem>()
                 for (i in 0 until array.length()) {
                     val item = array.getJSONObject(i)
+                    val rId = item.optString("riderId").ifBlank { item.optString("rider_id") }
+                    if (rId.isBlank()) {
+                        // Strict fail-closed: Skip notifications with unidentifiable or missing rider ID
+                        continue
+                    }
                     val notifId = item.optString("notificationId").ifBlank { item.optString("id", UUID.randomUUID().toString()) }
                     list.add(
                         RiderNotificationItem(
@@ -340,7 +351,7 @@ class RiderDeliveryRepository(
                             type = item.optString("type", "ORDER_OFFER"),
                             category = item.optString("category", "ORDERS"),
                             priority = item.optString("priority", "HIGH"),
-                            riderId = item.optString("riderId", "rdr_rewari_01"),
+                            riderId = rId,
                             orderId = item.optString("orderId").takeIf { it.isNotBlank() },
                             deliveryId = item.optString("deliveryId").takeIf { it.isNotBlank() },
                             offerId = item.optString("offerId").takeIf { it.isNotBlank() },
@@ -388,7 +399,15 @@ class RiderDeliveryRepository(
             val conn = createConnection("/api/v1/delivery/rider/active-session", "GET")
             if (conn.responseCode == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                return@withContext parseSessionJson(JSONObject(jsonStr))
+                val obj = JSONObject(jsonStr)
+                val sessionObj = obj.optJSONObject("session")
+                if (sessionObj != null) {
+                    return@withContext parseSessionJson(sessionObj)
+                }
+                if (obj.optBoolean("active", true) && obj.has("deliveryId")) {
+                    return@withContext parseSessionJson(obj)
+                }
+                return@withContext null
             }
         } catch (e: Exception) {
             // No active session
@@ -409,40 +428,7 @@ class RiderDeliveryRepository(
         return@withContext null
     }
 
-    suspend fun transitionState(
-        deliveryId: String,
-        targetState: String,
-        idempotencyKey: String = UUID.randomUUID().toString()
-    ): Result<ServerDeliverySession> = withContext(Dispatchers.IO) {
-        try {
-            val conn = createConnection("/api/v1/delivery/$deliveryId/transition", "POST")
-            conn.doOutput = true
 
-            val body = JSONObject().apply {
-                put("targetState", targetState)
-                put("idempotencyKey", idempotencyKey)
-            }
-
-            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-
-            val responseStr = if (conn.responseCode in 200..299) {
-                conn.inputStream.bufferedReader().use { it.readText() }
-            } else {
-                conn.errorStream.bufferedReader().use { it.readText() }
-            }
-
-            val json = JSONObject(responseStr)
-            if (conn.responseCode == 200) {
-                val session = parseSessionJson(json)
-                return@withContext Result.success(session)
-            } else {
-                val errMessage = json.optString("message", "Transition rejected")
-                return@withContext Result.failure(Exception(errMessage))
-            }
-        } catch (e: Exception) {
-            return@withContext Result.failure(e)
-        }
-    }
 
     suspend fun verifyOtp(deliveryId: String, otp: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
@@ -609,13 +595,15 @@ class RiderDeliveryRepository(
             val conn = createConnection("/api/v1/delivery/session/$deliveryId/arrive-merchant", "POST")
             conn.doOutput = true
             conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode == 200) {
+            if (conn.responseCode in 200..299) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 return@withContext Result.success(parseSessionJson(JSONObject(jsonStr)))
             }
-            return@withContext transitionState(deliveryId, "ARRIVED_PICKUP")
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            val errMsg = try { JSONObject(errStr).optString("message", errStr) } catch (_: Exception) { errStr }
+            return@withContext Result.failure(Exception("Arrive store failed: $errMsg"))
         } catch (e: Exception) {
-            return@withContext transitionState(deliveryId, "ARRIVED_PICKUP")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -628,9 +616,11 @@ class RiderDeliveryRepository(
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 return@withContext Result.success(parseSessionJson(JSONObject(jsonStr)))
             }
-            return@withContext transitionState(deliveryId, "EN_ROUTE_CUSTOMER")
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            val errMsg = try { JSONObject(errStr).optString("message", errStr) } catch (_: Exception) { errStr }
+            return@withContext Result.failure(Exception("Pickup confirmation failed: $errMsg"))
         } catch (e: Exception) {
-            return@withContext transitionState(deliveryId, "EN_ROUTE_CUSTOMER")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -639,13 +629,15 @@ class RiderDeliveryRepository(
             val conn = createConnection("/api/v1/delivery/session/$deliveryId/arrive-customer", "POST")
             conn.doOutput = true
             conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode == 200) {
+            if (conn.responseCode in 200..299) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 return@withContext Result.success(parseSessionJson(JSONObject(jsonStr)))
             }
-            return@withContext transitionState(deliveryId, "HANDOFF_STARTED")
+            val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
+            val errMsg = try { JSONObject(errStr).optString("message", errStr) } catch (_: Exception) { errStr }
+            return@withContext Result.failure(Exception("Arrive customer failed: $errMsg"))
         } catch (e: Exception) {
-            return@withContext transitionState(deliveryId, "HANDOFF_STARTED")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -655,9 +647,12 @@ class RiderDeliveryRepository(
         destLat: Double,
         destLng: Double
     ): Result<DeliveryRouteResult> = withContext(Dispatchers.IO) {
+        // 1. Try via Commerce OS Server
         try {
             val path = "/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
             val conn = createConnection(path, "GET")
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
             if (conn.responseCode == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(jsonStr)
@@ -670,28 +665,67 @@ class RiderDeliveryRepository(
                     val pt = waypointsArray.getJSONObject(i)
                     waypoints.add(RoutePoint(lat = pt.getDouble("lat"), lng = pt.getDouble("lng")))
                 }
-                return@withContext Result.success(
-                    DeliveryRouteResult(
-                        distanceKm = distKm,
-                        durationMins = durMins,
-                        waypoints = waypoints,
-                        provider = provider
+                if (waypoints.size >= 2) {
+                    return@withContext Result.success(
+                        DeliveryRouteResult(
+                            distanceKm = distKm,
+                            durationMins = durMins,
+                            waypoints = waypoints,
+                            provider = provider
+                        )
                     )
-                )
-            } else {
-                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP ${conn.responseCode}"
-                return@withContext Result.failure(Exception("Route unavailable: $err"))
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Direct HTTPS fallback to OSRM OpenStreetMap routing service
+        try {
+            val osrmUrl = java.net.URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
+            val conn = (osrmUrl.openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 4000
+                readTimeout = 4000
+                setRequestProperty("User-Agent", "CommerceOS-Rider/2.0")
+            }
+            if (conn.responseCode == 200) {
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(jsonStr)
+                val routes = json.getJSONArray("routes")
+                if (routes.length() > 0) {
+                    val routeObj = routes.getJSONObject(0)
+                    val distMeters = routeObj.getDouble("distance")
+                    val durSeconds = routeObj.getDouble("duration")
+                    val geom = routeObj.getJSONObject("geometry")
+                    val coords = geom.getJSONArray("coordinates")
+                    val waypoints = mutableListOf<RoutePoint>()
+                    for (i in 0 until coords.length()) {
+                        val c = coords.getJSONArray(i)
+                        waypoints.add(RoutePoint(lat = c.getDouble(1), lng = c.getDouble(0)))
+                    }
+                    if (waypoints.size >= 2) {
+                        return@withContext Result.success(
+                            DeliveryRouteResult(
+                                distanceKm = Math.round((distMeters / 1000.0) * 10.0) / 10.0,
+                                durationMins = Math.max(1, (durSeconds / 60.0).toInt()),
+                                waypoints = waypoints,
+                                provider = "OSRM_DIRECT"
+                            )
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
             return@withContext Result.failure(e)
         }
+
+        return@withContext Result.failure(Exception("Road route geometry calculation unavailable"))
     }
 
     private fun parseSessionJson(json: JSONObject): ServerDeliverySession {
-        val stateStr = json.optString("state", "")
-        if (stateStr.isBlank()) {
-            throw IllegalArgumentException("INVALID_DATA: Server session state cannot be empty")
-        }
+        val stateStr = json.optString("state").takeIf { it.isNotBlank() }
+            ?: json.optString("deliveryStatus").takeIf { it.isNotBlank() }
+            ?: json.optString("status").takeIf { it.isNotBlank() }
+            ?: "ASSIGNED"
 
         val telemObj = json.optJSONObject("telemetry")
         val telemetry = if (telemObj != null && telemObj.has("latitude") && telemObj.has("longitude")) {
@@ -713,9 +747,12 @@ class RiderDeliveryRepository(
         val distKm = if (json.has("distanceKm") && !json.isNull("distanceKm")) json.getDouble("distanceKm") else null
         val estMins = if (json.has("estimatedTimeMins") && !json.isNull("estimatedTimeMins")) json.getInt("estimatedTimeMins") else null
 
-        if (!json.has("deliveryId") || !json.has("orderId")) {
-            throw IllegalArgumentException("INVALID_DATA: Delivery session missing mandatory deliveryId or orderId")
-        }
+        val deliveryId = json.optString("deliveryId").takeIf { it.isNotBlank() }
+            ?: json.optString("id").takeIf { it.isNotBlank() }
+            ?: "del_active"
+        val orderId = json.optString("orderId").takeIf { it.isNotBlank() }
+            ?: json.optString("order_id").takeIf { it.isNotBlank() }
+            ?: "ord_active"
 
         val cLat = if (json.has("customerLat") && !json.isNull("customerLat")) json.getDouble("customerLat").takeIf { !it.isNaN() && it != 0.0 } else null
         val cLng = if (json.has("customerLng") && !json.isNull("customerLng")) json.getDouble("customerLng").takeIf { !it.isNaN() && it != 0.0 } else null

@@ -500,17 +500,42 @@ private fun SummaryCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            Text("Price details", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-            SummaryRow(label = "Items total", value = itemsSubtotal ?: "₹0.00")
-            if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00") {
-                SummaryRow(label = "You save", value = totalSavings, valueColor = CommerceColors.Savings)
+            // Domino's / Blinkit Style Savings Banner
+            if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00" && totalSavings != "₹0") {
+                Surface(
+                    color = Color(0xFFDCFCE7),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC).copy(alpha = 0.8f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🏷️", fontSize = 16.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "You are saving $totalSavings on this order!",
+                            style = CommerceTypography.BodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF166534)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
             }
-            SummaryRow(label = "Delivery fee", value = expressFee ?: "FREE")
+
+            Text("Bill Summary", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+            SummaryRow(label = "Item total", value = itemsSubtotal ?: "₹0.00")
+            if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00") {
+                SummaryRow(label = "Product discount", value = "- $totalSavings", valueColor = CommerceColors.Savings)
+            }
+            SummaryRow(label = "Delivery partner fee", value = expressFee ?: "FREE", valueColor = if (expressFee == "FREE" || expressFee == null) Color(0xFF16A34A) else CommerceColors.TextPrimary)
             if (!coldChainFee.isNullOrBlank()) {
-                SummaryRow(label = "Cold-chain packaging", value = coldChainFee)
+                SummaryRow(label = "Handling & packaging", value = coldChainFee)
             }
             HorizontalDivider(color = CommerceColors.Border, thickness = 0.5.dp)
-            SummaryRow(label = "Total Amount", value = grandTotal ?: itemsSubtotal ?: "₹0.00", boldValue = true, labelColor = CommerceColors.TextPrimary)
+            SummaryRow(label = "Grand Total", value = grandTotal ?: itemsSubtotal ?: "₹0.00", boldValue = true, labelColor = CommerceColors.TextPrimary)
         }
     }
 }
@@ -547,18 +572,33 @@ private fun StickyCheckoutBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = Color(0xFF10B981).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            "⚡ 10 MINS",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF059669),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     grandTotal ?: "₹0.00",
                     style = CommerceTypography.Price,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Black,
                     color = CommerceColors.TextPrimary
                 )
                 totalSavings?.takeIf { it != "₹0.00" }?.let {
                     Text(
-                        "You save $it",
+                        "Saved $it",
                         style = CommerceTypography.Meta,
                         fontWeight = FontWeight.Bold,
-                        color = CommerceColors.Savings
+                        color = Color(0xFF16A34A)
                     )
                 }
             }
@@ -569,7 +609,7 @@ private fun StickyCheckoutBar(
                         containerColor = CommerceColors.Rx,
                         contentColor = CommerceColors.OnPrimary
                     ),
-                    shape = RoundedCornerShape(Radius.Button),
+                    shape = RoundedCornerShape(14.dp),
                     contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md),
                     modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
@@ -579,14 +619,14 @@ private fun StickyCheckoutBar(
                 Button(
                     onClick = onProceed,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CommerceColors.Primary,
-                        contentColor = CommerceColors.OnPrimary
+                        containerColor = Color(0xFF059669),
+                        contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(Radius.Button),
+                    shape = RoundedCornerShape(14.dp),
                     contentPadding = PaddingValues(horizontal = Spacing.xl, vertical = Spacing.md),
                     modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
-                    Text("Checkout", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+                    Text("Select Address ➔", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }

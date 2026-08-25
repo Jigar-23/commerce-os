@@ -128,18 +128,6 @@ class RiderForegroundLocationService : Service(), LocationListener {
         while (serviceScope.isActive) {
             try {
                 val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
-                if (sessionMgr.getAuthToken().isBlank()) {
-                    val repo = com.commerceos.rider.repository.RiderDeliveryRepository(
-                        baseUrlProvider = { sessionMgr.getBaseUrl() },
-                        authTokenProvider = { "" }
-                    )
-                    val loginRes = repo.loginAsRider("rdr_rewari_01", "+919876543210")
-                    loginRes.onSuccess { token ->
-                        sessionMgr.saveAuthToken(token)
-                        sessionMgr.saveRiderId("rdr_rewari_01")
-                    }
-                }
-
                 val baseUrl = sessionMgr.getBaseUrl()
                 val token = sessionMgr.getAuthToken()
                 if (baseUrl.isNotBlank() && token.isNotBlank()) {

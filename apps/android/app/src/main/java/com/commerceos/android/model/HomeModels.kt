@@ -244,13 +244,14 @@ enum class HomeSectionType {
     EDITORIAL,
     RECOMMENDED_FEED,
     COLLECTION_SECTION,
-    DISH_SHELF
+    DISH_SHELF,
+    UNKNOWN
 }
 
 /** A server-authored Home section. The client renders, never composes. */
 data class HomeSection(
-    val id: String,
-    val type: HomeSectionType,
+    val id: String = "",
+    val type: HomeSectionType = HomeSectionType.UNKNOWN,
     val title: String? = null,
     val subtitle: String? = null,
     val priority: Int = 0,
@@ -301,29 +302,26 @@ data class VerticalStatus(
  * yet must be advertised as "coming soon", never as a dead button.
  */
 data class HomeVertical(
-    val id: String,
-    val label: String,
-    val tagline: String,
-    val iconKey: String,
-    val isLive: Boolean,
-    val status: VerticalStatus? = VerticalStatus(
-        enabled = isLive,
-        status = if (isLive) VerticalOperationalStatus.AVAILABLE else VerticalOperationalStatus.OUT_OF_ZONE
-    )
+    val id: String = "",
+    val label: String = "",
+    val tagline: String = "",
+    val iconKey: String = "",
+    val isLive: Boolean = true,
+    val status: VerticalStatus? = null
 )
 
 data class CategoryGroup(
-    val id: String,
-    val title: String,
-    val subtitle: String,
+    val id: String = "",
+    val title: String = "",
+    val subtitle: String? = null,
     val imageUrl: String? = null,
     val itemCount: Int? = null,
     val verticalId: String? = null
 )
 
 data class BrandItem(
-    val id: String,
-    val name: String,
+    val id: String = "",
+    val name: String = "",
     val verticalId: String? = null
 )
 
@@ -381,11 +379,18 @@ data class VerticalHomeFeedResponse(
  * when absent the client renders a brand composition, it never fakes an asset.
  */
 data class HomeHeroDto(
-    val campaignId: String,
-    val title: String,
-    val subtitle: String,
-    val badge: String,
-    val ctaText: String,
+    @com.google.gson.annotations.SerializedName(value = "campaignId", alternate = ["id"])
+    val campaignId: String = "hero_default",
+    @com.google.gson.annotations.SerializedName(value = "title", alternate = ["headline", "name"])
+    val title: String = "Special Offers & Quick Delivery",
+    @com.google.gson.annotations.SerializedName(value = "subtitle", alternate = ["subHeadline", "desc", "description"])
+    val subtitle: String = "Medicines & daily essentials delivered in 10 minutes",
+    @com.google.gson.annotations.SerializedName(value = "badge", alternate = ["badgeText", "tag"])
+    val badge: String = "EXPRESS 10 MINS",
+    @com.google.gson.annotations.SerializedName(value = "ctaText", alternate = ["cta", "buttonText"])
+    val ctaText: String = "Explore Catalog",
+    @com.google.gson.annotations.SerializedName(value = "imageUrl", alternate = ["bannerUrl", "image", "banner"])
     val imageUrl: String? = null,
-    val themeKey: String? = null
+    val themeKey: String? = "wellness",
+    val deeplink: String? = null
 )
