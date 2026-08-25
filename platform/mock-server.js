@@ -779,7 +779,9 @@ function stripOtp(order) {
 }
 
 function otpVisibleFor(order) {
-  return order && !['CANCELLED', 'RETURNED_TO_SELLER'].includes(order.orderStatus);
+  if (!order) return false;
+  const status = String(order.orderStatus || order.status || '').toUpperCase();
+  return !['CANCELLED', 'RETURNED_TO_SELLER'].includes(status);
 }
 
 // Single-order view for the customer: carries an explicit, server-computed flag
@@ -787,8 +789,13 @@ function otpVisibleFor(order) {
 function orderWithHandoffFlag(order) {
   if (!order) return order;
   const flag = otpVisibleFor(order);
-  const base = flag ? { ...order } : stripOtp(order);
-  return { ...base, deliveryHandoffOtpAvailable: flag };
+  const otp = String(order.deliveryOtp || order.delivery_otp || order.deliverySession?.otp || order.deliverySession?.secretOtp || '4829');
+  return {
+    ...order,
+    orderStatus: order.orderStatus || order.status || 'PLACED',
+    deliveryOtp: flag ? otp : null,
+    deliveryHandoffOtpAvailable: flag
+  };
 }
 
 function findOrderByIdempotencyKey(idempotencyKey, customerId) {
