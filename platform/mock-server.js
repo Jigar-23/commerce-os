@@ -506,7 +506,7 @@ async function twoFactorVerify(sessionId, otp) {
     String(parsed.Details || '').toLowerCase().includes('otp matched');
 }
 
-const GATEWAY_PORT = Number(process.env.GATEWAY_PORT) || 8090;
+const GATEWAY_PORT = Number(process.env.PORT) || Number(process.env.GATEWAY_PORT) || 8090;
 
 const SERVICES = [
   { name: 'API Gateway (single origin: /api/v1/*)', port: GATEWAY_PORT },
@@ -2143,19 +2143,17 @@ async function handleRequest(port, req, res) {
   const query = new URL(url, 'http://localhost').searchParams;
 
   // ---------------- API GATEWAY (single client origin: /api/v1/*) ----------------
-  if (port === GATEWAY_PORT || port === 8090) {
-    if (path === '/health' || path === '/' || path === '/api/health') {
-      return json(res, 200, {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        service: 'CommerceOS Unified Microservices API Gateway',
-        environment: process.env.NODE_ENV || 'development'
-      });
-    }
-    const route = GATEWAY_ROUTES.find((r) => path.startsWith(r.prefix));
-    if (route) {
-      return handleRequest(route.port, req, res);
-    }
+  if (path === '/health' || path === '/' || path === '/api/health') {
+    return json(res, 200, {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      service: 'CommerceOS Unified Microservices API Gateway',
+      environment: process.env.NODE_ENV || 'development'
+    });
+  }
+  const route = GATEWAY_ROUTES.find((r) => path.startsWith(r.prefix));
+  if (route && (port === GATEWAY_PORT || port === 8090 || port === Number(process.env.PORT) || port === 10000)) {
+    return handleRequest(route.port, req, res);
   }
 
   (async () => {
