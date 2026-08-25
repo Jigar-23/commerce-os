@@ -779,12 +779,11 @@ function stripOtp(order) {
 }
 
 function otpVisibleFor(order) {
-  return order && ['OUT_FOR_DELIVERY', 'DELIVERED', 'DELIVERY_ATTEMPT_FAILED'].includes(order.orderStatus);
+  return order && !['CANCELLED', 'RETURNED_TO_SELLER'].includes(order.orderStatus);
 }
 
 // Single-order view for the customer: carries an explicit, server-computed flag
-// telling the client whether a handoff PIN is available, so the UI never infers
-// OTP presence from the (nulled) OTP field itself.
+// telling the client whether a handoff PIN is available.
 function orderWithHandoffFlag(order) {
   if (!order) return order;
   const flag = otpVisibleFor(order);
@@ -5709,7 +5708,7 @@ async function handleRequest(port, req, res) {
 
         // Otherwise treat param as customerId
         const customerOrders = (db.orders || []).filter((o) => String(o.customerId) === String(param));
-        return json(res, 200, customerOrders.map(stripOtp));
+        return json(res, 200, customerOrders.map(orderWithHandoffFlag));
       }
 
       // GET /api/v1/orders/customer/:customerId (explicit customer list — OTP stripped)
