@@ -83,11 +83,17 @@ class VerticalHomeViewModel(
                     is ApiResult.Success -> {
                         val feed = result.data
                         loadedKey = requestKey
+                        val effectiveTitle = feed.title?.ifBlank { null }
+                            ?: feed.hero?.title?.ifBlank { null }
+                            ?: "${verticalId.replaceFirstChar { it.uppercase() }} Store"
+                        val effectiveSubtitle = feed.subtitle?.ifBlank { null }
+                            ?: feed.hero?.subtitle?.ifBlank { null }
+                            ?: "Explore products and categories"
                         uiState = VerticalHomeUiState.Content(
                             verticalId = verticalId,
-                            title = feed.title,
-                            subtitle = feed.subtitle,
-                            ctaText = feed.ctaText,
+                            title = effectiveTitle,
+                            subtitle = effectiveSubtitle,
+                            ctaText = feed.ctaText ?: feed.hero?.ctaText,
                             featuredProducts = feed.featuredProducts,
                             categories = feed.categories,
                             fulfillment = fulfillment

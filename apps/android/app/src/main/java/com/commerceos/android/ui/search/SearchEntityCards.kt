@@ -15,6 +15,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.commerceos.android.model.SearchEntityType
 import com.commerceos.android.model.SearchResult
 import com.commerceos.android.ui.components.ProductImage
@@ -31,7 +32,8 @@ import com.commerceos.android.util.MoneyFormatter
 fun SearchEntityRenderer(
     result: SearchResult,
     onClick: () -> Unit,
-    onWishlistToggle: ((String) -> Unit)? = null
+    onWishlistToggle: ((String) -> Unit)? = null,
+    onAddToCart: ((SearchResult) -> Unit)? = null
 ) {
     when (result.entityType) {
         SearchEntityType.RESTAURANT -> RestaurantSearchCard(result = result, onClick = onClick)
@@ -42,7 +44,12 @@ fun SearchEntityRenderer(
         SearchEntityType.COLLECTION -> CollectionSearchCard(result = result, onClick = onClick)
         SearchEntityType.CAMPAIGN -> CampaignSearchCard(result = result, onClick = onClick)
         SearchEntityType.OFFER -> OfferSearchCard(result = result, onClick = onClick)
-        SearchEntityType.PRODUCT -> ProductSearchCard(result = result, onClick = onClick, onWishlistToggle = onWishlistToggle)
+        SearchEntityType.PRODUCT -> ProductSearchCard(
+            result = result,
+            onClick = onClick,
+            onWishlistToggle = onWishlistToggle,
+            onAddToCart = onAddToCart
+        )
     }
 }
 
@@ -56,7 +63,8 @@ fun SearchEntityRenderer(
 fun ProductSearchCard(
     result: SearchResult,
     onClick: () -> Unit,
-    onWishlistToggle: ((String) -> Unit)? = null
+    onWishlistToggle: ((String) -> Unit)? = null,
+    onAddToCart: ((SearchResult) -> Unit)? = null
 ) {
     var isWishlisted by remember { mutableStateOf(false) }
 
@@ -191,28 +199,48 @@ fun ProductSearchCard(
                     )
                 }
 
-                // Pricing & Stock Availability
+                // Pricing & Stock Availability & Add Button
                 if (result.price != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            MoneyFormatter.format(result.price),
-                            style = CommerceTypography.BodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = CommerceColors.TextPrimary
-                        )
-
-                        // STRICT INTEGRITY: Missing availabilityStatus -> omit
-                        val avail = result.availabilityStatus
-                        if (!avail.isNullOrBlank()) {
+                        Column {
                             Text(
-                                "• $avail",
-                                style = CommerceTypography.Meta,
-                                color = if (avail.contains("In Stock", ignoreCase = true)) CommerceColors.Success else CommerceColors.TextMuted
+                                MoneyFormatter.format(result.price),
+                                style = CommerceTypography.BodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = CommerceColors.TextPrimary
                             )
+
+                            // STRICT INTEGRITY: Missing availabilityStatus -> omit
+                            val avail = result.availabilityStatus
+                            if (!avail.isNullOrBlank()) {
+                                Text(
+                                    avail,
+                                    style = CommerceTypography.Meta,
+                                    color = if (avail.contains("In Stock", ignoreCase = true)) CommerceColors.Success else CommerceColors.TextMuted
+                                )
+                            }
+                        }
+
+                        if (onAddToCart != null) {
+                            Button(
+                                onClick = { onAddToCart(result) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.PrimaryDark),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(
+                                    "ADD",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = androidx.compose.ui.graphics.Color.White
+                                )
+                            }
                         }
                     }
                 }

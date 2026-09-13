@@ -496,20 +496,14 @@ fun CommerceEntityRenderer(
             val cardModel = prod.toProductCardModel()
             val qty = cartQuantityMap[prod.sku] ?: cartQuantityMap[prod.id] ?: 0
             val verticalKey = prod.verticalId?.lowercase() ?: "general"
-            when (verticalKey) {
-                "fashion", "style", "apparel" -> FashionProductCard(
-                    model = cardModel,
-                    onSelect = { onEntityClick(entity) },
-                    onWishlistToggle = {},
-                    modifier = modifier
-                )
-                "electronics", "tech" -> ElectronicsProductCard(
-                    model = cardModel,
-                    onSelect = { onEntityClick(entity) },
-                    onAddToCart = { onAddToCart?.invoke(prod) },
-                    modifier = modifier
-                )
-                "health", "pharmacy" -> PharmacyProductCard(
+            val isMedicine = verticalKey in listOf("health", "pharmacy") ||
+                entity.vertical in listOf("health", "pharmacy") ||
+                prod.templateType == "MEDICINE_ITEM" ||
+                prod.medicineDetails != null ||
+                prod.rxRequirement != null
+
+            when {
+                isMedicine -> PharmacyProductCard(
                     model = cardModel,
                     onSelect = { onEntityClick(entity) },
                     onAddToCart = { onAddToCart?.invoke(prod) },
@@ -517,7 +511,19 @@ fun CommerceEntityRenderer(
                     onQuantityChange = { newQty -> onUpdateQuantity?.invoke(prod.sku, newQty) },
                     modifier = modifier
                 )
-                "grocery", "fresh" -> GroceryProductCard(
+                verticalKey in listOf("fashion", "style", "apparel") -> FashionProductCard(
+                    model = cardModel,
+                    onSelect = { onEntityClick(entity) },
+                    onWishlistToggle = {},
+                    modifier = modifier
+                )
+                verticalKey in listOf("electronics", "tech") -> ElectronicsProductCard(
+                    model = cardModel,
+                    onSelect = { onEntityClick(entity) },
+                    onAddToCart = { onAddToCart?.invoke(prod) },
+                    modifier = modifier
+                )
+                verticalKey in listOf("grocery", "fresh") -> GroceryProductCard(
                     model = cardModel,
                     onSelect = { onEntityClick(entity) },
                     onAddToCart = { onAddToCart?.invoke(prod) },

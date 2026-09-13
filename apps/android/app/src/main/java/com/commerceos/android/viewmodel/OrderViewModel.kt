@@ -91,6 +91,12 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
     var liveTracking by mutableStateOf<CustomerOrderTrackingDto?>(null)
         private set
 
+    var isStreamReconnecting by mutableStateOf(false)
+        private set
+
+    var isOffline by mutableStateOf(false)
+        private set
+
     private var trackingJob: Job? = null
 
     fun loadDetail(orderId: String) {
@@ -98,10 +104,14 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
             detail = OrderDetailUiState.Loading
             when (val result = repository.getOrderById(orderId)) {
                 is ApiResult.Success -> {
+                    isOffline = false
                     detail = OrderDetailUiState.Content(result.data)
                     startLiveTrackingPolling(orderId)
                 }
                 is ApiResult.Failure -> {
+                    if (result.error is AppError.Network) {
+                        isOffline = true
+                    }
                     detail = if (result.error is AppError.Server && result.error.httpCode == 404) {
                         OrderDetailUiState.NotFound
                     } else {
@@ -119,33 +129,77 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
             when (val result = repository.getLiveTracking(orderId)) {
                 is ApiResult.Success -> {
                     liveTracking = result.data
+                    isOffline = false
                 }
                 else -> {}
             }
 
-            // 2. Realtime SSE Event Stream (Sub-second live telemetry pushes)
+            // 2. Realtime SSE Event Stream with Exponential Backoff & Jitter
             launch {
-                repository.streamLiveOrderTracking(orderId).collect { update ->
-                    liveTracking = update
-                    val state = (update.state ?: update.stage ?: "").uppercase()
-                    if (state == "DELIVERED" || state == "CANCELLED" || state == "FAILED") {
-                        trackingJob?.cancel()
+                var reconnectAttempt = 0
+                while (isActive) {
+                    try {
+                        repository.streamLiveOrderTracking(orderId).collect { update ->
+                            reconnectAttempt = 0
+                            isStreamReconnecting = false
+                            isOffline = false
+                            liveTracking = update
+                            val state = (update.state ?: update.stage ?: "").uppercase()
+                            if (state == "DELIVERED" || state == "CANCELLED" || state == "FAILED") {
+                                trackingJob?.cancel()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (!isActive) break
+                        isStreamReconnecting = true
+                        reconnectAttempt++
+                        val baseDelay = (1000L * (1L shl reconnectAttempt.coerceAtMost(5))).coerceAtMost(30000L)
+                        val jitter = (0L..500L).random()
+                        delay(baseDelay + jitter)
                     }
                 }
             }
 
-            // 3. Heartbeat Reconciliation Fallback (Every 12 seconds)
+            // 3. High-Frequency Live Telemetry Polling (Every 2 seconds while active)
+            var pollCount = 0
             while (isActive) {
-                delay(12000)
-                when (val orderResult = repository.getOrderById(orderId)) {
+                delay(2000)
+                pollCount++
+                
+                // Fetch fresh rider GPS coordinates & route progress every 2 seconds
+                when (val trackRes = repository.getLiveTracking(orderId)) {
                     is ApiResult.Success -> {
-                        detail = OrderDetailUiState.Content(orderResult.data)
-                        val status = orderResult.data.orderStatus.uppercase()
-                        if (status == "DELIVERED" || status == "CANCELLED" || status == "FAILED") {
+                        liveTracking = trackRes.data
+                        isOffline = false
+                        val stage = (trackRes.data.state ?: trackRes.data.stage ?: "").uppercase()
+                        if (stage == "DELIVERED" || stage == "CANCELLED" || stage == "FAILED") {
                             break
                         }
                     }
-                    else -> {}
+                    is ApiResult.Failure -> {
+                        if (trackRes.error is AppError.Network) {
+                            isOffline = true
+                        }
+                    }
+                }
+
+                // Heartbeat order detail reconciliation every 8 seconds (every 4th poll)
+                if (pollCount % 4 == 0) {
+                    when (val orderResult = repository.getOrderById(orderId)) {
+                        is ApiResult.Success -> {
+                            detail = OrderDetailUiState.Content(orderResult.data)
+                            isOffline = false
+                            val status = orderResult.data.orderStatus.uppercase()
+                            if (status == "DELIVERED" || status == "CANCELLED" || status == "FAILED") {
+                                break
+                            }
+                        }
+                        is ApiResult.Failure -> {
+                            if (orderResult.error is AppError.Network) {
+                                isOffline = true
+                            }
+                        }
+                    }
                 }
             }
         }

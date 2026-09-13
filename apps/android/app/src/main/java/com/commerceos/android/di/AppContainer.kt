@@ -37,6 +37,16 @@ class AppContainer(context: Context) {
         database.cartDao()
     }
 
+    val locationProvider: com.commerceos.android.location.LocationProvider by lazy {
+        com.commerceos.android.location.DefaultLocationProvider(context)
+    }
+    val geocodingProvider: com.commerceos.android.location.GeocodingProvider by lazy {
+        com.commerceos.android.location.DefaultGeocodingProvider(context)
+    }
+    val googlePlacesProvider: com.commerceos.android.location.GooglePlacesSearchProvider by lazy {
+        com.commerceos.android.location.GooglePlacesSearchProvider(context)
+    }
+
     val factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -51,7 +61,12 @@ class AppContainer(context: Context) {
                 modelClass.isAssignableFrom(CheckoutViewModel::class.java) ->
                     CheckoutViewModel(repo) as T
                 modelClass.isAssignableFrom(AddressViewModel::class.java) ->
-                    AddressViewModel(repo) as T
+                    AddressViewModel(
+                        repository = repo,
+                        locationProvider = locationProvider,
+                        geocodingProvider = geocodingProvider,
+                        placeSearchProvider = googlePlacesProvider
+                    ) as T
                 modelClass.isAssignableFrom(OrderViewModel::class.java) ->
                     OrderViewModel(repo) as T
                 modelClass.isAssignableFrom(PrescriptionViewModel::class.java) ->

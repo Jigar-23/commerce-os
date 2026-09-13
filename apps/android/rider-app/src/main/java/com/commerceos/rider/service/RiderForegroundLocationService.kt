@@ -1,10 +1,12 @@
 package com.commerceos.rider.service
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
@@ -16,6 +18,7 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.commerceos.rider.model.RiderLocationUpdate
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,15 +94,21 @@ class RiderForegroundLocationService : Service(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        val notification = buildNotification("Rider GPS Active • High Precision Telemetry")
         try {
-            val notification = buildNotification("Rider GPS Active • High Precision Telemetry")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val hasLocationPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasLocationPerm) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
         }
 
         locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
@@ -138,20 +147,25 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     when (val res = repo.fetchActiveOffer()) {
                         is com.commerceos.rider.model.ActiveOfferResult.Success -> {
                             val offer = res.offer
-                            com.commerceos.rider.util.RiderOfferEventPipeline.processValidatedOffer(
-                                context = applicationContext,
-                                offer = offer,
-                                source = com.commerceos.rider.util.OfferEventSource.RECONCILIATION
-                            )
+                            if (offer.offerId != lastSeenOfferId) {
+                                lastSeenOfferId = offer.offerId
+                                com.commerceos.rider.util.RiderOfferEventPipeline.processValidatedOffer(
+                                    context = applicationContext,
+                                    offer = offer,
+                                    source = com.commerceos.rider.util.OfferEventSource.RECONCILIATION
+                                )
+                            }
                         }
-                        is com.commerceos.rider.model.ActiveOfferResult.None -> {}
+                        is com.commerceos.rider.model.ActiveOfferResult.None -> {
+                            lastSeenOfferId = ""
+                        }
                         is com.commerceos.rider.model.ActiveOfferResult.Error -> {}
                     }
                 }
             } catch (e: Exception) {
                 // Ignore transient background errors
             }
-            delay(3000L)
+            delay(5000L)
         }
     }
 
@@ -202,25 +216,58 @@ class RiderForegroundLocationService : Service(), LocationListener {
         }
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        requestLocationUpdates()
+        return START_STICKY
+    }
+
     private fun requestLocationUpdates() {
         try {
             val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
-            if (!isGpsEnabled) {
+            val isNetEnabled = locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+            val isPassiveEnabled = locationManager?.isProviderEnabled(LocationManager.PASSIVE_PROVIDER) == true
+
+            if (!isGpsEnabled && !isNetEnabled && !isPassiveEnabled) {
                 _isStale.value = true
             }
 
-            locationManager?.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                1000L,
-                0f,
-                this
-            )
-            locationManager?.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER,
-                2000L,
-                0f,
-                this
-            )
+            // Immediately prime last known location so UI doesn't stall waiting for hardware callback
+            val lastGps = try { locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER) } catch (_: Exception) { null }
+            val lastNet = try { locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) } catch (_: Exception) { null }
+            val lastPassive = try { locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER) } catch (_: Exception) { null }
+            val best = lastGps ?: lastNet ?: lastPassive
+            if (best != null) {
+                onLocationChanged(best)
+            }
+
+            val mainLooper = android.os.Looper.getMainLooper()
+            if (isGpsEnabled) {
+                locationManager?.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    1000L,
+                    0f,
+                    this,
+                    mainLooper
+                )
+            }
+            if (isNetEnabled) {
+                locationManager?.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    1500L,
+                    0f,
+                    this,
+                    mainLooper
+                )
+            }
+            if (isPassiveEnabled) {
+                locationManager?.requestLocationUpdates(
+                    LocationManager.PASSIVE_PROVIDER,
+                    1000L,
+                    0f,
+                    this,
+                    mainLooper
+                )
+            }
         } catch (e: SecurityException) {
             _isStale.value = true
         } catch (e: Exception) {
@@ -228,14 +275,48 @@ class RiderForegroundLocationService : Service(), LocationListener {
         }
     }
 
+    private var lastMockTimestamp: Long = 0L
+    private var lastDispatchedLat: Double = 0.0
+    private var lastDispatchedLng: Double = 0.0
+
     override fun onLocationChanged(location: Location) {
         val accuracy = if (location.hasAccuracy()) location.accuracy else 5.0f
-        _isLowAccuracy.value = accuracy > 50.0f
+        _isLowAccuracy.value = accuracy > 100.0f
+        _isStale.value = false
 
-        // Reject low accuracy GPS fixes (>50m)
-        if (accuracy > 50.0f) {
+        // Filter out extreme noise fixes (>150m)
+        if (accuracy > 150.0f) {
             return
         }
+
+        val isMock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            location.isMock
+        } else {
+            @Suppress("DEPRECATION")
+            location.isFromMockProvider
+        }
+
+        val now = System.currentTimeMillis()
+        if (isMock) {
+            lastMockTimestamp = now
+        } else if (now - lastMockTimestamp < 5000L) {
+            // A mock location app/simulator is actively injecting test coordinates.
+            // Ignore non-mock hardware satellite fixes to prevent bouncing between test and physical location!
+            return
+        }
+
+        // Anti-jitter: ignore micro movements (< 1.0m) if stationary
+        val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0.0f
+        if (lastDispatchedLat != 0.0 && lastDispatchedLng != 0.0 && speedKmh < 1.0f) {
+            val distResults = FloatArray(1)
+            Location.distanceBetween(lastDispatchedLat, lastDispatchedLng, location.latitude, location.longitude, distResults)
+            if (distResults[0] < 1.0f && _lastLocation.value != null) {
+                return
+            }
+        }
+
+        lastDispatchedLat = location.latitude
+        lastDispatchedLng = location.longitude
 
         currentSequenceNumber++
         val headingValue: Float? = if (location.hasBearing()) location.bearing else null
@@ -245,10 +326,10 @@ class RiderForegroundLocationService : Service(), LocationListener {
             riderId = activeRiderId,
             latitude = location.latitude,
             longitude = location.longitude,
-            speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0.0f,
+            speedKmh = speedKmh,
             heading = headingValue,
             accuracyMeters = accuracy,
-            timestamp = System.currentTimeMillis()
+            timestamp = now
         )
 
         _lastLocation.value = update
@@ -421,10 +502,6 @@ class RiderForegroundLocationService : Service(), LocationListener {
     }
 
 
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 

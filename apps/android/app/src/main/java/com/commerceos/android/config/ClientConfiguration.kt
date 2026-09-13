@@ -111,7 +111,7 @@ data class ClientConfiguration(
                 splashTagline = "Your Trusted Licensed Pharmacy Partner",
                 checkoutBranding = ClientCheckoutBranding(
                     trustBadgeText = "Licensed Pharmacist Verified",
-                    guaranteeText = "100% Genuine Medicines & Cold-Chain Fulfillment",
+                    guaranteeText = "Cold-Chain Regulated Pharmacy Fulfillment",
                     orderConfirmationNote = "Your prescription is being reviewed by a certified pharmacist."
                 )
             ),

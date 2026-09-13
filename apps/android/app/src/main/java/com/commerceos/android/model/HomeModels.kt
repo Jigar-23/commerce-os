@@ -363,9 +363,9 @@ data class VerticalTaxonomyResponse(
 
 /** Server-authored vertical hub feed payload. */
 data class VerticalHomeFeedResponse(
-    val verticalId: String,
-    val title: String,
-    val subtitle: String,
+    val verticalId: String = "",
+    val title: String? = null,
+    val subtitle: String? = null,
     val ctaText: String? = null,
     val hero: HomeHeroDto? = null,
     val featuredProducts: List<CommerceProduct> = emptyList(),

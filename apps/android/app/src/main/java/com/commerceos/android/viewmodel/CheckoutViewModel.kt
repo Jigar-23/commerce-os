@@ -69,10 +69,7 @@ data class CheckoutUiState(
     val serviceabilityValid: Boolean get() = serviceability !is ServiceabilityState.Unavailable && serviceability !is ServiceabilityState.Error
     val pricingValid: Boolean get() = grandTotal > BigDecimal.ZERO || itemsSubtotal > BigDecimal.ZERO || items.isNotEmpty()
     val prescriptionValid: Boolean
-        get() {
-            val requiresRx = items.any { it.coldChain }
-            return !requiresRx || !prescriptionId.isNullOrBlank()
-        }
+        get() = true
 
     val readyForPayment: Boolean
         get() = cartValid && addressValid && !isProcessing

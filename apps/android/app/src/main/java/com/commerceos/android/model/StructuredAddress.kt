@@ -109,15 +109,15 @@ data class StructuredAddress(
             entranceErr = "Specify entrance details when Other is selected"
         }
 
-        // Recipient validation if someone else
-        if (recipientType == RecipientType.SOMEONE_ELSE) {
-            if (contactName.trim().isBlank()) {
-                nameErr = "Recipient name is required"
-            }
-            val cleanPhone = contactPhone.trim().replace(Regex("[^0-9]"), "")
-            if (cleanPhone.length != 10) {
-                phoneErr = "Enter a valid 10-digit mobile number"
-            }
+        // Compulsory Phone Number Validation for ALL addresses (Delivery contact / Rider calls)
+        val cleanPhone = contactPhone.trim().replace(Regex("[^0-9]"), "").takeLast(10)
+        if (cleanPhone.length != 10) {
+            phoneErr = "Phone number is required (10 digits for delivery updates)"
+        }
+
+        // Recipient Name validation if someone else
+        if (recipientType == RecipientType.SOMEONE_ELSE && contactName.trim().isBlank()) {
+            nameErr = "Recipient name is required"
         }
 
         val isValid = houseErr == null &&
@@ -159,6 +159,9 @@ data class StructuredAddress(
             }
         }
 
+        val cleanPhone = contactPhone.trim().replace(Regex("[^0-9]"), "").takeLast(10)
+        val formattedPhone = if (cleanPhone.length == 10) "+91$cleanPhone" else contactPhone.trim()
+
         return AddAddressRequest(
             tag = tag.ifBlank { "Home" },
             addressLine = finalAddressLine.ifBlank { "Selected Delivery Address" },
@@ -167,8 +170,8 @@ data class StructuredAddress(
             postalCode = postalCode.trim(),
             country = country.ifBlank { "India" },
             landmark = landmark.trim(),
-            contactName = if (recipientType == RecipientType.SOMEONE_ELSE) contactName.trim() else "",
-            contactPhone = if (recipientType == RecipientType.SOMEONE_ELSE) contactPhone.trim() else "",
+            contactName = if (recipientType == RecipientType.SOMEONE_ELSE) contactName.trim() else "Customer",
+            contactPhone = formattedPhone,
             isDefault = isDefault,
             latitude = boundLat,
             longitude = boundLng,

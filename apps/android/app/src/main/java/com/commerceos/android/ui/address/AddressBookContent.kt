@@ -1,11 +1,14 @@
 package com.commerceos.android.ui.address
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
@@ -13,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +45,8 @@ fun AddressBookContent(
     onSetDefaultAddress: (String) -> Unit,
     onAddNewLocation: () -> Unit,
     onProceedToPayment: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
+    fromProfile: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var addressSearchQuery by remember { mutableStateOf("") }
@@ -62,34 +68,55 @@ fun AddressBookContent(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)) {
         // Screen Header
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            if (onBack != null) {
+                Surface(
+                    color = Color.White,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF0F172A),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Delivery Addresses",
-                    style = CommerceTypography.Title,
+                    text = if (fromProfile) "Saved Addresses" else "Delivery Addresses",
+                    style = CommerceTypography.Heading,
                     fontWeight = FontWeight.Bold,
                     color = CommerceColors.TextPrimary
                 )
                 Text(
-                    "Confirm fulfillment availability & ETAs",
+                    text = if (fromProfile) "${addresses.size} saved delivery locations" else "Confirm fulfillment availability & ETAs",
                     style = CommerceTypography.Meta,
                     color = CommerceColors.TextMuted
                 )
             }
+
             Button(
                 onClick = onAddNewLocation,
-                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
-                shape = RoundedCornerShape(Radius.Button)
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Add address", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+                Text("Add", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -129,13 +156,14 @@ fun AddressBookContent(
 
         Spacer(modifier = Modifier.height(Spacing.sm))
 
-        // Multi-Vertical Fulfillment Promise Header
-        AddressServiceabilityCard(
-            serviceabilityState = serviceability,
-            selectedAddressId = selectedAddressId
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
+        // Multi-Vertical Fulfillment Promise Header (Only show during checkout flow)
+        if (!fromProfile) {
+            AddressServiceabilityCard(
+                serviceabilityState = serviceability,
+                selectedAddressId = selectedAddressId
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+        }
 
         // Address List
         if (isLoading && addresses.isEmpty()) {

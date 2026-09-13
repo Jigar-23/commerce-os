@@ -2,6 +2,7 @@ package com.commerceos.android
 
 import android.app.Application
 import com.commerceos.android.di.AppContainer
+import com.google.android.gms.maps.MapsInitializer
 
 /**
  * Application-level composition root. The dependency graph is owned here, never
@@ -15,5 +16,8 @@ class CommerceOSApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        try {
+            MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LATEST, null)
+        } catch (_: Exception) {}
     }
 }

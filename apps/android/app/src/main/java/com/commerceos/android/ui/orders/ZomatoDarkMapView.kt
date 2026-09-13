@@ -3,6 +3,7 @@ package com.commerceos.android.ui.orders
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.animation.*
@@ -118,6 +119,10 @@ fun ZomatoDarkMapView(
                     setBackgroundColor(0xFF080C16.toInt())
 
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            return true
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isMapLoaded = true
@@ -281,108 +286,156 @@ private fun generateBlinkitGradeDarkMapHtml(
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #080C16; font-family: -apple-system, Roboto, sans-serif; }
-        .leaflet-container { background: #080C16; }
-        
-        /* 3D Elevated Pin Hierarchy */
+        html, body, #map {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #050811;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+        }
+        .leaflet-container {
+            background: #050811;
+        }
+
+        /* Zomato Obsidian Tile Contrast Filter */
+        .leaflet-tile-pane {
+            filter: brightness(0.85) contrast(1.25) saturate(1.2) hue-rotate(210deg);
+        }
+
         .pin-wrapper {
             display: flex;
             flex-direction: column;
             align-items: center;
-            width: 48px;
-            height: 56px;
         }
         .pin-head {
-            border-radius: 50%;
-            width: 32px;
-            height: 32px;
+            border-radius: 12px;
+            width: 34px;
+            height: 34px;
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
             z-index: 2;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.6);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.8);
         }
         .store-head {
             background: linear-gradient(135deg, #0284c7, #0369a1);
-            border: 2.5px solid #38bdf8;
+            border: 2px solid #FFFFFF;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.8), 0 0 12px rgba(2, 132, 199, 0.7);
         }
-        .store-head svg { width: 16px; height: 16px; fill: white; }
+        .store-head svg { width: 18px; height: 18px; fill: white; }
         .customer-head {
-            background: linear-gradient(135deg, #059669, #047857);
-            border: 2.5px solid #34d399;
+            background: linear-gradient(135deg, #F97316, #C2410C);
+            border: 2px solid #FFFFFF;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.8), 0 0 12px rgba(249, 115, 22, 0.7);
         }
-        .customer-head svg { width: 16px; height: 16px; fill: white; }
+        .customer-head svg { width: 18px; height: 18px; fill: white; }
         .pin-needle {
             width: 0;
             height: 0;
             border-left: 6px solid transparent;
             border-right: 6px solid transparent;
-            margin-top: -3px;
+            margin-top: -2px;
             position: relative;
             z-index: 1;
         }
-        .store-needle { border-top: 10px solid #0284c7; }
-        .customer-needle { border-top: 10px solid #059669; }
+        .store-needle { border-top: 8px solid #0284c7; }
+        .customer-needle { border-top: 8px solid #F97316; }
         .pin-shadow {
-            width: 12px;
-            height: 4px;
-            background: rgba(0,0,0,0.5);
+            width: 14px;
+            height: 5px;
+            background: rgba(0,0,0,0.6);
             border-radius: 50%;
-            margin-top: -2px;
+            margin-top: -1px;
         }
         
-        /* 60fps Animated Rider Vehicle */
-        .biker-container {
-            width: 40px;
-            height: 40px;
+        /* Zomato 3D Isometric Scooter with Headlight Projection Beam */
+        .biker-anchor {
             position: relative;
-            will-change: transform;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
         }
-        .biker-pulse {
+        .biker-rotator {
+            position: relative;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .biker-headlight {
             position: absolute;
-            width: 40px;
-            height: 40px;
+            top: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 44px;
+            height: 34px;
+            background: radial-gradient(ellipse at 50% 100%, rgba(56, 189, 248, 0.55) 0%, rgba(56, 189, 248, 0.2) 50%, rgba(56, 189, 248, 0) 80%);
+            clip-path: polygon(35% 100%, 65% 100%, 100% 0%, 0% 0%);
+            pointer-events: none;
+        }
+        .biker-pulse-primary {
+            position: absolute;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
-            background: rgba(16, 185, 129, 0.25);
-            animation: radarPulse 2s infinite ease-out;
+            background: rgba(0, 245, 212, 0.2);
+            border: 1.5px solid rgba(0, 245, 212, 0.8);
+            animation: radarWave 2s cubic-bezier(0.1, 0.7, 0.1, 1) infinite;
         }
-        .biker-core {
+        .biker-pulse-secondary {
             position: absolute;
-            top: 4px;
-            left: 4px;
-            width: 32px;
-            height: 32px;
-            background: #10B981;
-            border: 2.5px solid #064E3B;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(0, 187, 249, 0.15);
+            animation: radarWave 2s cubic-bezier(0.1, 0.7, 0.1, 1) infinite 0.7s;
+        }
+        .biker-core-puck {
+            position: relative;
+            width: 34px;
+            height: 34px;
+            background: linear-gradient(135deg, #00F5D4 0%, #00BBF9 100%);
+            border: 2.5px solid #FFFFFF;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.6);
-            transition: transform 0.2s ease;
+            box-shadow: 0 6px 18px rgba(0, 245, 212, 0.7), 0 2px 6px rgba(0, 0, 0, 0.9);
         }
-        .biker-core svg {
-            width: 18px;
-            height: 18px;
-            fill: #FFFFFF;
+        .biker-core-puck svg {
+            width: 19px;
+            height: 19px;
+            fill: #050811;
+            filter: drop-shadow(0 1px 2px rgba(255,255,255,0.4));
+        }
+
+        @keyframes radarWave {
+            0% { transform: scale(0.6); opacity: 0.9; }
+            70% { transform: scale(1.4); opacity: 0.3; }
+            100% { transform: scale(1.6); opacity: 0; }
         }
         
-        @keyframes radarPulse {
-            0% { transform: scale(0.8); opacity: 0.9; }
-            70% { transform: scale(1.8); opacity: 0.1; }
-            100% { transform: scale(1.8); opacity: 0; }
+        /* Multi-Layer Glowing Neon Polyline Shader */
+        .neon-glow-outer {
+            stroke: #00F5D4;
+            stroke-opacity: 0.35;
+            filter: drop-shadow(0 0 8px #00F5D4);
         }
-        
-        /* Blinkit-Grade Smooth Solid Neon Route */
-        .leaflet-interactive.active-route-core {
-            stroke-linecap: round;
-            stroke-linejoin: round;
+        .neon-track-core {
+            stroke: #00BBF9;
+            stroke-opacity: 0.95;
         }
-        .leaflet-interactive.active-route-halo {
-            stroke-linecap: round;
-            stroke-linejoin: round;
-            filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.45));
+        .neon-spine-inner {
+            stroke: #FFFFFF;
+            stroke-opacity: 0.95;
         }
     </style>
 </head>
@@ -523,20 +576,24 @@ private fun generateBlinkitGradeDarkMapHtml(
             var rot = (rider.heading != null) ? rider.heading : currentMarkerHeading;
             var isPredictive = Boolean(rider.isPredictiveMotionEnabled && !rider.isStale);
             if (!riderMarker) {
-                var markerHtml = '<div class="biker-container">' +
-                                 '<div class="biker-pulse"></div>' +
-                                 '<div class="biker-core" style="transform: rotate(' + rot + 'deg);">' + bikeSvg + '</div>' +
-                                 '</div>';
-                var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [40, 40], iconAnchor: [20, 20] });
+                var markerHtml = '<div class="biker-anchor">' +
+                                 '<div class="biker-rotator" style="transform: rotate(' + rot + 'deg);">' +
+                                 '<div class="biker-headlight"></div>' +
+                                 (rider.isStale ? '' : '<div class="biker-pulse-primary"></div><div class="biker-pulse-secondary"></div>') +
+                                 '<div class="biker-core-puck">' + bikeSvg + '</div>' +
+                                 '</div></div>';
+                var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [60, 60], iconAnchor: [30, 30] });
                 riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
                 currentMarkerHeading = rot;
             } else {
                 var el = riderMarker.getElement();
                 if (el) {
-                    var core = el.querySelector('.biker-core');
-                    if (core) core.style.transform = 'rotate(' + rot + 'deg)';
-                    var pulse = el.querySelector('.biker-pulse');
-                    if (pulse) pulse.style.display = rider.isStale ? 'none' : 'block';
+                    var rotator = el.querySelector('.biker-rotator');
+                    if (rotator) rotator.style.transform = 'rotate(' + rot + 'deg)';
+                    var p1 = el.querySelector('.biker-pulse-primary');
+                    var p2 = el.querySelector('.biker-pulse-secondary');
+                    if (p1) p1.style.display = rider.isStale ? 'none' : 'block';
+                    if (p2) p2.style.display = rider.isStale ? 'none' : 'block';
                 }
                 if (rider.isStale) {
                     if (motionFrameId) cancelAnimationFrame(motionFrameId);
@@ -608,16 +665,16 @@ private fun generateBlinkitGradeDarkMapHtml(
                 traversedPolyline = null;
             }
 
-            // Active Remaining Route (Blinkit-Grade Dual-Layer: Soft Ambient Glow + Solid Neon Emerald Core)
+            // Active Remaining Route: Multi-Layer Zomato Neon Cyan Glow + Core
             var activePts = remainingPts.length >= 2 ? remainingPts : latLngs;
             
-            // Outer Halo Layer
+            // Outer Halo Glow Layer
             if (!activePolylineGlow) {
                 activePolylineGlow = L.polyline(activePts, {
-                    color: '#10B981',
-                    weight: 10,
-                    opacity: 0.25,
-                    className: 'active-route-halo',
+                    color: '#00F5D4',
+                    weight: 12,
+                    opacity: 0.35,
+                    className: 'neon-glow-outer',
                     lineCap: 'round',
                     lineJoin: 'round'
                 }).addTo(map);
@@ -625,13 +682,13 @@ private fun generateBlinkitGradeDarkMapHtml(
                 activePolylineGlow.setLatLngs(activePts);
             }
 
-            // Inner Solid Core Layer
+            // Inner Solid Neon Core Layer
             if (!activePolyline) {
                 activePolyline = L.polyline(activePts, {
-                    color: '#10B981',
+                    color: '#00BBF9',
                     weight: 5.5,
-                    opacity: 1.0,
-                    className: 'active-route-core',
+                    opacity: 0.95,
+                    className: 'neon-track-core',
                     lineCap: 'round',
                     lineJoin: 'round'
                 }).addTo(map);

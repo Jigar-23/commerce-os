@@ -4491,6 +4491,22 @@ async function handleRequest(port, req, res) {
         });
       }
 
+      // GET /api/v1/delivery/rider/trips
+      if (path === '/api/v1/delivery/rider/trips' && req.method === 'GET') {
+        const authClaims = verifyAndDecodeJwt(req);
+        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
+          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT authentication required.' });
+        }
+        const riderId = authClaims.sub || authClaims.subject;
+        let trips = [];
+        if (appRepositories && appRepositories.deliverySessionRepo) {
+          trips = await appRepositories.deliverySessionRepo.getSessionsByRider(riderId);
+        } else {
+          trips = (db.deliverySessions || []).filter(s => s.riderId === riderId);
+        }
+        return json(res, 200, trips);
+      }
+
       // POST /api/v1/delivery/rider/shift-status (Online/Offline Duty Toggle via Presence Repository)
       if (path === '/api/v1/delivery/rider/shift-status' && req.method === 'POST') {
         const authClaims = verifyAndDecodeJwt(req);
@@ -5862,6 +5878,19 @@ async function handleRequest(port, req, res) {
         entry.isDefault = true;
         saveDb();
         return json(res, 200, entry);
+      }
+
+      // Prescriptions for customer
+      const custRxMatch = path.match(/^\/api\/v1\/customers\/([^/]+)\/prescriptions$/);
+      if (custRxMatch && req.method === 'GET') {
+        const targetId = custRxMatch[1];
+        let list = [];
+        if (appRepositories && appRepositories.prescriptionRepo) {
+          list = await appRepositories.prescriptionRepo.getPrescriptionsByCustomerId(targetId);
+        } else {
+          list = (db.prescriptions || []).filter(r => String(r.customerId) === String(targetId));
+        }
+        return json(res, 200, list);
       }
 
       // Profile

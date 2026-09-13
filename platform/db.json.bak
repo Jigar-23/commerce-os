@@ -1,0 +1,489 @@
+{
+  "sellers": [
+    {
+      "id": "seller_demo_001",
+      "name": "HealthCart Seller",
+      "storeName": "HealthCart Pharmacy",
+      "status": "ACTIVE"
+    }
+  ],
+  "products": [
+    {
+      "id": "prod_para_500",
+      "sku": "SKU-PARA-500",
+      "name": "Paracetamol 500mg IP",
+      "brandName": "Cipla",
+      "manufacturer": "Cipla Ltd",
+      "packSize": "15 tablets",
+      "rxRequirement": "OTC",
+      "price": 6,
+      "mrp": 8,
+      "discountedPrice": 5,
+      "discountPercentage": 17,
+      "inStock": true,
+      "stockCount": 118,
+      "coldChainRequired": false,
+      "expressDeliverySlaMins": 15,
+      "therapeuticCategory": "Pain & Fever",
+      "templateType": "MEDICINE_ITEM",
+      "rating": 4.6,
+      "reviewCount": 214,
+      "image": "",
+      "sellerId": "seller_demo_001"
+    },
+    {
+      "id": "prod_amox_625",
+      "sku": "SKU-AMOX-625",
+      "name": "Amoxiclav 625 Duo",
+      "brandName": "GSK",
+      "manufacturer": "GSK Pharmaceuticals",
+      "packSize": "10 tablets",
+      "rxRequirement": "RX",
+      "price": 190,
+      "mrp": 220,
+      "discountedPrice": 170,
+      "discountPercentage": 9,
+      "inStock": true,
+      "stockCount": 45,
+      "coldChainRequired": false,
+      "expressDeliverySlaMins": 15,
+      "therapeuticCategory": "Antibiotics",
+      "templateType": "MEDICINE_ITEM",
+      "rating": 4.8,
+      "reviewCount": 98,
+      "image": "",
+      "sellerId": "seller_demo_001"
+    },
+    {
+      "id": "prod_cold_01",
+      "sku": "SKU-COLD-01",
+      "name": "Cold & Cough Relief Syrup",
+      "brandName": "Himalaya",
+      "manufacturer": "Himalaya Wellness",
+      "packSize": "100ml",
+      "rxRequirement": "OTC",
+      "price": 95,
+      "mrp": 110,
+      "discountedPrice": 85,
+      "discountPercentage": 14,
+      "inStock": true,
+      "stockCount": 59,
+      "coldChainRequired": false,
+      "expressDeliverySlaMins": 15,
+      "therapeuticCategory": "Cold & Cough",
+      "templateType": "MEDICINE_ITEM",
+      "rating": 4.4,
+      "reviewCount": 67,
+      "image": "",
+      "sellerId": "seller_demo_001"
+    },
+    {
+      "id": "prod_insulin",
+      "sku": "SKU-INS-01",
+      "name": "Insulin Glargine Pen",
+      "brandName": "Sanofi",
+      "manufacturer": "Sanofi India",
+      "packSize": "1 pen (3ml)",
+      "rxRequirement": "RX",
+      "price": 620,
+      "mrp": 680,
+      "discountedPrice": 600,
+      "discountPercentage": 7,
+      "inStock": true,
+      "stockCount": 20,
+      "coldChainRequired": true,
+      "expressDeliverySlaMins": 20,
+      "therapeuticCategory": "Diabetes Care",
+      "templateType": "MEDICINE_ITEM",
+      "rating": 4.7,
+      "reviewCount": 41,
+      "image": "",
+      "sellerId": "seller_demo_001"
+    }
+  ],
+  "carts": {
+    "8f921ab0-0012-4412-9901-112233445566": []
+  },
+  "orders": [
+    {
+      "id": "ORD-2026-1001",
+      "customerId": "8f921ab0-0012-4412-9901-112233445566",
+      "customerPhone": "+1 (555) 234-5678",
+      "customerName": "Sarah Jenkins",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 12,
+      "taxAmount": 0.6,
+      "deliveryFee": 2,
+      "deliveryAddress": {
+        "id": "addr_1",
+        "tag": "Home",
+        "addressLine": "Flat 402, Skyline Towers, Sector 18",
+        "city": "Panipat",
+        "state": "Haryana",
+        "postalCode": "132103",
+        "country": "India",
+        "landmark": "Near City Mall",
+        "contactName": "Sarah Jenkins",
+        "contactPhone": "+1 (555) 234-5678",
+        "isDefault": true
+      },
+      "deliveryAddressJson": "{\"id\":\"addr_1\",\"tag\":\"Home\",\"addressLine\":\"Flat 402, Skyline Towers, Sector 18\",\"city\":\"Panipat\",\"postalCode\":\"132103\"}",
+      "items": [
+        {
+          "name": "Paracetamol 500mg IP",
+          "packSize": "15 tablets",
+          "sku": "SKU-PARA-500",
+          "unitPrice": 5,
+          "quantity": 2,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "4821",
+      "deliverySlaMins": 15,
+      "paymentMethod": "UPI_INSTANT",
+      "paymentId": "pay_seed_0001",
+      "paymentStatus": "PAID",
+      "idempotencyKey": null,
+      "reservedStock": false,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 0,
+        "collectionStatus": "NOT_APPLICABLE",
+        "collectedAmount": 0,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "CHECKPOINT",
+      "provider": "INDIA_POST",
+      "consignmentNumber": "IP202608110001",
+      "createdAt": "2026-08-10T10:00:00.000Z",
+      "updatedAt": "2026-08-10T12:30:00.000Z",
+      "sellerId": "seller_demo_001",
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-08-10T10:00:00.000Z"
+        },
+        {
+          "status": "DELIVERED",
+          "label": "Delivered to customer",
+          "actor": "delivery",
+          "location": "Customer Address",
+          "createdAt": "2026-08-10T12:30:00.000Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "otpVerifiedAt": "2026-08-10T12:30:00.000Z"
+    }
+  ],
+  "codLedger": [
+    {
+      "id": "cod_tx_1786465271299",
+      "orderId": "ORD-2026-4537",
+      "sellerId": "seller_demo_001",
+      "amountExpected": 87,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-08-11T16:21:11.299Z",
+      "reconciled": false
+    }
+  ],
+  "notifications": [],
+  "auditLogs": [
+    {
+      "id": "audit_1786466044530_214",
+      "actor": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ORD-2026-8749 total Rs 0 paymentMethod=UPI_INSTANT",
+      "timestamp": "2026-08-11T16:34:04.530Z"
+    },
+    {
+      "id": "audit_1786465355156_255",
+      "actor": "customer",
+      "action": "PAYMENT_CAPTURED",
+      "details": "Payment pay_live_48924511 captured for order ORD-2026-5929",
+      "timestamp": "2026-08-11T16:22:35.156Z"
+    },
+    {
+      "id": "audit_1786465355156_769",
+      "actor": "system",
+      "action": "ORDER_STATUS_UPDATE",
+      "details": "Order ORD-2026-5929 transitioned to SELLER_ACCEPTED",
+      "timestamp": "2026-08-11T16:22:35.156Z"
+    },
+    {
+      "id": "audit_1786465355083_537",
+      "actor": "customer",
+      "action": "PAYMENT_AUTHORIZED",
+      "details": "Payment pay_live_48924511 authorized for order ORD-2026-5929",
+      "timestamp": "2026-08-11T16:22:35.083Z"
+    },
+    {
+      "id": "audit_1786465354938_958",
+      "actor": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ORD-2026-5929 total Rs 172 paymentMethod=UPI_INSTANT",
+      "timestamp": "2026-08-11T16:22:34.938Z"
+    },
+    {
+      "id": "audit_1786465354929_848",
+      "actor": "pharmacist",
+      "action": "VERIFY_PRESCRIPTION",
+      "details": "Verified prescription RX-1786465354870-8863 (Lic PHARM-LIC-2026-9912)",
+      "timestamp": "2026-08-11T16:22:34.929Z"
+    },
+    {
+      "id": "audit_1786465354870_257",
+      "actor": "customer",
+      "action": "UPLOAD_PRESCRIPTION",
+      "details": "Uploaded prescription RX-1786465354870-8863 for Sarah",
+      "timestamp": "2026-08-11T16:22:34.870Z"
+    },
+    {
+      "id": "audit_1786465308065_609",
+      "actor": "customer",
+      "action": "PAYMENT_AUTHORIZED",
+      "details": "Payment pay_live_37202673 authorized for order ORD-2026-9464",
+      "timestamp": "2026-08-11T16:21:48.065Z"
+    },
+    {
+      "id": "audit_1786465308000_221",
+      "actor": "customer",
+      "action": "PAYMENT_CAPTURED",
+      "details": "Payment pay_live_64492880 captured for order ORD-2026-9464",
+      "timestamp": "2026-08-11T16:21:48.000Z"
+    },
+    {
+      "id": "audit_1786465308000_602",
+      "actor": "system",
+      "action": "ORDER_STATUS_UPDATE",
+      "details": "Order ORD-2026-9464 transitioned to SELLER_ACCEPTED",
+      "timestamp": "2026-08-11T16:21:48.000Z"
+    },
+    {
+      "id": "audit_1786465307925_893",
+      "actor": "customer",
+      "action": "PAYMENT_AUTHORIZED",
+      "details": "Payment pay_live_64492880 authorized for order ORD-2026-9464",
+      "timestamp": "2026-08-11T16:21:47.925Z"
+    },
+    {
+      "id": "audit_1786465307809_10",
+      "actor": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ORD-2026-9464 total Rs 172 paymentMethod=UPI_INSTANT",
+      "timestamp": "2026-08-11T16:21:47.809Z"
+    },
+    {
+      "id": "audit_1786465307800_614",
+      "actor": "pharmacist",
+      "action": "VERIFY_PRESCRIPTION",
+      "details": "Verified prescription RX-1786465307757-9949 (Lic PHARM-LIC-2026-9912)",
+      "timestamp": "2026-08-11T16:21:47.800Z"
+    },
+    {
+      "id": "audit_1786465307757_877",
+      "actor": "customer",
+      "action": "UPLOAD_PRESCRIPTION",
+      "details": "Uploaded prescription RX-1786465307757-9949 for Sarah",
+      "timestamp": "2026-08-11T16:21:47.757Z"
+    },
+    {
+      "id": "audit_1786465271299_613",
+      "actor": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ORD-2026-4537 total Rs 87 paymentMethod=COD",
+      "timestamp": "2026-08-11T16:21:11.299Z"
+    },
+    {
+      "id": "audit_1786465270853_401",
+      "actor": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ORD-2026-6331 total Rs 172 paymentMethod=UPI_INSTANT",
+      "timestamp": "2026-08-11T16:21:10.853Z"
+    },
+    {
+      "id": "audit_1786465270811_35",
+      "actor": "pharmacist",
+      "action": "VERIFY_PRESCRIPTION",
+      "details": "Verified prescription RX-1786465270721-9089 (Lic PHARM-LIC-2026-9912)",
+      "timestamp": "2026-08-11T16:21:10.811Z"
+    },
+    {
+      "id": "audit_1786465270721_377",
+      "actor": "customer",
+      "action": "UPLOAD_PRESCRIPTION",
+      "details": "Uploaded prescription RX-1786465270721-9089 for Sarah",
+      "timestamp": "2026-08-11T16:21:10.721Z"
+    },
+    {
+      "id": "audit_1786465270462_870",
+      "actor": "customer",
+      "action": "ADD_ADDRESS",
+      "details": "Added address addr_1786465270462",
+      "timestamp": "2026-08-11T16:21:10.462Z"
+    },
+    {
+      "id": "audit_1786465026786_943",
+      "actor": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ORD-2026-8201 total Rs 12 paymentMethod=UPI_INSTANT",
+      "timestamp": "2026-08-11T16:17:06.786Z"
+    }
+  ],
+  "inventoryHistory": [
+    {
+      "id": "invhist_1786465354938_214",
+      "productId": "prod_amox_625",
+      "sku": "SKU-AMOX-625",
+      "name": "Amoxiclav 625 Duo",
+      "previousStock": 46,
+      "nextStock": 45,
+      "delta": -1,
+      "actor": "system",
+      "reason": "High-concurrency order placement debit",
+      "createdAt": "2026-08-11T16:22:34.938Z"
+    },
+    {
+      "id": "invhist_1786465307809_240",
+      "productId": "prod_amox_625",
+      "sku": "SKU-AMOX-625",
+      "name": "Amoxiclav 625 Duo",
+      "previousStock": 47,
+      "nextStock": 46,
+      "delta": -1,
+      "actor": "system",
+      "reason": "High-concurrency order placement debit",
+      "createdAt": "2026-08-11T16:21:47.809Z"
+    },
+    {
+      "id": "invhist_1786465271299_738",
+      "productId": "prod_cold_01",
+      "sku": "SKU-COLD-01",
+      "name": "Cold & Cough Relief Syrup",
+      "previousStock": 60,
+      "nextStock": 59,
+      "delta": -1,
+      "actor": "system",
+      "reason": "High-concurrency order placement debit",
+      "createdAt": "2026-08-11T16:21:11.299Z"
+    },
+    {
+      "id": "invhist_1786465270852_292",
+      "productId": "prod_amox_625",
+      "sku": "SKU-AMOX-625",
+      "name": "Amoxiclav 625 Duo",
+      "previousStock": 48,
+      "nextStock": 47,
+      "delta": -1,
+      "actor": "system",
+      "reason": "High-concurrency order placement debit",
+      "createdAt": "2026-08-11T16:21:10.852Z"
+    },
+    {
+      "id": "invhist_1786465026785_991",
+      "productId": "prod_para_500",
+      "sku": "SKU-PARA-500",
+      "name": "Paracetamol 500mg IP",
+      "previousStock": 120,
+      "nextStock": 118,
+      "delta": -2,
+      "actor": "system",
+      "reason": "High-concurrency order placement debit",
+      "createdAt": "2026-08-11T16:17:06.785Z"
+    }
+  ],
+  "pushTokens": [],
+  "addresses": {
+    "8f921ab0-0012-4412-9901-112233445566": [
+      {
+        "id": "addr_1",
+        "tag": "Home",
+        "addressLine": "Flat 402, Skyline Towers, Sector 18",
+        "city": "Panipat",
+        "state": "Haryana",
+        "postalCode": "132103",
+        "country": "India",
+        "landmark": "Near City Mall",
+        "contactName": "Sarah Jenkins",
+        "contactPhone": "+1 (555) 234-5678",
+        "isDefault": true,
+        "createdAt": "2026-08-11T16:16:55.679Z"
+      },
+      {
+        "id": "addr_2",
+        "tag": "Work",
+        "addressLine": "Plot 881, Tech Park Phase II",
+        "city": "Panipat",
+        "state": "Haryana",
+        "postalCode": "132103",
+        "country": "India",
+        "landmark": "Blue Tower",
+        "contactName": "Sarah Jenkins",
+        "contactPhone": "+1 (555) 234-5678",
+        "isDefault": false,
+        "createdAt": "2026-08-11T16:16:55.679Z"
+      },
+      {
+        "id": "addr_3",
+        "tag": "Parents",
+        "addressLine": "House 14B, Green Park Colony",
+        "city": "Panipat",
+        "state": "Haryana",
+        "postalCode": "132104",
+        "country": "India",
+        "landmark": "",
+        "contactName": "Sarah Jenkins",
+        "contactPhone": "+1 (555) 234-5678",
+        "isDefault": false,
+        "createdAt": "2026-08-11T16:16:55.679Z"
+      }
+    ]
+  },
+  "payments": [],
+  "prescriptions": [],
+  "users": [
+    {
+      "id": "usr_383700",
+      "phone": "+919991416180",
+      "fullName": "Customer 6180",
+      "email": "user_9991416180@commerceos.io",
+      "createdAt": "2026-08-11T17:44:49.457Z",
+      "lastOtp": null,
+      "lastOtpChallenge": null
+    },
+    {
+      "id": "usr_239810",
+      "phone": "+919876543210",
+      "fullName": "Customer 3210",
+      "email": "user_9876543210@commerceos.io",
+      "createdAt": "2026-08-11T20:17:45.209Z",
+      "lastOtpChallenge": "otp_1786479501104_8634"
+    }
+  ],
+  "refreshTokens": {
+    "refresh_8f921ab0-0012-4412-9901-112233445566_536971508059": {
+      "userId": "8f921ab0-0012-4412-9901-112233445566",
+      "phone": "+1 (555) 234-5678",
+      "issuedAt": 1786479478263
+    },
+    "refresh_usr_383700_877261192222": {
+      "userId": "usr_383700",
+      "phone": "+919991416180",
+      "issuedAt": 1786482113419
+    }
+  }
+}

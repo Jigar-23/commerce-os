@@ -40,8 +40,9 @@ fun RecipientSelector(
             )
         }
 
+        Spacer(modifier = Modifier.height(8.dp))
+
         if (recipientType == RecipientType.SOMEONE_ELSE) {
-            Spacer(modifier = Modifier.height(6.dp))
             OutlinedTextField(
                 value = contactName,
                 onValueChange = onContactNameChanged,
@@ -51,6 +52,7 @@ fun RecipientSelector(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+            Spacer(modifier = Modifier.height(6.dp))
             OutlinedTextField(
                 value = contactPhone,
                 onValueChange = { input ->
@@ -58,6 +60,22 @@ fun RecipientSelector(
                     onContactPhoneChanged(filtered)
                 },
                 label = { Text("Recipient Mobile Number (+91) *") },
+                placeholder = { Text("10-digit mobile number") },
+                isError = phoneError != null,
+                supportingText = phoneError?.let { { Text(it, color = CommerceColors.Danger) } },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            OutlinedTextField(
+                value = contactPhone,
+                onValueChange = { input ->
+                    val filtered = input.filter { it.isDigit() || it == '+' }.take(13)
+                    onContactPhoneChanged(filtered)
+                },
+                label = { Text("Phone Number for Delivery Updates *") },
+                placeholder = { Text("10-digit mobile number (e.g. 9991416180)") },
                 isError = phoneError != null,
                 supportingText = phoneError?.let { { Text(it, color = CommerceColors.Danger) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),

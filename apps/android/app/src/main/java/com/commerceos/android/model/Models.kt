@@ -317,6 +317,13 @@ data class CreateOrderApiRequest(
     val deliverySlaMins: Int
 )
 
+data class CustomerDeliverySessionDto(
+    val deliveryId: String? = null,
+    val orderId: String? = null,
+    val otp: String? = null,
+    val state: String? = null
+)
+
 data class CustomerOrderApiResponse(
     val id: String,
     val orderStatus: String,
@@ -324,7 +331,8 @@ data class CustomerOrderApiResponse(
     val paymentMethod: String = "COD",
     val paymentStatus: String,
     val deliverySlaMins: Int,
-    val deliveryOtp: String?,
+    val deliveryOtp: String? = null,
+    val deliverySession: CustomerDeliverySessionDto? = null,
     val deliveryHandoffOtpAvailable: Boolean? = null,
     val consignmentNumber: String? = null,
     val provider: String? = "SELLER_MANAGED",
@@ -338,7 +346,10 @@ data class CustomerOrderApiResponse(
     val riderName: String? = null,
     val riderPhone: String? = null,
     val riderVehicle: String? = null
-)
+) {
+    val effectiveDeliveryPin: String?
+        get() = deliveryOtp?.takeIf { it.isNotBlank() } ?: deliverySession?.otp?.takeIf { it.isNotBlank() }
+}
 
 data class OrderItem(
     val productId: String = "",

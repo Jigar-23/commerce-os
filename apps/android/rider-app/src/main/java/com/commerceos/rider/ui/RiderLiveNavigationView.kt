@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.commerceos.rider.model.RoutePoint
 import com.commerceos.rider.model.ServerDeliverySession
 import com.commerceos.rider.repository.RiderDeliveryRepository
+import com.commerceos.rider.util.RiderNavigationUtils
 import kotlinx.coroutines.launch
 
 @Composable
@@ -43,6 +46,7 @@ fun RiderLiveNavigationView(
     onVerifyOtp: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    var showManualArrivalConfirmDialog by remember { mutableStateOf(false) }
 
     val merchantLat = session.merchantLat?.takeIf { it != 0.0 } ?: 28.202224
     val merchantLng = session.merchantLng?.takeIf { it != 0.0 } ?: 76.615418
@@ -52,8 +56,16 @@ fun RiderLiveNavigationView(
     val isPhase1 = session.state in listOf("ASSIGNED", "ACCEPTED", "EN_ROUTE_PICKUP", "OUT_FOR_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "ARRIVED_MERCHANT")
     val targetLat = if (isPhase1) merchantLat else customerLat
     val targetLng = if (isPhase1) merchantLng else customerLng
-    val targetName = if (isPhase1) session.merchantName.ifBlank { "Dark Store Hub" } else session.customerName.ifBlank { "Customer" }
-    val targetAddress = if (isPhase1) session.merchantAddress.ifBlank { "Rewari Store Hub" } else session.customerAddress.ifBlank { "Delivery Address" }
+    val targetName = if (isPhase1) {
+        session.merchantName.takeIf { it.isNotBlank() && it != "null" } ?: "Dark Store Hub"
+    } else {
+        session.customerName.takeIf { it.isNotBlank() && it != "null" } ?: "Customer"
+    }
+    val targetAddress = if (isPhase1) {
+        session.merchantAddress.takeIf { it.isNotBlank() && it != "null" } ?: "Rewari Store Hub"
+    } else {
+        session.customerAddress.takeIf { it.isNotBlank() && it != "null" } ?: "Delivery Address"
+    }
 
     val hasRiderGps = riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0
 
@@ -63,16 +75,43 @@ fun RiderLiveNavigationView(
     var isRouteLoading by remember { mutableStateOf(false) }
     var routeUnavailable by remember { mutableStateOf(false) }
 
+    var lastRoutedOriginLat by remember { mutableStateOf<Double?>(null) }
+    var lastRoutedOriginLng by remember { mutableStateOf<Double?>(null) }
+    var lastRoutedPhase by remember { mutableStateOf(isPhase1) }
+    var cachedRiderLat by remember { mutableStateOf<Double?>(null) }
+    var cachedRiderLng by remember { mutableStateOf<Double?>(null) }
+
+    if (hasRiderGps) {
+        cachedRiderLat = riderLat
+        cachedRiderLng = riderLng
+    }
+
     // Fetch authoritative OSRM road route geometry for Phase 1 (Rider -> Store) or Phase 2 (Store/Rider -> Customer)
     LaunchedEffect(riderLat, riderLng, targetLat, targetLng, isPhase1) {
-        val originLat = if (hasRiderGps) riderLat!! else (if (isPhase1) (merchantLat - 0.008) else merchantLat)
-        val originLng = if (hasRiderGps) riderLng!! else (if (isPhase1) (merchantLng - 0.006) else merchantLng)
+        val effectiveLat = riderLat ?: cachedRiderLat
+        val effectiveLng = riderLng ?: cachedRiderLng
+        val originLat = effectiveLat ?: (if (isPhase1) (merchantLat - 0.008) else merchantLat)
+        val originLng = effectiveLng ?: (if (isPhase1) (merchantLng - 0.006) else merchantLng)
+
+        // Throttle route recalculation: do not re-fetch from OSRM unless moved > 40m or phase changed
+        val prevLat = lastRoutedOriginLat
+        val prevLng = lastRoutedOriginLng
+        if (waypoints.size >= 2 && isPhase1 == lastRoutedPhase && prevLat != null && prevLng != null) {
+            val distArr = FloatArray(1)
+            android.location.Location.distanceBetween(prevLat, prevLng, originLat, originLng, distArr)
+            if (distArr[0] < 40.0f) {
+                return@LaunchedEffect
+            }
+        }
 
         isRouteLoading = true
         val res = repository.fetchRoute(originLat, originLng, targetLat, targetLng)
         res.onSuccess { routeResult ->
             if (routeResult.waypoints.size >= 2) {
                 waypoints = routeResult.waypoints
+                lastRoutedOriginLat = originLat
+                lastRoutedOriginLng = originLng
+                lastRoutedPhase = isPhase1
             }
             routeDistanceKm = routeResult.distanceKm
             routeDurationMins = routeResult.durationMins
@@ -92,7 +131,7 @@ fun RiderLiveNavigationView(
             null
         }
     }
-    val isWithinStoreArrivalRadius = distanceToStoreMeters != null && distanceToStoreMeters <= 50.0
+    val isWithinStoreArrivalRadius = distanceToStoreMeters != null && distanceToStoreMeters <= 200.0
 
     val displayDistanceKm = routeDistanceKm ?: session.distanceKm ?: 0.0
     val displayEtaMins = routeDurationMins ?: session.estimatedTimeMins ?: 0
@@ -164,7 +203,7 @@ fun RiderLiveNavigationView(
                     .height(if (session.state in listOf("ARRIVED_CUSTOMER", "HANDOFF_STARTED")) 160.dp else 220.dp)
                     .clip(RoundedCornerShape(12.dp))
             ) {
-                ZomatoDarkMapView(
+                NativeGoogleRiderNavMap(
                     merchantLat = merchantLat,
                     merchantLng = merchantLng,
                     customerLat = customerLat,
@@ -173,9 +212,7 @@ fun RiderLiveNavigationView(
                     riderLng = riderLng,
                     riderHeading = riderHeading,
                     waypoints = waypoints,
-                    isRouteLoading = isRouteLoading,
-                    routeUnavailable = routeUnavailable,
-                    isStale = isStale,
+                    isPhase1 = isPhase1,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -203,7 +240,44 @@ fun RiderLiveNavigationView(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Quick Actions Bar: Turn-by-Turn External Maps + Direct Phone Call
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        RiderNavigationUtils.launchExternalMaps(context, targetLat, targetLng, targetName)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1.2f).height(42.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Navigate (Maps) ↗", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                }
+
+                val contactPhone = if (isPhase1) session.merchantPhone.ifBlank { "1800123456" } else session.customerPhone.ifBlank { session.maskedCustomerPhone }
+                Button(
+                    onClick = {
+                        RiderNavigationUtils.dialPhoneNumber(context, contactPhone)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (isPhase1) "Call Hub" else "Call Customer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Dynamic Contextual State Action Button
             when (session.state) {
@@ -213,35 +287,38 @@ fun RiderLiveNavigationView(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Button(
-                            onClick = onArrivedStore,
-                            enabled = isWithinStoreArrivalRadius,
+                            onClick = {
+                                if (isWithinStoreArrivalRadius) {
+                                    onArrivedStore()
+                                } else {
+                                    showManualArrivalConfirmDialog = true
+                                }
+                            },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF0284C7),
-                                disabledContainerColor = Color(0xFF1E293B)
+                                containerColor = if (isWithinStoreArrivalRadius) Color(0xFF0284C7) else Color(0xFF1E293B)
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth().height(54.dp)
                         ) {
-                            if (isWithinStoreArrivalRadius) {
-                                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("ARRIVED AT STORE", fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = 0.5.sp, color = Color.White)
-                            } else {
-                                Text(
-                                    text = if (distanceToStoreMeters != null) {
-                                        "ARRIVED AT STORE (%.0fm away • need <50m)".format(distanceToStoreMeters)
-                                    } else {
-                                        "ARRIVED AT STORE (Waiting for GPS)"
-                                    },
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF94A3B8)
-                                )
-                            }
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = if (isWithinStoreArrivalRadius) Color.White else Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isWithinStoreArrivalRadius) {
+                                    "ARRIVED AT STORE"
+                                } else if (distanceToStoreMeters != null) {
+                                    "ARRIVED AT STORE (%.0fm away)".format(distanceToStoreMeters)
+                                } else {
+                                    "ARRIVED AT STORE"
+                                },
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
+                                letterSpacing = 0.5.sp,
+                                color = if (isWithinStoreArrivalRadius) Color.White else Color(0xFF38BDF8)
+                            )
                         }
                         if (!isWithinStoreArrivalRadius) {
                             Text(
-                                text = "📍 You must be within 50m of the store to mark arrival (${distanceToStoreMeters?.let { "current: %.0fm".format(it) } ?: "fetching GPS..."})",
+                                text = "📍 Tap to confirm arrival if GPS is drifting or indoors (${distanceToStoreMeters?.let { "approx %.0fm away".format(it) } ?: "acquiring GPS..."})",
                                 fontSize = 11.sp,
                                 color = Color(0xFFFBBF24),
                                 fontWeight = FontWeight.Medium
@@ -323,25 +400,44 @@ fun RiderLiveNavigationView(
             }
         }
     }
-}
 
-private fun launchExternalMaps(context: Context, lat: Double?, lng: Double?, label: String) {
-    if (lat == null || lng == null || lat == 0.0 || lng == 0.0) {
-        Toast.makeText(context, "Location coordinates unavailable for this destination", Toast.LENGTH_SHORT).show()
-        return
-    }
-    try {
-        val uri = Uri.parse("google.navigation:q=$lat,$lng&mode=d")
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            setPackage("com.google.android.apps.maps")
-        }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        try {
-            val fallbackUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${Uri.encode(label)})")
-            context.startActivity(Intent(Intent.ACTION_VIEW, fallbackUri))
-        } catch (ex: Exception) {
-            Toast.makeText(context, "No navigation app found on device", Toast.LENGTH_SHORT).show()
-        }
+    if (showManualArrivalConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showManualArrivalConfirmDialog = false },
+            title = {
+                Text("Confirm Store Arrival", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 17.sp)
+            },
+            text = {
+                val distText = if (distanceToStoreMeters != null) "GPS estimates you are ~%.0fm from the store hub.".format(distanceToStoreMeters) else "GPS is acquiring your precise coordinates."
+                Text(
+                    text = "$distText\n\nConfirm that you have arrived at the store to proceed with package pickup verification?",
+                    color = Color(0xFFCBD5E1),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showManualArrivalConfirmDialog = false
+                        onArrivedStore()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Confirm Arrival", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showManualArrivalConfirmDialog = false },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Cancel", color = Color(0xFF94A3B8))
+                }
+            },
+            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 }

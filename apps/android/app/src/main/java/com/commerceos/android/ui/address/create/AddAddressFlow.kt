@@ -534,51 +534,30 @@ fun AddAddressFlow(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .offset(y = (-40).dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Surface(
-                        color = Color(0xFF18181B),
-                        shape = RoundedCornerShape(8.dp),
-                        shadowElevation = 4.dp
-                    ) {
-                        Text(
-                            text = "Move pin to your exact delivery location",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-
                 Surface(
                     color = Color.White,
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    shadowElevation = 4.dp,
+                    shadowElevation = 6.dp,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 18.dp)
                         .clickable(onClick = requestLocationPermission)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Default.LocationOn,
                             contentDescription = null,
-                            tint = Color(0xFF16A34A),
-                            modifier = Modifier.size(16.dp)
+                            tint = Color(0xFF059669),
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Use current location",
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF047857)
                         )

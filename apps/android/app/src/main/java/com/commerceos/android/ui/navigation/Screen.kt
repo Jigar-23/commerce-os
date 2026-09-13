@@ -17,6 +17,7 @@ sealed class Screen {
     data class UnifiedOrderTracking(val orderId: String) : Screen()
     object OrderHistory : Screen()
     object Account : Screen()
+    object Notifications : Screen()
     object Prescriptions : Screen()
     data class Search(val query: UniversalSearchQuery = UniversalSearchQuery()) : Screen()
     data class VerticalHome(val verticalId: String) : Screen()

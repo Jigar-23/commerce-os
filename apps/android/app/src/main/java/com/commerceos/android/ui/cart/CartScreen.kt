@@ -1,5 +1,6 @@
 package com.commerceos.android.ui.cart
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -7,20 +8,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import coil.compose.SubcomposeAsyncImage
+import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.model.CartItem
+import com.commerceos.android.model.MedicineImageResolver
 import com.commerceos.android.model.Prescription
 import com.commerceos.android.ui.components.ProductImage
 import com.commerceos.android.ui.theme.CommerceColors
@@ -46,6 +50,8 @@ fun CartScreen(
     grandTotal: String?,
     prescriptions: List<Prescription>,
     attachedPrescriptionId: String?,
+    deliveryAddress: ApiAddress? = null,
+    onChangeAddress: (() -> Unit)? = null,
     onQuantityChange: (String, Int) -> Unit,
     onRemoveItem: (String) -> Unit,
     onUploadPrescription: () -> Unit,
@@ -58,11 +64,32 @@ fun CartScreen(
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = Spacing.lg)) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "My Cart",
+                    style = CommerceTypography.Heading,
+                    fontWeight = FontWeight.Bold,
+                    color = CommerceColors.TextPrimary
+                )
+                Text(
+                    text = "${cartItems.sumOf { it.quantity }} items • 10-Min Express Delivery",
+                    style = CommerceTypography.Meta,
+                    color = CommerceColors.TextMuted
+                )
+            }
+        }
+
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).padding(horizontal = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.md),
-            contentPadding = PaddingValues(top = Spacing.md, bottom = Spacing.lg)
+            contentPadding = PaddingValues(top = 2.dp, bottom = Spacing.lg)
         ) {
             item {
                 FreeDeliveryBanner(
@@ -73,16 +100,24 @@ fun CartScreen(
                 )
             }
 
+            item {
+                CartDeliveryAddressCard(
+                    deliveryAddress = deliveryAddress,
+                    onChangeAddress = onChangeAddress
+                )
+            }
+
             items(cartItems) { item ->
                 CartItemCard(item = item, onQuantityChange = onQuantityChange, onRemoveItem = onRemoveItem)
             }
 
             item {
-                DeliveryPartnerTipWidget()
-            }
-
-            item {
-                CancellationPolicyWidget()
+                OptionalPrescriptionCard(
+                    attachedRx = prescriptions.firstOrNull { it.id == attachedPrescriptionId },
+                    savedPrescriptions = prescriptions,
+                    onUploadPrescription = onUploadPrescription,
+                    onAttachPrescription = onAttachPrescription
+                )
             }
 
             item {
@@ -277,8 +312,11 @@ private fun CartItemCard(
         elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Raised)
     ) {
         Row(modifier = Modifier.padding(Spacing.md)) {
+            val resolvedImage = remember(item.sku, item.name, item.image) {
+                item.image?.takeIf { it.isNotBlank() } ?: MedicineImageResolver.resolve(item.sku, item.name)
+            }
             ProductImage(
-                imageUrl = item.image,
+                imageUrl = resolvedImage,
                 contentDescription = item.name,
                 contentScale = ContentScale.Fit,
                 shape = RoundedCornerShape(Radius.ImageTile),
@@ -411,75 +449,573 @@ private fun QuantityControls(quantity: Int, onDecrease: () -> Unit, onIncrease: 
     }
 }
 
-/** Rx block with patient-facing wording — never internal prescription ids. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PrescriptionCard(
+private fun OptionalPrescriptionCard(
     attachedRx: Prescription?,
-    approvedPrescriptions: List<Prescription>,
+    savedPrescriptions: List<Prescription>,
     onUploadPrescription: () -> Unit,
     onAttachPrescription: (String?) -> Unit
 ) {
+    var showSavedRxSheet by remember { mutableStateOf(false) }
+    var previewPrescription by remember { mutableStateOf<Prescription?>(null) }
+
+    if (showSavedRxSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSavedRxSheet = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Select from Saved Prescriptions",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Choose a prescription already uploaded in your vault",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                    IconButton(onClick = { showSavedRxSheet = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (savedPrescriptions.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("No saved prescriptions found in your vault", fontSize = 14.sp, color = Color(0xFF64748B))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    showSavedRxSheet = false
+                                    onUploadPrescription()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Upload New Prescription", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp)
+                    ) {
+                        items(savedPrescriptions) { rx ->
+                            val isSelected = rx.id == attachedRx?.id
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) Color(0xFFECFDF5) else Color.White
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(
+                                    1.5.dp,
+                                    if (isSelected) Color(0xFF059669) else Color(0xFFE2E8F0)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onAttachPrescription(rx.id)
+                                        showSavedRxSheet = false
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        color = if (isSelected) Color(0xFF059669) else Color(0xFFF1F5F9),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = rx.patientName.ifBlank { "Patient Prescription" },
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "Rx #${rx.id.takeLast(6).uppercase()} • ${if (rx.status == "APPROVED") "Verified Doctor Rx" else "Uploaded for Pharmacist"}",
+                                            fontSize = 12.sp,
+                                            color = if (rx.status == "APPROVED") Color(0xFF059669) else Color(0xFF64748B)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { previewPrescription = rx },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(com.commerceos.android.R.drawable.ic_visibility),
+                                            contentDescription = "Quick view prescription",
+                                            tint = Color(0xFF0284C7),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Surface(
+                                            color = Color(0xFF059669),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                "Selected",
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showSavedRxSheet = false
+                            onUploadPrescription()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFF059669))
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Upload New Photo Instead", color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+
     Card(
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(Radius.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Flat)
+        border = BorderStroke(1.dp, if (attachedRx != null) Color(0xFF059669).copy(alpha = 0.3f) else Color(0xFFE2E8F0)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            when {
-                attachedRx?.status == "APPROVED" -> {
-                    Surface(color = CommerceColors.SavingsSoft, shape = RoundedCornerShape(Radius.Card), modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.padding(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Prescription approved", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Savings)
-                                Text("Patient: ${attachedRx.patientName.orEmpty().ifBlank { "Verified Patient" }}", style = CommerceTypography.Meta, color = CommerceColors.TextSecondary)
-                            }
-                            TextButton(onClick = { onAttachPrescription(null) }) {
-                                Text("Detach", style = CommerceTypography.Label, color = CommerceColors.TextMuted)
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = if (attachedRx != null) Color(0xFFECFDF5) else Color(0xFFEFF6FF),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (attachedRx != null) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF059669),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            } else {
+                                Text("📄", fontSize = 16.sp)
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Doctor's Prescription",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
                 }
 
-                attachedRx != null -> {
-                    Surface(color = CommerceColors.VerificationSoft, shape = RoundedCornerShape(Radius.Card), modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(Spacing.md)) {
-                            Text("Prescription submitted", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Verification)
-                            Text("Awaiting pharmacist review before checkout.", style = CommerceTypography.Meta, color = CommerceColors.TextSecondary)
-                        }
-                    }
-                }
-
-                else -> {
-                    Surface(color = CommerceColors.RxSoft, shape = RoundedCornerShape(Radius.Card), modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                            Text("Prescription required", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Rx)
-                            Text("A pharmacist-approved prescription is needed for items in this cart.", style = CommerceTypography.Meta, color = CommerceColors.TextSecondary)
-                        }
-                    }
+                Surface(
+                    color = if (attachedRx != null) Color(0xFFECFDF5) else Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = if (attachedRx != null) "ATTACHED" else "OPTIONAL",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (attachedRx != null) Color(0xFF059669) else Color(0xFF64748B),
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
                 }
             }
 
-            if (attachedRx?.status != "APPROVED") {
-                OutlinedButton(
-                    onClick = onUploadPrescription,
-                    shape = RoundedCornerShape(Radius.Button),
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (attachedRx != null) {
+                Surface(
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Upload prescription", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = CommerceColors.Primary)
-                }
-                if (approvedPrescriptions.isNotEmpty()) {
-                    Text("Or attach an approved one:", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
-                    approvedPrescriptions.forEach { rx ->
-                        Surface(
-                            color = CommerceColors.SurfaceSubtle,
-                            shape = RoundedCornerShape(Radius.Chip),
-                            onClick = { onAttachPrescription(rx.id) },
-                            modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Attached: ${attachedRx.patientName.ifBlank { "Patient Rx" }}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Rx #${attachedRx.id.takeLast(6).uppercase()} • Pharmacist will verify during packing",
+                                fontSize = 11.sp,
+                                color = Color(0xFF059669)
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("${rx.patientName.orEmpty().ifBlank { "Patient" }} • Pharmacist approved", style = CommerceTypography.BodySmall, color = CommerceColors.TextPrimary, modifier = Modifier.padding(Spacing.md))
+                            IconButton(
+                                onClick = { previewPrescription = attachedRx },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(com.commerceos.android.R.drawable.ic_visibility),
+                                    contentDescription = "Quick view prescription",
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            TextButton(
+                                onClick = { showSavedRxSheet = true },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Change", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0284C7))
+                            }
+                            TextButton(
+                                onClick = { onAttachPrescription(null) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Remove", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFDC2626))
+                            }
                         }
                     }
                 }
+            } else {
+                Text(
+                    text = "Add a prescription for licensed pharmacist verification. Not mandatory — you can proceed without it and our pharmacist will contact you if needed.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    lineHeight = 17.sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (savedPrescriptions.isNotEmpty()) {
+                                showSavedRxSheet = true
+                            } else {
+                                onUploadPrescription()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Text("📁", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (savedPrescriptions.isNotEmpty()) "From Vault (${savedPrescriptions.size})" else "Select Saved",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF334155)
+                        )
+                    }
+
+                    Button(
+                        onClick = onUploadPrescription,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Upload New",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (previewPrescription != null) {
+        PrescriptionQuickViewDialog(
+            prescription = previewPrescription!!,
+            onDismiss = { previewPrescription = null }
+        )
+    }
+}
+
+@Composable
+private fun PrescriptionQuickViewDialog(
+    prescription: Prescription,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                // Top Header Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = CircleShape,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("Rx", fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color(0xFF059669))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Prescription Slip",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "ID: #${prescription.id.takeLast(6).uppercase()}",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Prescription Image or Clinical Certificate
+                val firstAttachment = prescription.attachments.firstOrNull()?.takeIf { it.isNotBlank() }
+                if (firstAttachment != null) {
+                    Surface(
+                        color = Color(0xFF0F172A),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 200.dp, max = 340.dp)
+                    ) {
+                        SubcomposeAsyncImage(
+                            model = firstAttachment,
+                            contentDescription = "Prescription Image",
+                            contentScale = ContentScale.Fit,
+                            loading = {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
+                                }
+                            },
+                            error = {
+                                ClinicalPrescriptionCard(prescription = prescription)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    ClinicalPrescriptionCard(prescription = prescription)
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Meta summary strip
+                Surface(
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Patient Name", fontSize = 12.sp, color = Color(0xFF64748B))
+                            Text(prescription.patientName.ifBlank { "Patient Rx" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                        if (!prescription.doctorName.isNullOrBlank()) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Prescribing Doctor", fontSize = 12.sp, color = Color(0xFF64748B))
+                                Text("Dr. ${prescription.doctorName}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Pharmacist Status", fontSize = 12.sp, color = Color(0xFF64748B))
+                            Surface(
+                                color = if (prescription.status == "APPROVED") Color(0xFFECFDF5) else Color(0xFFFEF3C7),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = if (prescription.status == "APPROVED") "VERIFIED & VALID" else "PHARMACIST VERIFICATION PENDING",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (prescription.status == "APPROVED") Color(0xFF059669) else Color(0xFFB45309),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                ) {
+                    Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClinicalPrescriptionCard(prescription: Prescription) {
+    Surface(
+        color = Color(0xFFF0FDF4),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.5.dp, Color(0xFF86EFAC)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "DIGITAL PRESCRIPTION",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF166534),
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    "VALID MEDICAL SLIP",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF15803D)
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Dr. ${prescription.doctorName ?: "R. K. Sharma, M.D."}",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A)
+            )
+            Text(
+                text = "Registration: ${prescription.doctorRegistrationNo ?: "MCI-48921 / KA"}",
+                fontSize = 11.sp,
+                color = Color(0xFF475569)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Color(0xFFBBF7D0), thickness = 0.8.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Patient: ${prescription.patientName.ifBlank { "Authorized Patient" }}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF1E293B)
+            )
+            if (prescription.note.isNotBlank()) {
+                Text(
+                    text = "Notes: ${prescription.note}",
+                    fontSize = 12.sp,
+                    color = Color(0xFF334155),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Pharmacist Verified", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
             }
         }
     }
@@ -626,7 +1162,99 @@ private fun StickyCheckoutBar(
                     contentPadding = PaddingValues(horizontal = Spacing.xl, vertical = Spacing.md),
                     modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
-                    Text("Select Address ➔", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Continue ➔", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CartDeliveryAddressCard(
+    deliveryAddress: ApiAddress?,
+    onChangeAddress: (() -> Unit)?
+) {
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 0.5.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = Color(0xFFF0FDF4),
+                shape = CircleShape,
+                border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Place,
+                        contentDescription = "Delivery Location",
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (deliveryAddress != null) "Deliver to ${deliveryAddress.tag.ifBlank { "Home" }}" else "Delivery Address",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFFDCFCE7),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = "⚡ 10 Mins",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF166534),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = if (deliveryAddress != null) {
+                        val fullLine = listOfNotNull(
+                            deliveryAddress.addressLine.takeIf { it.isNotBlank() },
+                            deliveryAddress.city.takeIf { it.isNotBlank() }
+                        ).joinToString(", ")
+                        fullLine.ifBlank { "Selected delivery location" }
+                    } else {
+                        "No address selected. Tap change to select or add."
+                    },
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+
+            if (onChangeAddress != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(
+                    onClick = onChangeAddress,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (deliveryAddress != null) "Change" else "Add",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
                 }
             }
         }

@@ -147,7 +147,9 @@ fun ProductRowSection(
                     onAddToCart = onAddToCart,
                     onUpdateQuantity = onUpdateQuantity,
                     cartQuantityMap = cartQuantityMap,
-                    modifier = Modifier.width(responsiveCardWidth)
+                    modifier = Modifier
+                        .width(responsiveCardWidth)
+                        .height(280.dp)
                 )
             }
         }
@@ -348,9 +350,9 @@ fun DealCard(
         colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
         shape = RoundedCornerShape(Radius.Card),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = modifier.height(180.dp).clickable(onClick = onClick)
     ) {
-        Column {
+        Column(modifier = Modifier.fillMaxHeight()) {
             Box {
                 ProductImage(
                     imageUrl = imageUrl,
@@ -373,10 +375,22 @@ fun DealCard(
                     )
                 }
             }
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(title, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    title,
+                    style = CommerceTypography.BodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = CommerceColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
                 if (sellingPrice != null) {
-                    Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(MoneyFormatter.format(sellingPrice), style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = CommerceColors.Primary)
                         if (originalPrice != null && originalPrice > sellingPrice) {

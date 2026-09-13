@@ -3,6 +3,7 @@ package com.commerceos.rider.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -107,6 +108,10 @@ fun ZomatoDarkMapView(
                     setBackgroundColor(0xFF0B1120.toInt())
 
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            return true
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isMapLoaded = true
@@ -280,67 +285,178 @@ private fun generateHardenedDarkMapHtml(
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0B1120; font-family: -apple-system, Roboto, sans-serif; }
-        .leaflet-container { background: #0B1120; }
-        .store-icon {
-            background: #0284C7;
-            border: 2px solid #FFFFFF;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 10px rgba(2, 132, 199, 0.8);
+        html, body, #map {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #050811;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
         }
-        .store-icon svg { width: 16px; height: 16px; fill: white; }
-        .customer-icon {
-            background: #EA580C;
-            border: 2px solid #FFFFFF;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 10px rgba(234, 88, 12, 0.8);
+        .leaflet-container {
+            background: #050811;
         }
-        .customer-icon svg { width: 16px; height: 16px; fill: white; }
         
-        /* Clean Quick-Commerce Branded Rider Marker */
-        .biker-container {
-            width: 36px;
-            height: 36px;
+        /* Zomato-Grade Dark Obsidian Tile Contrast Filter */
+        .leaflet-tile-pane {
+            filter: brightness(0.85) contrast(1.25) saturate(1.2) hue-rotate(210deg);
+        }
+
+        /* 3D Elevated Store Marker */
+        .store-marker-3d {
             position: relative;
-            transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .biker-pulse {
+        .store-beacon {
             position: absolute;
-            width: 36px;
-            height: 36px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
-            background: rgba(16, 185, 129, 0.3);
-            animation: pulse 2.5s infinite;
+            background: rgba(2, 132, 199, 0.25);
+            border: 1px solid rgba(2, 132, 199, 0.8);
+            animation: pulseBeacon 2.5s infinite ease-out;
         }
-        .biker-core {
-            position: absolute;
-            top: 3px;
-            left: 3px;
-            width: 30px;
-            height: 30px;
-            background: #10B981;
+        .store-pill {
+            position: relative;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);
             border: 2px solid #FFFFFF;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(2, 132, 199, 0.7);
+        }
+        .store-pill svg { width: 17px; height: 17px; fill: #FFFFFF; }
+
+        /* 3D Elevated Customer Destination Marker */
+        .customer-marker-3d {
+            position: relative;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .customer-beacon {
+            position: absolute;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(249, 115, 22, 0.25);
+            border: 1px solid rgba(249, 115, 22, 0.8);
+            animation: pulseBeacon 2.5s infinite ease-out 0.5s;
+        }
+        .customer-pill {
+            position: relative;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #F97316 0%, #C2410C 100%);
+            border: 2px solid #FFFFFF;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(249, 115, 22, 0.7);
+        }
+        .customer-pill svg { width: 17px; height: 17px; fill: #FFFFFF; }
+
+        /* Zomato 3D Isometric Scooter with Headlight Projection Beam */
+        .biker-anchor {
+            position: relative;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .biker-rotator {
+            position: relative;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        /* Dynamic Headlight Light Cone on Asphalt */
+        .biker-headlight {
+            position: absolute;
+            top: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 44px;
+            height: 34px;
+            background: radial-gradient(ellipse at 50% 100%, rgba(56, 189, 248, 0.55) 0%, rgba(56, 189, 248, 0.2) 50%, rgba(56, 189, 248, 0) 80%);
+            clip-path: polygon(35% 100%, 65% 100%, 100% 0%, 0% 0%);
+            pointer-events: none;
+        }
+        .biker-pulse-primary {
+            position: absolute;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(0, 245, 212, 0.2);
+            border: 1.5px solid rgba(0, 245, 212, 0.8);
+            animation: radarWave 2s cubic-bezier(0.1, 0.7, 0.1, 1) infinite;
+        }
+        .biker-pulse-secondary {
+            position: absolute;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(0, 187, 249, 0.15);
+            animation: radarWave 2s cubic-bezier(0.1, 0.7, 0.1, 1) infinite 0.7s;
+        }
+        .biker-core-puck {
+            position: relative;
+            width: 34px;
+            height: 34px;
+            background: linear-gradient(135deg, #00F5D4 0%, #00BBF9 100%);
+            border: 2.5px solid #FFFFFF;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+            box-shadow: 0 6px 18px rgba(0, 245, 212, 0.7), 0 2px 6px rgba(0, 0, 0, 0.9);
         }
-        .biker-core svg {
-            width: 18px;
-            height: 18px;
-            fill: #FFFFFF;
+        .biker-core-puck svg {
+            width: 19px;
+            height: 19px;
+            fill: #050811;
+            filter: drop-shadow(0 1px 2px rgba(255,255,255,0.4));
         }
-        @keyframes pulse {
-            0% { transform: scale(0.9); opacity: 0.7; }
-            70% { transform: scale(1.5); opacity: 0; }
+
+        @keyframes radarWave {
+            0% { transform: scale(0.6); opacity: 0.9; }
+            70% { transform: scale(1.4); opacity: 0.3; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+        @keyframes pulseBeacon {
+            0% { transform: scale(0.8); opacity: 0.8; }
             100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        /* SVG Multi-Layer Glowing Neon Polyline Shader */
+        .neon-glow-outer {
+            stroke: #00F5D4;
+            stroke-opacity: 0.35;
+            filter: drop-shadow(0 0 8px #00F5D4);
+        }
+        .neon-track-core {
+            stroke: #00BBF9;
+            stroke-opacity: 0.95;
+        }
+        .neon-spine-inner {
+            stroke: #FFFFFF;
+            stroke-opacity: 0.95;
         }
     </style>
 </head>
@@ -349,21 +465,24 @@ private fun generateHardenedDarkMapHtml(
 <script>
     var map = L.map('map', {
         zoomControl: false,
-        attributionControl: true
+        attributionControl: false
     }).setView([$merchantLat, $merchantLng], 14);
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
         subdomains: 'abcd',
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        attribution: ''
     }).addTo(map);
 
     var storeSvg = '<svg viewBox="0 0 24 24"><path d="M4 4h16v3H4zm0 5h16v11H4zm3 2v7h10v-7z"/></svg>';
     var customerSvg = '<svg viewBox="0 0 24 24"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm0 4.7l4 3.6V18h-8v-6.7l4-3.6z"/></svg>';
-    var bikeSvg = '<svg viewBox="0 0 24 24"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm14-8.5c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm-8.2-7.5l-2.4-4H5v2h2.2l1.6 2.7c-.8.8-1.3 1.8-1.5 3h2.1c.2-.7.6-1.3 1.1-1.8l1.7 2.1h3.7v-2h-2.5l-1.9-2.4.9-2.6 1.8 1.4v2.6h2v-3.7l-2.8-2.2c-.3-.2-.7-.3-1.1-.3-.4 0-.8.2-1.1.5l-1.6 2.4z"/></svg>';
+    var scooterSvg = '<svg viewBox="0 0 24 24"><path d="M19 7c0-1.1-.9-2-2-2h-3v2h3v2.65L13.52 14H10V9H6c-2.21 0-4 1.79-4 4v3h2c0 1.66 1.34 3 3 3s3-1.34 3-3h4.18c.41 1.16 1.51 2 2.82 2 1.66 0 3-1.34 3-3h1v-4.5L19 7zM7 17c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1zm11 0c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1z"/></svg>';
 
-    var storeIcon = L.divIcon({ className: 'store-icon', html: storeSvg, iconSize: [30, 30], iconAnchor: [15, 15] });
-    var customerIcon = L.divIcon({ className: 'customer-icon', html: customerSvg, iconSize: [30, 30], iconAnchor: [15, 15] });
+    var storeHtml = '<div class="store-marker-3d"><div class="store-beacon"></div><div class="store-pill">' + storeSvg + '</div></div>';
+    var customerHtml = '<div class="customer-marker-3d"><div class="customer-beacon"></div><div class="customer-pill">' + customerSvg + '</div></div>';
+
+    var storeIcon = L.divIcon({ className: '', html: storeHtml, iconSize: [44, 44], iconAnchor: [22, 22] });
+    var customerIcon = L.divIcon({ className: '', html: customerHtml, iconSize: [44, 44], iconAnchor: [22, 22] });
 
     var storeMarker = null;
     var customerMarker = null;
@@ -375,16 +494,19 @@ private fun generateHardenedDarkMapHtml(
     }
 
     var riderMarker = null;
-    var routePolyline = null;
+    var glowOuterPolyline = null;
+    var corePolyline = null;
+    var spinePolyline = null;
+    var traversedPolyline = null;
     var boundsGroup = [];
     if ($merchantLat && $merchantLng && $merchantLat !== 0) boundsGroup.push([$merchantLat, $merchantLng]);
     if ($customerLat && $customerLng && $customerLat !== 0) boundsGroup.push([$customerLat, $customerLng]);
     if (boundsGroup.length > 0) {
-        map.fitBounds(L.latLngBounds(boundsGroup), { padding: [30, 30], maxZoom: 15 });
+        map.fitBounds(L.latLngBounds(boundsGroup), { padding: [35, 35], maxZoom: 16 });
     }
     var lastAcceptedTimestamp = 0;
 
-    // Smooth Monotonic Interpolation Engine with Immediate Stale Freeze
+    // Smooth Monotonic Interpolation Engine
     var animFrame = null;
     function interpolateMarker(marker, startPos, endPos, durationMs) {
         if (animFrame) {
@@ -438,17 +560,19 @@ private fun generateHardenedDarkMapHtml(
             boundsGroup.push([effectiveCLat, effectiveCLng]);
         }
 
-        // Monotonic Filtered Rider Marker with Immediate Stale Freeze
+        // Zomato 3D Isometric Rider Marker
         if (rider && rider.lat && rider.lng) {
             var ts = rider.timestamp || Date.now();
             if (ts >= lastAcceptedTimestamp) {
                 lastAcceptedTimestamp = ts;
                 var rot = (rider.heading != null) ? rider.heading : 0;
-                var markerHtml = '<div class="biker-container" style="transform: rotate(' + rot + 'deg);">' +
-                                 (rider.isStale ? '' : '<div class="biker-pulse"></div>') +
-                                 '<div class="biker-core">' + bikeSvg + '</div>' +
-                                 '</div>';
-                var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [32, 32], iconAnchor: [16, 16] });
+                var markerHtml = '<div class="biker-anchor">' +
+                                 '<div class="biker-rotator" style="transform: rotate(' + rot + 'deg);">' +
+                                 '<div class="biker-headlight"></div>' +
+                                 (rider.isStale ? '' : '<div class="biker-pulse-primary"></div><div class="biker-pulse-secondary"></div>') +
+                                 '<div class="biker-core-puck">' + scooterSvg + '</div>' +
+                                 '</div></div>';
+                var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [60, 60], iconAnchor: [30, 30] });
 
                 if (!riderMarker) {
                     riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
@@ -482,29 +606,60 @@ private fun generateHardenedDarkMapHtml(
             }
         }
 
-        // Authoritative Road Geometry Polyline
-        if (waypoints && waypoints.length > 0) {
+        // Zomato-Grade Multi-Layer Glowing Neon Polyline Shader
+        if (waypoints && waypoints.length > 1) {
             var latLngs = waypoints.map(function(pt) { return [pt.lat, pt.lng]; });
-            if (!routePolyline) {
-                routePolyline = L.polyline(latLngs, {
-                    color: '#10B981',
-                    weight: 5,
-                    opacity: 0.85,
+            
+            // Layer 1: Outer Ambient Glow (14px)
+            if (!glowOuterPolyline) {
+                glowOuterPolyline = L.polyline(latLngs, {
+                    color: '#00F5D4',
+                    weight: 12,
+                    opacity: 0.35,
                     lineCap: 'round',
-                    lineJoin: 'round'
+                    lineJoin: 'round',
+                    className: 'neon-glow-outer'
                 }).addTo(map);
             } else {
-                routePolyline.setLatLngs(latLngs);
+                glowOuterPolyline.setLatLngs(latLngs);
+            }
+
+            // Layer 2: Core Neon Track (5px)
+            if (!corePolyline) {
+                corePolyline = L.polyline(latLngs, {
+                    color: '#00BBF9',
+                    weight: 5,
+                    opacity: 0.95,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    className: 'neon-track-core'
+                }).addTo(map);
+            } else {
+                corePolyline.setLatLngs(latLngs);
+            }
+
+            // Layer 3: Inner White Beam Spine (2px)
+            if (!spinePolyline) {
+                spinePolyline = L.polyline(latLngs, {
+                    color: '#FFFFFF',
+                    weight: 2,
+                    opacity: 0.95,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    className: 'neon-spine-inner'
+                }).addTo(map);
+            } else {
+                spinePolyline.setLatLngs(latLngs);
             }
         } else {
-            if (routePolyline) {
-                map.removeLayer(routePolyline);
-                routePolyline = null;
-            }
+            if (glowOuterPolyline) { map.removeLayer(glowOuterPolyline); glowOuterPolyline = null; }
+            if (corePolyline) { map.removeLayer(corePolyline); corePolyline = null; }
+            if (spinePolyline) { map.removeLayer(spinePolyline); spinePolyline = null; }
         }
     }
 
     function recenterMap() {
+        autoFollow = true;
         if (boundsGroup.length > 0) {
             map.fitBounds(L.latLngBounds(boundsGroup), { padding: [40, 40], maxZoom: 16 });
         }

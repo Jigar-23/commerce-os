@@ -38,6 +38,7 @@ fun CustomerHandoffView(
     errorMessage: String?,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val codAmountExpected = (session.codAmount ?: 0.0).toInt()
 
     Card(
@@ -76,13 +77,17 @@ fun CustomerHandoffView(
                 Surface(
                     color = Color(0xFF1E293B),
                     shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.3f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+                    modifier = Modifier.clickable {
+                        val ph = session.customerPhone.ifBlank { session.maskedCustomerPhone }
+                        com.commerceos.rider.util.RiderNavigationUtils.dialPhoneNumber(context, ph)
+                    }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Phone, contentDescription = "Call Customer", tint = Color(0xFF38BDF8), modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = session.maskedCustomerPhone,

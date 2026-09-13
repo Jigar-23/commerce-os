@@ -16,8 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImagePainter
-import coil.compose.rememberAsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.Radius
@@ -52,30 +51,25 @@ fun ProductImage(
         if (url.isEmpty()) {
             CommerceProductPlaceholder(tint = tint)
         } else {
-            val painter = rememberAsyncImagePainter(
+            SubcomposeAsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(url)
                     .crossfade(true)
-                    .build()
-            )
-
-            when (painter.state) {
-                is AsyncImagePainter.State.Loading ->
+                    .build(),
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                loading = {
                     if (showShimmer) {
                         ShimmerBox(modifier = Modifier.fillMaxSize(), shape = shape)
                     } else {
                         CommerceProductPlaceholder(tint = tint)
                     }
-
-                is AsyncImagePainter.State.Error -> CommerceProductPlaceholder(tint = tint)
-
-                else -> Image(
-                    painter = painter,
-                    contentDescription = contentDescription,
-                    contentScale = contentScale,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+                },
+                error = {
+                    CommerceProductPlaceholder(tint = tint)
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

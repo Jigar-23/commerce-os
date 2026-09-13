@@ -20,6 +20,8 @@ fun AddressScreen(
     onSelectAddress: (ApiAddress) -> Unit,
     onProceedToPayment: (() -> Unit)? = null,
     onSavedSuccessfully: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
+    fromProfile: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -31,6 +33,7 @@ fun AddressScreen(
 
     LaunchedEffect(state.saveState) {
         if (state.saveState is com.commerceos.android.viewmodel.SaveState.Success) {
+            viewModel.resetSaveState()
             onSavedSuccessfully?.invoke()
         }
     }
@@ -76,6 +79,8 @@ fun AddressScreen(
             onSetDefaultAddress = { id -> viewModel.setDefaultAddress(id) },
             onAddNewLocation = { viewModel.startAddAddressFlow() },
             onProceedToPayment = onProceedToPayment,
+            onBack = onBack,
+            fromProfile = fromProfile,
             modifier = modifier
         )
     }

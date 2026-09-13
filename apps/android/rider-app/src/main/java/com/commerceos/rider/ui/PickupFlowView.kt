@@ -61,23 +61,44 @@ fun PickupFlowView(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val storePhone = session.merchantPhone.ifBlank { "1800123456" }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        com.commerceos.rider.util.RiderNavigationUtils.dialPhoneNumber(context, storePhone)
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Icon(Icons.Default.Place, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Call Hub", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
                 OutlinedButton(
                     onClick = onReportIssue,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f).height(48.dp)
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("Report issue", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Report issue", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 Button(
                     onClick = onConfirmPickup,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1.6f).height(48.dp)
+                    modifier = Modifier.weight(1.4f).height(48.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("Confirm pickup", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
+                    Text("Confirm pickup", fontWeight = FontWeight.Black, fontSize = 13.sp, color = Color.Black)
                 }
             }
         }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,7 +31,10 @@ fun CustomerLiveMapTrackingView(
     order: CustomerOrderApiResponse,
     liveTracking: CustomerOrderTrackingDto?,
     modifier: Modifier = Modifier,
-    onExpandClick: (() -> Unit)? = null
+    isFullscreen: Boolean = false,
+    onExpandClick: (() -> Unit)? = null,
+    onExitFullscreen: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null
 ) {
     val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.202224
     val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.615418
@@ -51,6 +55,16 @@ fun CustomerLiveMapTrackingView(
     val hasGpsData = realRiderLat != null && realRiderLng != null
 
     var dynamicRoadPoints by remember { mutableStateOf<List<MapRoutePoint>>(emptyList()) }
+    var cachedRiderLat by remember { mutableStateOf<Double?>(null) }
+    var cachedRiderLng by remember { mutableStateOf<Double?>(null) }
+    var lastRoutedOriginLat by remember { mutableStateOf<Double?>(null) }
+    var lastRoutedOriginLng by remember { mutableStateOf<Double?>(null) }
+    var lastRoutedStage by remember { mutableStateOf<String?>(null) }
+
+    if (realRiderLat != null && realRiderLng != null) {
+        cachedRiderLat = realRiderLat
+        cachedRiderLng = realRiderLng
+    }
 
     val activeStage = liveTracking?.stage ?: when (order.orderStatus.uppercase()) {
         "DELIVERED" -> "DELIVERED"
@@ -67,10 +81,23 @@ fun CustomerLiveMapTrackingView(
             return@LaunchedEffect
         }
         val isPhase1 = activeStage in listOf("HEADING_TO_STORE", "ASSIGNING_PARTNER", "AT_STORE")
-        val originLat = if (isPhase1) (realRiderLat ?: (merchantLat - 0.008)) else merchantLat
-        val originLng = if (isPhase1) (realRiderLng ?: (merchantLng - 0.006)) else merchantLng
+        val effectiveRiderLat = realRiderLat ?: cachedRiderLat
+        val effectiveRiderLng = realRiderLng ?: cachedRiderLng
+        val originLat = if (isPhase1) (effectiveRiderLat ?: (merchantLat - 0.008)) else merchantLat
+        val originLng = if (isPhase1) (effectiveRiderLng ?: (merchantLng - 0.006)) else merchantLng
         val destLat = if (isPhase1) merchantLat else customerLat
         val destLng = if (isPhase1) merchantLng else customerLng
+
+        // Throttle route queries if position displacement is minimal (< 40m)
+        val prevLat = lastRoutedOriginLat
+        val prevLng = lastRoutedOriginLng
+        if (dynamicRoadPoints.size >= 2 && activeStage == lastRoutedStage && prevLat != null && prevLng != null) {
+            val distArr = FloatArray(1)
+            android.location.Location.distanceBetween(prevLat, prevLng, originLat, originLng, distArr)
+            if (distArr[0] < 40.0f) {
+                return@LaunchedEffect
+            }
+        }
 
         if (originLat != destLat || originLng != destLng) {
             withContext(Dispatchers.IO) {
@@ -150,17 +177,10 @@ fun CustomerLiveMapTrackingView(
         label = "BeaconScale"
     )
 
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1120)),
-        border = BorderStroke(1.dp, Color(0xFF1E293B)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        modifier = modifier.fillMaxWidth().height(290.dp)
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+    if (isFullscreen) {
+        Box(modifier = modifier.fillMaxSize().background(Color(0xFF080C16))) {
             if (hasLocations) {
-                // Interactive MapLibre Dark Map V2
-                ZomatoDarkMapView(
+                NativeGoogleOrderTrackingMap(
                     merchantLat = merchantLat,
                     merchantLng = merchantLng,
                     customerLat = customerLat,
@@ -169,13 +189,111 @@ fun CustomerLiveMapTrackingView(
                     riderLng = realRiderLng,
                     riderHeading = heading,
                     speedKmh = telemetry?.speedKmh,
-                    routeProgressPct = liveTracking?.routeProgressPct ?: telemetry?.routeProgressPct,
-                    snappedSegmentIndex = liveTracking?.snappedSegmentIndex,
                     waypoints = routePoints,
-                    traversedWaypoints = traversedPoints,
-                    remainingWaypoints = remainingPoints,
-                    stage = activeStage,
-                    isStale = isStale,
+                    activeStage = activeStage,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(Color(0xFF080C16)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Place,
+                            contentDescription = null,
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Live Route Syncing",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Waiting for dark store dispatch coordinates",
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                }
+            }
+
+            // Top Floating Header for Fullscreen
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 20.dp)
+                    .align(Alignment.TopStart),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { onExitFullscreen?.invoke() },
+                    modifier = Modifier
+                        .background(Color(0xFF0F172A).copy(alpha = 0.95f), CircleShape)
+                        .size(44.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Exit Fullscreen",
+                        tint = Color.White
+                    )
+                }
+
+                Surface(
+                    color = Color(0xFF0F172A).copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .scale(if (hasGpsData && !isStale) beaconScale else 1.0f)
+                                .background(
+                                    when {
+                                        hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
+                                        hasGpsData && isStale -> Color(0xFFF59E0B)
+                                        else -> Color(0xFF38BDF8)
+                                    },
+                                    CircleShape
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "ORDER #${order.id.takeLast(6).uppercase()} • FULLSCREEN MAP",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0B1120))
+        ) {
+            if (hasLocations) {
+                NativeGoogleOrderTrackingMap(
+                    merchantLat = merchantLat,
+                    merchantLng = merchantLng,
+                    customerLat = customerLat,
+                    customerLng = customerLng,
+                    riderLat = realRiderLat,
+                    riderLng = realRiderLng,
+                    riderHeading = heading,
+                    speedKmh = telemetry?.speedKmh,
+                    waypoints = routePoints,
+                    activeStage = activeStage,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -206,64 +324,115 @@ fun CustomerLiveMapTrackingView(
                 }
             }
 
-            // Top Floating Live Status Glass Pill
+            // Top Floating Navigation Bar (Back button + Order ID chip)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp)
-                    .background(Color(0xFF0F172A).copy(alpha = 0.94f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
+                    .align(Alignment.TopStart),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Box(
+                if (onBack != null) {
+                    IconButton(
+                        onClick = onBack,
                         modifier = Modifier
-                            .size(10.dp)
-                            .scale(if (hasGpsData && !isStale) beaconScale else 1.0f)
-                            .background(
-                                when {
-                                    hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
-                                    hasGpsData && isStale -> Color(0xFFF59E0B)
-                                    order.orderStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
-                                    else -> Color(0xFF38BDF8)
-                                },
-                                CircleShape
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = when {
-                            order.orderStatus == "DELIVERED" -> "Order Delivered"
-                            order.orderStatus == "HANDOFF_STARTED" -> "Partner at your door"
-                            order.orderStatus == "ARRIVED_CUSTOMER" -> "Partner has arrived"
-                            order.orderStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
-                            order.orderStatus == "PICKED_UP" -> "Order packed & picked up"
-                            order.orderStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"
-                            order.orderStatus == "SELLER_ACCEPTED" -> "Order accepted & packing"
-                            hasGpsData -> "Partner is on the way"
-                            else -> "Assigning delivery partner..."
-                        },
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
+                            .background(Color(0xFF0F172A).copy(alpha = 0.88f), CircleShape)
+                            .size(40.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else {
+                    Spacer(modifier = Modifier.size(40.dp))
                 }
 
+                Surface(
+                    color = Color(0xFF0F172A).copy(alpha = 0.88f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B))
+                ) {
+                    Text(
+                        text = "ORDER #${order.id.takeLast(6).uppercase()}",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    )
+                }
+            }
+
+            // Bottom Floating Controls (Live Status Text + Pulsing Beacon on Left, ⛶ Fullscreen Icon Button on Right)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
+                    .align(Alignment.BottomCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Sleek Floating Status Pill (NOT bulky white card!)
+                Surface(
+                    color = Color(0xFF0F172A).copy(alpha = 0.90f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B).copy(alpha = 0.8f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .scale(if (hasGpsData && !isStale) beaconScale else 1.0f)
+                                .background(
+                                    when {
+                                        hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
+                                        hasGpsData && isStale -> Color(0xFFF59E0B)
+                                        order.orderStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
+                                        else -> Color(0xFF38BDF8)
+                                    },
+                                    CircleShape
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = when {
+                                order.orderStatus == "DELIVERED" -> "Order Delivered"
+                                order.orderStatus == "HANDOFF_STARTED" -> "Partner at your door"
+                                order.orderStatus == "ARRIVED_CUSTOMER" -> "Partner has arrived"
+                                order.orderStatus == "OUT_FOR_DELIVERY" || order.orderStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
+                                order.orderStatus == "PICKED_UP" -> "Order packed & picked up"
+                                order.orderStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"
+                                order.orderStatus == "SELLER_ACCEPTED" -> "Order accepted & packing"
+                                hasGpsData -> "Partner is on the way"
+                                else -> "Assigning delivery partner..."
+                            },
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Square bracket symbol/icon button (NO text saying "Fullscreen"!)
                 if (onExpandClick != null) {
-                    Surface(
+                    IconButton(
                         onClick = onExpandClick,
-                        color = Color(0xFF1E293B),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.padding(start = 6.dp)
+                        modifier = Modifier
+                            .background(Color(0xFF0F172A).copy(alpha = 0.90f), CircleShape)
+                            .size(38.dp)
                     ) {
                         Text(
-                            text = "⛶ Fullscreen",
+                            text = "⛶",
                             color = Color(0xFF38BDF8),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }

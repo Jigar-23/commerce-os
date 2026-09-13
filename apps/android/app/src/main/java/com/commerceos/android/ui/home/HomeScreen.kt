@@ -24,8 +24,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.commerceos.android.R
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
@@ -85,7 +90,8 @@ fun HomeScreen(
     onUpdateQuantity: (String, Int) -> Unit = { _, _ -> },
     onSearchClick: (String) -> Unit = {},
     onVerticalSelect: (HomeVertical) -> Unit = {},
-    onOpenCatalog: () -> Unit = {}
+    onOpenCatalog: () -> Unit = {},
+    onUploadPrescription: () -> Unit = {}
 ) {
     // Feed is keyed on (customer, delivery address): changing location MUST
     // invalidate and refetch inventory/ETA/promotions for the new address.
@@ -101,18 +107,24 @@ fun HomeScreen(
     val sections = viewModel.sections
     val homeError = viewModel.errorMessage
 
-    val clientConfig = com.commerceos.android.config.LocalClientConfiguration.current
-    val enabledSectionTypes = clientConfig.enabledHomeSections.toSet()
-    val filteredSections = remember(sections, enabledSectionTypes) {
-        sections.filter { it.type in enabledSectionTypes }.ifEmpty { sections }
+    val nonHealthSections = remember {
+        setOf(
+            HomeSectionType.CATEGORY_GRID,
+            HomeSectionType.RESTAURANT_SHELF,
+            HomeSectionType.SERVICE_SHELF,
+            HomeSectionType.DISH_SHELF
+        )
+    }
+    val filteredSections = remember(sections) {
+        sections.filter { it.type !in nonHealthSections }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
                 DeliveryAddressWidget(
@@ -126,20 +138,15 @@ fun HomeScreen(
             }
 
             item {
-                UniversalSearchBar(onClick = { onSearchClick("") })
-            }
-
-            if (viewModel.verticals.isNotEmpty()) {
-                item {
-                    VerticalRailWidget(
-                        verticals = viewModel.verticals,
-                        onVerticalSelect = onVerticalSelect
-                    )
-                }
+                UniversalSearchBar(
+                    onClick = { onSearchClick("") }
+                )
             }
 
             item {
-                QuickCategoriesRail(onOpenCatalog = onOpenCatalog)
+                MedicineCategoryRail(
+                    onSelectCategory = { categoryQuery -> onSearchClick(categoryQuery) }
+                )
             }
 
             if (isLoading && sections.isEmpty()) {
@@ -173,79 +180,103 @@ fun HomeScreen(
     }
 }
 
-private data class QuickCategoryTile(
-    val icon: ImageVector,
-    val label: String,
-    val bgColor: Color,
-    val iconTint: Color
+private data class MedicalCategory(
+    val name: String,
+    val query: String,
+    val imageUrl: String
 )
 
 @Composable
-private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
-    val categories = listOf(
-        QuickCategoryTile(Icons.Default.ShoppingCart, "Groceries", Color(0xFFE8F5E9), Color(0xFF16A34A)),
-        QuickCategoryTile(Icons.Default.Favorite, "Medicines", Color(0xFFE0F2FE), Color(0xFF0284C7)),
-        QuickCategoryTile(Icons.Default.Star, "Top Deals", Color(0xFFFEF3C7), Color(0xFFD97706)),
-        QuickCategoryTile(Icons.Default.Home, "Essentials", Color(0xFFEDE9FE), Color(0xFF7C3AED)),
-        QuickCategoryTile(Icons.Default.Person, "Personal Care", Color(0xFFFCE7F3), Color(0xFFDB2777)),
-        QuickCategoryTile(Icons.Default.Phone, "Electronics", Color(0xFFCCFBF1), Color(0xFF0D9488)),
-        QuickCategoryTile(Icons.Default.Build, "Home Repairs", Color(0xFFFFEDD5), Color(0xFFEA580C)),
-        QuickCategoryTile(Icons.Default.LocationOn, "Local Stores", Color(0xFFF1F5F9), Color(0xFF475569))
-    )
+private fun MedicineCategoryRail(
+    onSelectCategory: (String) -> Unit
+) {
+    val categories = remember {
+        listOf(
+            MedicalCategory(
+                name = "Pain & Fever",
+                query = "Pain & Fever",
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
+            ),
+            MedicalCategory(
+                name = "Cold & Cough",
+                query = "Cold & Cough",
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg"
+            ),
+            MedicalCategory(
+                name = "Diabetes",
+                query = "Diabetes",
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg"
+            ),
+            MedicalCategory(
+                name = "Antibiotics",
+                query = "Antibiotics",
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg"
+            ),
+            MedicalCategory(
+                name = "Vitamins",
+                query = "Vitamins",
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg"
+            ),
+            MedicalCategory(
+                name = "Acidity & Gas",
+                query = "Acidity & Gas",
+                imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
+            )
+        )
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "Explore Categories",
-            style = CommerceTypography.Label,
-            fontWeight = FontWeight.Black,
-            color = CommerceColors.TextPrimary,
-            modifier = Modifier.padding(bottom = 10.dp)
+            text = "Popular Categories",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF0F172A),
+            modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        categories.chunked(4).forEach { rowList ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                rowList.forEach { item ->
-                    Surface(
-                        color = Color.White,
-                        shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(88.dp)
-                            .clickable { onOpenCatalog() }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp)
+        ) {
+            items(categories) { cat ->
+                Surface(
+                    onClick = { onSelectCategory(cat.query) },
+                    color = Color.White,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp,
+                    modifier = Modifier.width(96.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        Surface(
+                            color = Color(0xFFF8FAFC),
+                            shape = CircleShape,
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.size(46.dp)
                         ) {
-                            Surface(
-                                color = item.bgColor,
+                            ProductImage(
+                                imageUrl = cat.imageUrl,
+                                contentDescription = cat.name,
+                                contentScale = ContentScale.Fit,
                                 shape = CircleShape,
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = item.icon,
-                                        contentDescription = item.label,
-                                        tint = item.iconTint,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = item.label,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E293B),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(4.dp)
                             )
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = cat.name,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF1E293B),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 }
             }
@@ -254,7 +285,7 @@ private fun QuickCategoriesRail(onOpenCatalog: () -> Unit) {
 }
 
 // ---------------------------------------------------------------------------
-// Fixed first-viewport chrome (Blinkit & Zomato Native Top Header)
+// Fixed first-viewport chrome (Healthcare-Optimized Header)
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -274,7 +305,7 @@ private fun DeliveryAddressWidget(
         } else if (!context?.formattedEta.isNullOrBlank()) {
             context!!.formattedEta!!
         } else {
-            "11 mins"
+            "10-15 mins"
         }
     }
 
@@ -293,80 +324,75 @@ private fun DeliveryAddressWidget(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Column: Brand / Delivery SLA + Location Selector
+        // Left Column: Location and Delivery ETA
         Column(
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onChangeAddress)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Delivery in ",
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF0F172A)
-                )
-                Text(
-                    text = etaDisplay,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF059669) // Fresh Emerald Accent for ETA
-                )
-            }
-
-            Spacer(modifier = Modifier.height(3.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clickable(onClick = onChangeAddress)
-                    .padding(vertical = 2.dp)
-            ) {
                 Icon(
                     Icons.Default.LocationOn,
                     contentDescription = null,
-                    tint = Color(0xFF0F172A),
-                    modifier = Modifier.size(15.dp)
+                    tint = Color(0xFF059669),
+                    modifier = Modifier.size(17.dp)
                 )
-                Spacer(modifier = Modifier.width(3.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = displayAddress,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF334155),
+                    color = Color(0xFF0F172A),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.width(2.dp))
                 Icon(
                     Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Change Address",
-                    tint = Color(0xFF0F172A),
+                    contentDescription = "Select Location",
+                    tint = Color(0xFF64748B),
                     modifier = Modifier.size(18.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Delivering in ",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                )
+                Text(
+                    text = etaDisplay,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF059669)
                 )
             }
         }
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Right Profile Circle Button
+        // Right Action: User profile
         Surface(
             color = Color(0xFFF1F5F9),
             shape = CircleShape,
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
             modifier = Modifier
-                .size(42.dp)
+                .size(38.dp)
                 .clickable(onClick = onProfileClick)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Default.Person,
                     contentDescription = "Account",
-                    tint = Color(0xFF0F172A),
-                    modifier = Modifier.size(22.dp)
+                    tint = Color(0xFF334155),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -374,29 +400,32 @@ private fun DeliveryAddressWidget(
 }
 
 @Composable
-private fun UniversalSearchBar(onClick: () -> Unit) {
+private fun UniversalSearchBar(
+    onClick: () -> Unit
+) {
     val searchHints = remember {
         listOf(
-            "Search \"fresh milk, breads, fruits...\"",
-            "Search \"medicines, wellness & care...\"",
-            "Search \"chocolates, snacks & ice cream...\"",
-            "Search \"10-minute daily essentials...\""
+            "Search medicines, e.g. Dolo 650...",
+            "Search for Paracetamol, Crocin...",
+            "Search for Augmentin 625 Duo...",
+            "Search for Benadryl Cough syrup...",
+            "Search for Glycomet, Insulin...",
+            "Search for Pan 40, Digene..."
         )
     }
     var hintIndex by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(2800)
+            delay(3000)
             hintIndex = (hintIndex + 1) % searchHints.size
         }
     }
 
     Surface(
-        color = Color.White,
-        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFF8FAFC),
+        shape = RoundedCornerShape(14.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        shadowElevation = 3.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
@@ -407,9 +436,9 @@ private fun UniversalSearchBar(onClick: () -> Unit) {
         ) {
             Icon(
                 Icons.Default.Search,
-                contentDescription = null,
-                tint = Color(0xFF059669),
-                modifier = Modifier.size(22.dp)
+                contentDescription = "Search",
+                tint = Color(0xFF64748B),
+                modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Box(modifier = Modifier.weight(1f)) {
@@ -423,7 +452,6 @@ private fun UniversalSearchBar(onClick: () -> Unit) {
                     Text(
                         text = searchHints[targetIndex],
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
                         color = Color(0xFF64748B),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -431,123 +459,11 @@ private fun UniversalSearchBar(onClick: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Surface(
-                color = Color(0xFFF1F5F9),
-                shape = CircleShape,
-                modifier = Modifier.size(30.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        "🎙️",
-                        fontSize = 13.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-// Vertical availability is server-authored: unlaunched stores are advertised
-// honestly as "Coming soon" instead of dead buttons.
-@Composable
-private fun VerticalRailWidget(
-    verticals: List<HomeVertical>,
-    onVerticalSelect: (HomeVertical) -> Unit
-) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-    ) {
-        items(verticals) { vertical ->
-            VerticalChip(
-                vertical = vertical,
-                onClick = { onVerticalSelect(vertical) },
-                modifier = Modifier.width(92.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun VerticalChip(
-    vertical: HomeVertical,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isLive = vertical.isLive
-    val isServiceable = vertical.status?.isServiceable ?: true
-    val enabled = isLive && isServiceable
-    val accent = CommerceColors.Primary
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CommerceColors.Surface
-        ),
-        shape = RoundedCornerShape(Radius.md),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (enabled) CommerceColors.Primary.copy(alpha = 0.35f) else CommerceColors.Border
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = modifier.then(
-            if (enabled) Modifier.clickable(onClick = onClick) else Modifier
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = Spacing.sm, horizontal = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            VerticalGlyph(iconKey = vertical.iconKey, tint = if (enabled) accent else CommerceColors.TextMuted)
-            Spacer(modifier = Modifier.height(Spacing.xs))
-            Text(
-                vertical.label,
-                style = CommerceTypography.Caption,
-                fontWeight = FontWeight.Bold,
-                color = if (enabled) CommerceColors.TextPrimary else CommerceColors.TextMuted,
-                maxLines = 1
-            )
-            val etaLabel = vertical.status?.etaLabel
-            val statusLabel = when {
-                !isLive -> "Coming soon"
-                vertical.status?.status == com.commerceos.android.model.VerticalOperationalStatus.UNKNOWN -> "Unknown"
-                !isServiceable -> "Unavailable"
-                !etaLabel.isNullOrBlank() -> etaLabel
-                else -> "Available"
-            }
-            Text(
-                statusLabel,
-                style = CommerceTypography.Meta,
-                color = if (enabled) CommerceColors.Primary else CommerceColors.TextMuted
-            )
-        }
-    }
-}
-
-@Composable
-private fun VerticalGlyph(iconKey: String, tint: Color) {
-    val icon = when (iconKey.lowercase()) {
-        "grocery", "fresh" -> Icons.Default.ShoppingCart
-        "food", "restaurant" -> Icons.Default.Star
-        "fashion", "style" -> Icons.Default.Person
-        "electronics", "tech" -> Icons.Default.Phone
-        "health", "pharmacy", "wellness" -> Icons.Default.Favorite
-        "local", "services" -> Icons.Default.Build
-        else -> Icons.Default.Home
-    }
-    Surface(
-        color = tint.copy(alpha = 0.12f),
-        shape = CircleShape
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .padding(8.dp),
-            contentAlignment = Alignment.Center
-        ) {
             Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(22.dp)
+                painter = painterResource(id = R.drawable.ic_mic),
+                contentDescription = "Voice Search",
+                tint = Color(0xFF64748B),
+                modifier = Modifier.size(18.dp)
             )
         }
     }

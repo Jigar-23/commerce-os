@@ -26,6 +26,59 @@ data class ProductCardModel(
     val verticalId: String = "general"
 )
 
+object MedicineImageResolver {
+    private val PACKAGING_PHOTOS = mapOf(
+        "SKU-PCM-650" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
+        "SKU-PARA-500" to "https://cdn01.pharmeasy.in/dam/products_otc/H45820/crocin-650mg-strip-of-15-tablets-6.1-1775911968.jpg",
+        "SKU-AMOX-625" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg",
+        "SKU-COLD-01" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg",
+        "SKU-INS-01" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/192397/lantus-100iu-cartridge-of-3ml-solution-for-injection-box-front-1-1756885208-non-watermarked.jpg",
+        "SKU-PARACIP-500" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/266954/paracip-500mg-strip-of-10-tablets-box-front-1-1756826302-non-watermarked.jpg",
+        "SKU-GLYC-500" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg",
+        "SKU-CET-10" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/S21238/cetzine-10mg-strip-of-15-tablets-box-front-1-1756971688-non-watermarked.jpg",
+        "SKU-AZI-500" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/310659/azithral-azithromycin-500mg-strip-of-5-tablets-front-2-1756922244-non-watermarked.jpg"
+    )
+
+    private val KEYWORD_PHOTOS = listOf(
+        "dolo" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
+        "paracetamol" to "https://cdn01.pharmeasy.in/dam/products_otc/H45820/crocin-650mg-strip-of-15-tablets-6.1-1775911968.jpg",
+        "crocin" to "https://cdn01.pharmeasy.in/dam/products_otc/H45820/crocin-650mg-strip-of-15-tablets-6.1-1775911968.jpg",
+        "amoxiclav" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg",
+        "augmentin" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg",
+        "cold" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg",
+        "cough" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg",
+        "benadryl" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg",
+        "insulin" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/192397/lantus-100iu-cartridge-of-3ml-solution-for-injection-box-front-1-1756885208-non-watermarked.jpg",
+        "lantus" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/192397/lantus-100iu-cartridge-of-3ml-solution-for-injection-box-front-1-1756885208-non-watermarked.jpg",
+        "paracip" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/266954/paracip-500mg-strip-of-10-tablets-box-front-1-1756826302-non-watermarked.jpg",
+        "glycomet" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg",
+        "cetrizet" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/S21238/cetzine-10mg-strip-of-15-tablets-box-front-1-1756971688-non-watermarked.jpg",
+        "cetzine" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/S21238/cetzine-10mg-strip-of-15-tablets-box-front-1-1756971688-non-watermarked.jpg",
+        "azithral" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/310659/azithral-azithromycin-500mg-strip-of-5-tablets-front-2-1756922244-non-watermarked.jpg",
+        "azithromycin" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/310659/azithral-azithromycin-500mg-strip-of-5-tablets-front-2-1756922244-non-watermarked.jpg",
+        "pan 40" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/I00306/pan-40mg-strip-of-15-tablets-front-2-1756099995-non-watermarked.jpg",
+        "shelcal" to "https://cdn01.pharmeasy.in/dam/products_otc/K78299/shelcal-500mg-bottle-of-30-tablets-6.1-1787223246.jpg",
+        "becosules" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg",
+        "volini" to "https://cdn01.pharmeasy.in/dam/products_otc/I00392/volini-pain-relief-gel-tube-of-100-g-6.1-1712725504.jpg",
+        "digene" to "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
+    )
+
+    fun resolve(sku: String?, name: String? = null, rawImage: String? = null): String {
+        if (!rawImage.isNullOrBlank() && rawImage.startsWith("http") && !rawImage.contains("unsplash.com")) return rawImage
+        if (!sku.isNullOrBlank() && PACKAGING_PHOTOS.containsKey(sku.uppercase())) {
+            return PACKAGING_PHOTOS[sku.uppercase()]!!
+        }
+        if (!name.isNullOrBlank()) {
+            val lower = name.lowercase()
+            for ((kw, url) in KEYWORD_PHOTOS) {
+                if (lower.contains(kw)) return url
+            }
+        }
+        if (!rawImage.isNullOrBlank() && rawImage.startsWith("http")) return rawImage
+        return ""
+    }
+}
+
 fun CommerceProduct.toProductCardModel(
     etaLabel: String? = null,
     isWishlisted: Boolean = false
@@ -39,18 +92,18 @@ fun CommerceProduct.toProductCardModel(
         id = id,
         sku = sku,
         name = name,
-        brandName = brand ?: brandName ?: "",
-        packSize = unitLabel ?: "",
+        brandName = brandName ?: brand ?: "",
+        packSize = packSize ?: unitLabel ?: "",
         price = safePrice,
         sellingPrice = safeSellingPrice,
-        image = image ?: "",
+        image = MedicineImageResolver.resolve(sku, name, image),
         inStock = inStock ?: true,
         stockCount = null,
         discountPercent = discount,
         rating = rating,
         reviewCount = reviewCount,
         etaLabel = etaLabel, // Authentic fulfillment SLA; null if not available
-        rxRequired = medicineDetails?.prescriptionRequired ?: false,
+        rxRequired = (rxRequirement != null && rxRequirement != "OTC") || (medicineDetails?.prescriptionRequired ?: false),
         coldChain = medicineDetails?.coldChain ?: false,
         isWishlisted = isWishlisted,
         verticalId = verticalId ?: "general"
@@ -79,7 +132,7 @@ fun ApiMedicine.toProductCardModel(
         packSize = packSize ?: "",
         price = effectivePrice,
         sellingPrice = effectiveSellingPrice,
-        image = image ?: "",
+        image = MedicineImageResolver.resolve(sku, name, image),
         inStock = inStock ?: true,
         stockCount = stockCount,
         discountPercent = if (effectivePrice > effectiveSellingPrice && effectivePrice > 0) {

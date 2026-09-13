@@ -108,22 +108,34 @@ data class SearchFilterConfig(
 
 /** Server-authored multi-domain search response. */
 data class SearchResponse(
-    val query: String,
+    val query: String? = "",
     val totalCount: Int = 0,
     val orderedResults: List<SearchResult>? = null,
-    val products: List<SearchResult> = emptyList(),
-    val stores: List<SearchResult> = emptyList(),
-    val restaurants: List<SearchResult> = emptyList(),
-    val services: List<SearchResult> = emptyList(),
-    val brands: List<SearchResult> = emptyList(),
-    val categories: List<SearchResult> = emptyList(),
-    val collections: List<SearchResult> = emptyList(),
-    val campaigns: List<SearchResult> = emptyList(),
-    val offers: List<SearchResult> = emptyList()
+    val products: List<SearchResult>? = emptyList(),
+    val stores: List<SearchResult>? = emptyList(),
+    val restaurants: List<SearchResult>? = emptyList(),
+    val services: List<SearchResult>? = emptyList(),
+    val brands: List<SearchResult>? = emptyList(),
+    val categories: List<SearchResult>? = emptyList(),
+    val collections: List<SearchResult>? = emptyList(),
+    val campaigns: List<SearchResult>? = emptyList(),
+    val offers: List<SearchResult>? = emptyList()
 ) {
     val allResults: List<SearchResult>
-        get() = orderedResults ?: (products + stores + restaurants + services + brands + categories + collections + campaigns + offers)
-            .sortedBy { it.globalRank ?: Int.MAX_VALUE }
+        get() {
+            if (!orderedResults.isNullOrEmpty()) return orderedResults
+            val list = mutableListOf<SearchResult>()
+            products?.let { list.addAll(it) }
+            stores?.let { list.addAll(it) }
+            restaurants?.let { list.addAll(it) }
+            services?.let { list.addAll(it) }
+            brands?.let { list.addAll(it) }
+            categories?.let { list.addAll(it) }
+            collections?.let { list.addAll(it) }
+            campaigns?.let { list.addAll(it) }
+            offers?.let { list.addAll(it) }
+            return list.sortedBy { it.globalRank ?: Int.MAX_VALUE }
+        }
 }
 
 /** Strongly-typed discovery suggestion. */

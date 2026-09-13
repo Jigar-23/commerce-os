@@ -28,6 +28,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        try {
+            com.google.android.gms.maps.MapsInitializer.initialize(applicationContext, com.google.android.gms.maps.MapsInitializer.Renderer.LATEST, null)
+        } catch (_: Exception) {}
+
         requestRequiredPermissions()
         startLocationService()
         initFirebaseMessagingToken()
@@ -100,6 +104,10 @@ class MainActivity : ComponentActivity() {
 
     private fun initFirebaseMessagingToken() {
         try {
+            if (com.google.firebase.FirebaseApp.getApps(applicationContext).isEmpty()) {
+                android.util.Log.d("MainActivity", "FirebaseApp not initialized yet; skipping FCM token fetch.")
+                return
+            }
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful && task.result != null) {

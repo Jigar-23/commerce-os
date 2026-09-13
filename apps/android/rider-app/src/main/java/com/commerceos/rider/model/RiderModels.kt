@@ -33,6 +33,7 @@ data class ServerDeliverySession(
     val merchantAddress: String,
     val merchantLat: Double?,
     val merchantLng: Double?,
+    val merchantPhone: String = "",
     val payoutFormatted: String? = null,
     val distanceKm: Double? = null,
     val estimatedTimeMins: Int? = null,

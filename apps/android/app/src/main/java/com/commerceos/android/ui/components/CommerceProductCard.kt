@@ -294,16 +294,19 @@ private fun GridProductCard(
         elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Flat),
         modifier = modifier
     ) {
-        Column {
-            Box {
+        Column(modifier = Modifier.fillMaxHeight()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+            ) {
                 ProductImage(
                     imageUrl = model.image,
                     contentDescription = model.name,
                     contentScale = contentScale,
                     shape = RoundedCornerShape(Radius.ImageTile),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
+                        .fillMaxSize()
                         .padding(Spacing.sm)
                 )
                 if (model.discountPercent > 0) {
@@ -321,42 +324,47 @@ private fun GridProductCard(
                 }
             }
 
-            Column(modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp)) {
-                Text(
-                    model.name,
-                    style = CommerceTypography.ProductTitle,
-                    fontWeight = FontWeight.SemiBold,
-                    color = CommerceColors.TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (model.brandName.isNotBlank() || model.packSize.isNotBlank()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
                     Text(
-                        listOfNotNull(model.brandName.takeIf { it.isNotBlank() }, model.packSize.takeIf { it.isNotBlank() }).joinToString(" • "),
+                        model.name,
+                        style = CommerceTypography.ProductTitle,
+                        fontWeight = FontWeight.SemiBold,
+                        color = CommerceColors.TextPrimary,
+                        maxLines = 2,
+                        minLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        listOfNotNull(model.brandName.takeIf { it.isNotBlank() }, model.packSize.takeIf { it.isNotBlank() }).joinToString(" • ").ifBlank { " " },
                         style = CommerceTypography.Meta,
                         color = CommerceColors.TextMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    RatingAndDeliveryRow(model = model)
                 }
 
-                Spacer(modifier = Modifier.height(Spacing.xs))
-                RatingAndDeliveryRow(model = model)
-
-                StatusChips(model = model)
-
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                PriceBlock(model = model)
-
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                CardAddToCartButton(
-                    model = model,
-                    isReorderCard = isReorderCard,
-                    onAddToCart = onAddToCart,
-                    quantity = quantity,
-                    onQuantityChange = onQuantityChange,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column {
+                    PriceBlock(model = model)
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    CardAddToCartButton(
+                        model = model,
+                        isReorderCard = isReorderCard,
+                        onAddToCart = onAddToCart,
+                        quantity = quantity,
+                        onQuantityChange = onQuantityChange,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }

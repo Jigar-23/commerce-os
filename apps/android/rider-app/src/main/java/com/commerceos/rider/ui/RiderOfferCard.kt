@@ -21,6 +21,17 @@ fun RiderOfferCard(
     onDecline: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var secondsLeft by remember(offer.offerId) { 
+        mutableIntStateOf(if (offer.remainingSeconds > 0) offer.remainingSeconds else 30) 
+    }
+
+    LaunchedEffect(offer.offerId) {
+        while (secondsLeft > 0) {
+            kotlinx.coroutines.delay(1000L)
+            secondsLeft--
+        }
+    }
+
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
@@ -29,30 +40,36 @@ fun RiderOfferCard(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
-            // Top Badge
+            // Top Badges
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "NEW DELIVERY",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF38BDF8),
-                    letterSpacing = 1.sp
-                )
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF0284C7).copy(alpha = 0.2f)
+                ) {
+                    Text(
+                        text = "NEW ORDER OFFER",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF38BDF8),
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
 
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFF10B981).copy(alpha = 0.15f)
+                    color = if (secondsLeft <= 10) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFFF59E0B).copy(alpha = 0.2f)
                 ) {
                     Text(
-                        text = "⚡ FIRST-COME, FIRST-SERVED",
-                        color = Color(0xFF10B981),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        text = "⏳ ${secondsLeft}s",
+                        color = if (secondsLeft <= 10) Color(0xFFF87171) else Color(0xFFFBBF24),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                     )
                 }
             }

@@ -1,0 +1,62 @@
+#!/usr/bin/env sh
+
+die () {
+    echo "$*"
+    exit 1
+}
+
+##############################################################################
+##
+##  Gradle start up script for UN*X
+##
+##############################################################################
+
+# Attempt to set APP_HOME
+# Resolve links: $0 may be a link
+PRG="$0"
+# Need this for relative symlinks.
+while [ -h "$PRG" ]; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        PRG="$link"
+    else
+        PRG=`dirname "$PRG"`/"$link"
+    fi
+done
+
+SAVED="`pwd`"
+CDPATH=""
+cd "`dirname \"$PRG\"`/" >/dev/null
+APP_HOME="`pwd -P`"
+cd "$SAVED" >/dev/null
+
+APP_NAME="Gradle"
+APP_BASE_NAME=`basename "$0"`
+
+# Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+
+# Use the maximum available drive space for temp files
+JAVACMD="java"
+if [ -n "$JAVA_HOME" ] ; then
+    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
+        # IBM's JDK on AIX uses strange locations for the executables
+        JAVACMD="$JAVA_HOME/jre/sh/java"
+    else
+        JAVACMD="$JAVA_HOME/bin/java"
+    fi
+fi
+
+if [ ! -x "$JAVACMD" ] ; then
+    die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH."
+fi
+
+# Locate gradle-wrapper.jar
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -r "$WRAPPER_JAR" ]; then
+    echo "Downloading Gradle Wrapper Jar..."
+    curl -o "$WRAPPER_JAR" -L "https://raw.githubusercontent.com/gradle/gradle/v8.6.0/gradle/wrapper/gradle-wrapper.jar" || exit 1
+fi
+
+exec "$JAVACMD" "-classpath" "$WRAPPER_JAR" org.gradle.wrapper.GradleWrapperMain "$@"

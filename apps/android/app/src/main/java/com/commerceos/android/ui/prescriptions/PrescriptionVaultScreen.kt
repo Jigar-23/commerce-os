@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Refresh
@@ -28,20 +29,67 @@ fun PrescriptionVaultScreen(
     isLoading: Boolean,
     errorMessage: String?,
     onRefresh: () -> Unit,
-    onUpload: () -> Unit
+    onUpload: () -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(Spacing.lg)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text("Prescription Vault", style = CommerceTypography.Title, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                Text("Upload, track review status, and attach approved prescriptions.", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
+            if (onBack != null) {
+                Surface(
+                    color = androidx.compose.ui.graphics.Color.White,
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = androidx.compose.ui.graphics.Color(0xFF0F172A),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
             }
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh prescriptions", tint = CommerceColors.Primary)
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Prescriptions",
+                    style = CommerceTypography.Heading,
+                    fontWeight = FontWeight.Bold,
+                    color = CommerceColors.TextPrimary
+                )
+                Text(
+                    text = "Upload, review and manage prescription slips",
+                    style = CommerceTypography.Meta,
+                    color = CommerceColors.TextMuted
+                )
+            }
+
+            Surface(
+                color = androidx.compose.ui.graphics.Color.White,
+                shape = androidx.compose.foundation.shape.CircleShape,
+                border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFFE2E8F0)),
+                shadowElevation = 0.5.dp,
+                modifier = Modifier.size(38.dp)
+            ) {
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = androidx.compose.ui.graphics.Color(0xFF059669),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 

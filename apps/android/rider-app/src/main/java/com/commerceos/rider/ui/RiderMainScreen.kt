@@ -25,6 +25,8 @@ import com.commerceos.rider.model.ServerOffer
 import com.commerceos.rider.repository.RiderDeliveryRepository
 import com.commerceos.rider.service.RiderForegroundLocationService
 import com.commerceos.rider.session.RiderSessionManager
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -143,53 +145,82 @@ fun RiderMainScreen(
         }
     }
 
-    // 3. Event-Driven Background Reconciliation Loop (3s active polling)
+    // 3. Ultra-Fast Concurrent Reconciliation Loop (3s active polling)
     LaunchedEffect(isOnline) {
+        var profilePollCounter = 0
         while (isOnline) {
             if (sessionManager.getAuthToken().isBlank()) {
                 break
             }
 
-            when (val offerResult = repository.fetchActiveOffer()) {
-                is com.commerceos.rider.model.ActiveOfferResult.Success -> {
-                    val prevId = activeOffer?.offerId
-                    activeOffer = offerResult.offer
-                    if (prevId != offerResult.offer.offerId) {
-                        com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offerResult.offer.offerId)
-                        // Post persistent notification in Android notification tray
-                        com.commerceos.rider.util.RiderNotificationManager.postDirectOfferNotification(context, offerResult.offer)
+            coroutineScope {
+                val offerDeferred = async { repository.fetchActiveOffer() }
+                val notifsDeferred = async { repository.fetchNotifications() }
+                val sessionDeferred = async { repository.fetchActiveSession() }
+                val profileDeferred = if (profilePollCounter % 5 == 0) {
+                    async { repository.fetchRiderProfile() }
+                } else null
+
+                profilePollCounter++
+
+                // 1. Process active delivery session concurrently
+                try {
+                    val fetched = sessionDeferred.await()
+                    if (fetched != null && fetched.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")) {
+                        session = fetched
+                        RiderForegroundLocationService.updateDeliverySession(
+                            deliveryId = fetched.deliveryId,
+                            riderId = fetched.riderId,
+                            baseUrl = sessionManager.getBaseUrl(),
+                            token = sessionManager.getAuthToken()
+                        )
+                    } else if (session != null && (session?.state == "DELIVERED" || showCompletionDialog)) {
+                        // Keep delivered session for modal
+                    } else {
+                        session = null
+                        RiderForegroundLocationService.clearDeliverySession()
                     }
-                }
-                is com.commerceos.rider.model.ActiveOfferResult.None -> {
-                    if (activeOffer != null) {
-                        com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, activeOffer?.offerId)
+                } catch (_: Exception) {}
+
+                // 2. Process active job offer concurrently
+                try {
+                    when (val offerResult = offerDeferred.await()) {
+                        is com.commerceos.rider.model.ActiveOfferResult.Success -> {
+                            val prevId = activeOffer?.offerId
+                            activeOffer = offerResult.offer
+                            if (prevId != offerResult.offer.offerId) {
+                                com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offerResult.offer.offerId)
+                                com.commerceos.rider.util.RiderNotificationManager.postDirectOfferNotification(context, offerResult.offer)
+                            }
+                        }
+                        is com.commerceos.rider.model.ActiveOfferResult.None -> {
+                            if (activeOffer != null) {
+                                com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, activeOffer?.offerId)
+                            }
+                            activeOffer = null
+                        }
+                        is com.commerceos.rider.model.ActiveOfferResult.Error -> {
+                            // Do not discard active offer on transient network failure
+                        }
                     }
-                    activeOffer = null
-                }
-                is com.commerceos.rider.model.ActiveOfferResult.Error -> {
-                    // Do not discard active offer on transient network failure
-                }
+                } catch (_: Exception) {}
+
+                // 3. Process notifications concurrently
+                try {
+                    val notifs = notifsDeferred.await()
+                    notificationsList = notifs
+                    unreadNotifCount = notifs.count { it.readAt == null }
+                } catch (_: Exception) {}
+
+                // 4. Process periodic profile & earnings refresh
+                try {
+                    val profRes = profileDeferred?.await()
+                    if (profRes != null && profRes.isSuccess) {
+                        profRes.getOrNull()?.let { liveProfile = it }
+                    }
+                } catch (_: Exception) {}
             }
 
-            val notifs = repository.fetchNotifications()
-            notificationsList = notifs
-            unreadNotifCount = notifs.count { it.readAt == null }
-
-            val fetched = repository.fetchActiveSession()
-            if (fetched != null && fetched.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")) {
-                session = fetched
-                RiderForegroundLocationService.updateDeliverySession(
-                    deliveryId = fetched.deliveryId,
-                    riderId = fetched.riderId,
-                    baseUrl = sessionManager.getBaseUrl(),
-                    token = sessionManager.getAuthToken()
-                )
-            } else if (session != null && (session?.state == "DELIVERED" || showCompletionDialog)) {
-                // Keep delivered session for modal
-            } else {
-                session = null
-                RiderForegroundLocationService.clearDeliverySession()
-            }
             delay(3000L)
         }
     }
@@ -357,18 +388,44 @@ fun RiderMainScreen(
         containerColor = Color(0xFF0B1120)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            var stickyLat by remember { mutableStateOf<Double?>(null) }
+            var stickyLng by remember { mutableStateOf<Double?>(null) }
+            var stickyHeading by remember { mutableStateOf<Float?>(null) }
+
+            if (lastLocation != null) {
+                stickyLat = lastLocation?.latitude
+                stickyLng = lastLocation?.longitude
+                stickyHeading = lastLocation?.heading
+            }
+
             when (selectedTab) {
                 0 -> {
                     val currentSession = session
                     val currentOffer = activeOffer
 
                     if (currentSession != null && currentSession.state != "DELIVERED") {
+                        val effectiveRiderLat = stickyLat
+                            ?: currentSession.telemetry?.latitude
+                            ?: when (currentSession.state) {
+                                in listOf("ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "PICKED_UP") -> currentSession.merchantLat
+                                in listOf("ARRIVED_CUSTOMER", "HANDOFF_STARTED", "DELIVERED") -> currentSession.customerLat
+                                else -> null
+                            }
+                        val effectiveRiderLng = stickyLng
+                            ?: currentSession.telemetry?.longitude
+                            ?: when (currentSession.state) {
+                                in listOf("ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "PICKED_UP") -> currentSession.merchantLng
+                                in listOf("ARRIVED_CUSTOMER", "HANDOFF_STARTED", "DELIVERED") -> currentSession.customerLng
+                                else -> null
+                            }
+                        val effectiveRiderHeading = stickyHeading ?: currentSession.telemetry?.heading
+
                         ActiveDeliveryScreen(
                             session = currentSession,
                             repository = repository,
-                            riderLat = lastLocation?.latitude,
-                            riderLng = lastLocation?.longitude,
-                            riderHeading = lastLocation?.heading,
+                            riderLat = effectiveRiderLat,
+                            riderLng = effectiveRiderLng,
+                            riderHeading = effectiveRiderHeading,
                             isStale = isStale,
                             onArrivedStore = {
                                 scope.launch {

@@ -267,7 +267,15 @@ fun CommerceOSApp(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val hideTopBar = currentScreen is Screen.Home ||
-                (currentScreen is Screen.AddressSelection && addressViewModel.platformUiState.isFlowActive)
+                currentScreen is Screen.OrderHistory ||
+                currentScreen is Screen.OrderTracking ||
+                currentScreen is Screen.Cart ||
+                currentScreen is Screen.Account ||
+                currentScreen is Screen.Prescriptions ||
+                currentScreen is Screen.AddressSelection ||
+                currentScreen is Screen.Notifications ||
+                currentScreen is Screen.Categories ||
+                currentScreen is Screen.Search
 
             if (!hideTopBar) {
                 TopAppBar(
@@ -284,23 +292,25 @@ fun CommerceOSApp(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { navigateRoot(Screen.Cart); cartViewModel.loadCart() }) {
-                            BadgedBox(badge = {
-                                val count = cartViewModel.itemCount
-                                if (count > 0) {
-                                    Badge(
-                                        containerColor = CommerceColors.PrimaryDark,
-                                        contentColor = CommerceColors.OnPrimary
-                                    ) {
-                                        Text(if (count > 99) "99+" else "$count")
+                        if (currentScreen !is Screen.PaymentGateway) {
+                            IconButton(onClick = { navigateRoot(Screen.Cart); cartViewModel.loadCart() }) {
+                                BadgedBox(badge = {
+                                    val count = cartViewModel.itemCount
+                                    if (count > 0) {
+                                        Badge(
+                                            containerColor = CommerceColors.PrimaryDark,
+                                            contentColor = CommerceColors.OnPrimary
+                                        ) {
+                                            Text(if (count > 99) "99+" else "$count")
+                                        }
                                     }
+                                }) {
+                                    Icon(
+                                        Icons.Default.ShoppingCart,
+                                        contentDescription = terminology.cartLabel,
+                                        tint = CommerceColors.TextPrimary
+                                    )
                                 }
-                            }) {
-                                Icon(
-                                    Icons.Default.ShoppingCart,
-                                    contentDescription = terminology.cartLabel,
-                                    tint = CommerceColors.TextPrimary
-                                )
                             }
                         }
                     },
@@ -315,7 +325,7 @@ fun CommerceOSApp(
         },
         bottomBar = {
             Column {
-                if (cartViewModel.itemCount > 0 && currentScreen !is Screen.Cart && currentScreen !is Screen.PaymentGateway) {
+                if (cartViewModel.itemCount > 0 && currentScreen !is Screen.Cart && currentScreen !is Screen.PaymentGateway && currentScreen !is Screen.OrderTracking && currentScreen !is Screen.Account) {
                     GlobalCartBar(
                         itemCount = cartViewModel.itemCount,
                         subtotal = cartViewModel.effectiveGrandTotal,
@@ -470,6 +480,9 @@ fun CommerceOSApp(
                         val catalogQuery = CatalogQuery()
                         catalogViewModel.open(catalogQuery)
                         navigate(Screen.Catalog(catalogQuery))
+                    },
+                    onUploadPrescription = {
+                        showRxUploadDialog = true
                     }
                 )
                 }
@@ -576,6 +589,13 @@ fun CommerceOSApp(
                     grandTotal = MoneyFormatter.format(cartViewModel.effectiveGrandTotal),
                     prescriptions = prescriptionViewModel.prescriptions,
                     attachedPrescriptionId = checkoutViewModel.uiState.prescriptionId,
+                    deliveryAddress = addressViewModel.selectedAddress
+                        ?: addressViewModel.addresses.firstOrNull { it.isDefault }
+                        ?: addressViewModel.addresses.firstOrNull(),
+                    onChangeAddress = {
+                        addressViewModel.init(authenticatedCustomerId, force = true)
+                        navigate(Screen.AddressSelection(fromCheckout = true))
+                    },
                     onQuantityChange = { sku, quantity -> cartViewModel.updateQuantity(sku, quantity) },
                     onRemoveItem = { cartViewModel.removeItem(it) },
                     onUploadPrescription = { showRxUploadDialog = true },
@@ -602,11 +622,17 @@ fun CommerceOSApp(
                     AddressScreen(
                         viewModel = addressViewModel,
                         serviceability = checkoutViewModel.uiState.serviceability,
+                        onBack = { goBack() },
+                        fromProfile = isFromProfile,
                         onSelectAddress = { address ->
                             if (isFromCheckout) {
                                 checkoutViewModel.selectAddress(address)
                             } else if (isFromProfile) {
+                                addressViewModel.setDefaultAddress(address.id)
                                 addressViewModel.select(address)
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Default address set to ${address.tag.ifBlank { "Home" }}")
+                                }
                             } else {
                                 addressViewModel.select(address)
                                 goBack()
@@ -625,7 +651,11 @@ fun CommerceOSApp(
                             if (isFromCheckout) {
                                 val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
                                 if (addr != null) checkoutViewModel.selectAddress(addr)
-                                navigate(Screen.PaymentGateway)
+                                if (backStack.lastOrNull() is Screen.PaymentGateway) {
+                                    goBack()
+                                } else {
+                                    navigate(Screen.PaymentGateway)
+                                }
                             } else if (isFromProfile) {
                                 addressViewModel.loadAddresses()
                             } else {
@@ -647,8 +677,10 @@ fun CommerceOSApp(
                 is Screen.OrderTracking -> OrderTrackingScreen(
                     detail = orderViewModel.detail,
                     liveTracking = orderViewModel.liveTracking,
+                    isReconnecting = orderViewModel.isStreamReconnecting,
                     onRefresh = { orderViewModel.loadDetail(screen.orderId) },
-                    onBack = { goBack() }
+                    onBack = { goBack() },
+                    onReorderItem = { item -> cartViewModel.addReorderItem(item) }
                 )
                 is Screen.OrderHistory -> OrderHistoryScreen(
                     history = orderViewModel.history,
@@ -667,23 +699,21 @@ fun CommerceOSApp(
                     addressCount = addressViewModel.addresses.size,
                     isLoadingAddresses = addressViewModel.isLoading && addressViewModel.addresses.isEmpty(),
                     prescriptionCount = prescriptionViewModel.prescriptions.size,
+                    storeContactPhone = clientConfig.identity.supportPhone.takeIf { it.isNotBlank() } ?: "+91 1800-208-9999",
                     onOrders = {
                         navigateRoot(Screen.OrderHistory)
                         orderViewModel.loadHistory(authenticatedCustomerId)
                     },
                     onPrescriptions = {
-                        if (features.enablePrescriptionUpload) {
-                            prescriptionViewModel.load(authenticatedCustomerId)
-                            navigate(Screen.Prescriptions)
-                        } else {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Prescription feature is disabled for this store.")
-                            }
-                        }
+                        prescriptionViewModel.load(authenticatedCustomerId)
+                        navigate(Screen.Prescriptions)
                     },
                     onAddresses = {
                         addressViewModel.init(authenticatedCustomerId)
                         navigate(Screen.AddressSelection(fromProfile = true))
+                    },
+                    onNotifications = {
+                        navigate(Screen.Notifications)
                     },
                     onLogout = {
                         container.sessionManager.logout()
@@ -700,12 +730,16 @@ fun CommerceOSApp(
                         universalSearchViewModel.reset()
                     }
                 )
+                is Screen.Notifications -> com.commerceos.android.ui.notifications.NotificationsScreen(
+                    onBack = { goBack() }
+                )
                 is Screen.Prescriptions -> PrescriptionVaultScreen(
                     prescriptions = prescriptionViewModel.prescriptions,
                     isLoading = prescriptionViewModel.isLoading,
                     errorMessage = prescriptionViewModel.errorMessage,
                     onRefresh = { prescriptionViewModel.load(authenticatedCustomerId) },
-                    onUpload = { showRxUploadDialog = true }
+                    onUpload = { showRxUploadDialog = true },
+                    onBack = { goBack() }
                 )
                 is Screen.Search -> SearchScreen(
                     initialQuery = screen.query,
@@ -717,6 +751,19 @@ fun CommerceOSApp(
                     },
                     onSelectSearchResult = { res ->
                         navigate(router.resolve(res.toDestination(), clientConfig))
+                    },
+                    onAddToCart = { res ->
+                        cartViewModel.addItem(
+                            com.commerceos.android.model.CommerceProduct(
+                                id = res.entityId,
+                                sku = res.sku ?: res.entityId,
+                                name = res.title,
+                                price = res.price ?: 0.0,
+                                sellingPrice = res.price ?: 0.0,
+                                image = res.image,
+                                verticalId = res.vertical
+                            )
+                        )
                     },
                     onBack = { goBack() }
                 )
@@ -787,10 +834,22 @@ fun CommerceOSApp(
             }
 
             if (showAddressBottomSheet) {
+                val addressState = addressViewModel.platformUiState
                 AddressSelectionBottomSheet(
                     addresses = addressViewModel.addresses,
                     selectedAddressId = addressViewModel.selectedAddress?.id,
-                    onDismiss = { showAddressBottomSheet = false },
+                    searchResults = addressState.placeSearchResults,
+                    isSearchingPlaces = addressState.isSearchingPlaces,
+                    onSearchQueryChange = { query -> addressViewModel.searchLocationPlaces(query) },
+                    onSelectPlaceSearchResult = { result ->
+                        showAddressBottomSheet = false
+                        addressViewModel.selectPlaceSearchResult(result)
+                        navigate(Screen.AddressSelection())
+                    },
+                    onDismiss = {
+                        showAddressBottomSheet = false
+                        addressViewModel.searchLocationPlaces("")
+                    },
                     onSelectAddress = { addr ->
                         addressViewModel.select(addr)
                         showAddressBottomSheet = false

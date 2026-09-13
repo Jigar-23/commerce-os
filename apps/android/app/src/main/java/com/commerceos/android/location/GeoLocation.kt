@@ -48,7 +48,8 @@ data class PlaceSearchResult(
     val primaryText: String,
     val secondaryText: String,
     val fullAddress: String,
-    val geoPoint: GeoPoint
+    val geoPoint: GeoPoint,
+    val distance: String? = null
 )
 
 /**
