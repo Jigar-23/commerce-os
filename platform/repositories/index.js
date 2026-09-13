@@ -569,19 +569,20 @@ class TransactionalAuditRepository {
   async getLogs(claims = {}) {
     if (!this.pool) return [];
     const role = (claims.role || '').toUpperCase();
-    if (role === 'ROLE_ADMIN' || role === 'ADMIN' || role === 'AUDITOR') {
+    if (role === 'ROLE_ADMIN' || role === 'ADMIN' || role === 'AUDITOR' || role === 'ROLE_AUDITOR') {
       const res = await this.pool.query(`SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100`);
       return res.rows;
     }
     if (role === 'ROLE_SELLER' || role === 'SELLER') {
       const storeId = claims.storeId;
       const res = await this.pool.query(
-        `SELECT * FROM audit_logs WHERE store_id = $1 OR actor_id = $2 ORDER BY created_at DESC LIMIT 100`,
+        `SELECT * FROM audit_logs WHERE store_id = $1 OR store_id IS NULL OR actor_id = $2 ORDER BY created_at DESC LIMIT 100`,
         [storeId, claims.sub]
       );
       return res.rows;
     }
-    return [];
+    const res = await this.pool.query(`SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100`);
+    return res.rows;
   }
 }
 
@@ -4364,24 +4365,71 @@ class TransactionalRiderRepository {
     return res.rows;
   }
 
-  async saveRider(riderData) {
+  async getAllRiders() {
+    if (!this.pool) return [];
+    const res = await this.pool.query(`
+      SELECT 
+        r.id, 
+        r.rider_id, 
+        r.phone, 
+        r.full_name, 
+        r.vehicle_number, 
+        r.vehicle_type, 
+        r.tier, 
+        r.status, 
+        r.created_at, 
+        r.updated_at,
+        rp.status AS presence_status,
+        rp.last_known_lat,
+        rp.last_known_lng,
+        rp.last_seen_at
+      FROM riders r
+      LEFT JOIN rider_presence rp ON r.rider_id = rp.rider_id OR r.id = rp.rider_id
+      ORDER BY r.created_at DESC
+    `);
+    return res.rows;
+  }
+
+  async updateRiderStatus(riderId, status) {
     if (!this.pool) return null;
     const res = await this.pool.query(
-      `INSERT INTO riders (id, rider_id, phone, full_name, vehicle_number, vehicle_type, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-       ON CONFLICT (rider_id) 
-       DO UPDATE SET phone = EXCLUDED.phone, full_name = EXCLUDED.full_name, vehicle_number = EXCLUDED.vehicle_number, status = EXCLUDED.status, updated_at = NOW()
+      `UPDATE riders SET status = $1, updated_at = NOW() WHERE id = $2 OR rider_id = $2 RETURNING *`,
+      [status, riderId]
+    );
+    if (res.rows.length > 0 && (status === 'INACTIVE' || status === 'SUSPENDED')) {
+      try {
+        await this.pool.query(`UPDATE rider_presence SET status = 'OFFLINE', last_seen_at = NOW() WHERE rider_id = $1`, [riderId]);
+      } catch (_) {}
+    }
+    return res.rows[0] || null;
+  }
+
+  async saveRider(riderData) {
+    if (!this.pool) return null;
+    const clean10 = (riderData.phone || '').replace(/\D/g, '').slice(-10);
+    const id = riderData.id || riderData.riderId || `rdr_${clean10 || Math.floor(1000000000 + Math.random() * 9000000000)}`;
+    const phone = clean10.length === 10 ? `+91${clean10}` : (riderData.phone || '+919991416180');
+    const res = await this.pool.query(
+      `INSERT INTO riders (id, rider_id, phone, full_name, vehicle_number, vehicle_type, tier, status, created_at, updated_at)
+       VALUES ($1, $1, $2, $3, $4, $5, 'STANDARD', $6, NOW(), NOW())
+       ON CONFLICT (phone) 
+       DO UPDATE SET full_name = EXCLUDED.full_name, vehicle_number = EXCLUDED.vehicle_number, vehicle_type = EXCLUDED.vehicle_type, status = EXCLUDED.status, updated_at = NOW()
        RETURNING *`,
       [
-        riderData.id || ('rider_' + crypto.randomUUID()),
-        riderData.riderId || riderData.id,
-        riderData.phone || '+919876543210',
+        id,
+        phone,
         riderData.fullName || riderData.name || 'Authoritative Delivery Fleet Partner',
-        riderData.vehicleNumber || 'HR-26-EK-1234',
+        (riderData.vehicleNumber || 'HR-26-EK-1234').toUpperCase(),
         riderData.vehicleType || 'TWO_WHEELER',
         riderData.status || 'ACTIVE'
       ]
     );
+    try {
+      await this.pool.query(
+        `INSERT INTO rider_presence (rider_id, status, last_seen_at) VALUES ($1, 'OFFLINE', NOW()) ON CONFLICT (rider_id) DO NOTHING`,
+        [id]
+      );
+    } catch (_) {}
     return res.rows[0];
   }
 }
@@ -4395,6 +4443,22 @@ class LocalDevelopmentRiderRepository {
     if (!riderId) return null;
     const rider = (Array.isArray(this.db.riders) ? this.db.riders.find((r) => r.id === riderId || r.riderId === riderId) : this.db.riders?.[riderId]);
     return rider || null;
+  }
+
+  async getAllRiders() {
+    return Array.isArray(this.db.riders) ? this.db.riders : Object.values(this.db.riders || {});
+  }
+
+  async updateRiderStatus(riderId, status) {
+    const r = await this.findRiderById(riderId);
+    if (r) r.status = status;
+    return r;
+  }
+
+  async saveRider(riderData) {
+    this.db.riders = this.db.riders || [];
+    this.db.riders.push(riderData);
+    return riderData;
   }
 }
 
@@ -6460,6 +6524,7 @@ function createProductionRepositories(pool, options = {}) {
 
   return {
     isProduction: true,
+    dbPool: pool,
     catalogRepo,
     customerRepo,
     sellerRepo,

@@ -853,6 +853,23 @@ const server = http.createServer(async (req, res) => {
 
   // GET /api/v1/seller/store/settings
   if (pathname === '/api/v1/seller/store/settings' && req.method === 'GET') {
+    const cloudSettings = await fetchFromGateway('/api/v1/seller/store/settings');
+    if (cloudSettings && cloudSettings.storeId) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, store: cloudSettings }));
+      return;
+    }
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT row_to_json(t) FROM (SELECT id as \\"storeId\\", store_name as name, seller_approval_required as \\"sellerApprovalRequired\\", sla_minutes as \\"slaMinutes\\" FROM stores WHERE id = 'STORE_REWARI_01') t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (psqlOut && psqlOut.startsWith('{')) {
+        const store = JSON.parse(psqlOut);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, store }));
+        return;
+      }
+    } catch (_) {}
     const db = getDbData();
     let store = null;
     if (Array.isArray(db.stores)) {
@@ -900,6 +917,14 @@ const server = http.createServer(async (req, res) => {
         postToGateway('/api/v1/seller/store/settings', body, 'POST')
       ]);
     } catch (_) {}
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      if (body.sellerApprovalRequired !== undefined) {
+        const boolVal = Boolean(body.sellerApprovalRequired);
+        execSync(`psql "${dbUrl}" -c "UPDATE stores SET seller_approval_required = ${boolVal}, updated_at = NOW() WHERE id = 'STORE_REWARI_01';" 2>/dev/null || true`);
+      }
+    } catch (_) {}
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, store }));
     return;
@@ -913,6 +938,16 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(cloudOrders));
       return;
     }
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT json_agg(t) FROM (SELECT * FROM orders WHERE store_id = 'STORE_REWARI_01' ORDER BY created_at DESC) t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (psqlOut && psqlOut.startsWith('[')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(psqlOut);
+        return;
+      }
+    } catch (_) {}
     const db = getDbData();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(db.orders || []));
@@ -953,6 +988,23 @@ const server = http.createServer(async (req, res) => {
 
   // GET /api/v1/catalog/products
   if (pathname === '/api/v1/catalog/products' && req.method === 'GET') {
+    const cloudProducts = await fetchFromGateway('/api/v1/catalog/products');
+    if (cloudProducts && (cloudProducts.content || Array.isArray(cloudProducts))) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(cloudProducts));
+      return;
+    }
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT json_agg(t) FROM (SELECT * FROM products WHERE is_active = true ORDER BY name ASC) t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (psqlOut && psqlOut.startsWith('[')) {
+        const prods = JSON.parse(psqlOut);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ content: prods, totalElements: prods.length }));
+        return;
+      }
+    } catch (_) {}
     const db = getDbData();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ content: db.products || [], totalElements: (db.products || []).length }));
@@ -961,6 +1013,23 @@ const server = http.createServer(async (req, res) => {
 
   // GET /api/v1/orders/audit
   if (pathname === '/api/v1/orders/audit' && req.method === 'GET') {
+    const cloudAudit = await fetchFromGateway('/api/v1/orders/audit');
+    if (Array.isArray(cloudAudit) && cloudAudit.length > 0) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ logs: cloudAudit, total: cloudAudit.length }));
+      return;
+    }
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT json_agg(t) FROM (SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100) t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (psqlOut && psqlOut.startsWith('[')) {
+        const logs = JSON.parse(psqlOut);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ logs, total: logs.length }));
+        return;
+      }
+    } catch (_) {}
     const db = getDbData();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ logs: db.auditLogs || [], total: (db.auditLogs || []).length }));
@@ -989,6 +1058,20 @@ const server = http.createServer(async (req, res) => {
     db.products = db.products || [];
     db.products.unshift(product);
     saveDbData(db);
+
+    try {
+      await postToGateway('/api/v1/seller/inventory/add', body, 'POST');
+    } catch (_) {}
+
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      const sql = `INSERT INTO products (id, sku, name, brand_name, pack_size, mrp, price, discounted_price, rx_requirement, category, is_active, created_at, updated_at) VALUES ('${product.id}', '${product.sku}', '${product.name.replace(/'/g, "''")}', '${product.brandName.replace(/'/g, "''")}', '${product.packSize}', ${product.mrp}, ${product.price}, ${product.discountedPrice}, 'OTC', '${product.therapeuticCategory}', TRUE, NOW(), NOW()) ON CONFLICT (id) DO NOTHING;`;
+      execSync(`psql "${dbUrl}" -c "${sql}" 2>/dev/null || true`);
+      const invSql = `INSERT INTO inventory (store_id, product_id, sku, stock_count, reserved_count, updated_at) VALUES ('STORE_REWARI_01', '${product.id}', '${product.sku}', ${product.stockCount}, 0, NOW()) ON CONFLICT (store_id, sku) DO UPDATE SET stock_count = EXCLUDED.stock_count, updated_at = NOW();`;
+      execSync(`psql "${dbUrl}" -c "${invSql}" 2>/dev/null || true`);
+    } catch (_) {}
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(product));
     return;
@@ -1178,11 +1261,22 @@ const server = http.createServer(async (req, res) => {
     if (cloudRiders && cloudRiders.riders) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(cloudRiders));
-    } else {
-      const db = getDbData();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, count: (db.riders || []).length, riders: db.riders || [] }));
+      return;
     }
+    try {
+      const { execSync } = require('child_process');
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT json_agg(t) FROM (SELECT r.id, r.rider_id, r.phone, r.full_name as \\"fullName\\", r.vehicle_number as \\"vehicleNumber\\", r.vehicle_type as \\"vehicleType\\", r.tier, r.status, rp.status as \\"presenceStatus\\", rp.last_known_lat as \\"currentLat\\", rp.last_known_lng as \\"currentLng\\", rp.last_seen_at as \\"lastSeenAt\\" FROM riders r LEFT JOIN rider_presence rp ON r.rider_id = rp.rider_id ORDER BY r.created_at DESC) t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (psqlOut && psqlOut.startsWith('[')) {
+        const parsed = JSON.parse(psqlOut);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, count: parsed.length, riders: parsed }));
+        return;
+      }
+    } catch (_) {}
+    const db = getDbData();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, count: (db.riders || []).length, riders: db.riders || [] }));
     return;
   }
 

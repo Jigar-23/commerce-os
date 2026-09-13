@@ -36900,6 +36900,17 @@
   ],
   "riders": [
     {
+      "id": "rdr_9811223344",
+      "rider_id": "rdr_9811223344",
+      "full_name": "Suresh Kumar",
+      "phone": "+919811223344",
+      "vehicle_number": "HR-26-SK-9999",
+      "vehicle_type": "TWO_WHEELER",
+      "status": "ACTIVE",
+      "aadhaar_number": "XXXX-XXXX-1234",
+      "created_at": "2026-09-13T20:07:45.959Z"
+    },
+    {
       "id": "rdr_9817916180",
       "rider_id": "rdr_9817916180",
       "full_name": "abcd",
