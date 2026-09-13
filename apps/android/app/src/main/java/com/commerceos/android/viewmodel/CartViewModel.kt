@@ -90,13 +90,15 @@ class CartViewModel(
 
     val mrpTotal: BigDecimal
         get() = (cartItems ?: emptyList()).fold(BigDecimal.ZERO) { acc, i ->
-            val price = i.mrp ?: i.unitPrice
+            val price = i.mrp ?: i.unitPrice ?: BigDecimal.ZERO
             acc.add(price.multiply(BigDecimal.valueOf(i.quantity.toLong())))
         }
 
     val totalSavings: BigDecimal
-        get() = if (totals != null) mrpTotal.subtract(totals!!.itemsSubtotal).coerceAtLeast(BigDecimal.ZERO)
-                else mrpTotal.subtract(effectiveSubtotal).coerceAtLeast(BigDecimal.ZERO)
+        get() {
+            val sub = totals?.itemsSubtotal ?: effectiveSubtotal
+            return mrpTotal.subtract(sub ?: BigDecimal.ZERO).coerceAtLeast(BigDecimal.ZERO)
+        }
 
     private val LOCAL_OFFLINE_CART_KEY = "local_offline_cart"
 

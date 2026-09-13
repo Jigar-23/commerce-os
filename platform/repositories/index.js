@@ -5354,8 +5354,10 @@ class TransactionalCartRepository {
       sku: r.sku,
       name: r.name || r.sku,
       quantity: Number(r.quantity) || 1,
-      price: Number(r.price || 0),
-      discountedPrice: Number(r.discountedPrice || r.price || 0)
+      unitPrice: Number(r.unitPrice || r.discountedPrice || r.price || 0),
+      price: Number(r.price || r.unitPrice || 0),
+      discountedPrice: Number(r.discountedPrice || r.price || r.unitPrice || 0),
+      mrp: Number(r.mrp || r.price || r.unitPrice || 0)
     }));
   }
 
@@ -5369,6 +5371,7 @@ class TransactionalCartRepository {
       await client.query('BEGIN');
       const res = await client.query(`SELECT id, items FROM carts WHERE customer_id = $1 FOR UPDATE`, [customerId]);
       let items = [];
+      const itemUnitPrice = Number(item.unitPrice || item.discountedPrice || item.price || 0);
       if (res.rows.length > 0) {
         const raw = res.rows[0].items;
         items = typeof raw === 'string' ? JSON.parse(raw) : (raw || []);
@@ -5381,8 +5384,10 @@ class TransactionalCartRepository {
             sku: item.sku,
             name: item.name || item.sku,
             quantity: Number(item.quantity) || 1,
-            price: Number(item.price || 0),
-            discountedPrice: Number(item.discountedPrice || item.price || 0)
+            unitPrice: itemUnitPrice,
+            price: Number(item.price || itemUnitPrice),
+            discountedPrice: Number(item.discountedPrice || itemUnitPrice),
+            mrp: Number(item.mrp || item.price || itemUnitPrice)
           });
         }
         await client.query(`UPDATE carts SET items = $1, updated_at = NOW() WHERE customer_id = $2`, [JSON.stringify(items), customerId]);
@@ -5392,8 +5397,10 @@ class TransactionalCartRepository {
           sku: item.sku,
           name: item.name || item.sku,
           quantity: Number(item.quantity) || 1,
-          price: Number(item.price || 0),
-          discountedPrice: Number(item.discountedPrice || item.price || 0)
+          unitPrice: itemUnitPrice,
+          price: Number(item.price || itemUnitPrice),
+          discountedPrice: Number(item.discountedPrice || itemUnitPrice),
+          mrp: Number(item.mrp || item.price || itemUnitPrice)
         }];
         await client.query(
           `INSERT INTO carts (id, customer_id, items, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())`,

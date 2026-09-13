@@ -89,10 +89,10 @@ data class CartItem(
 data class CartResponse(
     val customerId: String,
     val items: List<CartItem>,
-    val itemsSubtotal: BigDecimal,
-    val expressDeliveryFee: BigDecimal,
-    val coldChainPackagingFee: BigDecimal,
-    val grandTotal: BigDecimal,
+    val itemsSubtotal: BigDecimal? = null,
+    val expressDeliveryFee: BigDecimal? = null,
+    val coldChainPackagingFee: BigDecimal? = null,
+    val grandTotal: BigDecimal? = null,
     val freeDeliveryThreshold: BigDecimal? = null,
     val freeDeliveryEligible: Boolean? = null,
     val remainingForFreeDelivery: BigDecimal? = null

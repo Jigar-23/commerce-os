@@ -1050,21 +1050,29 @@ function substituteMedicinesFor(product) {
 function normalizeCartItem(i, resolvedProduct = null) {
   // SERVER-AUTHORITATIVE enrichment: rxRequirement, price and cold-chain are
   // resolved from CatalogRepository / authoritative catalog, never trusted from client payload.
-  const product = resolvedProduct || (db.products || []).find((p) => p.sku === i.sku || p.id === i.medicineId || p.id === i.id);
+  const product = resolvedProduct || (db.products || []).find((p) => p.sku === i.sku || p.id === i.medicineId || p.id === i.productId || p.id === i.id);
   const rxRequired = Boolean(i.rxRequired ?? i.prescriptionRequired ?? (product && product.rxRequirement !== 'OTC'));
+  const rawUnitPrice = Number(product ? (product.discountedPrice ?? product.price ?? 0) : (i.unitPrice ?? i.discountedPrice ?? i.price ?? 0));
+  const unitPrice = isNaN(rawUnitPrice) ? 0 : rawUnitPrice;
+  const rawMrp = Number(product ? (product.mrp ?? product.price ?? 0) : (i.mrp ?? i.unitPrice ?? unitPrice));
+  const mrp = isNaN(rawMrp) ? unitPrice : rawMrp;
   return {
+    productId: product ? product.id : (i.productId || i.medicineId || i.id || ''),
     medicineId: product ? (product.id || product.medicineId) : (i.medicineId || i.id || ''),
     sku: i.sku,
     name: product ? product.name : (i.name || ''),
     brand: product ? (product.brandName || product.brand || '') : (i.brand || i.brandName || ''),
     packSize: product ? (product.packSize || '') : (i.packSize || ''),
-    unitPrice: Number(product ? (product.discountedPrice ?? product.price ?? 0) : (i.unitPrice || i.discountedPrice || 0)),
-    mrp: Number(product ? (product.mrp ?? product.price ?? 0) : (i.mrp ?? i.unitPrice ?? 0)),
-    quantity: i.quantity || 1,
+    unitPrice: unitPrice,
+    price: unitPrice,
+    discountedPrice: unitPrice,
+    mrp: mrp,
+    quantity: Number(i.quantity) || 1,
+    verticalId: i.verticalId || (product ? (product.verticalId || 'pharmacy') : 'pharmacy'),
     rxRequired,
     prescriptionRequired: rxRequired,
     coldChain: Boolean(i.coldChain || (product && (product.coldChainRequired || product.cold_chain_required))),
-    image: product ? (product.image || '') : (i.image || ''),
+    image: product ? (product.image || product.imageUrl || product.image_url || '') : (i.image || i.imageUrl || i.image_url || ''),
   };
 }
 
@@ -1209,18 +1217,25 @@ function rankForAddress(items, addressId) {
 }
 
 function grandTotal(items) {
-  const subtotal = items.reduce((acc, i) => acc + (Number(i.unitPrice) * i.quantity), 0);
-  const freeDeliveryEligible = items.length > 0 && subtotal >= FREE_DELIVERY_THRESHOLD;
-  const expressFee = freeDeliveryEligible ? 0 : (items.length > 0 ? DELIVERY_FEE : 0);
-  const cold = items.some((i) => i.coldChain) ? COLD_CHAIN_FEE : 0;
-  const grand = Math.round((subtotal + expressFee + cold) * 100) / 100;
-  const remaining = Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - subtotal) * 100) / 100);
+  const subtotal = (items || []).reduce((acc, i) => {
+    const rawPrice = Number(i.unitPrice ?? i.discountedPrice ?? i.price ?? 0);
+    const unitPrice = isNaN(rawPrice) ? 0 : rawPrice;
+    const qty = Number(i.quantity) || 1;
+    return acc + (unitPrice * qty);
+  }, 0);
+  const safeSubtotal = isNaN(subtotal) ? 0 : subtotal;
+  const freeDeliveryEligible = items && items.length > 0 && safeSubtotal >= FREE_DELIVERY_THRESHOLD;
+  const expressFee = freeDeliveryEligible ? 0 : (items && items.length > 0 ? DELIVERY_FEE : 0);
+  const cold = (items || []).some((i) => i.coldChain) ? COLD_CHAIN_FEE : 0;
+  const grand = Math.round((safeSubtotal + expressFee + cold) * 100) / 100;
+  const remaining = Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - safeSubtotal) * 100) / 100);
+  const itemsSubtotal = Math.round(safeSubtotal * 100) / 100;
   return {
-    subtotal: Math.round(subtotal * 100) / 100,
+    subtotal: itemsSubtotal,
     expressFee,
     cold,
     grandTotal: grand,
-    itemsSubtotal: Math.round(subtotal * 100) / 100,
+    itemsSubtotal: itemsSubtotal,
     expressDeliveryFee: expressFee,
     coldChainPackagingFee: cold,
     freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD,
@@ -6040,23 +6055,25 @@ async function handleRequest(port, req, res) {
         const item = await parseBody(req);
         if (appRepositories && appRepositories.cartRepo) {
           const items = await appRepositories.cartRepo.addItem(customerId, item);
-          const totals = grandTotal(items);
-          return json(res, 200, { customerId, items: items.map(normalizeCartItem), ...totals });
+          const normalized = items.map(normalizeCartItem);
+          const totals = grandTotal(normalized);
+          return json(res, 200, { customerId, items: normalized, ...totals });
         } else if (appRepositories && appRepositories.isProduction) {
           return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
         }
 
         const items = cartFor(customerId);
-        const normalized = normalizeCartItem(item);
+        const normalizedItem = normalizeCartItem(item);
         const existing = items.find((i) => i.sku === item.sku);
         if (existing) {
           existing.quantity += item.quantity || 1;
         } else {
-          items.push(normalized);
+          items.push(normalizedItem);
         }
         saveDb();
-        const totals = grandTotal(items);
-        return json(res, 200, { customerId, items: items.map(normalizeCartItem), ...totals });
+        const normalizedItems = items.map(normalizeCartItem);
+        const totals = grandTotal(normalizedItems);
+        return json(res, 200, { customerId, items: normalizedItems, ...totals });
       }
 
       const itemMatch = path.match(/^\/api\/v1\/cart\/([^/]+)\/items\/([^/]+)$/);
@@ -6072,8 +6089,9 @@ async function handleRequest(port, req, res) {
           }
           if (appRepositories && appRepositories.cartRepo) {
             const items = await appRepositories.cartRepo.updateItemQty(custId, sku, qty);
-            const t = grandTotal(items);
-            return json(res, 200, { customerId: custId, items: items.map(normalizeCartItem), ...t });
+            const normalized = items.map(normalizeCartItem);
+            const t = grandTotal(normalized);
+            return json(res, 200, { customerId: custId, items: normalized, ...t });
           } else if (appRepositories && appRepositories.isProduction) {
             return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
           }
@@ -6083,15 +6101,17 @@ async function handleRequest(port, req, res) {
           if (!existing) return json(res, 404, { error: 'Item not found in cart' });
           existing.quantity = qty;
           saveDb();
-          const t = grandTotal(items);
-          return json(res, 200, { customerId: custId, items: items.map(normalizeCartItem), ...t });
+          const normalized = items.map(normalizeCartItem);
+          const t = grandTotal(normalized);
+          return json(res, 200, { customerId: custId, items: normalized, ...t });
         }
 
         if (req.method === 'DELETE') {
           if (appRepositories && appRepositories.cartRepo) {
             const items = await appRepositories.cartRepo.removeItem(custId, sku);
-            const t = grandTotal(items);
-            return json(res, 200, { customerId: custId, items: items.map(normalizeCartItem), ...t });
+            const normalized = items.map(normalizeCartItem);
+            const t = grandTotal(normalized);
+            return json(res, 200, { customerId: custId, items: normalized, ...t });
           } else if (appRepositories && appRepositories.isProduction) {
             return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
           }
@@ -6100,8 +6120,9 @@ async function handleRequest(port, req, res) {
           const next = items.filter((i) => i.sku !== sku);
           db.carts[custId] = next;
           saveDb();
-          const t = grandTotal(next);
-          return json(res, 200, { customerId: custId, items: next.map(normalizeCartItem), ...t });
+          const normalized = next.map(normalizeCartItem);
+          const t = grandTotal(normalized);
+          return json(res, 200, { customerId: custId, items: normalized, ...t });
         }
       }
 
@@ -6125,15 +6146,17 @@ async function handleRequest(port, req, res) {
         const custId = cartMatch[1];
         if (appRepositories && appRepositories.cartRepo) {
           const items = await appRepositories.cartRepo.getCart(custId);
-          const t = grandTotal(items);
-          return json(res, 200, { customerId: custId, items: items.map(normalizeCartItem), ...t });
+          const normalized = items.map(normalizeCartItem);
+          const t = grandTotal(normalized);
+          return json(res, 200, { customerId: custId, items: normalized, ...t });
         } else if (appRepositories && appRepositories.isProduction) {
           return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
         }
 
         const items = cartFor(custId);
-        const t = grandTotal(items);
-        return json(res, 200, { customerId: custId, items: items.map(normalizeCartItem), ...t });
+        const normalized = items.map(normalizeCartItem);
+        const t = grandTotal(normalized);
+        return json(res, 200, { customerId: custId, items: normalized, ...t });
       }
       return json(res, 404, { error: 'Not Found' });
     }
