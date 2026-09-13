@@ -2704,7 +2704,8 @@ async function handleRequest(port, req, res) {
       if ((path === '/api/v1/auth/rider/verify-otp' || path === '/api/v1/auth/rider/otp/verify') && req.method === 'POST') {
         const body = await parseBody(req);
         const { challengeId, otp, phone, name, vehicle } = body;
-        const rawPhone = phone || '';
+        const ch = challengeId ? otpStore[challengeId] : null;
+        const rawPhone = phone || (ch && ch.phone) || '';
         const digitsOnly = String(rawPhone).replace(/\D/g, '');
         const cleanPhone = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
         const inputOtp = String(otp || '').trim();
