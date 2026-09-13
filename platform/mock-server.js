@@ -1102,11 +1102,20 @@ function paginate(list, limit, offset) {
 // no longer composes "server-driven" shelves locally.
 function serverHomeFeed(customerId, rawProducts, orders, addressId) {
   const products = (rawProducts || []).map(p => {
-    const sellPrice = Number(p.discountedPrice ?? p.sellingPrice ?? p.price ?? 5.0);
+    const sellPrice = Number(p.discountedPrice ?? p.discounted_price ?? p.sellingPrice ?? p.price ?? 5.0);
     const mrpVal = Number(p.mrp ?? p.price ?? (sellPrice * 1.25));
     const fullPrice = Math.max(mrpVal, sellPrice);
+    const img = p.imageUrl || p.image_url || p.image || '';
     return {
       ...p,
+      brandName: p.brandName || p.brand_name || p.brand || '',
+      packSize: p.packSize || p.pack_size || '',
+      rxRequirement: p.rxRequirement || p.rx_requirement || 'OTC',
+      therapeuticCategory: p.therapeuticCategory || p.category || '',
+      category: p.category || p.therapeuticCategory || '',
+      image: img,
+      imageUrl: img,
+      image_url: img,
       price: fullPrice,
       mrp: fullPrice,
       discountedPrice: sellPrice,
@@ -2478,11 +2487,20 @@ async function handleRequest(port, req, res) {
       }
 
       function formatProductForCatalog(p) {
-        const sellPrice = Number(p.discountedPrice ?? p.sellingPrice ?? p.price ?? 5.0);
+        const sellPrice = Number(p.discountedPrice ?? p.discounted_price ?? p.sellingPrice ?? p.price ?? 5.0);
         const mrpVal = Number(p.mrp ?? p.price ?? (sellPrice * 1.25));
         const fullPrice = Math.max(mrpVal, sellPrice);
+        const img = p.imageUrl || p.image_url || p.image || '';
         return {
           ...p,
+          brandName: p.brandName || p.brand_name || p.brand || '',
+          packSize: p.packSize || p.pack_size || '',
+          rxRequirement: p.rxRequirement || p.rx_requirement || 'OTC',
+          therapeuticCategory: p.therapeuticCategory || p.category || '',
+          category: p.category || p.therapeuticCategory || '',
+          image: img,
+          imageUrl: img,
+          image_url: img,
           price: fullPrice,
           mrp: fullPrice,
           discountedPrice: sellPrice,
@@ -3201,6 +3219,8 @@ async function handleRequest(port, req, res) {
         const mrp = Number(body.mrp || price * 1.25);
         const stockCount = Number(body.stockCount || body.quantity || 50);
 
+        const img = (body.imageUrl || body.image_url || body.image || '').trim();
+
         const newProduct = {
           id: body.id || ('prod_' + sku.toLowerCase().replace(/[^a-z0-9]/g, '_')),
           sku: sku,
@@ -3217,10 +3237,35 @@ async function handleRequest(port, req, res) {
           coldChainRequired: Boolean(body.coldChainRequired || body.coldChain),
           rating: 4.8,
           reviewCount: 12,
-          image: body.image || '',
+          image: img,
+          imageUrl: img,
+          image_url: img,
           mrp: mrp,
           therapeuticCategory: body.category || body.therapeuticCategory || 'Health & Daily Needs'
         };
+
+        if (appRepositories && appRepositories.catalogRepo) {
+          try {
+            const saved = await appRepositories.catalogRepo.saveProductTransactionally(newProduct);
+            if (saved && saved.id) newProduct.id = saved.id;
+          } catch (e) {
+            console.error('[inventory/add] catalogRepo save error:', e.message);
+          }
+        }
+        if (appRepositories && appRepositories.inventoryRepo) {
+          try {
+            await appRepositories.inventoryRepo.setStockForStore(
+              'STORE_REWARI_01',
+              newProduct.id,
+              newProduct.sku,
+              stockCount,
+              'Merchant inventory add',
+              { id: 'seller_rewari_01', type: 'SELLER' }
+            );
+          } catch (e) {
+            console.error('[inventory/add] inventoryRepo setStock error:', e.message);
+          }
+        }
 
         db.products = db.products || [];
         const existingIdx = db.products.findIndex(p => p.sku === sku);

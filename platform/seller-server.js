@@ -733,6 +733,12 @@ const HTML_CONTENT = `<!DOCTYPE html>
           </div>
         </div>
 
+        <div class="form-group" style="margin-top: 12px;">
+          <label>Product Image URL (Photo Link)</label>
+          <input type="url" id="f-image" class="input-box" placeholder="https://cdn01.pharmeasy.in/... or any direct image link">
+          <span style="font-size: 11px; color: #64748B; margin-top: 4px; display: block;">Direct JPG/PNG link stored in Supabase &amp; displayed in Customer/Rider mobile apps.</span>
+        </div>
+
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
           <button type="button" class="btn btn-slate" onclick="closeModal()">Cancel</button>
           <button type="submit" class="btn btn-emerald">Save to Stock</button>
@@ -997,7 +1003,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const { execSync } = require('child_process');
       const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
-      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT json_agg(t) FROM (SELECT * FROM products WHERE is_active = true ORDER BY name ASC) t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
+      const psqlOut = execSync(`psql "${dbUrl}" -t -A -c "SELECT json_agg(t) FROM (SELECT p.*, p.brand_name AS \\"brandName\\", p.pack_size AS \\"packSize\\", p.image_url AS \\"imageUrl\\", p.image_url AS \\"image\\", p.discounted_price AS \\"discountedPrice\\", COALESCE(i.stock_count, 50) AS \\"stockCount\\" FROM products p LEFT JOIN inventory i ON p.id = i.product_id WHERE p.is_active = true ORDER BY p.name ASC) t;" 2>/dev/null`, { encoding: 'utf8' }).trim();
       if (psqlOut && psqlOut.startsWith('[')) {
         const prods = JSON.parse(psqlOut);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1040,6 +1046,7 @@ const server = http.createServer(async (req, res) => {
   if ((pathname === '/api/v1/seller/inventory/add' || pathname === '/api/v1/catalog/products') && req.method === 'POST') {
     const body = await parseJsonBody(req);
     const db = getDbData();
+    const imgUrl = (body.imageUrl || body.image_url || body.image || '').trim();
     const product = {
       id: body.id || 'prod_' + Math.floor(10000 + Math.random() * 90000),
       sku: body.sku || 'SKU-' + Math.floor(1000 + Math.random() * 9000),
@@ -1053,20 +1060,25 @@ const server = http.createServer(async (req, res) => {
       inStock: true,
       stockCount: Number(body.stockCount || 50),
       therapeuticCategory: body.category || 'General',
-      sellerId: 'seller_rewari_01'
+      sellerId: 'seller_rewari_01',
+      imageUrl: imgUrl,
+      image_url: imgUrl,
+      image: imgUrl
     };
     db.products = db.products || [];
     db.products.unshift(product);
     saveDbData(db);
 
     try {
-      await postToGateway('/api/v1/seller/inventory/add', body, 'POST');
+      await postToGateway('/api/v1/seller/inventory/add', { ...body, imageUrl: imgUrl, image_url: imgUrl, image: imgUrl }, 'POST');
     } catch (_) {}
 
     try {
       const { execSync } = require('child_process');
       const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
-      const sql = `INSERT INTO products (id, sku, name, brand_name, pack_size, mrp, price, discounted_price, rx_requirement, category, is_active, created_at, updated_at) VALUES ('${product.id}', '${product.sku}', '${product.name.replace(/'/g, "''")}', '${product.brandName.replace(/'/g, "''")}', '${product.packSize}', ${product.mrp}, ${product.price}, ${product.discountedPrice}, 'OTC', '${product.therapeuticCategory}', TRUE, NOW(), NOW()) ON CONFLICT (id) DO NOTHING;`;
+      const existingId = execSync(`psql "${dbUrl}" -t -A -c "SELECT id FROM products WHERE sku = '${product.sku}' LIMIT 1;" 2>/dev/null || true`, { encoding: 'utf8' }).trim();
+      if (existingId) product.id = existingId;
+      const sql = `INSERT INTO products (id, sku, name, brand_name, pack_size, mrp, price, discounted_price, rx_requirement, category, image_url, is_active, created_at, updated_at) VALUES ('${product.id}', '${product.sku}', '${product.name.replace(/'/g, "''")}', '${product.brandName.replace(/'/g, "''")}', '${product.packSize}', ${product.mrp}, ${product.price}, ${product.discountedPrice}, 'OTC', '${product.therapeuticCategory}', '${imgUrl.replace(/'/g, "''")}', TRUE, NOW(), NOW()) ON CONFLICT (id) DO UPDATE SET image_url = EXCLUDED.image_url, name = EXCLUDED.name, price = EXCLUDED.price, mrp = EXCLUDED.mrp, discounted_price = EXCLUDED.discounted_price, brand_name = EXCLUDED.brand_name, updated_at = NOW();`;
       execSync(`psql "${dbUrl}" -c "${sql}" 2>/dev/null || true`);
       const invSql = `INSERT INTO inventory (store_id, product_id, sku, stock_count, reserved_count, updated_at) VALUES ('STORE_REWARI_01', '${product.id}', '${product.sku}', ${product.stockCount}, 0, NOW()) ON CONFLICT (store_id, sku) DO UPDATE SET stock_count = EXCLUDED.stock_count, updated_at = NOW();`;
       execSync(`psql "${dbUrl}" -c "${invSql}" 2>/dev/null || true`);

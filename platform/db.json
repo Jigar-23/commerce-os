@@ -20,6 +20,24 @@
   ],
   "products": [
     {
+      "id": "prod_30247",
+      "sku": "SKU-DOLO-650",
+      "name": "Dolo 650mg Paracetamol",
+      "brandName": "Micro Labs",
+      "manufacturer": "Cipla",
+      "packSize": "1 unit",
+      "price": 30,
+      "mrp": 35,
+      "discountedPrice": 30,
+      "inStock": true,
+      "stockCount": 60,
+      "therapeuticCategory": "Pain & Fever",
+      "sellerId": "seller_rewari_01",
+      "imageUrl": "https://cdn01.pharmeasy.in/dam/productsnowatermark/061693/dolo-650mg-strip-of-15-tablets-front-1-1756827387-non-watermarked.jpg",
+      "image_url": "https://cdn01.pharmeasy.in/dam/productsnowatermark/061693/dolo-650mg-strip-of-15-tablets-front-1-1756827387-non-watermarked.jpg",
+      "image": "https://cdn01.pharmeasy.in/dam/productsnowatermark/061693/dolo-650mg-strip-of-15-tablets-front-1-1756827387-non-watermarked.jpg"
+    },
+    {
       "id": "prod_para_500",
       "sku": "SKU-PARA-500",
       "name": "Paracetamol 500mg IP",

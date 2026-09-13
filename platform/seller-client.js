@@ -57,6 +57,9 @@ function setTab(tabId, skipPush) {
 function openModal() {
   document.getElementById('item-modal').style.display = 'flex';
   document.getElementById('f-sku').value = 'SKU-' + Math.floor(1000 + Math.random() * 9000);
+  if (document.getElementById('f-name')) document.getElementById('f-name').value = '';
+  if (document.getElementById('f-brand')) document.getElementById('f-brand').value = '';
+  if (document.getElementById('f-image')) document.getElementById('f-image').value = '';
 }
 
 function closeModal() {
@@ -472,6 +475,7 @@ function reloadCurrentOrderDetail() {
 
 async function handleSaveItem(e) {
   e.preventDefault();
+  const imageUrl = (document.getElementById('f-image')?.value || '').trim();
   const item = {
     name: document.getElementById('f-name').value.trim(),
     sku: document.getElementById('f-sku').value.trim(),
@@ -479,7 +483,10 @@ async function handleSaveItem(e) {
     brandName: document.getElementById('f-brand').value.trim() || 'CommerceOS Partner',
     price: parseFloat(document.getElementById('f-price').value) || 10,
     mrp: parseFloat(document.getElementById('f-mrp').value) || 12,
-    stockCount: parseInt(document.getElementById('f-stock').value) || 50
+    stockCount: parseInt(document.getElementById('f-stock').value) || 50,
+    imageUrl: imageUrl,
+    image_url: imageUrl,
+    image: imageUrl
   };
 
   try {
@@ -764,11 +771,13 @@ function render(force) {
   const iTable = document.getElementById('inventory-table');
   if (iTable) {
     iTable.innerHTML = filteredProducts.map(p => {
+      const img = p.imageUrl || p.image_url || p.image || '';
+      const imgThumb = img ? '<img src="' + img + '" style="width: 36px; height: 36px; object-fit: cover; border-radius: 6px; border: 1px solid #334155; margin-right: 12px; flex-shrink: 0;" onerror="this.style.display=\'none\'">' : '<div style="width: 36px; height: 36px; border-radius: 6px; background: #1E293B; border: 1px solid #334155; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 16px; flex-shrink: 0;">💊</div>';
       return '<tr>' +
-        '<td><div style="font-weight: 800;">' + p.name + '</div><div style="font-family: monospace; font-size: 11px; color: #64748B;">' + p.sku + '</div></td>' +
-        '<td style="color: #94A3B8;">' + (p.brandName || p.manufacturer || 'Cipla') + '</td>' +
-        '<td style="font-weight: 800;">₹' + (p.discountedPrice || p.price || 0) + '</td>' +
-        '<td style="font-weight: 800; color: #34D399;">' + (p.stockCount || 0) + ' units</td>' +
+        '<td><div style="display: flex; align-items: center;">' + imgThumb + '<div><div style="font-weight: 800;">' + p.name + '</div><div style="font-family: monospace; font-size: 11px; color: #64748B;">' + p.sku + '</div></div></div></td>' +
+        '<td style="color: #94A3B8;">' + (p.brandName || p.brand_name || p.manufacturer || 'Cipla') + '</td>' +
+        '<td style="font-weight: 800;">₹' + (p.discountedPrice || p.discounted_price || p.price || 0) + '</td>' +
+        '<td style="font-weight: 800; color: #34D399;">' + (p.stockCount || p.stock_count || 0) + ' units</td>' +
         '<td style="text-align: right; display: flex; justify-content: flex-end; gap: 6px;">' +
           '<button class="btn btn-slate" style="color: #34D399; cursor: pointer;" onclick="adjustStock(\'' + p.sku + '\', 10)">+10</button>' +
           '<button class="btn btn-slate" style="color: #FB7185; cursor: pointer;" onclick="adjustStock(\'' + p.sku + '\', -5)">-5</button>' +

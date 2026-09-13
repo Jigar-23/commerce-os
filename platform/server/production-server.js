@@ -4398,7 +4398,8 @@ const server = http.createServer(async (req, res) => {
             price: body.price,
             discountedPrice: body.discountedPrice,
             rxRequirement: body.rxRequirement,
-            category: body.category
+            category: body.category,
+            imageUrl: body.imageUrl || body.image_url || body.image
           });
         } catch (err) {
           if (err.code === '23505' && String(err.constraint || err.message || '').includes('products_sku')) {
@@ -4606,7 +4607,8 @@ const server = http.createServer(async (req, res) => {
         price: body && body.price != null ? body.price : existing.price,
         discountedPrice: body && body.discountedPrice != null ? body.discountedPrice : (existing.discounted_price ?? existing.price),
         rxRequirement: body && body.rxRequirement != null ? body.rxRequirement : existing.rx_requirement,
-        category: body && body.category != null ? body.category : existing.category
+        category: body && body.category != null ? body.category : existing.category,
+        imageUrl: body && (body.imageUrl || body.image_url || body.image) != null ? (body.imageUrl || body.image_url || body.image) : existing.image_url
       });
 
       // Stock changes are applied ONLY through the authoritative inventory domain

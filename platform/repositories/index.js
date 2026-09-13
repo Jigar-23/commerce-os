@@ -157,8 +157,8 @@ class TransactionalCatalogRepository {
     const res = await this.pool.query(
       `INSERT INTO products (
         id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
-        rx_requirement, category, is_active, store_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, NULL, NOW(), NOW())
+        rx_requirement, category, image_url, is_active, store_id, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE, NULL, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         brand_name = EXCLUDED.brand_name,
@@ -168,6 +168,7 @@ class TransactionalCatalogRepository {
         discounted_price = EXCLUDED.discounted_price,
         rx_requirement = EXCLUDED.rx_requirement,
         category = EXCLUDED.category,
+        image_url = COALESCE(EXCLUDED.image_url, products.image_url),
         store_id = NULL,
         updated_at = NOW()
       RETURNING *`,
@@ -181,7 +182,8 @@ class TransactionalCatalogRepository {
         Number(product.price || 0),
         Number(product.discountedPrice || product.discounted_price || product.price || 0),
         (product.rxRequirement || product.rx_requirement || 'OTC').toUpperCase(),
-        product.category ? String(product.category) : null
+        product.category ? String(product.category) : null,
+        product.imageUrl || product.image_url || product.image || null
       ]
     );
     return res.rows[0] || null;
@@ -232,13 +234,20 @@ class LocalDevelopmentCatalogRepository {
   async saveProductTransactionally(product, storeId = null) {
     this.db.products = this.db.products || [];
     const idx = this.db.products.findIndex(p => p.id === product.id || p.sku === product.sku);
+    const img = product.imageUrl || product.image_url || product.image || '';
+    const enriched = {
+      ...product,
+      image: img,
+      imageUrl: img,
+      image_url: img
+    };
     if (idx >= 0) {
-      this.db.products[idx] = { ...this.db.products[idx], ...product };
+      this.db.products[idx] = { ...this.db.products[idx], ...enriched };
     } else {
-      this.db.products.unshift(product);
+      this.db.products.unshift(enriched);
     }
     this.saveDb();
-    return product;
+    return enriched;
   }
 
   async deleteProductTransactionally(productId, storeId = null) {
