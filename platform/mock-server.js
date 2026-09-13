@@ -1850,10 +1850,30 @@ async function newOrder(customerId, payload, cartItems) {
   const orderId = 'ord_' + crypto.randomUUID();
   const deliveryId = 'del_' + crypto.randomUUID();
 
+  let resolvedAddressId = payload.addressId || (payload.deliveryAddress && payload.deliveryAddress.id) || null;
+  if (!resolvedAddressId && appRepositories && appRepositories.addressRepo) {
+    try {
+      const defAddr = await appRepositories.addressRepo.getDefaultAddress(customerId);
+      if (defAddr && defAddr.id) {
+        resolvedAddressId = defAddr.id;
+      }
+    } catch (_) {}
+  }
+  if (!resolvedAddressId) {
+    const savedAddrs = (db.addresses && db.addresses[customerId]) || [];
+    const defAddr = savedAddrs.find(a => a.isDefault) || savedAddrs[0];
+    if (defAddr && defAddr.id) {
+      resolvedAddressId = defAddr.id;
+    }
+  }
+
+  const fulfillmentNodeStoreId = (serviceability && serviceability.fulfillmentNode && (serviceability.fulfillmentNode.id || serviceability.fulfillmentNode.store_id || serviceability.fulfillmentNode.storeId)) || payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].storeId) || (items[0] && items[0].sellerId) || 'STORE_REWARI_01';
+
   const order = {
     id: orderId,
     orderId,
     customerId,
+    addressId: resolvedAddressId,
     customerPhone: payload.customerPhone || user.phone || null,
     customerName: payload.customerName || user.fullName || null,
     orderType: payload.orderType || 'QUICK_COMMERCE_10MIN',
@@ -1907,11 +1927,11 @@ async function newOrder(customerId, payload, cartItems) {
     consignmentNumber: null,
     createdAt: nowIso(),
     sellerId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'seller_rewari_01',
-    storeId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'STORE_REWARI_01',
-    fulfillmentStoreId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'STORE_REWARI_01',
+    storeId: fulfillmentNodeStoreId,
+    fulfillmentStoreId: fulfillmentNodeStoreId,
     fulfillmentDecision: (serviceability && serviceability.fulfillmentDecision) || {
-      storeId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'STORE_REWARI_01',
-      distanceKm: (serviceability && serviceability.distanceKm) || 1.2,
+      storeId: fulfillmentNodeStoreId,
+      distanceKm: (serviceability && serviceability.distanceKm != null ? Number(serviceability.distanceKm) : 1.2),
       slaMinutes: slaMins || 15
     },
     cancellation: null,
@@ -2021,7 +2041,18 @@ async function newOrder(customerId, payload, cartItems) {
   if (appRepositories && appRepositories.orderRepo) {
     const placeRes = await appRepositories.orderRepo.placeOrderTransactionally(customerId, order, deliverySession);
     if (!placeRes.ok) {
-      return { error: placeRes.message || `Insufficient stock for SKU ${placeRes.sku}`, isStockError: true, sku: placeRes.sku, httpStatus: placeRes.httpStatus };
+      return {
+        error: placeRes.message || `Order placement failed: ${placeRes.error || 'UNKNOWN_ERROR'}`,
+        isStockError: placeRes.error === 'OUT_OF_STOCK' || placeRes.error === 'INSUFFICIENT_STOCK' || Boolean(placeRes.isStockError),
+        isCatalogError: placeRes.error === 'PRODUCT_NOT_FOUND' || placeRes.error === 'EMPTY_ORDER_ITEMS' || placeRes.error === 'CANONICAL_PRODUCT_ID_REQUIRED',
+        isPricingError: placeRes.error === 'PRICING_MISMATCH',
+        isPaymentMethodError: placeRes.error === 'INVALID_PAYMENT_METHOD',
+        sku: placeRes.sku,
+        httpStatus: placeRes.httpStatus || (placeRes.error === 'OUT_OF_STOCK' || placeRes.error === 'INSUFFICIENT_STOCK' ? 409 : 400)
+      };
+    }
+    if (placeRes.order) {
+      Object.assign(order, placeRes.order);
     }
   } else if (appRepositories && appRepositories.isProduction) {
     return { error: 'FATAL_TRANSACTION_ERROR: OrderRepository is required in production mode.', isStockError: false };
@@ -3740,7 +3771,18 @@ async function handleRequest(port, req, res) {
           return json(res, 403, { error: 'FORBIDDEN', message: 'Customer ID in route does not match authenticated identity.' });
         }
         const payload = await parseBody(req);
-        let cartItems = cartFor(customerId);
+        let cartItems = null;
+        if (appRepositories && appRepositories.cartRepo) {
+          try {
+            const dbCart = await appRepositories.cartRepo.getCart(customerId);
+            if (dbCart && Array.isArray(dbCart.items) && dbCart.items.length > 0) {
+              cartItems = dbCart.items;
+            }
+          } catch (_) {}
+        }
+        if (!cartItems || cartItems.length === 0) {
+          cartItems = cartFor(customerId);
+        }
         if (!cartItems || cartItems.length === 0) {
           cartItems = [
             { sku: 'SKU-PARA-500', name: 'Paracetamol 500mg IP', quantity: 2, unitPrice: 15.0, rxRequired: false, coldChain: false }
@@ -3749,19 +3791,32 @@ async function handleRequest(port, req, res) {
         const existingIdem = findOrderByIdempotencyKey(payload.idempotencyKey, customerId);
         if (existingIdem) return json(res, 200, existingIdem);
 
-        if (appRepositories && appRepositories.isProduction && !payload.addressId) {
+        let targetAddressId = payload.addressId || (payload.deliveryAddress && payload.deliveryAddress.id) || null;
+        if (!targetAddressId && appRepositories && appRepositories.addressRepo) {
+          try {
+            const def = await appRepositories.addressRepo.getDefaultAddress(authenticatedCustomerId);
+            if (def && def.id) targetAddressId = def.id;
+          } catch (_) {}
+        }
+        if (!targetAddressId) {
+          const userAddrs = (db.addresses && db.addresses[authenticatedCustomerId]) || [];
+          const def = userAddrs.find(a => a.isDefault) || userAddrs[0];
+          if (def && def.id) targetAddressId = def.id;
+        }
+
+        if (appRepositories && appRepositories.isProduction && !targetAddressId) {
           return json(res, 400, { error: 'ADDRESS_ID_REQUIRED', message: 'Authoritative addressId is strictly required.' });
         }
 
         // Resolve delivery address from payload or addressId
         let address = (payload.deliveryAddress && typeof payload.deliveryAddress === 'object') ? payload.deliveryAddress : null;
-        if (!address && payload.addressId) {
+        if (!address && targetAddressId) {
           if (appRepositories && appRepositories.addressRepo) {
-            address = await appRepositories.addressRepo.findAddressById(authenticatedCustomerId, payload.addressId);
+            address = await appRepositories.addressRepo.findAddressById(authenticatedCustomerId, targetAddressId);
           }
           if (!address && db.addresses) {
             for (const cId in db.addresses) {
-              const found = (db.addresses[cId] || []).find(a => a.id === payload.addressId);
+              const found = (db.addresses[cId] || []).find(a => a.id === targetAddressId);
               if (found) {
                 address = found;
                 break;
@@ -3769,13 +3824,13 @@ async function handleRequest(port, req, res) {
             }
           }
           if (!address) {
-            address = findAddress(authenticatedCustomerId, payload.addressId);
+            address = findAddress(authenticatedCustomerId, targetAddressId);
           }
         }
 
         if (!address) {
           const userAddrs = (db.addresses && db.addresses[authenticatedCustomerId]) || [];
-          address = userAddrs.find(a => a.isDefault) || userAddrs[0] || findAddress(authenticatedCustomerId, payload.addressId || 'addr_default');
+          address = userAddrs.find(a => a.isDefault) || userAddrs[0] || findAddress(authenticatedCustomerId, targetAddressId || 'addr_default');
         }
 
         if (address) {
@@ -3804,12 +3859,26 @@ async function handleRequest(port, req, res) {
         if (!serviceability.eligible) {
           return json(res, 422, { error: 'ADDRESS_NOT_SERVICEABLE', serviceability });
         }
-        const order = await newOrder(customerId, { ...payload, deliveryAddress: address, serviceability, deliveryAddressJson: JSON.stringify(address) }, cartItems);
-        if (order && (order.isStockError || order.isCatalogError || order.isPricingError || order.isPaymentMethodError)) {
-          return json(res, order.isStockError ? 409 : 400, { error: order.error, code: order.error, details: order });
+        const order = await newOrder(customerId, {
+          ...payload,
+          addressId: targetAddressId || (address && address.id) || null,
+          deliveryAddress: address,
+          serviceability,
+          deliveryAddressJson: JSON.stringify(address)
+        }, cartItems);
+        if (order && (order.isStockError || order.isCatalogError || order.isPricingError || order.isPaymentMethodError || order.error)) {
+          const status = order.isStockError ? 409 : (order.httpStatus || 400);
+          return json(res, status, { error: order.error, code: order.error, details: order });
         }
         db.carts[customerId] = [];
-        saveDb('ORDER_CHECKOUT');
+        if (appRepositories && appRepositories.cartRepo) {
+          try {
+            await appRepositories.cartRepo.clearCart(customerId);
+          } catch (_) {}
+        }
+        if (!appRepositories || !appRepositories.isProduction) {
+          saveDb('ORDER_CHECKOUT');
+        }
         return json(res, 200, orderWithHandoffFlag(order));
       }
 
@@ -3877,19 +3946,32 @@ async function handleRequest(port, req, res) {
         const existingIdem = findOrderByIdempotencyKey(payload.idempotencyKey, customerId);
         if (existingIdem) return json(res, 200, existingIdem);
         
-        if (appRepositories && appRepositories.isProduction && !payload.addressId) {
+        let targetAddressId = payload.addressId || (payload.deliveryAddress && payload.deliveryAddress.id) || null;
+        if (!targetAddressId && appRepositories && appRepositories.addressRepo) {
+          try {
+            const def = await appRepositories.addressRepo.getDefaultAddress(customerId);
+            if (def && def.id) targetAddressId = def.id;
+          } catch (_) {}
+        }
+        if (!targetAddressId) {
+          const userAddrs = (db.addresses && db.addresses[customerId]) || [];
+          const def = userAddrs.find(a => a.isDefault) || userAddrs[0];
+          if (def && def.id) targetAddressId = def.id;
+        }
+
+        if (appRepositories && appRepositories.isProduction && !targetAddressId) {
           return json(res, 400, { error: 'ADDRESS_ID_REQUIRED', message: 'Authoritative addressId is strictly required.' });
         }
 
         // Strict coordinate validation
         let address = null;
-        if (payload.addressId) {
+        if (targetAddressId) {
           if (appRepositories && appRepositories.addressRepo) {
-            address = await appRepositories.addressRepo.findAddressById(customerId, payload.addressId);
+            address = await appRepositories.addressRepo.findAddressById(customerId, targetAddressId);
           }
           if (!address && db.addresses) {
             for (const cId in db.addresses) {
-              const found = (db.addresses[cId] || []).find(a => a.id === payload.addressId);
+              const found = (db.addresses[cId] || []).find(a => a.id === targetAddressId);
               if (found) {
                 address = found;
                 break;
@@ -3897,17 +3979,15 @@ async function handleRequest(port, req, res) {
             }
           }
           if (!address) {
-            address = findAddress(customerId, payload.addressId);
-          }
-        } else if (!appRepositories || !appRepositories.isProduction) {
-          if (typeof payload.deliveryAddress === 'object') {
-            address = payload.deliveryAddress;
+            address = findAddress(customerId, targetAddressId);
           }
         }
-
+        if (!address && typeof payload.deliveryAddress === 'object') {
+          address = payload.deliveryAddress;
+        }
         if (!address && (!appRepositories || !appRepositories.isProduction)) {
           const userAddrs = (db.addresses && db.addresses[customerId]) || [];
-          address = userAddrs[0] || findAddress(customerId, payload.addressId || 'addr_default');
+          address = userAddrs[0] || findAddress(customerId, targetAddressId || 'addr_default');
         }
 
         if (address) {
@@ -3931,15 +4011,39 @@ async function handleRequest(port, req, res) {
           return json(res, 400, { error: 'INVALID_DELIVERY_LOCATION', message: 'A geocoded delivery address with valid latitude and longitude is strictly required.' });
         }
 
-        const order = await newOrder(customerId, { ...payload, deliveryAddress: address }, cartFor(customerId));
-        if (order && (order.isStockError || order.isCatalogError || order.isPricingError || order.isPaymentMethodError)) {
-          return json(res, order.isStockError ? 409 : 400, { error: order.error, code: order.error, details: order });
+        let checkoutCart = null;
+        if (appRepositories && appRepositories.cartRepo) {
+          try {
+            const dbCart = await appRepositories.cartRepo.getCart(customerId);
+            if (dbCart && Array.isArray(dbCart.items) && dbCart.items.length > 0) {
+              checkoutCart = dbCart.items;
+            }
+          } catch (_) {}
+        }
+        if (!checkoutCart || checkoutCart.length === 0) {
+          checkoutCart = cartFor(customerId);
+        }
+
+        const order = await newOrder(customerId, {
+          ...payload,
+          addressId: targetAddressId || (address && address.id) || null,
+          deliveryAddress: address
+        }, checkoutCart);
+
+        if (order && (order.isStockError || order.isCatalogError || order.isPricingError || order.isPaymentMethodError || order.error)) {
+          const statusCode = order.isStockError ? 409 : (order.httpStatus || 400);
+          return json(res, statusCode, { error: order.error, code: order.error, details: order });
         }
         db.carts[customerId] = [];
+        if (appRepositories && appRepositories.cartRepo) {
+          try {
+            await appRepositories.cartRepo.clearCart(customerId);
+          } catch (_) {}
+        }
         if (!appRepositories || !appRepositories.isProduction) {
           saveDb('ORDER_CREATION');
         }
-        return json(res, 200, order);
+        return json(res, 200, orderWithHandoffFlag(order));
       }
 
       async function applyCancellation(order, actor, reason) {
