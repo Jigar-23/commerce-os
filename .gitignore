@@ -1,7 +1,6 @@
 # Dependencies & Installed Packages
 node_modules/
 .pnpm-store/
-pnpm-lock.yaml
 
 # Build Outputs
 .next/
