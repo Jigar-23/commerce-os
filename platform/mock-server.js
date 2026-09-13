@@ -1884,6 +1884,11 @@ async function newOrder(customerId, payload, cartItems) {
     sellerId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'seller_rewari_01',
     storeId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'STORE_REWARI_01',
     fulfillmentStoreId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'STORE_REWARI_01',
+    fulfillmentDecision: (serviceability && serviceability.fulfillmentDecision) || {
+      storeId: payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].sellerId) || 'STORE_REWARI_01',
+      distanceKm: (serviceability && serviceability.distanceKm) || 1.2,
+      slaMinutes: slaMins || 15
+    },
     cancellation: null,
     cancellationRequest: null,
     trackingCheckpoints: [

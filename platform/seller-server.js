@@ -1023,6 +1023,13 @@ const server = http.createServer(async (req, res) => {
     try {
       await postToGateway(`/api/v1/orders/${encodeURIComponent(orderId)}/pack`, {}, 'POST');
     } catch (_) {}
+    try {
+      const { execSync } = require('child_process');
+      const cleanOId = orderId.replace(/'/g, "''");
+      const sql = `UPDATE orders SET status = 'PACKED', updated_at = NOW() WHERE id = '${cleanOId}' OR order_id = '${cleanOId}';`;
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      if (dbUrl) execSync(`psql "${dbUrl}" -c "${sql}" 2>/dev/null || true`);
+    } catch (_) {}
     const db = getDbData();
     const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
     if (order) {
@@ -1039,14 +1046,24 @@ const server = http.createServer(async (req, res) => {
   const readyMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/ready-for-pickup$/);
   if (readyMatch && req.method === 'POST') {
     const orderId = decodeURIComponent(readyMatch[1]);
+    try {
+      await postToGateway(`/api/v1/orders/${encodeURIComponent(orderId)}/ready-for-pickup`, {}, 'POST');
+    } catch (_) {}
+    try {
+      const { execSync } = require('child_process');
+      const cleanOId = orderId.replace(/'/g, "''");
+      const sql = `UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE id = '${cleanOId}' OR order_id = '${cleanOId}';`;
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+      if (dbUrl) execSync(`psql "${dbUrl}" -c "${sql}" 2>/dev/null || true`);
+    } catch (_) {}
     const db = getDbData();
     const order = (db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
     if (order) {
-      order.status = 'OUT_FOR_DELIVERY';
-      order.orderStatus = 'OUT_FOR_DELIVERY';
+      order.status = 'READY_FOR_PICKUP';
+      order.orderStatus = 'READY_FOR_PICKUP';
       saveDbData(db);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, orderId, status: 'OUT_FOR_DELIVERY' }));
+      res.end(JSON.stringify({ success: true, orderId, status: 'READY_FOR_PICKUP' }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'ORDER_NOT_FOUND' }));
