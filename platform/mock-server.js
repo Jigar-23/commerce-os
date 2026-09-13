@@ -2053,6 +2053,15 @@ async function newOrder(customerId, payload, cartItems) {
     }
     if (placeRes.order) {
       Object.assign(order, placeRes.order);
+      order.id = placeRes.order.id || placeRes.order.order_id || order.id;
+      order.orderId = order.id;
+      order.orderStatus = placeRes.order.status || order.orderStatus || 'PLACED';
+      order.status = order.orderStatus;
+      order.totalAmount = Number(placeRes.order.total_amount ?? order.totalAmount ?? 0);
+      order.deliverySlaMins = Number(order.deliverySlaMins || 15);
+      order.paymentStatus = placeRes.order.payment_status || order.paymentStatus || 'COD_PENDING';
+      order.paymentMethod = placeRes.order.payment_method || order.paymentMethod || 'COD';
+      order.deliveryOtp = placeRes.order.rawDeliveryPin || placeRes.order.deliveryOtp || order.deliveryOtp;
     }
   } else if (appRepositories && appRepositories.isProduction) {
     return { error: 'FATAL_TRANSACTION_ERROR: OrderRepository is required in production mode.', isStockError: false };

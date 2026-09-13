@@ -325,12 +325,12 @@ data class CustomerDeliverySessionDto(
 )
 
 data class CustomerOrderApiResponse(
-    val id: String,
-    val orderStatus: String,
-    val totalAmount: BigDecimal,
+    val id: String = "",
+    val orderStatus: String = "PLACED",
+    val totalAmount: BigDecimal = BigDecimal.ZERO,
     val paymentMethod: String = "COD",
-    val paymentStatus: String,
-    val deliverySlaMins: Int,
+    val paymentStatus: String = "COD_PENDING",
+    val deliverySlaMins: Int = 15,
     val deliveryOtp: String? = null,
     val deliverySession: CustomerDeliverySessionDto? = null,
     val deliveryHandoffOtpAvailable: Boolean? = null,
