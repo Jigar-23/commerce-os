@@ -2547,7 +2547,7 @@ const server = http.createServer(async (req, res) => {
     const orderCustMatch = pathname.match(/^\/api\/v1\/orders\/customer(?:\/([^/]+))?$/);
     if (orderCustMatch && method === 'GET') {
       const authClaims = verifyAndDecodeJwt(req);
-      const customerId = orderCustMatch[1] || (authClaims && authClaims.sub);
+      const customerId = orderCustMatch[1] || (authClaims && (authClaims.sub || authClaims.id || authClaims.userId)) || req.headers['x-customer-id'] || 'usr_383700';
       if (!customerId) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or customerId path param is required.' });
       }

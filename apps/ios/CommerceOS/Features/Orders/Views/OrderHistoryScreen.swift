@@ -33,7 +33,7 @@ public struct OrderHistoryScreen: View {
                     
                     // Refresh Button (Matching Android 38dp circle)
                     Button(action: {
-                        Task { await orderRepo.fetchCustomerOrders() }
+                        Task { await orderRepo.fetchCustomerOrders(customerId: container.apiClient.currentCustomerId) }
                     }) {
                         Circle()
                             .fill(Color.white)
@@ -62,7 +62,17 @@ public struct OrderHistoryScreen: View {
                 .padding(.horizontal, 14)
                 
                 // Orders List
-                if filteredOrders.isEmpty {
+                if orderRepo.isLoadingOrders && orderRepo.customerOrders.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Fetching your orders...")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(Color(hex: "64748B"))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
+                } else if filteredOrders.isEmpty {
                     emptyOrdersView
                         .padding(.top, 40)
                 } else {
@@ -82,7 +92,7 @@ public struct OrderHistoryScreen: View {
         .background(Color(hex: "F4F5F7").ignoresSafeArea())
         .onAppear {
             Task {
-                await orderRepo.fetchCustomerOrders()
+                await orderRepo.fetchCustomerOrders(customerId: container.apiClient.currentCustomerId)
             }
         }
         .sheet(item: Binding<IdentifiableOrderWrapper?>(
@@ -90,7 +100,7 @@ public struct OrderHistoryScreen: View {
             set: { trackedOrderId = $0?.value }
         )) { wrapper in
             NavigationView {
-                OrderTrackingScreen()
+                OrderTrackingScreen(orderId: wrapper.value)
                     .navigationTitle("Order Tracking")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {

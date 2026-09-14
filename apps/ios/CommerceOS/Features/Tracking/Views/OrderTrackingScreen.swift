@@ -42,7 +42,7 @@ public struct OrderTrackingScreen: View {
             }
             .navigationBarHidden(true)
             .onAppear {
-                container.trackingRepository.startLiveTracking()
+                container.trackingRepository.startLiveTracking(orderId: self.orderId)
                 if trackingData != nil {
                     startLiveActivityIfNeeded()
                 }

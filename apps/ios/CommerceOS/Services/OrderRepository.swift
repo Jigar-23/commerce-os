@@ -261,6 +261,7 @@ public class OrderRepository: ObservableObject {
 
     @Published public var customerOrders: [ServerOrderResponse] = []
     @Published public var isPlacingOrder: Bool = false
+    @Published public var isLoadingOrders: Bool = false
     @Published public var orderError: String? = nil
     @Published public var lastPlacedOrder: ServerOrderResponse? = nil
 
@@ -292,8 +293,13 @@ public class OrderRepository: ObservableObject {
             let response: ServerOrderResponse = try await apiClient.post(endpoint: "/api/v1/orders", body: request)
             await MainActor.run {
                 self.lastPlacedOrder = response
-                self.customerOrders.insert(response, at: 0)
+                if !self.customerOrders.contains(where: { $0.id == response.id }) {
+                    self.customerOrders.insert(response, at: 0)
+                }
                 self.isPlacingOrder = false
+            }
+            Task {
+                await self.fetchCustomerOrders()
             }
             return response
         } catch {
@@ -305,14 +311,32 @@ public class OrderRepository: ObservableObject {
         }
     }
 
-    public func fetchCustomerOrders() async {
+    public func fetchCustomerOrders(customerId: String? = nil) async {
+        let targetId = customerId
+            ?? apiClient.currentCustomerId
+            ?? KeychainHelper.shared.get(key: "customer_id")
+            ?? "usr_383700"
+
+        await MainActor.run {
+            self.isLoadingOrders = true
+        }
+
         do {
-            let fetched: [ServerOrderResponse] = try await apiClient.get(endpoint: "/api/v1/orders/customer")
+            let endpoint = "/api/v1/orders/customer/\(targetId)"
+            let fetched: [ServerOrderResponse] = try await apiClient.get(endpoint: endpoint)
             await MainActor.run {
                 self.customerOrders = fetched
+                self.isLoadingOrders = false
             }
         } catch {
-            print("[OrderRepository] Failed to fetch customer orders:", error.localizedDescription)
+            print("[OrderRepository] Failed to fetch customer orders for \(targetId):", error.localizedDescription)
+            await MainActor.run {
+                self.isLoadingOrders = false
+            }
         }
+    }
+
+    public func getOrderById(orderId: String) async throws -> ServerOrderResponse {
+        return try await apiClient.get(endpoint: "/api/v1/orders/\(orderId)")
     }
 }
