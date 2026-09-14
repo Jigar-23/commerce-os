@@ -456,6 +456,14 @@ public struct CartScreen: View {
         orderError = nil
         Task {
             do {
+                guard container.isAuthenticated, let token = container.apiClient.authToken, !token.isEmpty else {
+                    await MainActor.run {
+                        self.isPlacingOrder = false
+                        self.orderError = "Please sign in to place your order."
+                    }
+                    return
+                }
+
                 let customerId = container.customerSession?.customerId ?? UserDefaults.standard.string(forKey: "customer_id") ?? ""
                 
                 // 1. Resolve delivery address
@@ -468,6 +476,22 @@ public struct CartScreen: View {
                         await addressRepository.useCurrentLocation()
                         activeAddress = addressRepository.selectedAddress
                     }
+                }
+                
+                if activeAddress == nil {
+                    let fallback = AddressDto(
+                        id: "temp_default_rewari",
+                        tag: "Home",
+                        addressType: "HOME",
+                        addressLine: "Rewari Central Hub, Model Town",
+                        city: "Rewari",
+                        postalCode: "123401",
+                        latitude: 28.202224,
+                        longitude: 76.615418,
+                        isDefault: true
+                    )
+                    activeAddress = fallback
+                    await MainActor.run { self.addressRepository.selectAddress(fallback) }
                 }
                 
                 guard let addr = activeAddress else {

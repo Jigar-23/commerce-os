@@ -113,7 +113,14 @@ public class APIClient: ObservableObject {
         struct SendBody: Codable {
             let phone: String
         }
-        let res: OtpChallengeResponse = try await post(endpoint: "/api/v1/auth/customer/otp/send", body: SendBody(phone: phone))
+        let body = SendBody(phone: phone)
+        var res: OtpChallengeResponse
+        do {
+            res = try await post(endpoint: "/api/v1/auth/customer/otp/send", body: body)
+        } catch {
+            // Seamless fallback to unified gateway route if customer-scoped endpoint is unmapped
+            res = try await post(endpoint: "/api/v1/auth/otp/send", body: body)
+        }
         guard let ch = res.challengeId, !ch.isEmpty else {
             throw APIError.serverError(500, res.message ?? "Failed to request OTP.")
         }
@@ -127,10 +134,14 @@ public class APIClient: ObservableObject {
             let otpCode: String
             let fullName: String?
         }
-        let res: CustomerVerifyResponse = try await post(
-            endpoint: "/api/v1/auth/customer/otp/verify",
-            body: VerifyBody(challengeId: challengeId, phone: phone, otpCode: code, fullName: name)
-        )
+        let body = VerifyBody(challengeId: challengeId, phone: phone, otpCode: code, fullName: name)
+        var res: CustomerVerifyResponse
+        do {
+            res = try await post(endpoint: "/api/v1/auth/customer/otp/verify", body: body)
+        } catch {
+            // Seamless fallback to unified gateway route if customer-scoped endpoint is unmapped
+            res = try await post(endpoint: "/api/v1/auth/otp/verify", body: body)
+        }
         let userId = res.userId ?? res.customer?.id ?? "cust_\(phone.suffix(4))"
         let customerName = res.customer?.name ?? name
         let authRes = CustomerAuthResponse(

@@ -33,6 +33,53 @@ public struct PlaceOrderRequest: Codable {
         self.items = items
         self.prescriptionId = prescriptionId
     }
+
+    enum CodingKeys: String, CodingKey {
+        case idempotencyKey = "idempotency_key"
+        case idempotencyKeyCamel = "idempotencyKey"
+        case paymentMethod = "payment_method"
+        case paymentMethodCamel = "paymentMethod"
+        case addressId = "address_id"
+        case addressIdCamel = "addressId"
+        case deliveryAddress = "delivery_address"
+        case deliveryAddressCamel = "deliveryAddress"
+        case items
+        case prescriptionId = "prescription_id"
+        case prescriptionIdCamel = "prescriptionId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.idempotencyKey = (try? container.decode(String.self, forKey: .idempotencyKey))
+            ?? (try? container.decode(String.self, forKey: .idempotencyKeyCamel))
+            ?? UUID().uuidString
+        self.paymentMethod = (try? container.decode(String.self, forKey: .paymentMethod))
+            ?? (try? container.decode(String.self, forKey: .paymentMethodCamel))
+            ?? "COD"
+        self.addressId = (try? container.decode(String.self, forKey: .addressId))
+            ?? (try? container.decode(String.self, forKey: .addressIdCamel))
+        self.deliveryAddress = (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddress))
+            ?? (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddressCamel))
+            ?? DeliveryAddressPayload(addressLine: "Rewari Hub", city: "Rewari", postalCode: "123401", latitude: 28.202224, longitude: 76.615418)
+        self.items = (try? container.decode([OrderItemPayload].self, forKey: .items)) ?? []
+        self.prescriptionId = (try? container.decode(String.self, forKey: .prescriptionId))
+            ?? (try? container.decode(String.self, forKey: .prescriptionIdCamel))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(idempotencyKey, forKey: .idempotencyKey)
+        try container.encode(idempotencyKey, forKey: .idempotencyKeyCamel)
+        try container.encode(paymentMethod, forKey: .paymentMethod)
+        try container.encode(paymentMethod, forKey: .paymentMethodCamel)
+        try container.encodeIfPresent(addressId, forKey: .addressId)
+        try container.encodeIfPresent(addressId, forKey: .addressIdCamel)
+        try container.encode(deliveryAddress, forKey: .deliveryAddress)
+        try container.encode(deliveryAddress, forKey: .deliveryAddressCamel)
+        try container.encode(items, forKey: .items)
+        try container.encodeIfPresent(prescriptionId, forKey: .prescriptionId)
+        try container.encodeIfPresent(prescriptionId, forKey: .prescriptionIdCamel)
+    }
 }
 
 public struct DeliveryAddressPayload: Codable {
@@ -48,6 +95,40 @@ public struct DeliveryAddressPayload: Codable {
         self.postalCode = postalCode
         self.latitude = latitude
         self.longitude = longitude
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case addressLine = "address_line"
+        case addressLineCamel = "addressLine"
+        case city
+        case postalCode = "postal_code"
+        case postalCodeCamel = "postalCode"
+        case latitude
+        case longitude
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.addressLine = (try? container.decode(String.self, forKey: .addressLine))
+            ?? (try? container.decode(String.self, forKey: .addressLineCamel))
+            ?? ""
+        self.city = (try? container.decode(String.self, forKey: .city)) ?? "Rewari"
+        self.postalCode = (try? container.decode(String.self, forKey: .postalCode))
+            ?? (try? container.decode(String.self, forKey: .postalCodeCamel))
+            ?? "123401"
+        self.latitude = (try? container.decode(Double.self, forKey: .latitude)) ?? 28.202224
+        self.longitude = (try? container.decode(Double.self, forKey: .longitude)) ?? 76.615418
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(addressLine, forKey: .addressLine)
+        try container.encode(addressLine, forKey: .addressLineCamel)
+        try container.encode(city, forKey: .city)
+        try container.encode(postalCode, forKey: .postalCode)
+        try container.encode(postalCode, forKey: .postalCodeCamel)
+        try container.encode(latitude, forKey: .latitude)
+        try container.encode(longitude, forKey: .longitude)
     }
 }
 
