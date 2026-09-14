@@ -2039,29 +2039,38 @@ async function newOrder(customerId, payload, cartItems) {
   };
 
   if (appRepositories && appRepositories.orderRepo) {
-    const placeRes = await appRepositories.orderRepo.placeOrderTransactionally(customerId, order, deliverySession);
-    if (!placeRes.ok) {
+    try {
+      const placeRes = await appRepositories.orderRepo.placeOrderTransactionally(customerId, order, deliverySession);
+      if (!placeRes.ok) {
+        return {
+          error: placeRes.message || `Order placement failed: ${placeRes.error || 'UNKNOWN_ERROR'}`,
+          isStockError: placeRes.error === 'OUT_OF_STOCK' || placeRes.error === 'INSUFFICIENT_STOCK' || Boolean(placeRes.isStockError),
+          isCatalogError: placeRes.error === 'PRODUCT_NOT_FOUND' || placeRes.error === 'EMPTY_ORDER_ITEMS' || placeRes.error === 'CANONICAL_PRODUCT_ID_REQUIRED',
+          isPricingError: placeRes.error === 'PRICING_MISMATCH',
+          isPaymentMethodError: placeRes.error === 'INVALID_PAYMENT_METHOD',
+          sku: placeRes.sku,
+          httpStatus: placeRes.httpStatus || (placeRes.error === 'OUT_OF_STOCK' || placeRes.error === 'INSUFFICIENT_STOCK' ? 409 : 400)
+        };
+      }
+      if (placeRes.order) {
+        Object.assign(order, placeRes.order);
+        order.id = placeRes.order.id || placeRes.order.order_id || order.id;
+        order.orderId = order.id;
+        order.orderStatus = placeRes.order.status || order.orderStatus || 'PLACED';
+        order.status = order.orderStatus;
+        order.totalAmount = Number(placeRes.order.total_amount ?? order.totalAmount ?? 0);
+        order.deliverySlaMins = Number(order.deliverySlaMins || 15);
+        order.paymentStatus = placeRes.order.payment_status || order.paymentStatus || 'COD_PENDING';
+        order.paymentMethod = placeRes.order.payment_method || order.paymentMethod || 'COD';
+        order.deliveryOtp = placeRes.order.rawDeliveryPin || placeRes.order.deliveryOtp || order.deliveryOtp;
+      }
+    } catch (err) {
+      console.error('[OrderEngine] Transactional order placement failed:', err);
       return {
-        error: placeRes.message || `Order placement failed: ${placeRes.error || 'UNKNOWN_ERROR'}`,
-        isStockError: placeRes.error === 'OUT_OF_STOCK' || placeRes.error === 'INSUFFICIENT_STOCK' || Boolean(placeRes.isStockError),
-        isCatalogError: placeRes.error === 'PRODUCT_NOT_FOUND' || placeRes.error === 'EMPTY_ORDER_ITEMS' || placeRes.error === 'CANONICAL_PRODUCT_ID_REQUIRED',
-        isPricingError: placeRes.error === 'PRICING_MISMATCH',
-        isPaymentMethodError: placeRes.error === 'INVALID_PAYMENT_METHOD',
-        sku: placeRes.sku,
-        httpStatus: placeRes.httpStatus || (placeRes.error === 'OUT_OF_STOCK' || placeRes.error === 'INSUFFICIENT_STOCK' ? 409 : 400)
+        error: err.message || 'TRANSACTION_FAILURE: Could not complete order placement.',
+        httpStatus: 500,
+        isCatalogError: false
       };
-    }
-    if (placeRes.order) {
-      Object.assign(order, placeRes.order);
-      order.id = placeRes.order.id || placeRes.order.order_id || order.id;
-      order.orderId = order.id;
-      order.orderStatus = placeRes.order.status || order.orderStatus || 'PLACED';
-      order.status = order.orderStatus;
-      order.totalAmount = Number(placeRes.order.total_amount ?? order.totalAmount ?? 0);
-      order.deliverySlaMins = Number(order.deliverySlaMins || 15);
-      order.paymentStatus = placeRes.order.payment_status || order.paymentStatus || 'COD_PENDING';
-      order.paymentMethod = placeRes.order.payment_method || order.paymentMethod || 'COD';
-      order.deliveryOtp = placeRes.order.rawDeliveryPin || placeRes.order.deliveryOtp || order.deliveryOtp;
     }
   } else if (appRepositories && appRepositories.isProduction) {
     return { error: 'FATAL_TRANSACTION_ERROR: OrderRepository is required in production mode.', isStockError: false };
