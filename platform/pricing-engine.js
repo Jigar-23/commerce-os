@@ -93,10 +93,9 @@ function calculateCustomerOrderPricing({
   isCod = false
 }) {
   const subtotal = Math.round(Number(itemsSubtotal || 0) * 100) / 100;
-  const dist = Math.max(0.1, Number(distanceKm) || 1.0);
-  const deliveryFee = dist > 4.0 ? (29.0 + Math.round((dist - 4.0) * 5)) : 29.0;
-  const taxAmount = Math.round(subtotal * 0.05 * 100) / 100;
-  const codFee = isCod ? 15.0 : 0.0;
+  const deliveryFee = subtotal >= 199.0 ? 0.0 : 2.0;
+  const taxAmount = 0.0;
+  const codFee = 0.0;
   const totalAmount = Math.round((subtotal + deliveryFee + taxAmount + codFee) * 100) / 100;
 
   return {

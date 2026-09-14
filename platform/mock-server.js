@@ -312,6 +312,14 @@ function buildRiderDeliveryDTO(session) {
 function buildOpsDeliveryDTO(session) {
   if (!session) return null;
   const isStale = (Date.now() - (session.telemetry?.serverTimestamp || 0)) > 15000;
+  const order = (db.orders || []).find(o => o.id === session.orderId || o.orderId === session.orderId);
+  let orderItems = session.items || (order && order.items) || [];
+  if (typeof orderItems === 'string') {
+    try { orderItems = JSON.parse(orderItems); } catch (_) {}
+  }
+  const orderTotal = Number(session.codAmount || session.orderTotal || (order && (order.totalAmount ?? order.total_amount)) || 0);
+  const earnings = Math.max(35, Math.round((Number(session.distanceKm) || 1.5) * 15));
+
   return {
     deliveryId: session.deliveryId,
     orderId: session.orderId,
@@ -329,6 +337,7 @@ function buildOpsDeliveryDTO(session) {
     merchantAddress: session.merchantAddress,
     merchantLat: session.merchantLat,
     merchantLng: session.merchantLng,
+    merchantPhone: session.merchantPhone || '+91 98179 16180',
     state: session.state,
     secretOtp: session.otp,
     otpAttemptsLeft: session.otpAttemptsLeft,
@@ -338,6 +347,11 @@ function buildOpsDeliveryDTO(session) {
     codCollectedAmount: session.codCollectedAmount,
     codReconciled: session.codReconciled,
     telemetry: session.telemetry ? { ...session.telemetry, isStale } : null,
+    distanceKm: session.distanceKm != null ? Number(session.distanceKm) : 1.7,
+    orderTotal,
+    items: orderItems,
+    payoutFormatted: session.payoutFormatted || `₹${earnings}`,
+    earningsAmount: earnings,
   };
 }
 
@@ -791,9 +805,34 @@ function orderWithHandoffFlag(order) {
   if (!order) return order;
   const flag = otpVisibleFor(order);
   const otp = String(order.deliveryOtp || order.delivery_otp || order.deliverySession?.otp || order.deliverySession?.secretOtp || '4829');
+  const totalAmt = Number(order.totalAmount ?? order.total_amount ?? 0);
+  const delFee = Number(order.deliveryFee ?? order.delivery_fee ?? 2.0);
+  const taxAmt = Number(order.taxAmount ?? order.tax_amount ?? 0);
+  let parsedAddress = order.deliveryAddress ?? order.delivery_address ?? null;
+  if (typeof parsedAddress === 'string') {
+    try { parsedAddress = JSON.parse(parsedAddress); } catch (_) {}
+  }
+  let parsedItems = order.items ?? [];
+  if (typeof parsedItems === 'string') {
+    try { parsedItems = JSON.parse(parsedItems); } catch (_) {}
+  }
   return {
     ...order,
     orderStatus: order.orderStatus || order.status || 'PLACED',
+    status: order.orderStatus || order.status || 'PLACED',
+    totalAmount: totalAmt,
+    total_amount: totalAmt,
+    deliveryFee: delFee,
+    delivery_fee: delFee,
+    taxAmount: taxAmt,
+    tax_amount: taxAmt,
+    paymentMethod: order.paymentMethod || order.payment_method || 'COD',
+    payment_method: order.paymentMethod || order.payment_method || 'COD',
+    paymentStatus: order.paymentStatus || order.payment_status || 'COD_PENDING',
+    payment_status: order.paymentStatus || order.payment_status || 'COD_PENDING',
+    deliveryAddress: parsedAddress,
+    delivery_address: parsedAddress,
+    items: parsedItems,
     deliveryOtp: flag ? otp : null,
     deliveryHandoffOtpAvailable: flag
   };
@@ -2146,12 +2185,24 @@ async function newOrder(customerId, payload, cartItems) {
       deliveryLongitude: resolvedCustomerLng || 76.6190,
       estimatedEarnings: estimatedEarn,
       estimatedEarningsFormatted: '₹' + estimatedEarn,
+      earningsAmount: estimatedEarn,
+      earnings_amount: estimatedEarn,
+      totalEarnings: estimatedEarn,
+      payout: estimatedEarn,
+      orderTotal: totalAmt,
+      order_total: totalAmt,
+      cartValue: totalAmt,
+      totalAmount: totalAmt,
+      total_amount: totalAmt,
       distanceKm: 2.5,
       durationMins: 10,
       itemCount: sourceItems.length,
+      items: sourceItems,
       isColdChain: sourceItems.some(i => i.coldChainRequired),
       isCod,
       codAmountToCollect: isCod ? totalAmt : 0,
+      customerName: payload.customerName || (user && user.fullName) || 'Customer 6180',
+      merchantName: (deliverySession && deliverySession.merchantName) || 'Rewari Central Fulfillment Hub',
       offerCreatedAt: Date.now(),
       offerExpiresAt: Date.now() + 180000,
     };
