@@ -263,16 +263,18 @@ public struct AuthScreen: View {
     // MARK: - Actions
 
     private func sendOtp() {
-        guard phone.count == 10 else {
+        let digits = phone.filter { $0.isNumber }
+        guard digits.count >= 10 else {
             errorMessage = "Please enter a valid 10-digit mobile number."
             return
         }
+        let clean10 = String(digits.suffix(10))
         isLoading = true
         errorMessage = nil
 
         Task {
             do {
-                let formatted = "+91\(phone)"
+                let formatted = "+91\(clean10)"
                 let result = try await container.apiClient.sendOtp(phone: formatted)
                 await MainActor.run {
                     self.challengeId = result.challengeId
@@ -295,20 +297,24 @@ public struct AuthScreen: View {
     }
 
     private func verifyOtp() {
-        guard !otpCode.isEmpty else {
+        let otpDigits = otpCode.filter { $0.isNumber }
+        guard !otpDigits.isEmpty else {
             errorMessage = "Please enter the 6-digit OTP code."
             return
         }
+        let digits = phone.filter { $0.isNumber }
+        let clean10 = String(digits.suffix(10))
+        let formatted = "+91\(clean10)"
+        
         isLoading = true
         errorMessage = nil
 
         Task {
             do {
-                let formatted = "+91\(phone)"
                 let auth = try await container.apiClient.verifyOtp(
                     challengeId: challengeId,
                     phone: formatted,
-                    code: otpCode,
+                    code: otpDigits,
                     name: nil
                 )
                 await MainActor.run {

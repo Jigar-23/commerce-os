@@ -111,20 +111,18 @@ public class APIClient: ObservableObject {
     }
 
     public func sendOtp(phone: String) async throws -> OtpSendResult {
+        let digitsOnly = phone.filter { $0.isNumber }
+        let clean10 = String(digitsOnly.suffix(10))
+        let formatted = "+91\(clean10)"
+
         let payload: [String: Any] = [
-            "phone": phone,
-            "mobile": phone,
-            "mobileNumber": phone,
-            "mobile_number": phone
+            "phone": formatted,
+            "mobile": formatted,
+            "phoneNumber": formatted,
+            "phone_number": formatted
         ]
         let data = try JSONSerialization.data(withJSONObject: payload)
-        var res: OtpChallengeResponse
-        do {
-            res = try await request(endpoint: "/api/v1/auth/otp/send", method: "POST", body: data)
-        } catch {
-            // Seamless fallback to customer-scoped endpoint if unified route fails
-            res = try await request(endpoint: "/api/v1/auth/customer/otp/send", method: "POST", body: data)
-        }
+        let res: OtpChallengeResponse = try await request(endpoint: "/api/v1/auth/otp/send", method: "POST", body: data)
         guard let ch = res.challengeId, !ch.isEmpty else {
             throw APIError.serverError(500, res.message ?? "Failed to request OTP.")
         }
@@ -132,10 +130,15 @@ public class APIClient: ObservableObject {
     }
 
     public func verifyOtp(challengeId: String, phone: String, code: String, name: String? = nil) async throws -> CustomerAuthResponse {
+        let digitsOnly = phone.filter { $0.isNumber }
+        let clean10 = String(digitsOnly.suffix(10))
+        let formatted = "+91\(clean10)"
+
         let payload: [String: Any] = [
             "challengeId": challengeId,
             "challenge_id": challengeId,
-            "phone": phone,
+            "sessionId": challengeId,
+            "phone": formatted,
             "otp": code,
             "otpCode": code,
             "otp_code": code,
@@ -143,18 +146,12 @@ public class APIClient: ObservableObject {
             "full_name": name ?? ""
         ]
         let data = try JSONSerialization.data(withJSONObject: payload)
-        var res: CustomerVerifyResponse
-        do {
-            res = try await request(endpoint: "/api/v1/auth/otp/verify", method: "POST", body: data)
-        } catch {
-            // Seamless fallback to customer-scoped endpoint if unified route fails
-            res = try await request(endpoint: "/api/v1/auth/customer/otp/verify", method: "POST", body: data)
-        }
-        let userId = res.userId ?? res.customer?.id ?? "cust_\(phone.suffix(4))"
+        let res: CustomerVerifyResponse = try await request(endpoint: "/api/v1/auth/otp/verify", method: "POST", body: data)
+        let userId = res.userId ?? res.customer?.id ?? "cust_\(clean10)"
         let customerName = res.customer?.name ?? name
         let authRes = CustomerAuthResponse(
             userId: userId,
-            phone: res.phone ?? phone,
+            phone: res.phone ?? formatted,
             name: customerName,
             roles: ["ROLE_CUSTOMER"],
             accessToken: res.accessToken,
@@ -194,7 +191,7 @@ public class APIClient: ObservableObject {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        if let token = authToken, !token.isEmpty {
+        if let token = authToken, !token.isEmpty, !endpoint.contains("/auth/") {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
