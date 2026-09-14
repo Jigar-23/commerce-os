@@ -41,6 +41,7 @@ public struct CustomerAuthResponse: Codable {
 
 public class APIClient: ObservableObject {
     public static let shared = APIClient()
+    public static let sessionExpiredNotification = Notification.Name("CommerceOSUserSessionExpired")
 
     public var baseURLString: String {
         get { ServerEnvironmentConfig.shared.activeURLString }
@@ -110,16 +111,19 @@ public class APIClient: ObservableObject {
     }
 
     public func sendOtp(phone: String) async throws -> OtpSendResult {
-        struct SendBody: Codable {
-            let phone: String
-        }
-        let body = SendBody(phone: phone)
+        let payload: [String: Any] = [
+            "phone": phone,
+            "mobile": phone,
+            "mobileNumber": phone,
+            "mobile_number": phone
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
         var res: OtpChallengeResponse
         do {
-            res = try await post(endpoint: "/api/v1/auth/customer/otp/send", body: body)
+            res = try await request(endpoint: "/api/v1/auth/otp/send", method: "POST", body: data)
         } catch {
-            // Seamless fallback to unified gateway route if customer-scoped endpoint is unmapped
-            res = try await post(endpoint: "/api/v1/auth/otp/send", body: body)
+            // Seamless fallback to customer-scoped endpoint if unified route fails
+            res = try await request(endpoint: "/api/v1/auth/customer/otp/send", method: "POST", body: data)
         }
         guard let ch = res.challengeId, !ch.isEmpty else {
             throw APIError.serverError(500, res.message ?? "Failed to request OTP.")
@@ -128,19 +132,23 @@ public class APIClient: ObservableObject {
     }
 
     public func verifyOtp(challengeId: String, phone: String, code: String, name: String? = nil) async throws -> CustomerAuthResponse {
-        struct VerifyBody: Codable {
-            let challengeId: String
-            let phone: String
-            let otpCode: String
-            let fullName: String?
-        }
-        let body = VerifyBody(challengeId: challengeId, phone: phone, otpCode: code, fullName: name)
+        let payload: [String: Any] = [
+            "challengeId": challengeId,
+            "challenge_id": challengeId,
+            "phone": phone,
+            "otp": code,
+            "otpCode": code,
+            "otp_code": code,
+            "fullName": name ?? "",
+            "full_name": name ?? ""
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
         var res: CustomerVerifyResponse
         do {
-            res = try await post(endpoint: "/api/v1/auth/customer/otp/verify", body: body)
+            res = try await request(endpoint: "/api/v1/auth/otp/verify", method: "POST", body: data)
         } catch {
-            // Seamless fallback to unified gateway route if customer-scoped endpoint is unmapped
-            res = try await post(endpoint: "/api/v1/auth/otp/verify", body: body)
+            // Seamless fallback to customer-scoped endpoint if unified route fails
+            res = try await request(endpoint: "/api/v1/auth/customer/otp/verify", method: "POST", body: data)
         }
         let userId = res.userId ?? res.customer?.id ?? "cust_\(phone.suffix(4))"
         let customerName = res.customer?.name ?? name
@@ -200,6 +208,12 @@ public class APIClient: ObservableObject {
             }
 
             if httpRes.statusCode == 401 {
+                if let authHdr = req.value(forHTTPHeaderField: "Authorization"), !authHdr.isEmpty {
+                    await MainActor.run {
+                        self.clearAuth()
+                        NotificationCenter.default.post(name: APIClient.sessionExpiredNotification, object: nil)
+                    }
+                }
                 throw APIError.unauthenticated
             }
 

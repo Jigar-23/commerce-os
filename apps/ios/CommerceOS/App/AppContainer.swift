@@ -40,6 +40,14 @@ public final class AppContainer: ObservableObject {
         self.offlineCache = offlineCache
         
         self.loadSession()
+        
+        NotificationCenter.default.addObserver(
+            forName: APIClient.sessionExpiredNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.logout()
+        }
     }
     
     public func loadSession() {
@@ -72,6 +80,7 @@ public final class AppContainer: ObservableObject {
     public func login(customerId: String, phone: String, name: String? = nil, token: String) {
         UserDefaults.standard.set(customerId, forKey: "customer_id")
         UserDefaults.standard.set(phone, forKey: "customer_phone")
+        UserDefaults.standard.set(phone, forKey: "last_login_phone")
         UserDefaults.standard.set(token, forKey: "auth_token")
         if let name = name {
             UserDefaults.standard.set(name, forKey: "customer_name")

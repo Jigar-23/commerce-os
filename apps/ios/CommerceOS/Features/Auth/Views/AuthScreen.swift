@@ -252,6 +252,12 @@ public struct AuthScreen: View {
         .sheet(isPresented: $showServerSettings) {
             ServerSettingsSheet()
         }
+        .onAppear {
+            if phone.isEmpty, let savedPhone = UserDefaults.standard.string(forKey: "last_login_phone") {
+                let digits = savedPhone.filter { $0.isNumber }
+                phone = String(digits.suffix(10))
+            }
+        }
     }
 
     // MARK: - Actions

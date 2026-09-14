@@ -383,13 +383,33 @@ public struct CartScreen: View {
                     
                     // Error Banner if order placement fails
                     if let err = orderError {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(err)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.red)
-                            Spacer()
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text(err)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.red)
+                                Spacer()
+                            }
+                            
+                            if err.contains("sign in") || err.contains("Authentication") || err.contains("Session expired") {
+                                Button(action: {
+                                    container.logout()
+                                }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "person.crop.circle.badge.checkmark")
+                                        Text("Sign In Now")
+                                    }
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color(hex: "059669"))
+                                    .cornerRadius(8)
+                                }
+                                .padding(.top, 2)
+                            }
                         }
                         .padding(10)
                         .background(Color.red.opacity(0.12))
@@ -550,7 +570,12 @@ public struct CartScreen: View {
             } catch {
                 await MainActor.run {
                     self.isPlacingOrder = false
-                    self.orderError = "Order Placement Failed: \(error.localizedDescription)"
+                    if let apiErr = error as? APIError, case .unauthenticated = apiErr {
+                        self.container.logout()
+                        self.orderError = "Session expired. Please sign in with your phone number."
+                    } else {
+                        self.orderError = "Order Placement Failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }
