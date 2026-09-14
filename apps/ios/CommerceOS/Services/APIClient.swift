@@ -78,9 +78,10 @@ public class APIClient: ObservableObject {
             config.requestCachePolicy = .reloadIgnoringLocalCacheData
             self.session = URLSession(configuration: config)
         }
-        // Secure Keychain Loading
-        if let token = KeychainHelper.shared.get(key: "auth_token"),
-           let customerId = KeychainHelper.shared.get(key: "customer_id") {
+        // Dual-layer Keychain + UserDefaults Loading
+        let token = KeychainHelper.shared.get(key: "auth_token") ?? UserDefaults.standard.string(forKey: "auth_token")
+        let customerId = KeychainHelper.shared.get(key: "customer_id") ?? UserDefaults.standard.string(forKey: "customer_id")
+        if let token = token, let customerId = customerId, !token.isEmpty {
             self.authToken = token
             self.currentCustomerId = customerId
         }
@@ -95,6 +96,8 @@ public class APIClient: ObservableObject {
         self.currentCustomerId = customerId
         KeychainHelper.shared.save(key: "auth_token", data: token)
         KeychainHelper.shared.save(key: "customer_id", data: customerId)
+        UserDefaults.standard.set(token, forKey: "auth_token")
+        UserDefaults.standard.set(customerId, forKey: "customer_id")
     }
 
     public func clearAuth() {
@@ -102,6 +105,8 @@ public class APIClient: ObservableObject {
         self.currentCustomerId = nil
         KeychainHelper.shared.delete(key: "auth_token")
         KeychainHelper.shared.delete(key: "customer_id")
+        UserDefaults.standard.removeObject(forKey: "auth_token")
+        UserDefaults.standard.removeObject(forKey: "customer_id")
     }
 
     public struct OtpChallengeResponse: Codable {

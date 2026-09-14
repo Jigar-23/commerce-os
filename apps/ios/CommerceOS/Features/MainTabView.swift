@@ -64,6 +64,13 @@ public struct MainTabView: View {
             }
             .navigationViewStyle(.stack)
         }
+        .onChange(of: selectedTab) { newTab in
+            if newTab == 2 {
+                Task {
+                    await OrderRepository.shared.fetchCustomerOrders()
+                }
+            }
+        }
     }
 
     // MARK: - Android Material 3 Bottom Navigation Bar (Matches Android NavigationBar verbatim)
