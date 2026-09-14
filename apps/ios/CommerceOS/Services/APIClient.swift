@@ -67,6 +67,23 @@ public class APIClient: ObservableObject {
 
     private let session: URLSession
 
+    public static func extractSubFromJwt(_ token: String) -> String? {
+        let parts = token.components(separatedBy: ".")
+        guard parts.count >= 2 else { return nil }
+        var base64 = parts[1]
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 {
+            base64.append("=")
+        }
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sub = (json["sub"] as? String) ?? (json["subject"] as? String) else {
+            return nil
+        }
+        return sub
+    }
+
     public init(session: URLSession? = nil) {
         if let customSession = session {
             self.session = customSession
@@ -80,8 +97,11 @@ public class APIClient: ObservableObject {
         }
         // Dual-layer Keychain + UserDefaults Loading
         let token = KeychainHelper.shared.get(key: "auth_token") ?? UserDefaults.standard.string(forKey: "auth_token")
-        let customerId = KeychainHelper.shared.get(key: "customer_id") ?? UserDefaults.standard.string(forKey: "customer_id")
-        if let token = token, let customerId = customerId, !token.isEmpty {
+        var customerId = KeychainHelper.shared.get(key: "customer_id") ?? UserDefaults.standard.string(forKey: "customer_id")
+        if let token = token, !token.isEmpty {
+            if customerId == nil || customerId?.isEmpty == true {
+                customerId = APIClient.extractSubFromJwt(token)
+            }
             self.authToken = token
             self.currentCustomerId = customerId
         }

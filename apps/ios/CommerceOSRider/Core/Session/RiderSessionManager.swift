@@ -41,7 +41,19 @@ public final class RiderSessionManager: ObservableObject {
         isShiftOnline = newStatus
         UserDefaults.standard.set(newStatus, forKey: "rider_shift_online")
 
-        let body = ["online": newStatus]
+        struct ShiftPayload: Encodable {
+            let online: Bool
+            let isOnline: Bool
+            let shiftStatus: String
+            let status: String
+        }
+
+        let body = ShiftPayload(
+            online: newStatus,
+            isOnline: newStatus,
+            shiftStatus: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
+            status: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE"
+        )
         let _: [String: String]? = try? await apiClient.post(
             endpoint: .toggleShift(online: newStatus),
             body: body
@@ -61,14 +73,14 @@ public final class RiderSessionManager: ObservableObject {
             let session: ActiveDeliverySessionDto = try await apiClient.request(endpoint: .activeSession)
             self.activeSession = session
         } catch {
-            // No active session or network error
+            self.activeSession = nil
         }
 
         do {
             let prof: RiderProfileDto = try await apiClient.request(endpoint: .getProfile)
             self.profile = prof
         } catch {
-            // Keep existing fallback profile
+            // Keep existing profile
         }
     }
 }

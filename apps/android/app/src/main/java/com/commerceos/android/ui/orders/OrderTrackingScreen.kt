@@ -357,7 +357,7 @@ fun OrderTrackingContent(
                     ) {
                         Box(modifier = Modifier.size(8.dp).background(Color(0xFFF59E0B), CircleShape))
                         Text(
-                            text = "Live telemetry stream updating...",
+                            text = "Live telemetry stream reconnecting with exponential backoff...",
                             color = Color(0xFF92400E),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium

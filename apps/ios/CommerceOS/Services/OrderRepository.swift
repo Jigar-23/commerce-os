@@ -157,12 +157,28 @@ public struct ServerOrderItemResponse: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.sku = (try? container.decode(String.self, forKey: .sku)) ?? ""
         self.name = try? container.decode(String.self, forKey: .name)
-        let rawPrice = try? container.decode(Double.self, forKey: .price)
-        let rawUnitPrice = (try? container.decode(Double.self, forKey: .unitPrice))
+
+        var resolvedPrice: Double? = try? container.decode(Double.self, forKey: .price)
+        if resolvedPrice == nil, let s = try? container.decode(String.self, forKey: .price) {
+            resolvedPrice = Double(s)
+        }
+
+        var resolvedUnitPrice: Double? = (try? container.decode(Double.self, forKey: .unitPrice))
             ?? (try? container.decode(Double.self, forKey: .unit_price))
-        self.price = rawPrice ?? rawUnitPrice
-        self.unitPrice = rawUnitPrice ?? rawPrice
-        self.quantity = (try? container.decode(Int.self, forKey: .quantity)) ?? 1
+        if resolvedUnitPrice == nil, let s = (try? container.decode(String.self, forKey: .unitPrice)) ?? (try? container.decode(String.self, forKey: .unit_price)) {
+            resolvedUnitPrice = Double(s)
+        }
+
+        self.price = resolvedPrice ?? resolvedUnitPrice
+        self.unitPrice = resolvedUnitPrice ?? resolvedPrice
+
+        var resolvedQuantity: Int? = try? container.decode(Int.self, forKey: .quantity)
+        if resolvedQuantity == nil, let s = try? container.decode(String.self, forKey: .quantity) {
+            resolvedQuantity = Int(s)
+        } else if resolvedQuantity == nil, let d = try? container.decode(Double.self, forKey: .quantity) {
+            resolvedQuantity = Int(d)
+        }
+        self.quantity = resolvedQuantity ?? 1
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -279,11 +295,25 @@ public struct ServerOrderResponse: Identifiable, Codable {
             ?? (try? container.decode(String.self, forKey: .orderStatusCamel))
             ?? "PLACED"
         self.orderStatus = self.status
-        self.totalAmount = (try? container.decode(Double.self, forKey: .totalAmount))
+
+        var resolvedTotal: Double? = (try? container.decode(Double.self, forKey: .totalAmount))
             ?? (try? container.decode(Double.self, forKey: .totalAmountCamel))
-            ?? 0.0
-        self.deliveryFee = (try? container.decode(Double.self, forKey: .deliveryFee))
+        if resolvedTotal == nil {
+            if let s = (try? container.decode(String.self, forKey: .totalAmount)) ?? (try? container.decode(String.self, forKey: .totalAmountCamel)) {
+                resolvedTotal = Double(s)
+            }
+        }
+        self.totalAmount = resolvedTotal ?? 0.0
+
+        var resolvedFee: Double? = (try? container.decode(Double.self, forKey: .deliveryFee))
             ?? (try? container.decode(Double.self, forKey: .deliveryFeeCamel))
+        if resolvedFee == nil {
+            if let s = (try? container.decode(String.self, forKey: .deliveryFee)) ?? (try? container.decode(String.self, forKey: .deliveryFeeCamel)) {
+                resolvedFee = Double(s)
+            }
+        }
+        self.deliveryFee = resolvedFee
+
         self.paymentMethod = (try? container.decode(String.self, forKey: .paymentMethod))
             ?? (try? container.decode(String.self, forKey: .paymentMethodCamel))
         self.paymentStatus = (try? container.decode(String.self, forKey: .paymentStatus))
@@ -292,12 +322,41 @@ public struct ServerOrderResponse: Identifiable, Codable {
             ?? (try? container.decode(String.self, forKey: .deliveryOtpCamel))
         self.createdAt = (try? container.decode(String.self, forKey: .createdAt))
             ?? (try? container.decode(String.self, forKey: .createdAtCamel))
-        self.deliverySlaMins = (try? container.decode(Int.self, forKey: .deliverySlaMins))
+
+        var resolvedSla: Int? = (try? container.decode(Int.self, forKey: .deliverySlaMins))
             ?? (try? container.decode(Int.self, forKey: .deliverySlaMinsCamel))
-            ?? 10
-        self.deliveryAddress = (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddress))
-            ?? (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddressCamel))
-        self.items = try? container.decode([ServerOrderItemResponse].self, forKey: .items)
+        if resolvedSla == nil {
+            if let s = (try? container.decode(String.self, forKey: .deliverySlaMins)) ?? (try? container.decode(String.self, forKey: .deliverySlaMinsCamel)) {
+                resolvedSla = Int(s)
+            } else if let d = (try? container.decode(Double.self, forKey: .deliverySlaMins)) ?? (try? container.decode(Double.self, forKey: .deliverySlaMinsCamel)) {
+                resolvedSla = Int(d)
+            }
+        }
+        self.deliverySlaMins = resolvedSla ?? 10
+
+        // Delivery address: Object or stringified JSON
+        if let addr = (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddress))
+            ?? (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddressCamel)) {
+            self.deliveryAddress = addr
+        } else if let addrStr = (try? container.decode(String.self, forKey: .deliveryAddress))
+            ?? (try? container.decode(String.self, forKey: .deliveryAddressCamel)),
+            let data = addrStr.data(using: .utf8),
+            let decoded = try? JSONDecoder().decode(DeliveryAddressPayload.self, from: data) {
+            self.deliveryAddress = decoded
+        } else {
+            self.deliveryAddress = nil
+        }
+
+        // Items: Array or stringified JSON
+        if let itemsArray = try? container.decode([ServerOrderItemResponse].self, forKey: .items) {
+            self.items = itemsArray
+        } else if let itemsStr = try? container.decode(String.self, forKey: .items),
+                  let data = itemsStr.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([ServerOrderItemResponse].self, from: data) {
+            self.items = decoded
+        } else {
+            self.items = nil
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -376,25 +435,57 @@ public class OrderRepository: ObservableObject {
     }
 
     public func fetchCustomerOrders(customerId: String? = nil) async {
-        let targetId = customerId
+        var targetId = customerId
             ?? apiClient.currentCustomerId
             ?? UserDefaults.standard.string(forKey: "customer_id")
             ?? KeychainHelper.shared.get(key: "customer_id")
-            ?? "usr_383700"
+
+        if targetId == nil || targetId?.isEmpty == true {
+            if let token = apiClient.authToken, let sub = APIClient.extractSubFromJwt(token) {
+                targetId = sub
+                await MainActor.run {
+                    self.apiClient.currentCustomerId = sub
+                }
+            }
+        }
+
+        guard let resolvedTargetId = targetId, !resolvedTargetId.isEmpty else {
+            print("[OrderRepository] No customer ID or authentication session found; skipping orders fetch.")
+            await MainActor.run {
+                self.isLoadingOrders = false
+            }
+            return
+        }
 
         await MainActor.run {
             self.isLoadingOrders = true
         }
 
         do {
-            let endpoint = "/api/v1/orders/customer/\(targetId)"
-            let fetched: [ServerOrderResponse] = try await apiClient.get(endpoint: endpoint)
-            await MainActor.run {
-                self.customerOrders = fetched
-                self.isLoadingOrders = false
+            let endpoint = "/api/v1/orders/customer/\(resolvedTargetId)"
+            struct OrdersWrapper: Decodable {
+                let ok: Bool?
+                let orders: [ServerOrderResponse]?
+            }
+            if let fetched: [ServerOrderResponse] = try? await apiClient.get(endpoint: endpoint) {
+                await MainActor.run {
+                    self.customerOrders = fetched
+                    self.isLoadingOrders = false
+                }
+            } else if let wrapped: OrdersWrapper = try? await apiClient.get(endpoint: endpoint), let list = wrapped.orders {
+                await MainActor.run {
+                    self.customerOrders = list
+                    self.isLoadingOrders = false
+                }
+            } else {
+                let direct: [ServerOrderResponse] = try await apiClient.get(endpoint: endpoint)
+                await MainActor.run {
+                    self.customerOrders = direct
+                    self.isLoadingOrders = false
+                }
             }
         } catch {
-            print("[OrderRepository] Failed to fetch customer orders for \(targetId):", error.localizedDescription)
+            print("[OrderRepository] Failed to fetch customer orders for \(resolvedTargetId):", error.localizedDescription)
             await MainActor.run {
                 self.isLoadingOrders = false
             }

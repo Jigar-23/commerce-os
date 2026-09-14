@@ -56,7 +56,7 @@ public final class RiderOfferEventPipeline: ObservableObject {
                 if self.activeOffer?.offerId != first.offerId {
                     self.receiveOffer(offer: first)
                 }
-            } else if self.activeOffer != nil && (response.offers == nil || response.offers!.isEmpty) {
+            } else if self.activeOffer != nil && response.offers != nil && response.offers!.isEmpty {
                 self.dismissActiveOffer(reason: "RECONCILED_EMPTY")
             }
         } catch {
@@ -118,7 +118,12 @@ public final class RiderOfferEventPipeline: ObservableObject {
 
     public func receiveOffer(offer: DispatchOfferDto) {
         self.activeOffer = offer
-        self.offerTimeRemainingSeconds = 30
+        if let exp = offer.expiresAt {
+            let diff = Int(exp.timeIntervalSinceNow)
+            self.offerTimeRemainingSeconds = max(5, min(diff, 180))
+        } else {
+            self.offerTimeRemainingSeconds = 45
+        }
         self.startCountdown()
 
         if lastAlertedOfferId != offer.offerId {

@@ -99,12 +99,13 @@ const PORT = Number(process.env.PORT || 8080);
 // 2. Production PostgreSQL Connection Pool (Authoritative Supabase Cluster)
 let pool = null;
 if (DATABASE_URL) {
+  const isLocalDb = DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1');
   pool = new Pool({
     connectionString: DATABASE_URL,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
-    ssl: { rejectUnauthorized: false }
+    ssl: isLocalDb ? false : { rejectUnauthorized: false }
   });
   pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
 }

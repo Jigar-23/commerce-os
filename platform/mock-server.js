@@ -34,11 +34,11 @@ let appRepositories = null;
 let productionPgPool = null;
 if (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
   try {
-    const { Pool } = require('pg');
+    const isLocalDb = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
     productionPgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
       max: 20,
-      ssl: { rejectUnauthorized: false }
+      ssl: isLocalDb ? false : { rejectUnauthorized: false }
     });
     productionPgPool.query("ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;").catch(() => {});
     console.log('✅ Connected to Supabase PostgreSQL in mock-server');
@@ -2347,12 +2347,45 @@ async function newOrder(customerId, payload, cartItems) {
     db.offers = db.offers || {};
     db.offers[offerId] = offerRecord;
 
+    const uniqueNotifId = 'notif_' + crypto.createHash('sha256').update(`${order.id}_${offerId}`).digest('hex').slice(0, 16);
+
+    if (productionPgPool) {
+      try {
+        await productionPgPool.query(
+          `INSERT INTO offers (
+            id, offer_id, event_id, notification_id, delivery_id, order_id, rider_id, status,
+            offer_created_at, offer_expires_at, earnings_amount, delivery_distance_km, total_distance_km,
+            estimated_duration_mins, pricing_snapshot, waypoints, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'CREATED', $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
+          ON CONFLICT (offer_id) DO NOTHING`,
+          [
+            offerId,
+            offerId,
+            'evt_' + crypto.randomUUID(),
+            uniqueNotifId,
+            deliverySession.deliveryId,
+            order.id,
+            'rdr_9817916180',
+            Date.now(),
+            offerRecord.offerExpiresAt,
+            estimatedEarn,
+            2.5,
+            2.5,
+            10,
+            JSON.stringify({ baseFee: estimatedEarn, total: estimatedEarn }),
+            JSON.stringify([[28.2021899, 76.6153954], [resolvedCustomerLat || 28.1918, resolvedCustomerLng || 76.6081]])
+          ]
+        );
+      } catch (err) {
+        console.warn('[MockServer] Could not persist offer to PostgreSQL:', err.message);
+      }
+    }
+
     try {
       const storeDisplayName = resolvedStoreName;
       const itemsCount = (order.items && order.items.length > 0) ? order.items.length : 1;
       const notifTitle = `⚡ Order #${order.id.slice(-8).toUpperCase()} · ₹${estimatedEarn}`;
       const notifBody = `Pickup: ${storeDisplayName} (${itemsCount} items) • Earn ₹${estimatedEarn}`;
-      const uniqueNotifId = 'notif_' + crypto.createHash('sha256').update(`${order.id}_${offerId}`).digest('hex').slice(0, 16);
 
       const targetRiders = new Set();
       if (global.riderSSEConnections) {
@@ -5321,25 +5354,34 @@ async function handleRequest(port, req, res) {
             const dbOffers = await appRepositories.offerRepo.getActiveOffersForRider(riderId);
             if (dbOffers && dbOffers.length > 0) {
               const o = dbOffers[0];
-              return json(res, 200, {
+              const mapped = {
                 offerId: o.offer_id || o.offerId || o.id,
                 deliveryId: o.delivery_id || o.deliveryId,
                 orderId: o.order_id || o.orderId,
                 riderId: o.rider_id || o.riderId,
                 status: o.status,
                 orderStatus: o.order_status || o.orderStatus || 'READY_FOR_PICKUP',
-                payout: Number(o.total_earnings || o.payout || 35),
-                payoutFormatted: `₹${Number(o.total_earnings || o.payout || 35)}`,
-                pickupAddress: o.pickup_address || o.pickupAddress || 'Rewari Central Hub',
-                deliveryAddress: o.delivery_address || o.deliveryAddress || 'Customer Location',
+                payout: Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35),
+                payoutAmount: Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35),
+                earningsAmount: Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35),
+                payoutFormatted: `₹${Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35)}`,
+                pickupAddress: o.pickup_address || o.pickupAddress || o.merchantAddress || 'Rewari Central Hub',
+                deliveryAddress: o.delivery_address || o.deliveryAddress || o.customerAddress || 'Customer Location',
                 customerName: o.customer_name || o.customerName || 'Customer',
                 merchantName: o.merchant_name || o.merchantName || 'CommerceOS Central Hub',
                 distanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
-                estimatedTimeMins: Number(o.total_duration_mins || o.estimatedTimeMins || 12),
+                totalDistanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
+                estimatedTimeMins: Number(o.total_duration_mins || o.estimatedDurationMins || o.estimatedTimeMins || 12),
                 isCod: Boolean(o.is_cod != null ? o.is_cod : o.isCod),
-                codAmountToCollect: Number(o.cod_amount || o.codAmountToCollect || 0),
+                codAmountToCollect: Number(o.cod_amount || o.codAmount || o.codAmountToCollect || 0),
                 waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
                 serverTime: now
+              };
+              return json(res, 200, {
+                ok: true,
+                count: dbOffers.length,
+                offers: [mapped],
+                ...mapped
               });
             }
           } catch (err) {
@@ -5354,35 +5396,46 @@ async function handleRequest(port, req, res) {
                FROM offers o
                LEFT JOIN orders ord ON ord.order_id = o.order_id
                WHERE (o.rider_id = $1 OR o.rider_id IS NULL)
-                 AND o.status IN ('CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
-                 AND o.expires_at > NOW()
+                 AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                 AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint)
                ORDER BY o.created_at DESC LIMIT 1`,
               [riderId]
             );
             if (offRes.rows.length > 0) {
               const o = offRes.rows[0];
-              return json(res, 200, {
+              const mapped = {
                 offerId: o.offer_id || o.id,
                 deliveryId: o.delivery_id,
                 orderId: o.order_id,
                 riderId: o.rider_id,
                 status: o.status,
                 orderStatus: o.order_status || 'READY_FOR_PICKUP',
-                payout: Number(o.total_earnings || 35),
-                payoutFormatted: `₹${Number(o.total_earnings || 35)}`,
+                payout: Number(o.earnings_amount || o.total_earnings || 35),
+                payoutAmount: Number(o.earnings_amount || o.total_earnings || 35),
+                earningsAmount: Number(o.earnings_amount || o.total_earnings || 35),
+                payoutFormatted: `₹${Number(o.earnings_amount || o.total_earnings || 35)}`,
                 pickupAddress: 'Rewari Central Hub',
                 deliveryAddress: 'Customer Location',
                 customerName: 'Customer',
                 merchantName: 'CommerceOS Central Hub',
                 distanceKm: Number(o.total_distance_km || 2.1),
-                estimatedTimeMins: Number(o.total_duration_mins || 12),
+                totalDistanceKm: Number(o.total_distance_km || 2.1),
+                estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 12),
                 isCod: true,
                 codAmountToCollect: Number(o.total_amount || 0),
                 waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
                 serverTime: now
+              };
+              return json(res, 200, {
+                ok: true,
+                count: 1,
+                offers: [mapped],
+                ...mapped
               });
             }
-          } catch (_) {}
+          } catch (err) {
+            console.warn('[MockServer] Error querying active offers from productionPgPool:', err.message);
+          }
         }
 
         const activeOffers = Object.values(db.offers || {}).filter(
