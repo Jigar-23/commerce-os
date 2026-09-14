@@ -93,7 +93,7 @@ fun ZomatoDarkMapView(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B1120))) {
+    Box(modifier = modifier.fillMaxSize().background(Color(0xFF0D0F14))) {
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
@@ -105,7 +105,7 @@ fun ZomatoDarkMapView(
                     settings.domStorageEnabled = true
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
-                    setBackgroundColor(0xFF0B1120.toInt())
+                    setBackgroundColor(0xFF0D0F14.toInt())
 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -160,8 +160,9 @@ fun ZomatoDarkMapView(
             }
         } else if (isRouteLoading) {
             Surface(
-                color = Color(0xFF1E293B).copy(alpha = 0.9f),
+                color = Color(0xFF16181F).copy(alpha = 0.9f),
                 shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 12.dp)
@@ -170,7 +171,7 @@ fun ZomatoDarkMapView(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF38BDF8), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF10B981), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Updating route…", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
@@ -180,8 +181,9 @@ fun ZomatoDarkMapView(
         // Rider GPS Status Pill
         if (!hasRiderLocation) {
             Surface(
-                color = Color(0xFF1E293B).copy(alpha = 0.9f),
+                color = Color(0xFF16181F).copy(alpha = 0.9f),
                 shape = RoundedCornerShape(20.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp)
@@ -190,7 +192,7 @@ fun ZomatoDarkMapView(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF38BDF8), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF10B981), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Waiting for live GPS fix…", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF94A3B8))
                 }
@@ -218,8 +220,8 @@ fun ZomatoDarkMapView(
             onClick = {
                 webViewRef?.evaluateJavascript("recenterMap();", null)
             },
-            containerColor = Color(0xFF1E293B),
-            contentColor = Color(0xFF38BDF8),
+            containerColor = Color(0xFF16181F),
+            contentColor = Color(0xFF10B981),
             shape = CircleShape,
             modifier = Modifier
                 .align(Alignment.BottomEnd)

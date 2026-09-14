@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 public enum ServerEnvironmentPreset: String, CaseIterable, Identifiable {
-    case lanGateway = "Local LAN Gateway (192.168.1.52:3000)"
+    case lanGateway = "Local LAN Gateway (192.168.1.76:3000)"
     case cloudRender = "Cloud Production (Render)"
     case localSimulator = "Localhost Simulator (3000)"
     case custom = "Custom Server Endpoint"
@@ -12,7 +12,7 @@ public enum ServerEnvironmentPreset: String, CaseIterable, Identifiable {
     public var defaultURLString: String {
         switch self {
         case .lanGateway:
-            return "http://192.168.1.52:3000"
+            return "http://192.168.1.76:3000"
         case .cloudRender:
             return "https://commerce-os-api.onrender.com"
         case .localSimulator:
@@ -55,22 +55,9 @@ public final class ServerEnvironmentConfig: ObservableObject {
     private init() {
         let initialPreset: ServerEnvironmentPreset = .cloudRender
         self.activePreset = initialPreset
-
-        var urlToUse = ServerEnvironmentPreset.cloudRender.defaultURLString
-        if let savedURL = UserDefaults.standard.string(forKey: userDefaultsKey), !savedURL.isEmpty {
-            if savedURL.contains("localhost") || savedURL.contains("127.0.0.1") || savedURL.contains("192.168.") {
-                // Heal any stale local/LAN URL to the live Render cloud server
-                urlToUse = ServerEnvironmentPreset.cloudRender.defaultURLString
-                UserDefaults.standard.set(urlToUse, forKey: userDefaultsKey)
-                UserDefaults.standard.set(ServerEnvironmentPreset.cloudRender.rawValue, forKey: presetKey)
-            } else {
-                urlToUse = savedURL
-            }
-        } else {
-            UserDefaults.standard.set(urlToUse, forKey: userDefaultsKey)
-            UserDefaults.standard.set(ServerEnvironmentPreset.cloudRender.rawValue, forKey: presetKey)
-        }
-        self.activeURLString = urlToUse
+        self.activeURLString = ServerEnvironmentPreset.cloudRender.defaultURLString
+        UserDefaults.standard.set(activeURLString, forKey: userDefaultsKey)
+        UserDefaults.standard.set(activePreset.rawValue, forKey: presetKey)
 
         // Run initial connectivity probe
         checkHealth()
@@ -78,9 +65,6 @@ public final class ServerEnvironmentConfig: ObservableObject {
 
     public var activeBaseURL: URL {
         let trimmed = activeURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("localhost") || trimmed.contains("127.0.0.1") || trimmed.contains("192.168.") {
-            return URL(string: ServerEnvironmentPreset.cloudRender.defaultURLString)!
-        }
         return URL(string: trimmed) ?? URL(string: ServerEnvironmentPreset.cloudRender.defaultURLString)!
     }
 

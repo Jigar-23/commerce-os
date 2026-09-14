@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -137,8 +138,9 @@ fun RiderLiveNavigationView(
     val displayEtaMins = routeDurationMins ?: session.estimatedTimeMins ?: 0
 
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+        border = BorderStroke(1.dp, Color(0xFF262933)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onViewOrderDetails)
@@ -151,16 +153,25 @@ fun RiderLiveNavigationView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Surface(
-                        color = if (isPhase1) Color(0xFF0284C7) else Color(0xFFD97706),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = if (isPhase1) Color(0xFF0284C7) else Color(0xFFD97706),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Text(
+                                text = if (isPhase1) "Going to pickup" else "On the way to customer",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isPhase1) "Going to pickup" else "On the way to customer",
+                            text = "ORDER #${session.orderId.takeLast(8).uppercase()}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            color = Color(0xFF38BDF8)
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
@@ -218,7 +229,8 @@ fun RiderLiveNavigationView(
 
                 if (isRouteLoading) {
                     Surface(
-                        color = Color(0xFF0F172A).copy(alpha = 0.85f),
+                        color = Color(0xFF16181F).copy(alpha = 0.9f),
+                        border = BorderStroke(1.dp, Color(0xFF262933)),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -251,7 +263,8 @@ fun RiderLiveNavigationView(
                     onClick = {
                         RiderNavigationUtils.launchExternalMaps(context, targetLat, targetLng, targetName)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22252E)),
+                    border = BorderStroke(1.dp, Color(0xFF2B2F3B)),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1.2f).height(42.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
@@ -266,7 +279,8 @@ fun RiderLiveNavigationView(
                     onClick = {
                         RiderNavigationUtils.dialPhoneNumber(context, contactPhone)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22252E)),
+                    border = BorderStroke(1.dp, Color(0xFF2B2F3B)),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f).height(42.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
@@ -295,7 +309,7 @@ fun RiderLiveNavigationView(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isWithinStoreArrivalRadius) Color(0xFF0284C7) else Color(0xFF1E293B)
+                                containerColor = if (isWithinStoreArrivalRadius) Color(0xFF0284C7) else Color(0xFF22252E)
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth().height(54.dp)
@@ -436,7 +450,7 @@ fun RiderLiveNavigationView(
                     Text("Cancel", color = Color(0xFF94A3B8))
                 }
             },
-            containerColor = Color(0xFF0F172A),
+            containerColor = Color(0xFF16181F),
             shape = RoundedCornerShape(16.dp)
         )
     }

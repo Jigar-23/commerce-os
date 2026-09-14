@@ -9,10 +9,11 @@
     "services/*"
   ],
   "scripts": {
+    "start": "node platform/server/production-server.js",
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "mock-api": "node platform/mock-server.js",
-    "dev:all": "node platform/mock-server.js & turbo run dev",
+    "mock-api": "node platform/server/production-server.js",
+    "dev:all": "node platform/server/production-server.js & turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:guards": "node platform/test-production-static-guards.test.js",

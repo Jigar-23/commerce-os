@@ -16,9 +16,7 @@ services:
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        fromDatabase:
-          name: commerce-os-db
-          property: connectionString
+        value: postgresql://postgres.yjahldakwazqquznngsz:Jigsi%40311103@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres
       - key: REDIS_URL
         fromService:
           type: redis
@@ -93,13 +91,3 @@ services:
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
-databases:
-  # -------------------------------------------------------------
-  # 5. Authoritative PostgreSQL Database Cluster
-  # -------------------------------------------------------------
-  - name: commerce-os-db
-    plan: starter
-    region: singapore
-    postgresMajorVersion: "16"
-    databaseName: commerceos_production
-    user: commerceos_admin

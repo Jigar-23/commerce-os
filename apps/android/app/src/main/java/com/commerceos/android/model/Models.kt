@@ -136,13 +136,28 @@ data class RefreshTokenRequest(
     val refreshToken: String
 )
 
-data class AuthResponse(
-    val userId: String,
-    val email: String,
-    val roles: Set<String>,
-    val accessToken: String,
-    val refreshToken: String
+data class AuthCustomerDto(
+    val id: String? = null,
+    val phone: String? = null,
+    val name: String? = null,
+    val email: String? = null
 )
+
+data class AuthResponse(
+    val userId: String? = null,
+    val phone: String? = null,
+    val email: String? = null,
+    val fullName: String? = null,
+    val roles: Set<String> = emptySet(),
+    val accessToken: String = "",
+    val refreshToken: String? = null,
+    val customer: AuthCustomerDto? = null
+) {
+    val resolvedCustomerId: String
+        get() = userId?.takeIf { it.isNotBlank() }
+            ?: customer?.id?.takeIf { it.isNotBlank() }
+            ?: ""
+}
 
 // Server-owned address book (GET /api/v1/customers/:id/addresses)
 data class ApiAddress(
@@ -328,6 +343,11 @@ data class CustomerOrderApiResponse(
     val id: String = "",
     val orderStatus: String = "PLACED",
     val totalAmount: BigDecimal = BigDecimal.ZERO,
+    val total_amount: BigDecimal? = null,
+    val deliveryFee: BigDecimal? = null,
+    val delivery_fee: BigDecimal? = null,
+    val taxAmount: BigDecimal? = null,
+    val tax_amount: BigDecimal? = null,
     val paymentMethod: String = "COD",
     val paymentStatus: String = "COD_PENDING",
     val deliverySlaMins: Int = 15,
@@ -347,6 +367,12 @@ data class CustomerOrderApiResponse(
     val riderPhone: String? = null,
     val riderVehicle: String? = null
 ) {
+    val effectiveTotalAmount: BigDecimal
+        get() = if (totalAmount > BigDecimal.ZERO) totalAmount else (total_amount ?: BigDecimal.ZERO)
+
+    val effectiveDeliveryFee: BigDecimal
+        get() = deliveryFee ?: delivery_fee ?: BigDecimal("2.00")
+
     val effectiveDeliveryPin: String?
         get() = deliveryOtp?.takeIf { it.isNotBlank() } ?: deliverySession?.otp?.takeIf { it.isNotBlank() }
 }

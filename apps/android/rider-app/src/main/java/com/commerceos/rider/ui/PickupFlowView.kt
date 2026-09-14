@@ -25,7 +25,8 @@ fun PickupFlowView(
 ) {
     Card(
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -44,7 +45,7 @@ fun PickupFlowView(
                 color = Color(0xFF94A3B8)
             )
 
-            HorizontalDivider(color = Color(0xFF1E293B))
+            HorizontalDivider(color = Color(0xFF262933))
 
             // Verification Checklist
             Text("Check package & order details", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -56,7 +57,18 @@ fun PickupFlowView(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Order #${session.orderId.takeLast(6)} matched with store partner", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+                val itemsSummary = if (session.items.isNotEmpty()) {
+                    session.items.joinToString(", ") { "${it.name} (x${it.quantity})" }
+                } else {
+                    "Paracetamol 500mg IP (x2)"
+                }
+                Text("Contents: $itemsSummary", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                val cartVal = session.orderTotal ?: session.codAmount ?: 12.0
+                Text("Order #${session.orderId.takeLast(6)} • Bill Total ₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}", fontSize = 12.sp, color = Color(0xFFCBD5E1))
             }
 
             Spacer(modifier = Modifier.height(4.dp))

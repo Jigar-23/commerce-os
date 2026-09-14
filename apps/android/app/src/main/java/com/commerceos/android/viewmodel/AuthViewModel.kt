@@ -172,10 +172,10 @@ class AuthViewModel(private val authUseCase: AuthUseCase) : ViewModel() {
                     uiState = uiState.copy(isLoading = false)
                     _events.trySend(
                         AuthEvent.Authenticated(
-                            customerId = result.data.userId,
+                            customerId = result.data.resolvedCustomerId,
                             phone = uiState.phone,
                             accessToken = result.data.accessToken,
-                            refreshToken = result.data.refreshToken
+                            refreshToken = result.data.refreshToken.orEmpty()
                         )
                     )
                 }

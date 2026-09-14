@@ -4,273 +4,474 @@ public struct HomeScreen: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var cartStore: CartLocalStore
     @EnvironmentObject private var configProvider: ClientConfigProvider
+    @EnvironmentObject private var addressRepository: AddressRepository
     @ObservedObject private var serverConfig = ServerEnvironmentConfig.shared
     @State private var selectedCategory: String = "All"
     @State private var products: [ProductDto] = []
     @State private var buyAgainProducts: [ProductDto] = []
     @State private var homeFeed: HomeFeedResponse? = nil
     @State private var isLoading: Bool = false
-    @State private var showServerSettingsSheet: Bool = false
+    private enum HomeSheetDestination: Identifiable {
+        case account
+        case addressSelection
+        case addAddressFlow
+        case serverSettings
+        case productDetail(ProductDto)
+
+        var id: String {
+            switch self {
+            case .account: return "account"
+            case .addressSelection: return "addressSelection"
+            case .addAddressFlow: return "addAddressFlow"
+            case .serverSettings: return "serverSettings"
+            case .productDetail(let prod): return "product_\(prod.id)"
+            }
+        }
+    }
+    @State private var activeSheet: HomeSheetDestination? = nil
+    @State private var searchHintIndex: Int = 0
     let onOpenCatalog: () -> Void
     
-    @State private var categories: [String] = ["All"]
+    @State private var categories: [String] = ["All", "Pain & Fever", "Cold & Cough", "Diabetes", "Antibiotics", "Vitamins", "Acidity & Gas"]
+    
+    private let searchHints = [
+        "Search medicines, e.g. Dolo 650...",
+        "Search for Paracetamol, Crocin...",
+        "Search for Augmentin 625 Duo...",
+        "Search for Benadryl Cough syrup...",
+        "Search for Glycomet, Insulin...",
+        "Search for Pan 40, Digene..."
+    ]
+
+    private struct MedicalCategoryItem: Identifiable {
+        let id: String
+        let name: String
+        let query: String
+        let imageUrl: String
+    }
+
+    private let medicineCategories: [MedicalCategoryItem] = [
+        MedicalCategoryItem(
+            id: "pain_fever",
+            name: "Pain & Fever",
+            query: "Pain & Fever",
+            imageUrl: "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
+        ),
+        MedicalCategoryItem(
+            id: "cold_cough",
+            name: "Cold & Cough",
+            query: "Cold & Cough",
+            imageUrl: "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg"
+        ),
+        MedicalCategoryItem(
+            id: "diabetes",
+            name: "Diabetes",
+            query: "Diabetes",
+            imageUrl: "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg"
+        ),
+        MedicalCategoryItem(
+            id: "antibiotics",
+            name: "Antibiotics",
+            query: "Antibiotics",
+            imageUrl: "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg"
+        ),
+        MedicalCategoryItem(
+            id: "vitamins",
+            name: "Vitamins",
+            query: "Vitamins",
+            imageUrl: "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg"
+        ),
+        MedicalCategoryItem(
+            id: "acidity_gas",
+            name: "Acidity & Gas",
+            query: "Acidity & Gas",
+            imageUrl: "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
+        )
+    ]
     
     public init(onOpenCatalog: @escaping () -> Void = {}) {
         self.onOpenCatalog = onOpenCatalog
     }
     
     public var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Top Location & SLA Bar (Matching Android HomeScreen.kt)
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 4) {
-                                Text("Delivery in")
-                                    .font(.system(size: 19, weight: .black))
-                                    .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                                Text("11 mins")
-                                    .font(.system(size: 19, weight: .black))
-                                    .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
-                            }
-                            
-                            HStack(spacing: 4) {
-                                Image(systemName: "mappin.and.ellipse")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
-                                Text("Flat 402, Green Glen Heights, Bellandur")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        Button(action: { showServerSettingsSheet = true }) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color(.systemGray6))
-                                    .frame(width: 40, height: 40)
-                                    .overlay(Circle().stroke(CommerceOSTheme.Colors.border, lineWidth: 1))
-                                Image(systemName: "person.crop.circle.fill")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(CommerceOSTheme.Colors.brandSecondary)
-                            }
-                        }
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 14) {
+                // 1. Fixed First-Viewport Chrome: Delivery Address Widget (Verbatim Android HomeScreen.kt)
+                deliveryAddressWidget
+                
+                // 2. Universal Search Bar (Verbatim Android UniversalSearchBar)
+                universalSearchBar
+                
+                // 3. Medicine Popular Categories Rail (Verbatim Android MedicineCategoryRail)
+                medicineCategoryRail
+                
+                // 4. Hero Campaign Banner (Verbatim Android HeroCampaignWidget)
+                heroCampaignWidget
+                
+                // 5. Category Filter Chips
+                categoryFilterChips
+                
+                // 6. Buy Again Shelf (if any)
+                if !buyAgainProducts.isEmpty {
+                    buyAgainShelf
+                }
+                
+                // 7. Trending & Popular Products Section
+                productsSection
+                
+                Spacer(minLength: 90)
+            }
+            .padding(.top, 4)
+        }
+        .background(Color(hex: "F4F5F7").ignoresSafeArea())
+        .sheet(item: $activeSheet) { destination in
+            switch destination {
+            case .account:
+                AccountScreen()
+            case .addressSelection:
+                AddressSelectionBottomSheet(
+                    addressRepository: addressRepository,
+                    customerId: container.customerSession?.customerId ?? "",
+                    onDismiss: { activeSheet = nil },
+                    onAddNewAddress: {
+                        activeSheet = .addAddressFlow
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                    
-                    // Universal Search Bar (Matching Android UniversalSearchBar)
-                    Button(action: onOpenCatalog) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
-                            Text("Search \"fresh milk, medicines, fruits, essentials...\"")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(Color(.placeholderText))
-                            Spacer()
-                            Image(systemName: "mic.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .cornerRadius(12)
+                )
+            case .addAddressFlow:
+                AddAddressFlowView(onSaveAddress: { newAddr in
+                    addressRepository.selectAddress(newAddr)
+                    activeSheet = nil
+                })
+            case .serverSettings:
+                ServerSettingsSheet()
+            case .productDetail(let product):
+                ProductDetailSheet(product: product)
+            }
+        }
+        .task {
+            loadProducts()
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                withAnimation {
+                    searchHintIndex = (searchHintIndex + 1) % searchHints.count
+                }
+            }
+        }
+    }
+    
+    // MARK: - Delivery Address Widget (Matching Android DeliveryAddressWidget)
+    private var deliveryAddressWidget: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Button(action: { activeSheet = .addressSelection }) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(Color(hex: "059669"))
+                        Text(addressRepository.locationHeaderTitle)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(hex: "64748B"))
+                    }
+
+                    HStack(spacing: 4) {
+                        Text("Delivering in")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(Color(hex: "64748B"))
+                        Text("\(addressRepository.calculatedEtaMinutes) mins")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color(hex: "059669"))
+                    }
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Spacer()
+
+            Button(action: { activeSheet = .account }) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: "ECFDF5"))
+                        .frame(width: 38, height: 38)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
+                            Circle()
+                                .stroke(Color(hex: "10B981"), lineWidth: 1.2)
                         )
-                        .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 2)
-                        .padding(.horizontal)
-                    }
                     
-                    // Quick Categories Rail (Matching Android 8-tile QuickCategoriesRail)
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Explore Categories")
-                            .font(.system(size: 14, weight: .black))
-                            .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                            .padding(.horizontal)
-                        
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                            QuickCategoryTileView(icon: "cart.fill", title: "Groceries", bgColor: Color(hex: "E8F5E9"), iconColor: Color(hex: "16A34A"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "cross.case.fill", title: "Medicines", bgColor: Color(hex: "E0F2FE"), iconColor: Color(hex: "0284C7"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "star.fill", title: "Top Deals", bgColor: Color(hex: "FEF3C7"), iconColor: Color(hex: "D97706"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "house.fill", title: "Essentials", bgColor: Color(hex: "EDE9FE"), iconColor: Color(hex: "7C3AED"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "sparkles", title: "Personal", bgColor: Color(hex: "FCE7F3"), iconColor: Color(hex: "DB2777"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "bolt.fill", title: "Electronics", bgColor: Color(hex: "CCFBF1"), iconColor: Color(hex: "0D9488"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "wrench.fill", title: "Repairs", bgColor: Color(hex: "FFEDD5"), iconColor: Color(hex: "EA580C"), onTap: onOpenCatalog)
-                            QuickCategoryTileView(icon: "building.2.fill", title: "Local Stores", bgColor: Color(hex: "F1F5F9"), iconColor: Color(hex: "475569"), onTap: onOpenCatalog)
-                        }
-                        .padding(.horizontal)
+                    if let name = container.customerSession?.name, let initial = name.first {
+                        Text(String(initial).uppercased())
+                            .font(.system(size: 16, weight: .black))
+                            .foregroundColor(Color(hex: "065F46"))
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(Color(hex: "065F46"))
                     }
-                    
-                    // Hero Express Delivery Banner (Emerald Quick-Commerce Gradient)
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("10-MINUTE QUICK COMMERCE")
-                                .font(.system(size: 11, weight: .black))
-                                .foregroundColor(.white.opacity(0.9))
-                            Text("Commerce OS • Express Delivery")
-                                .font(.system(size: 15, weight: .black))
-                                .foregroundColor(.white)
-                            Text("Fresh groceries & essentials at your doorstep in minutes.")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color.white.opacity(0.85))
-                        }
-                        Spacer()
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(Color(hex: "E9BE3A"))
-                    }
-                    .padding(16)
-                    .background(
-                        LinearGradient(
-                            colors: [CommerceOSTheme.Colors.brandPrimary, CommerceOSTheme.Colors.brandPrimaryDark],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .cornerRadius(14)
-                    .shadow(color: CommerceOSTheme.Colors.brandPrimary.opacity(0.25), radius: 8, x: 0, y: 4)
-                    .padding(.horizontal)
-                    
-                    // Category Filter Chips
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(categories, id: \.self) { cat in
-                                Button(action: { selectedCategory = cat }) {
-                                    Text(cat)
-                                        .font(.system(size: 13, weight: .bold))
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .background(selectedCategory == cat ? CommerceOSTheme.Colors.brandPrimaryDark : Color.white)
-                                        .foregroundColor(selectedCategory == cat ? .white : CommerceOSTheme.Colors.sushiInk)
-                                        .cornerRadius(20)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 20)
-                                                .stroke(selectedCategory == cat ? Color.clear : CommerceOSTheme.Colors.border, lineWidth: 1)
-                                        )
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                    
-                    // Buy Again Section (Matching Android)
-                    if !buyAgainProducts.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Buy Again")
-                                .font(.system(size: 16, weight: .bold))
-                                .padding(.horizontal)
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 12) {
-                                    ForEach(buyAgainProducts) { product in
-                                        BuyAgainCard(product: product)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
+    }
+
+    // MARK: - Universal Search Bar (Matching Android UniversalSearchBar)
+    private var universalSearchBar: some View {
+        Button(action: onOpenCatalog) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(hex: "64748B"))
+                
+                Text(searchHints[searchHintIndex])
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(hex: "64748B"))
+                    .lineLimit(1)
+                    .id("search_hint_\(searchHintIndex)")
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: searchHintIndex)
+                
+                Spacer()
+                
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 15))
+                    .foregroundColor(Color(hex: "64748B"))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color(hex: "F8FAFC"))
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
+            )
+            .padding(.horizontal, 14)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    // MARK: - Medicine Category Rail (Matching Android MedicineCategoryRail)
+    private var medicineCategoryRail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Popular Categories")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(Color(hex: "0F172A"))
+                .padding(.horizontal, 14)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(medicineCategories) { cat in
+                        Button(action: {
+                            selectedCategory = cat.name
+                        }) {
+                            VStack(spacing: 6) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(hex: "F8FAFC"))
+                                        .frame(width: 46, height: 46)
+                                        .overlay(Circle().stroke(Color(hex: "E2E8F0"), lineWidth: 0.5))
+
+                                    if let url = URL(string: cat.imageUrl) {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let img):
+                                                img.resizable()
+                                                    .aspectRatio(contentMode: .fit)
+                                                    .clipShape(Circle())
+                                                    .padding(4)
+                                            default:
+                                                Image(systemName: "pills.fill")
+                                                    .font(.system(size: 18))
+                                                    .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                                            }
+                                        }
+                                        .frame(width: 46, height: 46)
                                     }
                                 }
-                                .padding(.horizontal)
+
+                                Text(cat.name)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(Color(hex: "1E293B"))
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity)
                             }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 6)
+                            .frame(width: 96)
+                            .background(Color.white)
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(selectedCategory == cat.name ? Color(hex: "059669") : Color(hex: "E2E8F0"), lineWidth: selectedCategory == cat.name ? 1.5 : 1)
+                            )
+                            .shadow(color: Color.black.opacity(0.02), radius: 1, x: 0, y: 0.5)
                         }
-                    }
-                    
-                    // Trending Products Section
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Popular Products & Essentials")
-                                .font(.system(size: 18, weight: .bold))
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        
-                        if isLoading && products.isEmpty {
-                            VStack(spacing: 12) {
-                                Spacer()
-                                ProgressView("Loading dynamic catalog...")
-                                    .padding(.vertical, 24)
-                                Spacer()
-                            }
-                            .frame(maxWidth: .infinity)
-                        } else if filteredProducts.isEmpty && !isLoading {
-                            VStack(spacing: 8) {
-                                Image(systemName: "tray")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(.secondary)
-                                Text("No medicines found in \(selectedCategory)")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 32)
-                        } else {
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                                ForEach(filteredProducts) { product in
-                                    ProductCard(product: product)
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                    
-                    Spacer(minLength: 80)
-                }
-                .padding(.top, 8)
-            }
-            .navigationTitle(configProvider.currentConfig.terminology.appTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: { showServerSettingsSheet = true }) {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(serverConfig.isServerConnected ? Color.green : Color.red)
-                                .frame(width: 8, height: 8)
-                            Text(serverConfig.isServerConnected ? (serverConfig.latencyMs != nil ? "\(serverConfig.latencyMs!)ms" : "Online") : "Offline")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(serverConfig.isServerConnected ? .green : .red)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
+                        .buttonStyle(PlainButtonStyle())
                     }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(.green)
-                        Text("10m Express")
-                            .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 14)
+            }
+        }
+    }
+
+    // MARK: - Hero Campaign Banner (Matching Android HeroCampaignWidget)
+    private var heroCampaignWidget: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: "0F172A"), Color(hex: "0B101D")],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 190)
+
+            HStack {
+                Spacer()
+                Image(systemName: "cross.case.fill")
+                    .font(.system(size: 90))
+                    .foregroundColor(Color(hex: "10B981").opacity(0.12))
+                    .padding(.trailing, 24)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("SUPER SAVER")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(hex: "059669"))
+                    .cornerRadius(4)
+
+                Text("10-Minute Express Delivery")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+
+                Text("Certified medicines, daily essentials & baby care at your doorstep.")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(hex: "94A3B8"))
+                    .lineLimit(2)
+
+                Button(action: onOpenCatalog) {
+                    Text("Explore Now")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color(hex: "059669"))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.top, 4)
+            }
+            .padding(18)
+            .frame(maxWidth: 280, alignment: .leading)
+        }
+        .frame(height: 190)
+        .cornerRadius(16)
+        .padding(.horizontal, 14)
+    }
+
+    // MARK: - Category Filter Chips
+    private var categoryFilterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(categories, id: \.self) { cat in
+                    Button(action: { selectedCategory = cat }) {
+                        Text(cat)
+                            .font(.system(size: 12, weight: .bold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(selectedCategory == cat ? Color(hex: "059669") : Color.white)
+                            .foregroundColor(selectedCategory == cat ? .white : Color(hex: "1E293B"))
+                            .cornerRadius(20)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(selectedCategory == cat ? Color.clear : Color(hex: "E2E8F0"), lineWidth: 1)
+                            )
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
-            .sheet(isPresented: $showServerSettingsSheet) {
-                ServerSettingsSheet()
+            .padding(.horizontal, 14)
+        }
+    }
+
+    // MARK: - Buy Again Shelf
+    private var buyAgainShelf: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Buy Again")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(Color(hex: "0F172A"))
+                .padding(.horizontal, 14)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(buyAgainProducts) { product in
+                        BuyAgainCard(product: product, onSelect: { prod in
+                            activeSheet = .productDetail(prod)
+                        })
+                    }
+                }
+                .padding(.horizontal, 14)
             }
-            .task {
-                loadProducts()
+        }
+    }
+
+    // MARK: - Products Section
+    private var productsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Popular Products & Essentials")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(Color(hex: "0F172A"))
+                .padding(.horizontal, 14)
+
+            if isLoading && products.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 180)
+            } else if filteredProducts.isEmpty && !isLoading {
+                VStack(spacing: 8) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 32))
+                        .foregroundColor(.secondary)
+                    Text("No medicines found in \(selectedCategory)")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 32)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 12)], spacing: 12) {
+                    ForEach(filteredProducts) { product in
+                        CommerceProductCard(product: product, onSelect: { prod in
+                            activeSheet = .productDetail(prod)
+                        })
+                    }
+                }
+                .padding(.horizontal, 14)
             }
         }
     }
     
     private var filteredProducts: [ProductDto] {
         if selectedCategory == "All" { return products }
-        return products.filter { $0.category.localizedCaseInsensitiveContains(selectedCategory) }
+        return products.filter { $0.category.localizedCaseInsensitiveContains(selectedCategory) || $0.name.localizedCaseInsensitiveContains(selectedCategory) }
     }
     
     private func loadProducts() {
         isLoading = true
         Task {
-            // 1. Primary: Server-authored HomeFeedResponse matching Android
             do {
-                let feed: HomeFeedResponse = try await container.apiClient.get(endpoint: "/api/v1/catalog/home-feed?customerId=cust_123")
+                let custId = container.customerSession?.customerId ?? ""
+                let endpoint = custId.isEmpty ? "/api/v1/catalog/home-feed" : "/api/v1/catalog/home-feed?customerId=\(custId)"
+                let feed: HomeFeedResponse = try await container.apiClient.get(endpoint: endpoint)
                 var dynamicProducts: [ProductDto] = []
                 if let popular = feed.popular, !popular.isEmpty {
                     dynamicProducts.append(contentsOf: popular.map { $0.toProductDto() })
@@ -315,7 +516,6 @@ public struct HomeScreen: View {
                 print("[HomeScreen] HomeFeed error: \(error), attempting fallback to /products")
             }
 
-            // 2. Secondary fallback: /api/v1/catalog/products
             do {
                 let res: CatalogProductsResponse = try await container.apiClient.get(endpoint: "/api/v1/catalog/products")
                 let catRes: CatalogCategoriesResponse = try await container.apiClient.get(endpoint: "/api/v1/catalog/categories")
@@ -330,7 +530,6 @@ public struct HomeScreen: View {
                 }
             } catch {
                 print("[HomeScreen] Products error: \(error), falling back to offline cache")
-                // 3. Tertiary fallback: offline cached catalog
                 let cached = await container.offlineCache.getCachedProducts()
                 let mapped = cached.map { $0.toProductDto() }
                 await MainActor.run {
@@ -344,49 +543,47 @@ public struct HomeScreen: View {
     }
 }
 
-// MARK: - Quick Commerce Category Tile
-public struct QuickCategoryTileView: View {
-    let icon: String
-    let title: String
-    let bgColor: Color
-    let iconColor: Color
-    let onTap: () -> Void
-    
-    public init(icon: String, title: String, bgColor: Color, iconColor: Color, onTap: @escaping () -> Void) {
-        self.icon = icon
-        self.title = title
-        self.bgColor = bgColor
-        self.iconColor = iconColor
-        self.onTap = onTap
+// MARK: - Buy Again Card
+public struct BuyAgainCard: View {
+    @EnvironmentObject private var cartStore: CartLocalStore
+    let product: ProductDto
+    var onSelect: ((ProductDto) -> Void)? = nil
+
+    public init(product: ProductDto, onSelect: ((ProductDto) -> Void)? = nil) {
+        self.product = product
+        self.onSelect = onSelect
     }
-    
+
     public var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .fill(bgColor)
-                        .frame(width: 38, height: 38)
-                    Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(iconColor)
-                }
-                Text(title)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(product.name)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(Color(hex: "0F172A"))
+                .lineLimit(2)
+            
+            Spacer(minLength: 4)
+            
+            HStack {
+                Text("₹\(String(format: "%.2f", product.price))")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundColor(Color(hex: "0F172A"))
+                Spacer()
+                QuickAddToCartButton(product: product, compact: true)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 84)
-            .background(Color.white)
-            .cornerRadius(14)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.02), radius: 2, x: 0, y: 1)
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding(10)
+        .frame(width: 140, height: 110)
+        .background(Color.white)
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.02), radius: 2, x: 0, y: 1)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect?(product)
+        }
     }
 }
 
@@ -422,7 +619,7 @@ public struct QuickAddToCartButton: View {
                     if isReorderCard {
                         Text("REORDER")
                             .font(.system(size: compact ? 10 : 12, weight: .black))
-                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                            .foregroundColor(Color(hex: "059669"))
                     } else if isOutOfStock {
                         Text("OUT OF STOCK")
                             .font(.system(size: compact ? 9 : 11, weight: .bold))
@@ -430,19 +627,19 @@ public struct QuickAddToCartButton: View {
                     } else {
                         Text("ADD")
                             .font(.system(size: compact ? 11 : 13, weight: .black))
-                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                            .foregroundColor(Color(hex: "059669"))
                         Image(systemName: "plus")
                             .font(.system(size: compact ? 9 : 11, weight: .bold))
-                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                            .foregroundColor(Color(hex: "059669"))
                     }
                 }
                 .padding(.horizontal, compact ? 8 : 12)
                 .padding(.vertical, compact ? 4 : 6)
-                .background(isOutOfStock ? Color(.systemGray6) : CommerceOSTheme.Colors.brandPrimarySoft)
+                .background(isOutOfStock ? Color(.systemGray6) : Color(hex: "ECFDF5"))
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(isOutOfStock ? Color.clear : CommerceOSTheme.Colors.brandPrimaryDark, lineWidth: 1)
+                        .stroke(isOutOfStock ? Color.clear : Color(hex: "059669"), lineWidth: 1)
                 )
             }
             .disabled(isOutOfStock)
@@ -472,128 +669,14 @@ public struct QuickAddToCartButton: View {
             }
             .padding(.horizontal, compact ? 4 : 8)
             .padding(.vertical, compact ? 2 : 4)
-            .background(CommerceOSTheme.Colors.brandPrimaryDark)
+            .background(Color(hex: "059669"))
             .cornerRadius(8)
-            .shadow(color: CommerceOSTheme.Colors.brandPrimaryDark.opacity(0.3), radius: 3, x: 0, y: 1)
+            .shadow(color: Color(hex: "059669").opacity(0.3), radius: 3, x: 0, y: 1)
         }
     }
 }
 
-public struct BuyAgainCard: View {
-    @EnvironmentObject private var cartStore: CartLocalStore
-    let product: ProductDto
-
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(product.name)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                .lineLimit(2)
-            
-            Spacer(minLength: 4)
-            
-            HStack {
-                Text("$\(String(format: "%.2f", product.price))")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                Spacer()
-                QuickAddToCartButton(product: product, compact: true)
-            }
-        }
-        .padding(10)
-        .frame(width: 140, height: 110)
-        .background(Color(.systemBackground))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 1)
-    }
-}
-
-public struct ProductCard: View {
-    @EnvironmentObject private var cartStore: CartLocalStore
-    let product: ProductDto
-    
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Badges
-            HStack {
-                if product.isColdChain == true {
-                    HStack(spacing: 2) {
-                        Image(systemName: "snowflake")
-                            .font(.system(size: 8))
-                        Text("2-8°C")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color(hex: "E0F2FE"))
-                    .foregroundColor(Color(hex: "0284C7"))
-                    .cornerRadius(4)
-                }
-                Spacer()
-            }
-            
-            Text(product.name)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                .lineLimit(2)
-            
-            if let salt = product.saltComposition {
-                Text(salt)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            
-            if let gen = product.genericSubstitute {
-                HStack(spacing: 3) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 8))
-                    Text("Save \(gen.savingsPercentage)% Generic")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(CommerceOSTheme.Colors.brandPrimarySoft)
-                .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
-                .cornerRadius(4)
-            }
-            
-            Spacer(minLength: 4)
-            
-            // Price & Add Button
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("$\(String(format: "%.2f", product.price))")
-                        .font(.system(size: 15, weight: .black))
-                        .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                    if product.mrp > product.price {
-                        Text("$\(String(format: "%.2f", product.mrp))")
-                            .font(.system(size: 11))
-                            .strikethrough()
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                QuickAddToCartButton(product: product)
-            }
-        }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
-    }
-}
-
+// MARK: - Catalog Response Helpers
 public struct CatalogProductsResponse: Codable {
     public let content: [ProductResponseItem]
 
@@ -629,6 +712,7 @@ public struct ProductResponseItem: Codable {
     public let rxRequirement: String?
     public let coldChainRequired: Bool?
     public let inStock: Bool?
+    public let imageUrl: String?
     
     public func toProductDto() -> ProductDto {
         let isRx = (rxRequirement ?? "").contains("RX") || (rxRequirement ?? "").contains("SCHEDULE")
@@ -636,6 +720,7 @@ public struct ProductResponseItem: Codable {
         let sellPrice = discountedPrice ?? price
         let effectiveMrp = mrp ?? price
         let cat = category ?? therapeuticCategory ?? "General"
+        let resolved = MedicineImageResolver.resolve(sku: sku, name: name, rawImage: imageUrl)
         
         let genericSub: GenericSubstituteDto? = (sellPrice > 20.0) ? GenericSubstituteDto(
             genericName: "\(name.components(separatedBy: " ").first ?? name) Bio-Equivalent Salt",
@@ -656,7 +741,8 @@ public struct ProductResponseItem: Codable {
             requiresPrescription: isRx,
             isColdChain: isCold,
             inStock: inStock ?? true,
-            genericSubstitute: genericSub
+            genericSubstitute: genericSub,
+            imageUrl: resolved.isEmpty ? nil : resolved
         )
     }
 }

@@ -19,7 +19,7 @@ android {
             useSupportLibrary = true
         }
 
-        val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
+        val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "http://127.0.0.1:8080"
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
     }
 

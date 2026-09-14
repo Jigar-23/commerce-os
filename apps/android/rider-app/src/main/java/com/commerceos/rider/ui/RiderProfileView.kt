@@ -1,5 +1,6 @@
 package com.commerceos.rider.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +44,7 @@ fun RiderProfileView(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(Color(0xFF0D0F14))
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -50,17 +52,18 @@ fun RiderProfileView(
         // Profile Card
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+            border = BorderStroke(1.dp, Color(0xFF262933)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     modifier = Modifier
                         .size(72.dp)
-                        .background(Color(0xFF0284C7).copy(alpha = 0.2f), CircleShape),
+                        .background(Color(0xFF10B981).copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(44.dp))
+                    Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(44.dp))
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -90,7 +93,8 @@ fun RiderProfileView(
         // Shift Status Toggle Card
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+            border = BorderStroke(1.dp, Color(0xFF262933)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -114,7 +118,7 @@ fun RiderProfileView(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = Color(0xFF10B981),
                         uncheckedThumbColor = Color(0xFF94A3B8),
-                        uncheckedTrackColor = Color(0xFF334155)
+                        uncheckedTrackColor = Color(0xFF262933)
                     )
                 )
             }
@@ -123,7 +127,8 @@ fun RiderProfileView(
         // Vehicle & Safety Card
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+            border = BorderStroke(1.dp, Color(0xFF262933)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -150,6 +155,7 @@ fun RiderProfileView(
         OutlinedButton(
             onClick = onLogout,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+            border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {

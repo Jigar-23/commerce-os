@@ -138,6 +138,13 @@ object RiderNotificationManager {
             }
         }
 
+        val dedupKey = "offer_${offer.offerId}"
+        val orderDedupKey = if (offer.orderId.isNotBlank()) "order_${offer.orderId}" else null
+        if (isEventSuccessfullyPosted(context, dedupKey) || (orderDedupKey != null && isEventSuccessfullyPosted(context, orderDedupKey))) {
+            Log.d(TAG, "Notification already posted for $dedupKey / $orderDedupKey. Skipping duplicate alert.")
+            return NotificationPostResult.POSTED
+        }
+
         return try {
             initChannel(context)
 
@@ -157,17 +164,18 @@ object RiderNotificationManager {
 
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             val earningsText = "₹${offer.earningsAmount.toInt()}"
+            val orderTag = if (offer.orderId.isNotBlank()) " #${offer.orderId.takeLast(8).uppercase()}" else ""
 
             val appIconRes = context.applicationInfo.icon.takeIf { it != 0 }
                 ?: android.R.drawable.stat_notify_chat
 
             val builder = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(appIconRes)
-                .setContentTitle("🚀 NEW DELIVERY · $earningsText")
+                .setContentTitle("🚀 ORDER$orderTag · $earningsText")
                 .setContentText("${offer.totalDistanceKm} km • ~${offer.estimatedDurationMins} min | ${offer.merchantName}")
                 .setStyle(
                     NotificationCompat.BigTextStyle()
-                        .bigText("${offer.totalDistanceKm} km • ~${offer.estimatedDurationMins} min\nPickup: ${offer.merchantName}\nDrop: ${offer.customerAddress}\nTap to accept")
+                        .bigText("Order$orderTag • ~${offer.estimatedDurationMins} min\nPickup: ${offer.merchantName}\nDrop: ${offer.customerAddress}\nTap to accept")
                 )
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -182,9 +190,14 @@ object RiderNotificationManager {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(offer.offerId.hashCode(), builder.build())
 
-            // Audible alert tone and vibration pulse
+            markEventSuccessfullyPosted(context, dedupKey)
+            if (orderDedupKey != null) {
+                markEventSuccessfullyPosted(context, orderDedupKey)
+            }
+
+            // Audible alert tone and vibration pulse (played exactly once per unique order/offer)
             RiderAlertNotifier.playNewJobAlert(context, offer.offerId)
-            Log.d(TAG, "NOTIFICATION_POSTED_SUCCESS for offer: ${offer.offerId}")
+            Log.d(TAG, "NOTIFICATION_POSTED_SUCCESS for offer: ${offer.offerId} (Order: ${offer.orderId})")
             NotificationPostResult.POSTED
         } catch (e: Exception) {
             Log.e(TAG, "NOTIFICATION_POST_FAILED: ${e.message}", e)

@@ -1,5 +1,6 @@
 package com.commerceos.rider.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -36,7 +37,7 @@ fun DeliveryCompletionDialog(
                 Box(
                     modifier = Modifier
                         .size(64.dp)
-                        .background(Color(0xFF10B981).copy(alpha = 0.2f), CircleShape),
+                        .background(Color(0xFF10B981).copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -56,7 +57,7 @@ fun DeliveryCompletionDialog(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Order #${session.orderId.takeLast(8)} handoff confirmed",
+                        text = "Order #${session.orderId.takeLast(8).uppercase()} handoff confirmed",
                         fontSize = 12.sp,
                         color = Color(0xFF94A3B8)
                     )
@@ -64,8 +65,9 @@ fun DeliveryCompletionDialog(
 
                 // Earnings Credit Summary
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF22252E)),
+                    border = BorderStroke(1.dp, Color(0xFF2B2F3B)),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -76,14 +78,14 @@ fun DeliveryCompletionDialog(
                         ) {
                             Text("Earnings Credited:", fontSize = 13.sp, color = Color(0xFF94A3B8))
                             Text(
-                                text = session.payoutFormatted ?: "₹0",
+                                text = session.payoutFormatted ?: "₹35",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF10B981)
                             )
                         }
 
-                        HorizontalDivider(color = Color(0xFF334155))
+                        HorizontalDivider(color = Color(0xFF2B2F3B))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -111,11 +113,11 @@ fun DeliveryCompletionDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
-                    Text("Ready for next offer", fontWeight = FontWeight.Bold, color = Color.Black)
+                    Text("Ready for next offer", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         },
-        containerColor = Color(0xFF0F172A),
-        shape = RoundedCornerShape(20.dp)
+        containerColor = Color(0xFF16181F),
+        shape = RoundedCornerShape(22.dp)
     )
 }

@@ -5,11 +5,11 @@ import Link from 'next/link';
 import { sellerApi, SellerSession } from '@/lib/apiClient';
 import {
   BarChart3, Package, Layers, IndianRupee, XCircle, RefreshCw,
-  Settings, ChevronRight, Plus, ShieldCheck, Store, LogOut, Bike
+  Settings, ChevronRight, Plus, ShieldCheck, Store, LogOut, Bike, MapPin
 } from 'lucide-react';
 
 interface SellerSidebarProps {
-  activeTab: 'all' | 'orders' | 'inventory' | 'cod' | 'cancelled' | 'audit' | 'dashboard' | 'products' | 'pricing' | 'promotions' | 'settlements' | 'settings' | 'riders';
+  activeTab: 'all' | 'orders' | 'inventory' | 'cod' | 'cancelled' | 'audit' | 'dashboard' | 'products' | 'pricing' | 'promotions' | 'settlements' | 'settings' | 'riders' | 'stores';
   ordersCount?: number;
   inventoryCount?: number;
   pendingCodAmount?: number;
@@ -85,6 +85,12 @@ export default function SellerSidebar({
             </div>
           </Link>
 
+          <Link href="/stores" title="Stores & Fulfillment Hubs">
+            <div className={`p-3 rounded-xl transition-all ${activeTab === 'stores' ? 'bg-surface-accentSubtle text-content-accent border border-border-accent shadow-inner' : 'text-content-muted hover:text-white hover:bg-surface-inverse'}`}>
+              <MapPin className="w-5 h-5" />
+            </div>
+          </Link>
+
           <Link href="/cancelled" title="Cancelled">
             <div className={`p-3 rounded-xl transition-all ${activeTab === 'cancelled' ? 'bg-surface-accentSubtle text-content-accent border border-border-accent shadow-inner' : 'text-content-muted hover:text-white hover:bg-surface-inverse'}`}>
               <XCircle className="w-5 h-5" />
@@ -140,6 +146,14 @@ export default function SellerSidebar({
               <div className="flex items-center space-x-3">
                 <Bike className="w-4 h-4" />
                 <span>Fleet & Riders</span>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+            </Link>
+
+            <Link href="/stores" className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === 'stores' ? 'bg-surface-accentSubtle text-content-accent font-bold' : 'text-content-secondary hover:bg-surface-subtle'}`}>
+              <div className="flex items-center space-x-3">
+                <MapPin className="w-4 h-4" />
+                <span>Stores & Hubs</span>
               </div>
               <ChevronRight className="w-3.5 h-3.5 opacity-40" />
             </Link>

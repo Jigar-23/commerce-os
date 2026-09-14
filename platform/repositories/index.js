@@ -3950,6 +3950,11 @@ class LocalDevelopmentOrderRepository {
       : 'Order Package';
     const itemCount = items.reduce((sum, i) => sum + (Number(i.quantity) || 1), 0) || 1;
 
+    // Discover eligible online rider dynamically from presence repository
+    const candidateRiders = Object.values(this.db.riderPresence || {}).filter(p => p.isOnline || p.status === 'ONLINE');
+    const selectedRider = candidateRiders[0] || (Array.isArray(this.db.riders) && this.db.riders[0]) || { riderId: 'RIDER_001', name: 'Active Delivery Partner' };
+    const targetRiderId = selectedRider.riderId || selectedRider.id || 'RIDER_001';
+
     // 4. Calculate Real Distance & Duration (Haversine with urban road factor)
     const R = 6371;
     const dLat = (customerLat - merchantLat) * Math.PI / 180;
@@ -3959,19 +3964,27 @@ class LocalDevelopmentOrderRepository {
               Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const deliveryDistanceKm = Math.max(0.6, Math.round(R * c * 1.35 * 10) / 10);
-    const pickupDistanceKm = 0.5;
+
+    // Exact GPS Road Distance from rider's current coordinates to merchant pickup hub
+    let pickupDistanceKm = 0.5;
+    const rLat = Number(selectedRider.lastKnownLat || selectedRider.latitude || selectedRider.lat || 0);
+    const rLng = Number(selectedRider.lastKnownLng || selectedRider.longitude || selectedRider.lng || 0);
+    if (rLat !== 0 && rLng !== 0 && merchantLat !== 0 && merchantLng !== 0) {
+      const pDLat = (merchantLat - rLat) * Math.PI / 180;
+      const pDLon = (merchantLng - rLng) * Math.PI / 180;
+      const pA = Math.sin(pDLat / 2) * Math.sin(pDLat / 2) +
+                 Math.cos(rLat * Math.PI / 180) * Math.cos(merchantLat * Math.PI / 180) *
+                 Math.sin(pDLon / 2) * Math.sin(pDLon / 2);
+      const pC = 2 * Math.atan2(Math.sqrt(pA), Math.sqrt(1 - pA));
+      pickupDistanceKm = Math.max(0.2, Math.round(R * pC * 1.35 * 10) / 10);
+    }
     const totalDistanceKm = Math.round((deliveryDistanceKm + pickupDistanceKm) * 10) / 10;
-    const estimatedDurationMins = Math.max(5, Math.round(deliveryDistanceKm * 3.5 + 3));
+    const estimatedDurationMins = Math.max(5, Math.round(totalDistanceKm * 3.5 + 3));
 
     // 5. Calculate Real Rider Earnings & COD Dynamically
     const isCod = order.paymentMethod === 'COD' || order.paymentStatus === 'COD_PENDING' || Boolean(order.isCod);
     const codAmount = isCod ? Number(order.totalAmount || order.grandTotal || 0) : 0;
     const earningsAmount = Math.max(40, Math.round(35 + (totalDistanceKm * 12) + (isCod ? 15 : 0) + Math.max(0, (itemCount - 2) * 5)));
-
-    // Discover eligible online rider dynamically from presence repository
-    const candidateRiders = Object.values(this.db.riderPresence || {}).filter(p => p.isOnline || p.status === 'ONLINE');
-    const selectedRider = candidateRiders[0] || (Array.isArray(this.db.riders) && this.db.riders[0]) || { riderId: 'RIDER_001', name: 'Active Delivery Partner' };
-    const targetRiderId = selectedRider.riderId || selectedRider.id || 'RIDER_001';
 
     // 6. Create or Sync Delivery Session
     this.db.deliverySessions = this.db.deliverySessions || {};
@@ -4868,7 +4881,12 @@ class LocalDevelopmentNotificationRepository {
 
   async createNotification(record) {
     this.db.riderNotifications = this.db.riderNotifications || [];
-    const exists = this.db.riderNotifications.some(n => n.id === record.id || n.notificationId === record.notificationId);
+    const exists = this.db.riderNotifications.some(n => 
+      n.id === record.id || 
+      n.notificationId === record.notificationId ||
+      (record.orderId && n.orderId === record.orderId && n.riderId === record.riderId && n.category === record.category) ||
+      (record.offerId && n.offerId === record.offerId && n.riderId === record.riderId)
+    );
     if (!exists) {
       this.db.riderNotifications.unshift(record);
       this.saveDb();
@@ -5016,9 +5034,13 @@ class LocalDevelopmentTelemetryRepository {
     this.saveDb = saveDbFn || (() => {});
   }
 
-  async recordTelemetry(data) {
+  async recordTelemetry(riderIdOrData, maybeData) {
     this.db.riderTelemetry = this.db.riderTelemetry || [];
     this.db.fcmTelemetry = this.db.fcmTelemetry || [];
+    let data = typeof riderIdOrData === 'object' && riderIdOrData !== null ? riderIdOrData : maybeData;
+    if (typeof riderIdOrData === 'string' && maybeData && typeof maybeData === 'object') {
+      data = { ...maybeData, riderId: riderIdOrData };
+    }
     if (!data || typeof data !== 'object') {
       throw new Error('INVALID_TELEMETRY_PAYLOAD: Telemetry payload object is required.');
     }

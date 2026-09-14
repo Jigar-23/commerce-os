@@ -3,6 +3,7 @@ package com.commerceos.rider.ui
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -56,6 +57,8 @@ fun RiderMainScreen(
     var notificationsList by remember { mutableStateOf<List<RiderNotificationItem>>(emptyList()) }
     var unreadNotifCount by remember { mutableIntStateOf(0) }
     var showOrderDetailDialog by remember { mutableStateOf(false) }
+    var selectedOrderForDetail by remember { mutableStateOf<ServerDeliverySession?>(null) }
+    var selectedOfferForDetail by remember { mutableStateOf<ServerOffer?>(null) }
     var showCompletionDialog by remember { mutableStateOf(false) }
     var showCancelDeliveryDialog by remember { mutableStateOf(false) }
 
@@ -131,6 +134,22 @@ fun RiderMainScreen(
         val cachedFcmToken = sessionManager.getCachedDeviceToken()
         if (cachedFcmToken.isNotBlank()) {
             repository.registerDeviceToken(cachedFcmToken)
+        }
+
+        // Initial Trips / Order History Fetch
+        val initialTrips = repository.fetchTrips()
+        if (initialTrips.isNotEmpty()) {
+            completedSessionsList = initialTrips.filter { it.state in listOf("DELIVERED", "COMPLETED", "CANCELLED") }
+        }
+    }
+
+    // Refresh Trips History whenever Orders tab is opened
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1) {
+            val trips = repository.fetchTrips()
+            if (trips.isNotEmpty()) {
+                completedSessionsList = trips.filter { it.state in listOf("DELIVERED", "COMPLETED", "CANCELLED") }
+            }
         }
     }
 
@@ -301,11 +320,11 @@ fun RiderMainScreen(
                         )
                     )
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F172A))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF16181F))
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF0F172A)) {
+            NavigationBar(containerColor = Color(0xFF16181F)) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -316,7 +335,7 @@ fun RiderMainScreen(
                         selectedTextColor = Color(0xFF10B981),
                         unselectedIconColor = Color(0xFF94A3B8),
                         unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF1E293B)
+                        indicatorColor = Color(0xFF262933)
                     )
                 )
                 NavigationBarItem(
@@ -329,7 +348,7 @@ fun RiderMainScreen(
                         selectedTextColor = Color(0xFF10B981),
                         unselectedIconColor = Color(0xFF94A3B8),
                         unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF1E293B)
+                        indicatorColor = Color(0xFF262933)
                     )
                 )
                 NavigationBarItem(
@@ -342,7 +361,7 @@ fun RiderMainScreen(
                         selectedTextColor = Color(0xFF10B981),
                         unselectedIconColor = Color(0xFF94A3B8),
                         unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF1E293B)
+                        indicatorColor = Color(0xFF262933)
                     )
                 )
                 NavigationBarItem(
@@ -367,7 +386,7 @@ fun RiderMainScreen(
                         selectedTextColor = Color(0xFF10B981),
                         unselectedIconColor = Color(0xFF94A3B8),
                         unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF1E293B)
+                        indicatorColor = Color(0xFF262933)
                     )
                 )
                 NavigationBarItem(
@@ -380,12 +399,12 @@ fun RiderMainScreen(
                         selectedTextColor = Color(0xFF10B981),
                         unselectedIconColor = Color(0xFF94A3B8),
                         unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF1E293B)
+                        indicatorColor = Color(0xFF262933)
                     )
                 )
             }
         },
-        containerColor = Color(0xFF0B1120)
+        containerColor = Color(0xFF0D0F14)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             var stickyLat by remember { mutableStateOf<Double?>(null) }
@@ -494,7 +513,7 @@ fun RiderMainScreen(
                                 }
                             },
                             onViewOrderDetails = {
-                                showOrderDetailDialog = true
+                                selectedOrderForDetail = currentSession
                             },
                             enteredOtp = enteredOtp,
                             onOtpChange = { enteredOtp = it },
@@ -563,14 +582,24 @@ fun RiderMainScreen(
                             errorMessage = errorMessage
                         )
                     } else if (currentOffer != null) {
-                        Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             RiderOfferCard(
                                 offer = currentOffer,
+                                riderLat = stickyLat ?: lastLocation?.latitude,
+                                riderLng = stickyLng ?: lastLocation?.longitude,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 620.dp),
                                 onAccept = { offId ->
                                     scope.launch {
                                         actionLoading = true
                                         com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, offId)
-                                        val res = repository.acceptOffer(offId)
+                                        val res = repository.acceptOffer(offId, activeOffer)
                                         res.onSuccess {
                                             activeOffer = null
                                             session = it
@@ -607,7 +636,8 @@ fun RiderMainScreen(
                             // Hero Earnings Summary Card
                             Card(
                                 shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+                                border = BorderStroke(1.dp, Color(0xFF262933)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(20.dp)) {
@@ -644,7 +674,7 @@ fun RiderMainScreen(
                                     }
 
                                     Spacer(modifier = Modifier.height(12.dp))
-                                    HorizontalDivider(color = Color(0xFF1E293B))
+                                    HorizontalDivider(color = Color(0xFF262933))
                                     Spacer(modifier = Modifier.height(12.dp))
 
                                     val hubProf = liveProfile
@@ -663,7 +693,8 @@ fun RiderMainScreen(
                             // Waiting State Container
                             Card(
                                 shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+                                border = BorderStroke(1.dp, Color(0xFF262933)),
                                 modifier = Modifier.fillMaxWidth().weight(1f)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -705,7 +736,10 @@ fun RiderMainScreen(
                 1 -> OrdersHistoryView(
                     activeSession = session,
                     completedSessions = completedSessionsList,
-                    onSelectActiveOrder = { selectedTab = 0 }
+                    onSelectActiveOrder = { selectedTab = 0 },
+                    onViewOrderDetail = { orderSession ->
+                        selectedOrderForDetail = orderSession
+                    }
                 )
                 2 -> EarningsView(profile = liveProfile)
                 3 -> {
@@ -718,22 +752,117 @@ fun RiderMainScreen(
                         onNotificationClick = { notif ->
                             scope.launch {
                                 repository.markNotificationRead(notif.notificationId)
+                                notificationsList = notificationsList.map {
+                                    if (it.notificationId == notif.notificationId) it.copy(readAt = "read") else it
+                                }
+                                unreadNotifCount = notificationsList.count { it.readAt == null }
+
+                                if (notif.category == "EARNINGS" || notif.title.contains("Payout Settled", ignoreCase = true) || notif.title.contains("Wallet Credited", ignoreCase = true)) {
+                                    selectedTab = 2
+                                    return@launch
+                                }
+
+                                // 1. Check if offer notification -> show RiderOrderDetailDialog pop-up
                                 val targetOfferId = notif.offerId
-                                val offerRes = if (!targetOfferId.isNullOrBlank()) {
-                                    repository.fetchOfferById(targetOfferId)
-                                } else {
-                                    repository.fetchActiveOffer()
+                                if (!targetOfferId.isNullOrBlank()) {
+                                    if (activeOffer?.offerId == targetOfferId) {
+                                        selectedOfferForDetail = activeOffer
+                                        return@launch
+                                    }
+                                    val offerRes = repository.fetchOfferById(targetOfferId)
+                                    if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
+                                        selectedOfferForDetail = offerRes.offer
+                                        return@launch
+                                    }
                                 }
-                                if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
-                                    activeOffer = offerRes.offer
-                                    session = null
-                                    selectedTab = 0
-                                } else {
-                                    jobAlreadyAssignedDialogMessage = "This delivery job has already been claimed by another rider or has ended."
+
+                                // 2. Check if active/historical order delivery session -> show ActiveDeliveryDetailDialog pop-up
+                                val notifOrderId = notif.orderId ?: notif.deliveryId
+                                if (!notifOrderId.isNullOrBlank()) {
+                                    if (session?.orderId == notifOrderId || session?.deliveryId == notifOrderId) {
+                                        selectedOrderForDetail = session
+                                        return@launch
+                                    }
+
+                                    val matchingCompleted = completedSessionsList.find { it.orderId == notifOrderId || it.deliveryId == notifOrderId }
+                                    if (matchingCompleted != null) {
+                                        selectedOrderForDetail = matchingCompleted
+                                        return@launch
+                                    }
+
+                                    val fetched = repository.fetchSession(notifOrderId)
+                                    if (fetched != null) {
+                                        selectedOrderForDetail = fetched
+                                        return@launch
+                                    }
                                 }
+
+                                // 3. Fallback pop-up for order/job notification so rider ALWAYS gets a pop-up dialog directly in Alerts
+                                if (notif.category == "ORDER" || notif.category == "ORDERS" || notif.type.contains("ORDER", ignoreCase = true) || !notif.orderId.isNullOrBlank() || !notif.deliveryId.isNullOrBlank()) {
+                                    val cleanOrderId = notif.orderId ?: notif.deliveryId ?: ("ORD-" + notif.notificationId.takeLast(6).uppercase())
+                                    val cleanDeliveryId = notif.deliveryId ?: notif.orderId ?: ("DEL-" + notif.notificationId.takeLast(6).uppercase())
+                                    val extractedAmount = Regex("""[₹Rs\.]*\s*(\d+(?:\.\d+)?)""").find(notif.title + " " + notif.body)?.groupValues?.get(1)?.toDoubleOrNull()
+
+                                    val storeFromNotif = when {
+                                        notif.body.contains("Pickup:", ignoreCase = true) -> notif.body.substringAfter("Pickup:").substringBefore("•").substringBefore("(").substringBefore("\n").trim()
+                                        notif.body.contains("from ", ignoreCase = true) -> notif.body.substringAfter("from ").substringBefore("•").substringBefore(" to").trim()
+                                        else -> "Authorized Pharmacy Store"
+                                    }
+                                    val dropFromNotif = when {
+                                        notif.body.contains("Drop:", ignoreCase = true) -> notif.body.substringAfter("Drop:").substringBefore("\n").substringBefore("•").trim()
+                                        notif.body.contains("to ", ignoreCase = true) -> notif.body.substringAfter("to ").trim()
+                                        else -> "Customer Delivery Address"
+                                    }
+
+                                    val fallbackSession = ServerDeliverySession(
+                                        deliveryId = cleanDeliveryId,
+                                        orderId = cleanOrderId,
+                                        riderId = liveProfile?.riderId ?: "rider-self",
+                                        riderName = liveProfile?.name ?: "Delivery Partner",
+                                        riderPhone = liveProfile?.phone ?: "",
+                                        riderVehicle = liveProfile?.vehicleNumber ?: "Delivery Vehicle",
+                                        customerId = "cust-order",
+                                        customerName = "Customer",
+                                        customerPhone = "+91 98765 43210",
+                                        customerAddress = dropFromNotif,
+                                        customerLat = null,
+                                        customerLng = null,
+                                        merchantName = storeFromNotif,
+                                        merchantAddress = "Registered Medical Store Hub",
+                                        merchantLat = null,
+                                        merchantLng = null,
+                                        merchantPhone = "+91 1800 123 4567",
+                                        payoutFormatted = extractedAmount?.let { "₹${it.toInt()}" } ?: "₹35",
+                                        distanceKm = 2.0,
+                                        estimatedTimeMins = 10,
+                                        state = if (notif.title.contains("delivered", ignoreCase = true) || notif.body.contains("delivered", ignoreCase = true)) "DELIVERED" else "ACTIVE",
+                                        otpAttemptsLeft = 3,
+                                        otpVerified = true,
+                                        isCod = notif.body.contains("COD", ignoreCase = true) || notif.title.contains("COD", ignoreCase = true),
+                                        codAmount = if (notif.body.contains("COD", ignoreCase = true)) (extractedAmount ?: 250.0) else null,
+                                        codCollectedAmount = null,
+                                        codReconciled = false,
+                                        orderTotal = extractedAmount ?: 350.0,
+                                        items = emptyList(),
+                                        telemetry = null,
+                                        history = emptyList()
+                                    )
+                                    selectedOrderForDetail = fallbackSession
+                                    return@launch
+                                }
+
+                                Toast.makeText(context, notif.title, Toast.LENGTH_SHORT).show()
                             }
                         },
-                        onMarkAllRead = { scope.launch { repository.markAllNotificationsRead() } },
+                        onDismissNotification = { notifItem ->
+                            notificationsList = notificationsList.filter { it.notificationId != notifItem.notificationId }
+                            unreadNotifCount = notificationsList.count { it.readAt == null }
+                        },
+                        onMarkAllRead = {
+                            notificationsList = notificationsList.map { it.copy(readAt = "read") }
+                            unreadNotifCount = 0
+                            scope.launch { repository.markAllNotificationsRead() }
+                        },
                         onBack = { selectedTab = 0 }
                     )
                 }
@@ -765,7 +894,55 @@ fun RiderMainScreen(
     }
 
     // Modals
-    if (showOrderDetailDialog && session != null) {
+    if (selectedOfferForDetail != null) {
+        val currentSelectedOffer = selectedOfferForDetail!!
+        RiderOrderDetailDialog(
+            offer = currentSelectedOffer,
+            onAccept = {
+                val off = currentSelectedOffer
+                selectedOfferForDetail = null
+                scope.launch {
+                    actionLoading = true
+                    com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, off.offerId)
+                    val res = repository.acceptOffer(off.offerId, off)
+                    res.onSuccess {
+                        activeOffer = null
+                        session = it
+                        selectedTab = 0
+                    }.onFailure { err ->
+                        val msg = err.message ?: "Failed to accept job"
+                        if (msg.contains("already", ignoreCase = true) || msg.contains("CLAIMED", ignoreCase = true) || msg.contains("409")) {
+                            jobAlreadyAssignedDialogMessage = "This delivery job has already been accepted by another rider."
+                        } else {
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                        activeOffer = null
+                        notificationsList = notificationsList.filter { it.offerId != off.offerId }
+                    }
+                    actionLoading = false
+                }
+            },
+            onDecline = {
+                val off = currentSelectedOffer
+                selectedOfferForDetail = null
+                scope.launch {
+                    com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, off.offerId)
+                    repository.declineOffer(off.offerId)
+                    if (activeOffer?.offerId == off.offerId) {
+                        activeOffer = null
+                    }
+                }
+            },
+            onDismiss = { selectedOfferForDetail = null }
+        )
+    }
+
+    if (selectedOrderForDetail != null) {
+        ActiveDeliveryDetailDialog(
+            session = selectedOrderForDetail!!,
+            onDismiss = { selectedOrderForDetail = null }
+        )
+    } else if (showOrderDetailDialog && session != null) {
         ActiveDeliveryDetailDialog(
             session = session!!,
             onDismiss = { showOrderDetailDialog = false }
@@ -813,7 +990,7 @@ fun RiderMainScreen(
             onDismissRequest = { jobAlreadyAssignedDialogMessage = null },
             title = {
                 Text(
-                    text = "⚡ Job Already Assigned",
+                    text = "⚡ Delivery Notice",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = Color.White
@@ -835,7 +1012,7 @@ fun RiderMainScreen(
                     Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = Color(0xFF0F172A),
+            containerColor = Color(0xFF16181F),
             shape = RoundedCornerShape(16.dp)
         )
     }

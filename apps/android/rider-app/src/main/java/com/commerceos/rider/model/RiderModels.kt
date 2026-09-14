@@ -16,6 +16,13 @@ enum class CanonicalDeliveryState {
     RETURNED
 }
 
+data class RiderOrderItem(
+    val name: String,
+    val quantity: Int = 1,
+    val price: Double = 0.0,
+    val sku: String = ""
+)
+
 data class ServerDeliverySession(
     val deliveryId: String,
     val orderId: String,
@@ -44,6 +51,8 @@ data class ServerDeliverySession(
     val codAmount: Double? = null,
     val codCollectedAmount: Double? = null,
     val codReconciled: Boolean,
+    val orderTotal: Double? = null,
+    val items: List<RiderOrderItem> = emptyList(),
     val telemetry: TelemetryState?,
     val history: List<StateHistoryItem>
 ) {
@@ -126,6 +135,8 @@ data class ServerOffer(
     val estimatedDurationMins: Int,
     val isCod: Boolean = false,
     val codAmount: Double? = null,
+    val orderTotal: Double? = null,
+    val items: List<RiderOrderItem> = emptyList(),
     val customerName: String,
     val customerAddress: String,
     val customerLat: Double,

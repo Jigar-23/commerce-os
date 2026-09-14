@@ -16,82 +16,92 @@ public struct OrderHistoryScreen: View {
     public init() {}
     
     public var body: some View {
-        NavigationView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Header
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Your Orders")
-                        .font(.system(size: 24, weight: .black))
-                        .foregroundColor(.primary)
-                    Text("Track deliveries & rate past orders")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Top Header (Matching Android OrderHistoryScreen.kt)
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your Orders")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                        Text("Track deliveries & view past medicines")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(hex: "64748B"))
+                    }
+                    
+                    Spacer()
+                    
+                    // Refresh Button (Matching Android 38dp circle)
+                    Button(action: {
+                        Task { await orderRepo.fetchCustomerOrders() }
+                    }) {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 38, height: 38)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
+                            )
+                            .overlay(
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(Color(hex: "059669"))
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
                 
-                // Segmented Filter Rail (Domino's / Blinkit pattern)
+                // Filter Pills (Matching Android OrderHistoryScreen.kt)
                 HStack(spacing: 8) {
-                    filterButton(title: "ALL", count: orderRepo.customerOrders.count)
-                    filterButton(title: "ACTIVE", count: activeOrders.count)
-                    filterButton(title: "DELIVERED", count: deliveredOrders.count)
+                    filterPill(key: "ALL", label: "All Orders", count: orderRepo.customerOrders.count)
+                    filterPill(key: "ACTIVE", label: "Active", count: activeOrders.count)
+                    filterPill(key: "DELIVERED", label: "Delivered", count: deliveredOrders.count)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-                
-                Divider()
+                .padding(.horizontal, 14)
                 
                 // Orders List
                 if filteredOrders.isEmpty {
                     emptyOrdersView
+                        .padding(.top, 40)
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(filteredOrders) { order in
-                                OrderHistoryCard(order: order) {
-                                    trackedOrderId = order.id
-                                }
+                    LazyVStack(spacing: 12) {
+                        ForEach(filteredOrders) { order in
+                            OrderHistoryCard(order: order) {
+                                trackedOrderId = order.id
                             }
                         }
-                        .padding(16)
-                        .padding(.bottom, 80)
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 90)
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        Task { await orderRepo.fetchCustomerOrders() }
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                }
+            .padding(.top, 4)
+        }
+        .background(Color(hex: "F4F5F7").ignoresSafeArea())
+        .onAppear {
+            Task {
+                await orderRepo.fetchCustomerOrders()
             }
-            .onAppear {
-                Task {
-                    await orderRepo.fetchCustomerOrders()
-                }
-            }
-            .sheet(item: Binding<IdentifiableOrderWrapper?>(
-                get: { trackedOrderId.map { IdentifiableOrderWrapper(value: $0) } },
-                set: { trackedOrderId = $0?.value }
-            )) { wrapper in
-                NavigationView {
-                    OrderTrackingScreen()
-                        .navigationTitle("Order Tracking")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("Close") {
-                                    trackedOrderId = nil
-                                }
+        }
+        .sheet(item: Binding<IdentifiableOrderWrapper?>(
+            get: { trackedOrderId.map { IdentifiableOrderWrapper(value: $0) } },
+            set: { trackedOrderId = $0?.value }
+        )) { wrapper in
+            NavigationView {
+                OrderTrackingScreen()
+                    .navigationTitle("Order Tracking")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Close") {
+                                trackedOrderId = nil
                             }
                         }
-                }
+                    }
             }
+            .navigationViewStyle(.stack)
         }
     }
     
@@ -116,37 +126,47 @@ public struct OrderHistoryScreen: View {
         }
     }
     
-    private func filterButton(title: String, count: Int) -> some View {
-        Button(action: { selectedFilter = title }) {
+    private func filterPill(key: String, label: String, count: Int) -> some View {
+        let isSelected = selectedFilter == key
+        return Button(action: { selectedFilter = key }) {
             HStack(spacing: 4) {
-                Text(title)
-                    .font(.system(size: 12, weight: selectedFilter == title ? .bold : .medium))
+                Text(label)
+                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
                 if count > 0 {
                     Text("(\(count))")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10, weight: .bold))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(selectedFilter == title ? configProvider.currentConfig.theme.primaryColor.opacity(0.15) : Color(.systemGray6))
-            .foregroundColor(selectedFilter == title ? configProvider.currentConfig.theme.primaryColor : .secondary)
-            .cornerRadius(8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(isSelected ? Color(hex: "059669") : Color.white)
+            .foregroundColor(isSelected ? .white : Color(hex: "1E293B"))
+            .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isSelected ? Color.clear : Color(hex: "E2E8F0"), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.02), radius: 1, x: 0, y: 0.5)
         }
+        .buttonStyle(PlainButtonStyle())
     }
     
     private var emptyOrdersView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "cart.badge.questionmark")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.6))
+        VStack(spacing: 12) {
+            Circle()
+                .fill(Color(hex: "E2E8F0").opacity(0.5))
+                .frame(width: 64, height: 64)
+                .overlay(
+                    Image(systemName: "cart.badge.questionmark")
+                        .font(.system(size: 28))
+                        .foregroundColor(Color(hex: "64748B"))
+                )
             Text("No Orders Found")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(Color(hex: "0F172A"))
             Text("You have no \(selectedFilter.lowercased()) orders in your history.")
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
-            Spacer()
+                .font(.system(size: 12))
+                .foregroundColor(Color(hex: "64748B"))
         }
         .frame(maxWidth: .infinity)
     }
@@ -166,12 +186,12 @@ public struct OrderHistoryCard: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Order #\(order.id.prefix(8).uppercased())")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.primary)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(Color(hex: "0F172A"))
                     if let date = order.createdAt {
                         Text(date)
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color(hex: "64748B"))
                     }
                 }
                 Spacer()
@@ -179,62 +199,108 @@ public struct OrderHistoryCard: View {
             }
             
             Divider()
+                .background(Color(hex: "F1F5F9"))
             
-            HStack {
-                Text("Total: ₹\(String(format: "%.2f", order.totalAmount))")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                Spacer()
-                if isTrackable {
-                    Button(action: onTrack) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "location.fill")
-                                .font(.system(size: 11))
-                            Text("Track Order")
+            // Items List
+            if let items = order.items, !items.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(items.prefix(3), id: \.sku) { item in
+                        HStack(spacing: 8) {
+                            let imgUrl = MedicineImageResolver.resolve(sku: item.sku, name: item.name)
+                            if let url = URL(string: imgUrl), !imgUrl.isEmpty {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let img):
+                                        img.resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 28, height: 28)
+                                    default:
+                                        Image(systemName: "pills.fill")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color(hex: "059669"))
+                                            .frame(width: 28, height: 28)
+                                    }
+                                }
+                            } else {
+                                Image(systemName: "pills.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color(hex: "059669"))
+                                    .frame(width: 28, height: 28)
+                            }
+                            
+                            Text("\(item.quantity)x \(item.name ?? item.sku)")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(hex: "334155"))
+                                .lineLimit(1)
+                            Spacer()
+                            Text("₹\(String(format: "%.2f", (item.price ?? 0.0) * Double(item.quantity)))")
                                 .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color(hex: "0F172A"))
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(CommerceOSTheme.Colors.brandPrimaryDark)
-                        .foregroundColor(.white)
-                        .cornerRadius(6)
+                    }
+                    if items.count > 3 {
+                        Text("+ \(items.count - 3) more items")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "64748B"))
                     }
                 }
             }
+            
+            Divider()
+                .background(Color(hex: "F1F5F9"))
+            
+            // Bottom Action Row
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Total Paid")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Color(hex: "64748B"))
+                    Text("₹\(String(format: "%.2f", order.totalAmount))")
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundColor(Color(hex: "0F172A"))
+                }
+                
+                Spacer()
+                
+                Button(action: onTrack) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 11))
+                        Text(order.status.uppercased() == "DELIVERED" ? "View Details" : "Track Order")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color(hex: "059669"))
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding(14)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
+        .background(Color.white)
+        .cornerRadius(14)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.03), radius: 4, x: 0, y: 1)
-    }
-    
-    private var isTrackable: Bool {
-        let s = order.status.uppercased()
-        return s != "DELIVERED" && s != "CANCELLED"
+        .shadow(color: Color.black.opacity(0.02), radius: 2, x: 0, y: 1)
     }
     
     private var statusBadge: some View {
-        let (label, color) = badgeConfig
-        return Text(label)
-            .font(.system(size: 11, weight: .bold))
+        let s = order.status.uppercased()
+        let isDelivered = s == "DELIVERED"
+        let isCancelled = s == "CANCELLED"
+        let bg = isDelivered ? Color(hex: "ECFDF5") : (isCancelled ? Color(hex: "FEF2F2") : Color(hex: "EFF6FF"))
+        let fg = isDelivered ? Color(hex: "059669") : (isCancelled ? Color(hex: "DC2626") : Color(hex: "2563EB"))
+        
+        return Text(s.replacingOccurrences(of: "_", with: " "))
+            .font(.system(size: 10, weight: .black))
+            .foregroundColor(fg)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(color.opacity(0.12))
-            .foregroundColor(color)
+            .background(bg)
             .cornerRadius(6)
-    }
-    
-    private var badgeConfig: (String, Color) {
-        switch order.status.uppercased() {
-        case "DELIVERED": return ("Delivered", CommerceOSTheme.Colors.brandPrimary)
-        case "OUT_FOR_DELIVERY", "IN_TRANSIT": return ("Out for Delivery", CommerceOSTheme.Colors.brandAccent)
-        case "PREPARING", "ACCEPTED": return ("Preparing", CommerceOSTheme.Colors.warning)
-        case "CANCELLED": return ("Cancelled", CommerceOSTheme.Colors.error)
-        default: return (order.status, .gray)
-        }
     }
 }

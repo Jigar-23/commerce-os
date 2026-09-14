@@ -21,6 +21,20 @@
                ReferencedContainer = "container:CommerceOS.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8DFCEAB7C0F5B420CABF7732"
+               BuildableName = "CommerceOSTests.xctest"
+               BlueprintName = "CommerceOSTests"
+               ReferencedContainer = "container:CommerceOS.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -93,8 +107,6 @@
             ReferencedContainer = "container:CommerceOS.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

@@ -82,37 +82,80 @@ object ErrorBodyParser {
 }
 
 object Api {
-    /** Executes a retrofit call and maps transport + protocol failures to [AppError]. */
-    suspend fun <T> run(block: suspend () -> T): ApiResult<T> = try {
-        ApiResult.Success(block())
-    } catch (e: HttpException) {
-        val response = e.response()
-        val body = response?.errorBody()?.string()
-        val info = ErrorBodyParser.parse(body)
-        val path = response?.raw()?.request?.url?.encodedPath ?: ""
-        android.util.Log.e("ApiRun", "HttpException on $path: code=${e.code()}, body=$body", e)
-        // Wrong-OTP / bad-credential 401s carry structured, actionable payloads
-        // (attemptsLeft, retryAfterSeconds). Only a 401 on a PROTECTED resource
-        // after a failed refresh is a true session-expiry.
-        val isIdentityError = path.startsWith("/api/v1/auth")
-        if (e.code() == 401 && !isIdentityError) {
-            ApiResult.Failure(AppError.Unauthorized())
-        } else {
-            ApiResult.Failure(
-                AppError.Server(
-                    httpCode = e.code(),
-                    errorCode = info?.errorCode,
-                    serverMessage = info?.serverMessage ?: e.message() ?: "",
-                    retryAfterSeconds = info?.retryAfterSeconds,
-                    attemptsLeft = info?.attemptsLeft
-                )
-            )
+    /** Executes a retrofit call and maps transport + protocol failures to [AppError].
+     *  Automatically fails over across candidate gateways (local ADB reverse port 8090,
+     *  LAN IP, emulator IP) if Render is 429'd by Cloudflare or unreachable.
+     */
+    suspend fun <T> run(block: suspend () -> T): ApiResult<T> {
+        val candidateBases = listOfNotNull(
+            NetworkClient.baseUrl,
+            "http://127.0.0.1:8090",
+            "http://192.168.1.76:8090",
+            "http://10.0.2.2:8090"
+        ).distinct()
+
+        var lastHttpException: HttpException? = null
+        var lastIoException: IOException? = null
+        var lastGeneralException: Exception? = null
+
+        for (candidate in candidateBases) {
+            try {
+                if (NetworkClient.baseUrl != candidate) {
+                    NetworkClient.baseUrl = candidate
+                }
+                return ApiResult.Success(block())
+            } catch (e: HttpException) {
+                lastHttpException = e
+                val is429orChallenge = e.code() == 429 || e.code() in listOf(502, 503, 504)
+                if (!is429orChallenge) {
+                    // Application-level error (400, 401, 403, 404, 422, etc.)
+                    // Do not failover to another host on real business validation
+                    break
+                }
+                android.util.Log.w("ApiRun", "Endpoint $candidate returned HTTP ${e.code()}, attempting next candidate...")
+            } catch (e: IOException) {
+                lastIoException = e
+                android.util.Log.w("ApiRun", "Endpoint $candidate failed with IOException (${e.message}), attempting next candidate...")
+            } catch (e: Exception) {
+                lastGeneralException = e
+                break
+            }
         }
-    } catch (e: IOException) {
-        android.util.Log.e("ApiRun", "IOException in Api.run: ${e.message}", e)
-        ApiResult.Failure(AppError.Network(e.message ?: "network"))
-    } catch (e: Exception) {
-        android.util.Log.e("ApiRun", "Unexpected Exception in Api.run: ${e.javaClass.name}: ${e.message}", e)
-        ApiResult.Failure(AppError.Unknown(e.message ?: e.javaClass.simpleName))
+
+        // If loop exhausted with an HttpException:
+        if (lastHttpException != null) {
+            val e = lastHttpException
+            val response = e.response()
+            val body = response?.errorBody()?.string()
+            val info = ErrorBodyParser.parse(body)
+            val path = response?.raw()?.request?.url?.encodedPath ?: ""
+            android.util.Log.e("ApiRun", "HttpException on $path: code=${e.code()}, body=$body", e)
+            val isIdentityError = path.startsWith("/api/v1/auth")
+            return if (e.code() == 401 && !isIdentityError) {
+                ApiResult.Failure(AppError.Unauthorized())
+            } else {
+                ApiResult.Failure(
+                    AppError.Server(
+                        httpCode = e.code(),
+                        errorCode = info?.errorCode,
+                        serverMessage = info?.serverMessage ?: e.message() ?: "",
+                        retryAfterSeconds = info?.retryAfterSeconds,
+                        attemptsLeft = info?.attemptsLeft
+                    )
+                )
+            }
+        }
+
+        if (lastIoException != null) {
+            android.util.Log.e("ApiRun", "IOException in Api.run: ${lastIoException.message}", lastIoException)
+            return ApiResult.Failure(AppError.Network(lastIoException.message ?: "network"))
+        }
+
+        if (lastGeneralException != null) {
+            android.util.Log.e("ApiRun", "Unexpected Exception in Api.run: ${lastGeneralException.javaClass.name}: ${lastGeneralException.message}", lastGeneralException)
+            return ApiResult.Failure(AppError.Unknown(lastGeneralException.message ?: lastGeneralException.javaClass.simpleName))
+        }
+
+        return ApiResult.Failure(AppError.Unknown("Unknown network error"))
     }
 }

@@ -1,6 +1,7 @@
 import XCTest
 import CoreLocation
 import Combine
+@testable import CommerceOSRider
 
 final class GeofenceDetectorTests: XCTestCase {
     private var detector: RiderGeofenceDetector!

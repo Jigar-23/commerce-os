@@ -72,7 +72,9 @@ object RiderOfferEventPipeline {
 
         // 2. Deduplicate system tray notifications
         val dedupKey = "offer_${offer.offerId}"
-        val isAlreadyPosted = RiderNotificationManager.isEventSuccessfullyPosted(context, dedupKey)
+        val orderDedupKey = if (offer.orderId.isNotBlank()) "order_${offer.orderId}" else null
+        val isAlreadyPosted = RiderNotificationManager.isEventSuccessfullyPosted(context, dedupKey) ||
+            (orderDedupKey != null && RiderNotificationManager.isEventSuccessfullyPosted(context, orderDedupKey))
         if (isAlreadyPosted) {
             return offer
         }

@@ -53,7 +53,7 @@ fun RiderAuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F172A))
+            .background(Color(0xFF0D0F14))
     ) {
         Column(
             modifier = Modifier
@@ -99,9 +99,9 @@ fun RiderAuthScreen(
 
             // Main Auth Card
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
                 shape = RoundedCornerShape(24.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
@@ -141,9 +141,9 @@ fun RiderAuthScreen(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF475569),
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A)
+                                unfocusedBorderColor = Color(0xFF2B2F3B),
+                                focusedContainerColor = Color(0xFF22252E),
+                                unfocusedContainerColor = Color(0xFF22252E)
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -286,9 +286,9 @@ fun RiderAuthScreen(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF475569),
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A)
+                                unfocusedBorderColor = Color(0xFF2B2F3B),
+                                focusedContainerColor = Color(0xFF22252E),
+                                unfocusedContainerColor = Color(0xFF22252E)
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -306,9 +306,9 @@ fun RiderAuthScreen(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF475569),
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A)
+                                unfocusedBorderColor = Color(0xFF2B2F3B),
+                                focusedContainerColor = Color(0xFF22252E),
+                                unfocusedContainerColor = Color(0xFF22252E)
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -326,9 +326,9 @@ fun RiderAuthScreen(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF475569),
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A)
+                                unfocusedBorderColor = Color(0xFF2B2F3B),
+                                focusedContainerColor = Color(0xFF22252E),
+                                unfocusedContainerColor = Color(0xFF22252E)
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()

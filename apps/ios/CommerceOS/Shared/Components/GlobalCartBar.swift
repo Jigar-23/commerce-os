@@ -10,7 +10,7 @@ public struct GlobalCartBar: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     let count = cartStore.totalItemCount
-                    let label = "\(count) \(count == 1 ? "ITEM" : "ITEMS") • $\(String(format: "%.2f", cartStore.subtotal))"
+                    let label = "\(count) \(count == 1 ? "ITEM" : "ITEMS") • ₹\(String(format: "%.2f", cartStore.subtotal))"
                     Text(label)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)

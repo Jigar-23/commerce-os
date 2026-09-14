@@ -61,7 +61,7 @@ fun OrderTrackingScreen(
 ) {
     var isMapExpanded by remember { mutableStateOf(false) }
 
-    if (isMapExpanded && detail is OrderDetailUiState.Content) {
+    if (isMapExpanded && detail is OrderDetailUiState.Content && !detail.order.orderStatus.equals("DELIVERED", ignoreCase = true)) {
         CustomerLiveMapTrackingView(
             order = detail.order,
             liveTracking = liveTracking,
@@ -266,18 +266,76 @@ fun OrderTrackingContent(
             .fillMaxSize()
             .verticalScroll(scrollState)
     ) {
-        // 1. FIRST ELEMENT AT VERY TOP: INFINITE WIDTH LIVE TRACKING GOOGLE MAP
-        CustomerLiveMapTrackingView(
-            order = order,
-            liveTracking = liveTracking,
-            onExpandClick = onExpandMap,
-            onBack = onBack,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(300.dp)
-        )
+        // 1. FIRST ELEMENT AT VERY TOP:
+        // Active delivery -> Live interactive Google Map tracking
+        // Delivered order -> Clean top app bar with Back button and Order ID (NO MAP)
+        if (!isDelivered) {
+            CustomerLiveMapTrackingView(
+                order = order,
+                liveTracking = liveTracking,
+                onExpandClick = onExpandMap,
+                onBack = onBack,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+            )
+        } else {
+            // Dedicated Order Details Top Bar for Delivered Order (Map is hidden)
+            Surface(
+                color = Color.White,
+                shadowElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF0F172A))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Order Details", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text("Summary & Receipt", fontSize = 11.sp, color = Color(0xFF64748B))
+                        }
+                    }
 
-        // 2. BELOW THE MAP: ORDER STATUS, DELIVERY PIN, TIMELINE, ITEMS, AND DETAILS
+                    // Authoritative Order ID Badge with Copy
+                    val shortOrderId = order.id.takeLast(6).uppercase()
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.clickable {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Order ID", order.id))
+                            Toast.makeText(context, "Order ID copied: ${order.id}", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "ORDER #$shortOrderId",
+                                color = Color(0xFF0F172A),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("⧉", color = Color(0xFF64748B), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. BELOW TOP HEADER: STATUS CARDS, DETAILS, ITEMS, RECEIPT
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -285,7 +343,7 @@ fun OrderTrackingContent(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Reconnecting notification banner if telemetry stream drops
-            if (isReconnecting) {
+            if (isReconnecting && !isDelivered) {
                 Surface(
                     color = Color(0xFFFEF3C7),
                     shape = RoundedCornerShape(10.dp),
@@ -348,9 +406,105 @@ fun OrderTrackingContent(
                         )
                     }
                 }
+            } else if (isDelivered) {
+                // =========================================================================
+                // HERO ORDER DELIVERED SCENARIO CARD (Replaces Map with Clean Completion UI)
+                // =========================================================================
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFFD1FAE5)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = CircleShape,
+                            modifier = Modifier.size(60.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Delivered",
+                                    tint = Color(0xFF059669),
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Order Delivered Successfully 🎉",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Your order was handed over safely at your doorstep.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Delivery Partner Summary & Rating
+                        val assignedRiderName = liveTracking?.riderName ?: order.riderName
+                        Surface(
+                            color = Color(0xFFF8FAFC),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🛵", fontSize = 20.sp)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = assignedRiderName ?: "Delivery Partner",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "Delivered on time",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF059669),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    repeat(5) {
+                                        Icon(
+                                            Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFBBF24),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
-                // Active / Delivered Order Status & SLA Card
-                // 1. Sleek Compact Delivery Status & PIN Card
+                // Active Order Status & SLA Card with Live PIN
                 val displayOtp = order.effectiveDeliveryPin ?: liveTracking?.deliveryOtp
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -379,7 +533,6 @@ fun OrderTrackingContent(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = when (order.orderStatus.uppercase()) {
-                                            "DELIVERED" -> "ORDER COMPLETED"
                                             "OUT_FOR_DELIVERY" -> "ON THE WAY"
                                             "SELLER_ACCEPTED", "PACKED" -> "BEING PACKED"
                                             else -> "ORDER CONFIRMED"
@@ -396,7 +549,6 @@ fun OrderTrackingContent(
                                 val dynamicEtaMins = order.deliverySlaMins.coerceAtLeast(8)
                                 Text(
                                     text = when (order.orderStatus.uppercase()) {
-                                        "DELIVERED" -> "Delivered Successfully 🎉"
                                         "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> "At your doorstep ⚡"
                                         else -> "Arriving in $dynamicEtaMins mins ⚡"
                                     },
@@ -443,7 +595,6 @@ fun OrderTrackingContent(
 
                         // Stepper Progress Line
                         val progressFloat = when (order.orderStatus.uppercase()) {
-                            "DELIVERED" -> 1.0f
                             "OUT_FOR_DELIVERY", "REACHING_YOU" -> 0.75f
                             "PACKED" -> 0.55f
                             "SELLER_ACCEPTED" -> 0.35f
@@ -770,13 +921,22 @@ fun OrderTrackingContent(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val itemSubtotal = items.sumOf { (it.unitPrice.toInt() * it.quantity) }
+                    val itemSubtotal = items.sumOf { (it.unitPrice.toDouble() * it.quantity) }
+                    val effectiveTotal = order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 } ?: (itemSubtotal + (if (itemSubtotal >= 199.0) 0.0 else 2.0))
+                    val effectiveDeliveryFee = order.deliveryFee?.toDouble() ?: order.delivery_fee?.toDouble() ?: (if (itemSubtotal >= 199.0) 0.0 else 2.0)
+                    val isFreeDelivery = effectiveDeliveryFee <= 0.0
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Item Total", fontSize = 13.sp, color = Color(0xFF64748B))
-                        Text("₹$itemSubtotal", fontSize = 13.sp, color = Color(0xFF0F172A), fontWeight = FontWeight.Medium)
+                        Text(
+                            text = if (itemSubtotal % 1.0 == 0.0) "₹${itemSubtotal.toInt()}" else "₹${"%.2f".format(itemSubtotal)}",
+                            fontSize = 13.sp,
+                            color = Color(0xFF0F172A),
+                            fontWeight = FontWeight.Medium
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -787,9 +947,9 @@ fun OrderTrackingContent(
                     ) {
                         Text("Delivery Partner Fee", fontSize = 13.sp, color = Color(0xFF64748B))
                         Text(
-                            text = if (order.totalAmount.toInt() - itemSubtotal <= 0) "FREE" else "₹${order.totalAmount.toInt() - itemSubtotal}",
+                            text = if (isFreeDelivery) "FREE" else (if (effectiveDeliveryFee % 1.0 == 0.0) "₹${effectiveDeliveryFee.toInt()}" else "₹${"%.2f".format(effectiveDeliveryFee)}"),
                             fontSize = 13.sp,
-                            color = if (order.totalAmount.toInt() - itemSubtotal <= 0) Color(0xFF059669) else Color(0xFF0F172A),
+                            color = if (isFreeDelivery) Color(0xFF059669) else Color(0xFF0F172A),
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -814,7 +974,12 @@ fun OrderTrackingContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Total Amount", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                        Text("₹${order.totalAmount}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF059669))
+                        Text(
+                            text = if (effectiveTotal % 1.0 == 0.0) "₹${effectiveTotal.toInt()}" else "₹${"%.2f".format(effectiveTotal)}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF059669)
+                        )
                     }
                 }
             }

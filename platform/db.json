@@ -50,7 +50,7 @@
       "discountedPrice": 5,
       "discountPercentage": 17,
       "inStock": true,
-      "stockCount": 51,
+      "stockCount": 47,
       "coldChainRequired": false,
       "expressDeliverySlaMins": 15,
       "therapeuticCategory": "Pain & Fever",
@@ -250,13 +250,931 @@
       "reviewCount": 950,
       "sellerId": "seller_demo_001",
       "imageUrl": "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
+    },
+    {
+      "id": "item_amoxicillin_500",
+      "sku": "item_amoxicillin_500",
+      "name": "Amoxicillin 500mg",
+      "stockCount": 492,
+      "inStock": true,
+      "price": 120
     }
   ],
   "carts": {
     "usr_383700": [],
-    "usr_220692": []
+    "usr_220692": [],
+    "usr_550326": []
   },
   "orders": [
+    {
+      "id": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "customerId": "usr_383700",
+      "addressId": "temp_gps_1789372360716",
+      "customerPhone": "+919991416180",
+      "customerName": "Customer 6180",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 7,
+      "taxAmount": 0.35,
+      "deliveryFee": 2,
+      "deliveryAddress": {
+        "addressLine": "Kayasthwara Mohalla, Rewari, Rewari",
+        "addressType": "OTHER",
+        "city": "Rewari",
+        "contactName": "Customer",
+        "contactPhone": "",
+        "country": "India",
+        "id": "temp_gps_1789372360716",
+        "isDefault": false,
+        "landmark": "",
+        "latitude": 28.19923973083496,
+        "longitude": 76.61840057373047,
+        "postalCode": "123401",
+        "state": "Haryana",
+        "tag": "Current Location"
+      },
+      "items": [
+        {
+          "productId": "prod_para_500",
+          "name": "Paracetamol 500mg IP",
+          "packSize": "15 tablets",
+          "sku": "SKU-PARA-500",
+          "mrp": 8,
+          "price": 5,
+          "unitPrice": 5,
+          "quantity": 1,
+          "total": 5,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "133023",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_COLLECTED",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "prod_para_500",
+            "mrp": 8,
+            "sellingPrice": 5,
+            "quantity": 1,
+            "total": 5,
+            "discount": 3
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T07:56:10.753Z",
+        "subtotalAmount": 5,
+        "deliveryFee": 2,
+        "totalAmount": 7
+      },
+      "idempotencyKey": "93227276-facc-4246-bc61-00c4a0d564e6",
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 7,
+        "collectionStatus": "COLLECTED",
+        "collectedAmount": 7,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T07:56:10.753Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 0.6,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T07:56:10.753Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T07:56:10.753Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T07:56:10.753Z"
+        },
+        {
+          "status": "ARRIVED_PICKUP",
+          "label": "Delivery partner arrived at store for pickup",
+          "actor": "RIDER",
+          "location": "Store Pickup Point",
+          "createdAt": "2026-09-14T08:00:24.405Z"
+        },
+        {
+          "status": "OUT_FOR_DELIVERY",
+          "label": "Order picked up and is out for delivery",
+          "actor": "RIDER",
+          "location": "En Route to Customer",
+          "createdAt": "2026-09-14T08:02:46.053Z"
+        },
+        {
+          "status": "ARRIVED_CUSTOMER",
+          "label": "Delivery partner has arrived at your address",
+          "actor": "RIDER",
+          "location": "Customer Address",
+          "createdAt": "2026-09-14T08:18:18.863Z"
+        },
+        {
+          "status": "DELIVERED",
+          "label": "Order successfully delivered to customer",
+          "actor": "RIDER",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T08:23:14.914Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false,
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180"
+    },
+    {
+      "id": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "customerId": "usr_383700",
+      "addressId": "temp_gps_1789370112320",
+      "customerPhone": "+919991416180",
+      "customerName": "Customer 6180",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 7,
+      "taxAmount": 0.35,
+      "deliveryFee": 2,
+      "deliveryAddress": {
+        "addressLine": "Ganpat Nagar, Rewari, Rewari",
+        "addressType": "OTHER",
+        "city": "Rewari",
+        "contactName": "Customer",
+        "contactPhone": "",
+        "country": "India",
+        "id": "temp_gps_1789370112320",
+        "isDefault": false,
+        "landmark": "",
+        "latitude": 28.19641876220703,
+        "longitude": 76.62823486328125,
+        "postalCode": "123401",
+        "state": "Haryana",
+        "tag": "Current Location"
+      },
+      "items": [
+        {
+          "productId": "prod_para_500",
+          "name": "Paracetamol 500mg IP",
+          "packSize": "15 tablets",
+          "sku": "SKU-PARA-500",
+          "mrp": 8,
+          "price": 5,
+          "unitPrice": 5,
+          "quantity": 1,
+          "total": 5,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "143192",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_COLLECTED",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "prod_para_500",
+            "mrp": 8,
+            "sellingPrice": 5,
+            "quantity": 1,
+            "total": 5,
+            "discount": 3
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T07:18:28.238Z",
+        "subtotalAmount": 5,
+        "deliveryFee": 2,
+        "totalAmount": 7
+      },
+      "idempotencyKey": "08cd0d03-c872-4626-8242-7c7516c5321a",
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 7,
+        "collectionStatus": "COLLECTED",
+        "collectedAmount": 7,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T07:18:28.238Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 1.8,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T07:18:28.238Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T07:18:28.238Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T07:18:28.238Z"
+        },
+        {
+          "status": "ARRIVED_PICKUP",
+          "label": "Delivery partner arrived at store for pickup",
+          "actor": "RIDER",
+          "location": "Store Pickup Point",
+          "createdAt": "2026-09-14T07:23:34.693Z"
+        },
+        {
+          "status": "OUT_FOR_DELIVERY",
+          "label": "Order picked up and is out for delivery",
+          "actor": "RIDER",
+          "location": "En Route to Customer",
+          "createdAt": "2026-09-14T07:23:55.579Z"
+        },
+        {
+          "status": "ARRIVED_CUSTOMER",
+          "label": "Delivery partner has arrived at your address",
+          "actor": "RIDER",
+          "location": "Customer Address",
+          "createdAt": "2026-09-14T07:24:23.149Z"
+        },
+        {
+          "status": "DELIVERED",
+          "label": "Order successfully delivered to customer",
+          "actor": "RIDER",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T07:26:49.363Z"
+        },
+        {
+          "status": "DELIVERED",
+          "label": "Order successfully delivered to customer",
+          "actor": "RIDER",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T07:26:49.400Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false,
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180"
+    },
+    {
+      "id": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+      "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+      "customerId": "usr_550326",
+      "addressId": null,
+      "customerPhone": "9876500001",
+      "customerName": "Aarav Sharma",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 240,
+      "taxAmount": 12,
+      "deliveryFee": 0,
+      "deliveryAddress": {
+        "street": "Flat 402, Royal Palms, Rewari",
+        "latitude": 28.197,
+        "longitude": 76.619
+      },
+      "items": [
+        {
+          "productId": "item_amoxicillin_500",
+          "name": "Amoxicillin 500mg",
+          "packSize": "",
+          "mrp": 144,
+          "price": 120,
+          "unitPrice": 120,
+          "quantity": 2,
+          "total": 240,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "532788",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_PENDING",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "item_amoxicillin_500",
+            "mrp": 144,
+            "sellingPrice": 120,
+            "quantity": 2,
+            "total": 240,
+            "discount": 24
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T05:55:53.860Z",
+        "subtotalAmount": 240,
+        "deliveryFee": 0,
+        "totalAmount": 240
+      },
+      "idempotencyKey": null,
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 240,
+        "collectionStatus": "PENDING_COLLECTION",
+        "collectedAmount": 0,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T05:55:53.860Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 0.8,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T05:55:53.860Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T05:55:53.860Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T05:55:53.860Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false,
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180"
+    },
+    {
+      "id": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+      "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+      "customerId": "usr_550326",
+      "addressId": null,
+      "customerPhone": "9876500001",
+      "customerName": "Aarav Sharma",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 240,
+      "taxAmount": 12,
+      "deliveryFee": 0,
+      "deliveryAddress": {
+        "street": "Flat 402, Royal Palms, Rewari",
+        "latitude": 28.197,
+        "longitude": 76.619
+      },
+      "items": [
+        {
+          "productId": "item_amoxicillin_500",
+          "name": "Amoxicillin 500mg",
+          "packSize": "",
+          "mrp": 144,
+          "price": 120,
+          "unitPrice": 120,
+          "quantity": 2,
+          "total": 240,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "504439",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_PENDING",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "item_amoxicillin_500",
+            "mrp": 144,
+            "sellingPrice": 120,
+            "quantity": 2,
+            "total": 240,
+            "discount": 24
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T05:53:01.807Z",
+        "subtotalAmount": 240,
+        "deliveryFee": 0,
+        "totalAmount": 240
+      },
+      "idempotencyKey": null,
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 240,
+        "collectionStatus": "PENDING_COLLECTION",
+        "collectedAmount": 0,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T05:53:01.807Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 0.8,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T05:53:01.807Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T05:53:01.807Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T05:53:01.807Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false,
+      "riderId": "rdr_rewari_01",
+      "riderName": "Vikram Singh",
+      "riderPhone": "+919876543210"
+    },
+    {
+      "id": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+      "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+      "customerId": "usr_550326",
+      "addressId": null,
+      "customerPhone": "9876500001",
+      "customerName": "Aarav Sharma",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 240,
+      "taxAmount": 12,
+      "deliveryFee": 0,
+      "deliveryAddress": {
+        "street": "Flat 402, Royal Palms, Rewari",
+        "latitude": 28.197,
+        "longitude": 76.619
+      },
+      "items": [
+        {
+          "productId": "item_amoxicillin_500",
+          "name": "Amoxicillin 500mg",
+          "packSize": "",
+          "mrp": 144,
+          "price": 120,
+          "unitPrice": 120,
+          "quantity": 2,
+          "total": 240,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "642190",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_PENDING",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "item_amoxicillin_500",
+            "mrp": 144,
+            "sellingPrice": 120,
+            "quantity": 2,
+            "total": 240,
+            "discount": 24
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T05:52:55.050Z",
+        "subtotalAmount": 240,
+        "deliveryFee": 0,
+        "totalAmount": 240
+      },
+      "idempotencyKey": null,
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 240,
+        "collectionStatus": "PENDING_COLLECTION",
+        "collectedAmount": 0,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T05:52:55.050Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 0.8,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T05:52:55.050Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T05:52:55.050Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T05:52:55.050Z"
+        },
+        {
+          "status": "ARRIVED_PICKUP",
+          "label": "Delivery partner arrived at store for pickup",
+          "actor": "RIDER",
+          "location": "Store Pickup Point",
+          "createdAt": "2026-09-14T05:53:01.868Z"
+        },
+        {
+          "status": "OUT_FOR_DELIVERY",
+          "label": "Order picked up and is out for delivery",
+          "actor": "RIDER",
+          "location": "En Route to Customer",
+          "createdAt": "2026-09-14T05:53:01.876Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false,
+      "riderId": "rdr_rewari_01",
+      "riderName": "Vikram Singh",
+      "riderPhone": "+919876543210"
+    },
+    {
+      "id": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+      "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+      "customerId": "usr_550326",
+      "addressId": null,
+      "customerPhone": "9876500001",
+      "customerName": "Aarav Sharma",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 240,
+      "taxAmount": 12,
+      "deliveryFee": 0,
+      "deliveryAddress": {
+        "street": "Flat 402, Royal Palms, Rewari",
+        "latitude": 28.197,
+        "longitude": 76.619
+      },
+      "items": [
+        {
+          "productId": "item_amoxicillin_500",
+          "name": "Amoxicillin 500mg",
+          "packSize": "",
+          "mrp": 144,
+          "price": 120,
+          "unitPrice": 120,
+          "quantity": 2,
+          "total": 240,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "825052",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_PENDING",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "item_amoxicillin_500",
+            "mrp": 144,
+            "sellingPrice": 120,
+            "quantity": 2,
+            "total": 240,
+            "discount": 24
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T05:52:39.721Z",
+        "subtotalAmount": 240,
+        "deliveryFee": 0,
+        "totalAmount": 240
+      },
+      "idempotencyKey": null,
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 240,
+        "collectionStatus": "PENDING_COLLECTION",
+        "collectedAmount": 0,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T05:52:39.721Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 0.8,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T05:52:39.721Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T05:52:39.721Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T05:52:39.721Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false
+    },
+    {
+      "id": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "customerId": "usr_383700",
+      "addressId": "addr_home",
+      "customerPhone": "+919991416180",
+      "customerName": "Customer 6180",
+      "orderType": "QUICK_COMMERCE_10MIN",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
+      "rxVerificationRequired": false,
+      "totalAmount": 12,
+      "taxAmount": 0.6,
+      "deliveryFee": 2,
+      "deliveryAddress": {
+        "id": "addr_1787666270421",
+        "tag": "Home",
+        "addressLine": "hiiiiiiii, Company Bagh",
+        "city": "Rewari",
+        "state": "Haryana",
+        "postalCode": "123401",
+        "country": "India",
+        "landmark": "",
+        "contactName": "Customer 6180",
+        "contactPhone": "+919991416180",
+        "isDefault": true,
+        "latitude": 28.1918284,
+        "longitude": 76.6081482,
+        "deliveryInstructions": "",
+        "placeId": "geo_28.1918284_76.6081482",
+        "accuracyMeters": 5,
+        "createdAt": "2026-08-25T13:57:50.421Z"
+      },
+      "items": [
+        {
+          "productId": "prod_para_500",
+          "name": "Paracetamol 500mg IP",
+          "packSize": "15 tablets",
+          "sku": "SKU-PARA-500",
+          "mrp": 8,
+          "price": 5,
+          "unitPrice": 5,
+          "quantity": 2,
+          "total": 10,
+          "rxRequired": false,
+          "coldChain": false
+        }
+      ],
+      "deliveryOtp": "136000",
+      "deliverySlaMins": 12,
+      "paymentMethod": "COD",
+      "paymentId": null,
+      "paymentStatus": "COD_PENDING",
+      "pricingSnapshot": {
+        "items": [
+          {
+            "productId": "prod_para_500",
+            "mrp": 8,
+            "sellingPrice": 5,
+            "quantity": 2,
+            "total": 10,
+            "discount": 3
+          }
+        ],
+        "currency": "INR",
+        "lockedAt": "2026-09-14T04:53:01.429Z",
+        "subtotalAmount": 10,
+        "deliveryFee": 2,
+        "totalAmount": 12
+      },
+      "idempotencyKey": "test-12345",
+      "reservedStock": true,
+      "outOfStockSkus": [],
+      "cod": {
+        "amountToCollect": 12,
+        "collectionStatus": "PENDING_COLLECTION",
+        "collectedAmount": 0,
+        "shortageAmount": 0,
+        "collectorId": null,
+        "collectedAt": null
+      },
+      "deliveryModel": "EXPRESS_RIDER_DELIVERY",
+      "provider": "EXPRESS_RIDER_DELIVERY",
+      "consignmentNumber": null,
+      "createdAt": "2026-09-14T04:53:01.437Z",
+      "sellerId": "seller_rewari_01",
+      "storeId": "STORE_MASTER_001",
+      "fulfillmentStoreId": "STORE_MASTER_001",
+      "fulfillmentDecision": {
+        "storeId": "STORE_MASTER_001",
+        "distanceKm": 1.7,
+        "slaMinutes": 12
+      },
+      "cancellation": null,
+      "cancellationRequest": null,
+      "trackingCheckpoints": [
+        {
+          "status": "PLACED",
+          "label": "Order placed by customer",
+          "actor": "customer",
+          "location": "Online Storefront",
+          "createdAt": "2026-09-14T04:53:01.437Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted into fulfillment at Commerce OS Central Fulfillment Hub",
+          "actor": "system",
+          "location": "Commerce OS Central Fulfillment Hub",
+          "createdAt": "2026-09-14T04:53:01.437Z"
+        },
+        {
+          "status": "PLACED",
+          "label": "Order placed with Cash on Delivery (COD)",
+          "actor": "customer",
+          "location": "Customer Location",
+          "createdAt": "2026-09-14T04:53:01.437Z"
+        },
+        {
+          "status": "SELLER_ACCEPTED",
+          "label": "Order accepted by store and delivery partner requested",
+          "actor": "SELLER",
+          "location": "Fulfillment Store Hub",
+          "createdAt": "2026-09-14T06:41:19.799Z"
+        },
+        {
+          "status": "OUT_FOR_DELIVERY",
+          "label": "Order picked up and is out for delivery",
+          "actor": "RIDER",
+          "location": "En Route to Customer",
+          "createdAt": "2026-09-14T07:01:12.603Z"
+        }
+      ],
+      "otpAttempts": 0,
+      "isCod": true,
+      "sellerApprovalRequired": false,
+      "sellerApprovalStatus": "AUTO_ACCEPTED",
+      "requiresSellerAcceptance": false,
+      "updatedAt": "2026-09-14T06:41:19.799Z"
+    },
     {
       "id": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
       "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
@@ -264,8 +1182,8 @@
       "customerPhone": "9811998877",
       "customerName": null,
       "orderType": "QUICK_COMMERCE_10MIN",
-      "status": "PLACED",
-      "orderStatus": "PLACED",
+      "status": "CANCELLED",
+      "orderStatus": "CANCELLED",
       "rxVerificationRequired": false,
       "totalAmount": 32.5,
       "taxAmount": 1.63,
@@ -355,13 +1273,23 @@
           "actor": "customer",
           "location": "Customer Location",
           "createdAt": "2026-09-04T11:47:11.059Z"
+        },
+        {
+          "status": "CANCELLED",
+          "label": "Delivery cancelled by delivery partner (WRONG ADDRESS)",
+          "actor": "RIDER",
+          "createdAt": "2026-09-14T06:25:09.240Z"
         }
       ],
       "otpAttempts": 0,
       "isCod": true,
       "sellerApprovalRequired": true,
       "sellerApprovalStatus": "AUTO_ACCEPTED",
-      "requiresSellerAcceptance": false
+      "requiresSellerAcceptance": false,
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "cancellationReason": "WRONG_ADDRESS"
     },
     {
       "id": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
@@ -370,8 +1298,8 @@
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
       "orderType": "QUICK_COMMERCE_10MIN",
-      "status": "PRESCRIPTION_VERIFICATION_PENDING",
-      "orderStatus": "PRESCRIPTION_VERIFICATION_PENDING",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
       "rxVerificationRequired": true,
       "totalAmount": 850,
       "taxAmount": 42.5,
@@ -495,8 +1423,8 @@
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
       "orderType": "QUICK_COMMERCE_10MIN",
-      "status": "READY_FOR_PICKUP",
-      "orderStatus": "READY_FOR_PICKUP",
+      "status": "DELIVERED",
+      "orderStatus": "DELIVERED",
       "rxVerificationRequired": false,
       "totalAmount": 7,
       "taxAmount": 0.35,
@@ -609,6 +1537,97 @@
   ],
   "codLedger": [
     {
+      "id": "cod_tx_46390ee2-0aa6-4c7f-a2c0-063da99ceba8",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 7,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T07:56:10.774Z",
+      "reconciled": false
+    },
+    {
+      "id": "cod_tx_f42d368a-8781-446b-8e32-037e514716d7",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 7,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T07:18:28.254Z",
+      "reconciled": false
+    },
+    {
+      "id": "cod_tx_13bb2c5c-181e-425d-b626-550355ea5c88",
+      "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 240,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T05:55:53.870Z",
+      "reconciled": false
+    },
+    {
+      "id": "cod_tx_89a4078d-0d58-4140-9c4d-8411c3960949",
+      "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 240,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T05:53:01.820Z",
+      "reconciled": false
+    },
+    {
+      "id": "cod_tx_47cd90e4-184c-4295-86f8-f50996da14a3",
+      "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 240,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T05:52:55.062Z",
+      "reconciled": false
+    },
+    {
+      "id": "cod_tx_8c2b776d-408c-4872-889c-961d728b2965",
+      "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 240,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T05:52:39.738Z",
+      "reconciled": false
+    },
+    {
+      "id": "cod_tx_ecd8e385-8607-4748-9c84-6c2732acf7ae",
+      "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "sellerId": "seller_rewari_01",
+      "amountExpected": 12,
+      "amountCollected": 0,
+      "shortageAmount": 0,
+      "status": "PENDING_COLLECTION",
+      "collectorId": null,
+      "notes": "Awaiting cash handoff upon delivery",
+      "createdAt": "2026-09-14T04:53:01.457Z",
+      "reconciled": false
+    },
+    {
       "id": "cod_tx_8e4e83af-0a82-49da-b990-59cf2de0714f",
       "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
       "sellerId": "seller_rewari_01",
@@ -650,6 +1669,76 @@
   ],
   "notifications": [
     {
+      "id": "notif_1789372570782_788",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "customerId": "usr_383700",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_8f8abe0e-310e-4cff-b636-a4055fb2557d placed (COD Rs 7)",
+      "read": false,
+      "createdAt": "2026-09-14T07:56:10.782Z"
+    },
+    {
+      "id": "notif_1789370308262_365",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "customerId": "usr_383700",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_67d77341-1614-4067-9c45-799beaa59b77 placed (COD Rs 7)",
+      "read": false,
+      "createdAt": "2026-09-14T07:18:28.262Z"
+    },
+    {
+      "id": "notif_1789365353875_994",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+      "customerId": "usr_550326",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_dd824906-f11a-4dcd-8c60-099dd8c592c0 placed (COD Rs 240)",
+      "read": false,
+      "createdAt": "2026-09-14T05:55:53.875Z"
+    },
+    {
+      "id": "notif_1789365181829_82",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+      "customerId": "usr_550326",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b placed (COD Rs 240)",
+      "read": false,
+      "createdAt": "2026-09-14T05:53:01.829Z"
+    },
+    {
+      "id": "notif_1789365175067_550",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+      "customerId": "usr_550326",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_650992ea-3aa8-4170-bc42-2720894576d6 placed (COD Rs 240)",
+      "read": false,
+      "createdAt": "2026-09-14T05:52:55.067Z"
+    },
+    {
+      "id": "notif_1789365159743_382",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+      "customerId": "usr_550326",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_574de457-4c39-41e5-8d47-239d88a3ae1e placed (COD Rs 240)",
+      "read": false,
+      "createdAt": "2026-09-14T05:52:39.743Z"
+    },
+    {
+      "id": "notif_1789361581464_41",
+      "type": "ORDER_PLACED",
+      "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "customerId": "usr_383700",
+      "recipientType": "CUSTOMER",
+      "message": "New order ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7 placed (COD Rs 12)",
+      "read": false,
+      "createdAt": "2026-09-14T04:53:01.464Z"
+    },
+    {
       "id": "notif_1788522431115_383",
       "type": "ORDER_PLACED",
       "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
@@ -681,6 +1770,62 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "aud_1789372570788",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_8f8abe0e-310e-4cff-b636-a4055fb2557d total Rs 7 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T07:56:10.788Z"
+    },
+    {
+      "id": "aud_1789370308268",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_67d77341-1614-4067-9c45-799beaa59b77 total Rs 7 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T07:18:28.268Z"
+    },
+    {
+      "id": "aud_1789365353880",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_dd824906-f11a-4dcd-8c60-099dd8c592c0 total Rs 240 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T05:55:53.880Z"
+    },
+    {
+      "id": "aud_1789365181834",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b total Rs 240 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T05:53:01.834Z"
+    },
+    {
+      "id": "aud_1789365175072",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_650992ea-3aa8-4170-bc42-2720894576d6 total Rs 240 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T05:52:55.072Z"
+    },
+    {
+      "id": "aud_1789365159748",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_574de457-4c39-41e5-8d47-239d88a3ae1e total Rs 240 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T05:52:39.748Z"
+    },
+    {
+      "id": "aud_1789361581471",
+      "actorId": "customer",
+      "action": "CREATE_ORDER",
+      "details": "Created order ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7 total Rs 12 paymentMethod=COD",
+      "storeId": null,
+      "createdAt": "2026-09-14T04:53:01.471Z"
+    },
     {
       "id": "aud_1788522431139",
       "actorId": "customer",
@@ -1624,6 +2769,22 @@
       "email": "user_9811998877@commerceos.io",
       "role": "ROLE_CUSTOMER",
       "createdAt": "2026-09-04T11:46:53.775Z"
+    },
+    {
+      "id": "usr_550326",
+      "name": "Customer 0001",
+      "phone": "9876500001",
+      "email": "user_9876500001@commerceos.io",
+      "role": "ROLE_CUSTOMER",
+      "createdAt": "2026-09-14T05:52:39.696Z"
+    },
+    {
+      "id": "usr_231803",
+      "name": "Customer 6180",
+      "phone": "+919817916180",
+      "email": "user_9817916180@commerceos.io",
+      "role": "ROLE_CUSTOMER",
+      "createdAt": "2026-09-14T06:04:03.531Z"
     }
   ],
   "refreshTokens": {
@@ -2294,6 +3455,96 @@
       "phone": "9811998877",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1788522422295
+    },
+    "refresh_rdr_rewari_01_805114739927": {
+      "userId": "rdr_rewari_01",
+      "phone": "+919876543210",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365117816
+    },
+    "refresh_rdr_rewari_01_794473474110": {
+      "userId": "rdr_rewari_01",
+      "phone": "+919876543210",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365139325
+    },
+    "refresh_rdr_rewari_01_282763619173": {
+      "userId": "rdr_rewari_01",
+      "phone": "+919876543210",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365159695
+    },
+    "refresh_usr_550326_409410345567": {
+      "userId": "usr_550326",
+      "phone": "9876500001",
+      "role": "ROLE_CUSTOMER",
+      "issuedAt": 1789365159717
+    },
+    "refresh_rdr_rewari_01_436773013199": {
+      "userId": "rdr_rewari_01",
+      "phone": "+919876543210",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365175033
+    },
+    "refresh_usr_550326_996374032775": {
+      "userId": "usr_550326",
+      "phone": "9876500001",
+      "role": "ROLE_CUSTOMER",
+      "issuedAt": 1789365175047
+    },
+    "refresh_rdr_rewari_01_379218090815": {
+      "userId": "rdr_rewari_01",
+      "phone": "+919876543210",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365181790
+    },
+    "refresh_usr_550326_246707432555": {
+      "userId": "usr_550326",
+      "phone": "9876500001",
+      "role": "ROLE_CUSTOMER",
+      "issuedAt": 1789365181805
+    },
+    "refresh_usr_550326_331324921455": {
+      "userId": "usr_550326",
+      "phone": "9876500001",
+      "role": "ROLE_CUSTOMER",
+      "issuedAt": 1789365353857
+    },
+    "refresh_rdr_9817916180_791057434021": {
+      "userId": "rdr_9817916180",
+      "phone": "+919817916180",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365353928
+    },
+    "refresh_rdr_9817916180_815429238980": {
+      "userId": "rdr_9817916180",
+      "phone": "+919817916180",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789365847702
+    },
+    "refresh_rdr_9817916180_440097285850": {
+      "userId": "rdr_9817916180",
+      "phone": "+919817916180",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789368187227
+    },
+    "refresh_rdr_9817916180_640185886524": {
+      "userId": "rdr_9817916180",
+      "phone": "+919817916180",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789368554000
+    },
+    "refresh_rdr_9817916180_339361285254": {
+      "userId": "rdr_9817916180",
+      "phone": "+919817916180",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789368715439
+    },
+    "refresh_rdr_rewari_01_747353958804": {
+      "userId": "rdr_rewari_01",
+      "phone": "+919876543210",
+      "role": "ROLE_RIDER",
+      "issuedAt": 1789368750562
     }
   },
   "deliverySessions": {
@@ -2315,7 +3566,7 @@
       "merchantAddress": null,
       "merchantLat": null,
       "merchantLng": null,
-      "state": "ASSIGNED",
+      "state": "DELIVERED",
       "otp": "253270",
       "otpExpiresAt": 1787668453697,
       "otpAttemptsLeft": 5,
@@ -2352,7 +3603,7 @@
       "merchantAddress": null,
       "merchantLat": null,
       "merchantLng": null,
-      "state": "ASSIGNED",
+      "state": "DELIVERED",
       "otp": "253270",
       "otpExpiresAt": 1787668453697,
       "otpAttemptsLeft": 5,
@@ -2389,7 +3640,7 @@
       "merchantAddress": null,
       "merchantLat": null,
       "merchantLng": null,
-      "state": "ASSIGNED",
+      "state": "DELIVERED",
       "otp": "428034",
       "otpExpiresAt": 1787668522757,
       "otpAttemptsLeft": 5,
@@ -2426,7 +3677,7 @@
       "merchantAddress": null,
       "merchantLat": null,
       "merchantLng": null,
-      "state": "ASSIGNED",
+      "state": "DELIVERED",
       "otp": "428034",
       "otpExpiresAt": 1787668522757,
       "otpAttemptsLeft": 5,
@@ -2449,10 +3700,10 @@
       "deliveryId": "del_5f3341ad-26cc-4672-811b-5584414682de",
       "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
       "storeId": "STORE_REWARI_01",
-      "riderId": null,
-      "riderName": null,
-      "riderPhone": null,
-      "riderVehicle": null,
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "riderVehicle": "HR-26-AB-1234",
       "customerId": "usr_220692",
       "customerName": null,
       "customerPhone": "9811998877",
@@ -2463,7 +3714,7 @@
       "merchantAddress": null,
       "merchantLat": null,
       "merchantLng": null,
-      "state": "ASSIGNED",
+      "state": "DELIVERED",
       "otp": "246327",
       "otpExpiresAt": 1788524231077,
       "otpAttemptsLeft": 5,
@@ -2478,9 +3729,30 @@
         {
           "state": "ASSIGNED",
           "timestamp": "2026-09-04T11:47:11.077Z"
+        },
+        {
+          "state": "CANCELLED",
+          "reason": "WRONG_ADDRESS",
+          "note": "",
+          "timestamp": "2026-09-14T06:25:09.240Z"
         }
       ],
-      "processedIdempotencyKeys": {}
+      "processedIdempotencyKeys": {},
+      "telemetry": {
+        "latitude": 28.19641876220703,
+        "longitude": 76.62823486328125,
+        "speedKmh": 0.1,
+        "heading": 0,
+        "accuracyMeters": 1,
+        "sequenceNumber": 1789367070163,
+        "serverTimestamp": 1789367070163,
+        "riderId": "rdr_9817916180",
+        "isStale": true
+      },
+      "cancelledBy": "RIDER",
+      "cancellationReason": "WRONG_ADDRESS",
+      "cancellationNote": "",
+      "cancelledAt": "2026-09-14T06:25:09.240Z"
     },
     "ord_8f348822-8c5f-43ef-acdb-6834548004be": {
       "deliveryId": "del_5f3341ad-26cc-4672-811b-5584414682de",
@@ -2500,7 +3772,7 @@
       "merchantAddress": null,
       "merchantLat": null,
       "merchantLng": null,
-      "state": "ASSIGNED",
+      "state": "DELIVERED",
       "otp": "246327",
       "otpExpiresAt": 1788524231077,
       "otpAttemptsLeft": 5,
@@ -2518,1846 +3790,1022 @@
         }
       ],
       "processedIdempotencyKeys": {}
+    },
+    "del_0c8a9331-01de-4aad-9196-863fc30b62a2": {
+      "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "id": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "customerId": "usr_383700",
+      "customerName": "Customer 6180",
+      "customerPhone": "+919991416180",
+      "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
+      "customerLat": 28.1918284,
+      "customerLng": 76.6081482,
+      "deliveryAddress": {
+        "id": "addr_1787666270421",
+        "tag": "Home",
+        "addressLine": "hiiiiiiii, Company Bagh",
+        "city": "Rewari",
+        "state": "Haryana",
+        "postalCode": "123401",
+        "country": "India",
+        "landmark": "",
+        "contactName": "Customer 6180",
+        "contactPhone": "+919991416180",
+        "isDefault": true,
+        "latitude": 28.1918284,
+        "longitude": 76.6081482,
+        "deliveryInstructions": "",
+        "placeId": "geo_28.1918284_76.6081482",
+        "accuracyMeters": 5,
+        "createdAt": "2026-08-25T13:57:50.421Z"
+      },
+      "storeId": "STORE_MASTER_001",
+      "merchantName": "Rewari Central Hub",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "state": "DELIVERED",
+      "riderId": "rdr_rewari_01",
+      "payoutFormatted": "₹91",
+      "distanceKm": 3.4,
+      "estimatedTimeMins": 15,
+      "isCod": true,
+      "codAmount": 12,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 2,
+      "itemsSummary": "2x Paracetamol 500mg IP",
+      "createdAt": "2026-09-14T06:41:19.799Z",
+      "updatedAt": "2026-09-14T06:41:19.799Z",
+      "telemetry": {
+        "latitude": 28.1955,
+        "longitude": 76.6135,
+        "speedKmh": 32,
+        "heading": 235,
+        "accuracyMeters": 3,
+        "sequenceNumber": 1789369999999,
+        "serverTimestamp": 1789369304138,
+        "riderId": "rdr_rewari_01",
+        "isStale": true
+      },
+      "history": [
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T07:01:12.603Z"
+        }
+      ]
+    },
+    "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7": {
+      "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "id": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "customerId": "usr_383700",
+      "customerName": "Customer 6180",
+      "customerPhone": "+919991416180",
+      "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
+      "customerLat": 28.1918284,
+      "customerLng": 76.6081482,
+      "deliveryAddress": {
+        "id": "addr_1787666270421",
+        "tag": "Home",
+        "addressLine": "hiiiiiiii, Company Bagh",
+        "city": "Rewari",
+        "state": "Haryana",
+        "postalCode": "123401",
+        "country": "India",
+        "landmark": "",
+        "contactName": "Customer 6180",
+        "contactPhone": "+919991416180",
+        "isDefault": true,
+        "latitude": 28.1918284,
+        "longitude": 76.6081482,
+        "deliveryInstructions": "",
+        "placeId": "geo_28.1918284_76.6081482",
+        "accuracyMeters": 5,
+        "createdAt": "2026-08-25T13:57:50.421Z"
+      },
+      "storeId": "STORE_MASTER_001",
+      "merchantName": "Rewari Central Hub",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "state": "DELIVERED",
+      "riderId": "rdr_rewari_01",
+      "payoutFormatted": "₹91",
+      "distanceKm": 3.4,
+      "estimatedTimeMins": 15,
+      "isCod": true,
+      "codAmount": 12,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 2,
+      "itemsSummary": "2x Paracetamol 500mg IP",
+      "createdAt": "2026-09-14T06:41:19.799Z",
+      "updatedAt": "2026-09-14T06:41:19.799Z"
+    },
+    "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138": {
+      "deliveryId": "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138",
+      "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+      "storeId": "STORE_MASTER_001",
+      "riderId": null,
+      "riderName": null,
+      "riderPhone": null,
+      "riderVehicle": null,
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "825052",
+      "otpExpiresAt": 1789366959731,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:52:39.731Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "ord_574de457-4c39-41e5-8d47-239d88a3ae1e": {
+      "deliveryId": "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138",
+      "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+      "storeId": "STORE_MASTER_001",
+      "riderId": null,
+      "riderName": null,
+      "riderPhone": null,
+      "riderVehicle": null,
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "825052",
+      "otpExpiresAt": 1789366959731,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:52:39.731Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657": {
+      "deliveryId": "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657",
+      "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_rewari_01",
+      "riderName": "Vikram Singh",
+      "riderPhone": "+919876543210",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "642190",
+      "otpExpiresAt": 1789366975057,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:52:55.057Z"
+        },
+        {
+          "state": "ARRIVED_PICKUP",
+          "timestamp": "2026-09-14T05:53:01.868Z"
+        },
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T05:53:01.876Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "ord_650992ea-3aa8-4170-bc42-2720894576d6": {
+      "deliveryId": "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657",
+      "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_rewari_01",
+      "riderName": "Vikram Singh",
+      "riderPhone": "+919876543210",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "642190",
+      "otpExpiresAt": 1789366975057,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:52:55.057Z"
+        },
+        {
+          "state": "ARRIVED_PICKUP",
+          "timestamp": "2026-09-14T05:53:01.868Z"
+        },
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T05:53:01.876Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b": {
+      "deliveryId": "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b",
+      "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_rewari_01",
+      "riderName": "Vikram Singh",
+      "riderPhone": "+919876543210",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "504439",
+      "otpExpiresAt": 1789366981813,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:53:01.813Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b": {
+      "deliveryId": "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b",
+      "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_rewari_01",
+      "riderName": "Vikram Singh",
+      "riderPhone": "+919876543210",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "504439",
+      "otpExpiresAt": 1789366981813,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:53:01.813Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "del_9617860e-e5fa-4974-934b-8fa31f8376a6": {
+      "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+      "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "532788",
+      "otpExpiresAt": 1789367153865,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:55:53.865Z"
+        }
+      ],
+      "processedIdempotencyKeys": {},
+      "telemetry": {
+        "latitude": 28.205,
+        "longitude": 76.612,
+        "speedKmh": 25,
+        "heading": 140,
+        "accuracyMeters": 5,
+        "sequenceNumber": 1789368554014,
+        "serverTimestamp": 1789368554014,
+        "riderId": "rdr_9817916180",
+        "isStale": false
+      }
+    },
+    "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0": {
+      "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+      "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+      "storeId": "STORE_MASTER_001",
+      "riderId": null,
+      "riderName": null,
+      "riderPhone": null,
+      "riderVehicle": null,
+      "customerId": "usr_550326",
+      "customerName": "Aarav Sharma",
+      "customerPhone": "9876500001",
+      "customerAddress": "Customer Delivery Location",
+      "customerLat": 28.197,
+      "customerLng": 76.619,
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantLat": null,
+      "merchantLng": null,
+      "state": "DELIVERED",
+      "otp": "532788",
+      "otpExpiresAt": 1789367153865,
+      "otpAttemptsLeft": 5,
+      "otpVerified": false,
+      "isCod": true,
+      "codAmount": 240,
+      "codCollectedAmount": 0,
+      "codReconciled": false,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T05:55:53.865Z"
+        }
+      ],
+      "processedIdempotencyKeys": {}
+    },
+    "del_80527d72-a471-4523-bc01-cc0bcefda569": {
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_383700",
+      "customerName": "Customer 6180",
+      "customerPhone": "+919991416180",
+      "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
+      "customerLat": 28.19641876220703,
+      "customerLng": 76.62823486328125,
+      "merchantName": "Rewari Central Master Store",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "state": "DELIVERED",
+      "otp": "143192",
+      "otpExpiresAt": 1789372108247,
+      "otpAttemptsLeft": 3,
+      "otpVerified": true,
+      "isCod": true,
+      "codAmount": 7,
+      "codCollectedAmount": 7,
+      "codReconciled": true,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T07:18:28.247Z"
+        },
+        {
+          "state": "ARRIVED_PICKUP",
+          "timestamp": "2026-09-14T07:23:34.693Z"
+        },
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T07:23:55.579Z"
+        },
+        {
+          "state": "HANDOFF_STARTED",
+          "timestamp": "2026-09-14T07:24:23.149Z"
+        },
+        {
+          "state": "DELIVERED",
+          "timestamp": "2026-09-14T07:26:49.363Z"
+        },
+        {
+          "state": "DELIVERED",
+          "timestamp": "2026-09-14T07:26:49.400Z"
+        }
+      ],
+      "processedIdempotencyKeys": {},
+      "telemetry": {
+        "latitude": 28.19923973083496,
+        "longitude": 76.61840057373047,
+        "speedKmh": 0.1,
+        "heading": 0,
+        "accuracyMeters": 1,
+        "sequenceNumber": 1789370568412,
+        "serverTimestamp": 1789370568412,
+        "riderId": "rdr_9817916180",
+        "isStale": true
+      },
+      "codCollectionStatus": "COLLECTED",
+      "deliveredAt": "2026-09-14T07:26:49.400Z"
+    },
+    "ord_67d77341-1614-4067-9c45-799beaa59b77": {
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_383700",
+      "customerName": "Customer 6180",
+      "customerPhone": "+919991416180",
+      "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
+      "customerLat": 28.19641876220703,
+      "customerLng": 76.62823486328125,
+      "merchantName": "Rewari Central Master Store",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "state": "DELIVERED",
+      "otp": "143192",
+      "otpExpiresAt": 1789372108247,
+      "otpAttemptsLeft": 3,
+      "otpVerified": true,
+      "isCod": true,
+      "codAmount": 7,
+      "codCollectedAmount": 7,
+      "codReconciled": true,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T07:18:28.247Z"
+        },
+        {
+          "state": "ARRIVED_PICKUP",
+          "timestamp": "2026-09-14T07:23:34.693Z"
+        },
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T07:23:55.579Z"
+        },
+        {
+          "state": "HANDOFF_STARTED",
+          "timestamp": "2026-09-14T07:24:23.149Z"
+        },
+        {
+          "state": "DELIVERED",
+          "timestamp": "2026-09-14T07:26:49.363Z"
+        },
+        {
+          "state": "DELIVERED",
+          "timestamp": "2026-09-14T07:26:49.400Z"
+        }
+      ],
+      "processedIdempotencyKeys": {},
+      "telemetry": {
+        "latitude": 28.19923973083496,
+        "longitude": 76.61840057373047,
+        "speedKmh": 0.1,
+        "heading": 0,
+        "accuracyMeters": 1,
+        "sequenceNumber": 1789370568412,
+        "serverTimestamp": 1789370568412,
+        "riderId": "rdr_9817916180",
+        "isStale": true
+      },
+      "codCollectionStatus": "COLLECTED",
+      "deliveredAt": "2026-09-14T07:26:49.400Z"
+    },
+    "del_9ddb5efe-4d47-4652-a9a0-06378183e206": {
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_383700",
+      "customerName": "Customer 6180",
+      "customerPhone": "+919991416180",
+      "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
+      "customerLat": 28.19923973083496,
+      "customerLng": 76.61840057373047,
+      "merchantName": "Rewari Central Master Store",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "state": "DELIVERED",
+      "otp": "133023",
+      "otpExpiresAt": 1789374370764,
+      "otpAttemptsLeft": 5,
+      "otpVerified": true,
+      "isCod": true,
+      "codAmount": 7,
+      "codCollectedAmount": 7,
+      "codReconciled": true,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T07:56:10.764Z"
+        },
+        {
+          "state": "ARRIVED_PICKUP",
+          "timestamp": "2026-09-14T08:00:24.405Z"
+        },
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T08:02:45.781Z"
+        },
+        {
+          "state": "HANDOFF_STARTED",
+          "timestamp": "2026-09-14T08:18:18.862Z"
+        },
+        {
+          "state": "DELIVERED",
+          "timestamp": "2026-09-14T08:23:14.914Z"
+        }
+      ],
+      "processedIdempotencyKeys": {},
+      "waypoints": [
+        {
+          "lat": 28.19888,
+          "lng": 76.61859
+        },
+        {
+          "lat": 28.19901,
+          "lng": 76.61838
+        },
+        {
+          "lat": 28.19921,
+          "lng": 76.61844
+        }
+      ],
+      "distanceKm": 0,
+      "estimatedTimeMins": 1,
+      "codCollectionStatus": "COLLECTED",
+      "deliveredAt": "2026-09-14T08:23:14.914Z"
+    },
+    "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d": {
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "storeId": "STORE_MASTER_001",
+      "riderId": "rdr_9817916180",
+      "riderName": "Partner 6180",
+      "riderPhone": "+919817916180",
+      "riderVehicle": "HR-26-AB-1234",
+      "customerId": "usr_383700",
+      "customerName": "Customer 6180",
+      "customerPhone": "+919991416180",
+      "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
+      "customerLat": 28.19923973083496,
+      "customerLng": 76.61840057373047,
+      "merchantName": "Rewari Central Master Store",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "state": "DELIVERED",
+      "otp": "133023",
+      "otpExpiresAt": 1789374370764,
+      "otpAttemptsLeft": 5,
+      "otpVerified": true,
+      "isCod": true,
+      "codAmount": 7,
+      "codCollectedAmount": 7,
+      "codReconciled": true,
+      "itemCount": 1,
+      "isColdChain": false,
+      "history": [
+        {
+          "state": "ASSIGNED",
+          "timestamp": "2026-09-14T07:56:10.764Z"
+        },
+        {
+          "state": "ARRIVED_PICKUP",
+          "timestamp": "2026-09-14T08:00:24.405Z"
+        },
+        {
+          "state": "EN_ROUTE_CUSTOMER",
+          "timestamp": "2026-09-14T08:02:45.781Z"
+        },
+        {
+          "state": "HANDOFF_STARTED",
+          "timestamp": "2026-09-14T08:18:18.862Z"
+        },
+        {
+          "state": "DELIVERED",
+          "timestamp": "2026-09-14T08:23:14.914Z"
+        }
+      ],
+      "processedIdempotencyKeys": {},
+      "waypoints": [
+        {
+          "lat": 28.19888,
+          "lng": 76.61859
+        },
+        {
+          "lat": 28.19901,
+          "lng": 76.61838
+        },
+        {
+          "lat": 28.19921,
+          "lng": 76.61844
+        }
+      ],
+      "distanceKm": 0,
+      "estimatedTimeMins": 1,
+      "codCollectionStatus": "COLLECTED",
+      "deliveredAt": "2026-09-14T08:23:14.914Z"
     }
   },
   "offers": {
-    "off_a968296d-b4c4-4474-9a1a-e22e17dd85ee": {
-      "offerId": "off_a968296d-b4c4-4474-9a1a-e22e17dd85ee",
-      "eventId": "evt_57e9c895-c24c-4003-ad3f-04992ce2ec54",
-      "notificationId": "notif_4cd0665c-ae75-4641-b2d9-77b4602b1fb6",
-      "deliveryId": "del_f97c6755-74f5-4be8-b414-15800f857e79",
-      "orderId": "ord_306502de-5f54-452c-8b3f-890aa916047c",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 55,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T12:25:20.997Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 0.1,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0,
-          "distancePay": 0,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 55,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 0,
-      "estimatedDurationMins": 2,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787055920997,
-      "offerExpiresAt": 1787056820997,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T12:25:20.997Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "cancelledAt": 1787059526609
-    },
-    "off_80f335c7-6e05-4264-9967-863d564c0b03": {
-      "offerId": "off_80f335c7-6e05-4264-9967-863d564c0b03",
-      "id": "off_80f335c7-6e05-4264-9967-863d564c0b03",
-      "eventId": "evt_b6fe2275-f174-4678-baf8-5ab54dc121ea",
-      "notificationId": "notif_75962248-7c14-4931-9eca-30501fc61c71",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_f97c6755-74f5-4be8-b414-15800f857e79",
-      "orderId": "ord_306502de-5f54-452c-8b3f-890aa916047c",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6180",
-      "customerPhone": "+919991416180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari, Haryana, 123401",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "earningsAmount": 64,
-      "totalEarnings": 64,
-      "totalDistanceKm": 1.2,
-      "deliveryDistanceKm": 0.7,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787055935194,
-      "offerExpiresAt": 1787056835194,
-      "itemsSummary": "2x Paracetamol 500mg IP",
-      "itemCount": 2,
-      "isCod": true,
-      "codAmount": 12,
-      "createdAt": "2026-08-18T12:25:35.194Z",
-      "cancelledAt": 1787059526609
-    },
-    "off_c6be834d-c5fe-465a-bfdc-12e85cabdf6d": {
-      "offerId": "off_c6be834d-c5fe-465a-bfdc-12e85cabdf6d",
-      "id": "off_c6be834d-c5fe-465a-bfdc-12e85cabdf6d",
-      "eventId": "evt_9b855ef3-18a1-45d8-9d6d-79c674aa0422",
-      "notificationId": "notif_9b025615-1157-4e2e-ae6f-b820d8947d60",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_193970c2-94a6-40e0-aac8-18578008f8f2",
-      "orderId": "ord_0ba3fbf4-ebd1-46a1-8233-b3a7e10f968b",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787057798155,
-      "offerExpiresAt": 1787058698155,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T12:56:38.155Z",
-      "acceptedAt": 1787057798186,
-      "history": [
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T12:56:38.186Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_4b7f0ce4-8509-43c0-87fb-f973cbe3958f": {
-      "offerId": "off_4b7f0ce4-8509-43c0-87fb-f973cbe3958f",
-      "id": "off_4b7f0ce4-8509-43c0-87fb-f973cbe3958f",
-      "eventId": "evt_e84d1b6f-7b7b-44a5-bff2-bb6ad9f79346",
-      "notificationId": "notif_f08dae01-ed38-4ca7-a980-3ab8c2541ab1",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_68918c9a-d349-4716-aeab-cfcf7c568ad1",
-      "orderId": "ord_ab1820ef-d6e6-4991-90ab-2fe567cba736",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787057851176,
-      "offerExpiresAt": 1787058751176,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T12:57:31.176Z",
-      "acceptedAt": 1787057851199,
-      "history": [
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T12:57:31.199Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_48140523-e3fa-4165-8558-b90933b7f82f": {
-      "offerId": "off_48140523-e3fa-4165-8558-b90933b7f82f",
-      "eventId": "evt_7ec31a18-196f-407a-93da-6a2cc588c95f",
-      "notificationId": "notif_947b036f-a620-4ef6-9a7c-71d5dddc6632",
-      "deliveryId": "del_7c664b4d-f9ad-4685-b798-5205fcc356f3",
-      "orderId": "ord_798969c2-49cf-4d3f-8c91-716e29c57f60",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 55,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:01:12.024Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 0.8,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0,
-          "distancePay": 0,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 55,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 0.8,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058072024,
-      "offerExpiresAt": 1787058972024,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:01:12.024Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_46aa7101-6fc9-4f88-8554-5ae8ea81acfd": {
-      "offerId": "off_46aa7101-6fc9-4f88-8554-5ae8ea81acfd",
-      "id": "off_46aa7101-6fc9-4f88-8554-5ae8ea81acfd",
-      "eventId": "evt_c4fb9b7c-1b36-4c98-a6a5-8e55e6fc6a7e",
-      "notificationId": "notif_2b2d76eb-f124-4ac3-9e70-a11f011f0393",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_7c664b4d-f9ad-4685-b798-5205fcc356f3",
-      "orderId": "ord_798969c2-49cf-4d3f-8c91-716e29c57f60",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6180",
-      "customerPhone": "+919991416180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari, Haryana, 123401",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "earningsAmount": 64,
-      "totalEarnings": 64,
-      "totalDistanceKm": 1.2,
-      "deliveryDistanceKm": 0.7,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058098539,
-      "offerExpiresAt": 1787058998539,
-      "itemsSummary": "2x Paracetamol 500mg IP",
-      "itemCount": 2,
-      "isCod": true,
-      "codAmount": 12,
-      "createdAt": "2026-08-18T13:01:38.539Z"
-    },
-    "off_966d46a3-7e13-49b9-bc6e-48b0dfa80287": {
-      "offerId": "off_966d46a3-7e13-49b9-bc6e-48b0dfa80287",
-      "id": "off_966d46a3-7e13-49b9-bc6e-48b0dfa80287",
-      "eventId": "evt_51770ef1-1753-45b5-b4db-bc0fabd0fb27",
-      "notificationId": "notif_efb0e9c9-ea34-439d-9c63-29b178dd36c5",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_28d0a7db-9918-407f-9c17-95fe15f7e295",
-      "orderId": "ord_8eec5855-a195-4fda-bd79-c3cf07b645d1",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058312851,
-      "offerExpiresAt": 1787059212851,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T13:05:12.851Z"
-    },
-    "off_8ee346a2-2887-4413-b452-cd1dcd184ea1": {
-      "offerId": "off_8ee346a2-2887-4413-b452-cd1dcd184ea1",
-      "eventId": "evt_c9c36b76-b52d-4924-ae60-05b2251c3fb8",
-      "notificationId": "notif_2aebe71c-26df-40e7-84a8-5ab89fede188",
-      "deliveryId": "del_28d0a7db-9918-407f-9c17-95fe15f7e295",
-      "orderId": "ord_8eec5855-a195-4fda-bd79-c3cf07b645d1",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 61.65,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:05:13.245Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.7,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.7,
-          "distancePay": 6.65,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 61.65,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 1.7,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058313245,
-      "offerExpiresAt": 1787059213245,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:05:13.245Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_af1c75e5-2cde-4150-99ba-cef284673431": {
-      "offerId": "off_af1c75e5-2cde-4150-99ba-cef284673431",
-      "eventId": "evt_8a2540ce-c3d1-4746-b48d-ccc3965118f0",
-      "notificationId": "notif_25797ed7-d60b-420e-aea4-231e78c6de3b",
-      "deliveryId": "del_cfc6092d-6704-4e18-b4ed-227a95da6aea",
-      "orderId": "ord_74bee875-1ccb-4f8a-8fb3-a79822ecf8dd",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 55,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:06:06.235Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 0.8,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0,
-          "distancePay": 0,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 55,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 0.8,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058366235,
-      "offerExpiresAt": 1787059266235,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:06:06.235Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_461b4681-c428-4d4b-9666-ff8d16399568": {
-      "offerId": "off_461b4681-c428-4d4b-9666-ff8d16399568",
-      "id": "off_461b4681-c428-4d4b-9666-ff8d16399568",
-      "eventId": "evt_0c45b600-5209-4ef7-9738-bc812713b3d5",
-      "notificationId": "notif_1ec236e2-0e8c-4d5e-b743-29a6d7a2b46e",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_cfc6092d-6704-4e18-b4ed-227a95da6aea",
-      "orderId": "ord_74bee875-1ccb-4f8a-8fb3-a79822ecf8dd",
-      "status": "CANCELLED",
-      "notificationStatus": "RIDER_OPENED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6180",
-      "customerPhone": "+919991416180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari, Haryana, 123401",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "earningsAmount": 64,
-      "totalEarnings": 64,
-      "totalDistanceKm": 1.2,
-      "deliveryDistanceKm": 0.7,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058384628,
-      "offerExpiresAt": 1787059284628,
-      "itemsSummary": "2x Paracetamol 500mg IP",
-      "itemCount": 2,
-      "isCod": true,
-      "codAmount": 12,
-      "createdAt": "2026-08-18T13:06:24.628Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:07:01.783Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        },
-        {
-          "status": "RIDER_OPENED",
-          "timestamp": "2026-08-18T13:07:20.070Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_48f2564c-69fa-41f0-98c3-5ca424554105": {
-      "offerId": "off_48f2564c-69fa-41f0-98c3-5ca424554105",
-      "id": "off_48f2564c-69fa-41f0-98c3-5ca424554105",
-      "eventId": "evt_8c301c06-8542-42b5-ab59-f9e5edae297d",
-      "notificationId": "notif_f26b5553-0c81-466b-8f0f-ee09387f5bac",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_114b6ee6-3026-4639-a8a5-c09110057289",
-      "orderId": "ord_a3dd30e7-1a8e-4011-bbbd-685ec39dda9f",
-      "status": "CANCELLED",
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058444706,
-      "offerExpiresAt": 1787059344706,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T13:07:24.706Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:07:24.915Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_e737ef63-5b53-4893-a48a-64454e447233": {
-      "offerId": "off_e737ef63-5b53-4893-a48a-64454e447233",
-      "eventId": "evt_0c6975bd-3cd8-4643-9b76-51cc0ffab029",
-      "notificationId": "notif_2c96e5f5-e0f3-4a0f-8dde-16a03a97b8c5",
-      "deliveryId": "del_114b6ee6-3026-4639-a8a5-c09110057289",
-      "orderId": "ord_a3dd30e7-1a8e-4011-bbbd-685ec39dda9f",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 61.65,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:07:25.300Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.7,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.7,
-          "distancePay": 6.65,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 61.65,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 1.7,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058445301,
-      "offerExpiresAt": 1787059345301,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:07:25.301Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "RIDER_OPENED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:07:26.300Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        },
-        {
-          "status": "RIDER_OPENED",
-          "timestamp": "2026-08-18T13:07:32.701Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_9d56c0a8-4c68-4579-9658-437811dcdc5e": {
-      "offerId": "off_9d56c0a8-4c68-4579-9658-437811dcdc5e",
-      "id": "off_9d56c0a8-4c68-4579-9658-437811dcdc5e",
-      "eventId": "evt_26007c39-e8cf-4a18-93e2-3d3c3bff32e4",
-      "notificationId": "notif_830fe38d-896b-4a97-bbef-ca5b1818b764",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_f3ee8896-7a1e-4ff8-b72e-bc4f2a557965",
-      "orderId": "ord_a1c16f16-aae4-43b6-bd1a-6f1e6f160fa8",
-      "status": "CANCELLED",
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058509138,
-      "offerExpiresAt": 1787059409138,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T13:08:29.138Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:08:29.881Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_500f4684-e8b8-481a-935b-c76e4441b03b": {
-      "offerId": "off_500f4684-e8b8-481a-935b-c76e4441b03b",
-      "eventId": "evt_0b787404-2f8e-4776-b3f1-4bb877b1557e",
-      "notificationId": "notif_9ed2b8b4-81a5-44c4-a8e8-e87734fb918e",
-      "deliveryId": "del_f3ee8896-7a1e-4ff8-b72e-bc4f2a557965",
-      "orderId": "ord_a1c16f16-aae4-43b6-bd1a-6f1e6f160fa8",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 61.65,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:08:30.362Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.7,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.7,
-          "distancePay": 6.65,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 61.65,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 1.7,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058510362,
-      "offerExpiresAt": 1787059410362,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:08:30.362Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "RIDER_OPENED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:08:31.088Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        },
-        {
-          "status": "RIDER_OPENED",
-          "timestamp": "2026-08-18T13:08:41.547Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_235474a2-ec34-4681-b74a-f0033b88ae3b": {
-      "offerId": "off_235474a2-ec34-4681-b74a-f0033b88ae3b",
-      "eventId": "evt_a1d79f55-3028-4641-a20b-1f9957e08eec",
-      "notificationId": "notif_2450db91-80e2-4cd6-b478-2eee48126705",
-      "deliveryId": "del_43a82800-7f22-44fa-9ddb-b69accda9926",
-      "orderId": "ord_287f853d-31be-4105-ac31-df1d4015b1cb",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 55,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:09:28.179Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 0.8,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0,
-          "distancePay": 0,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 55,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 0.8,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058568179,
-      "offerExpiresAt": 1787059468179,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:09:28.179Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_9eac9ac9-c139-4fd1-9893-db0f8cacb74b": {
-      "offerId": "off_9eac9ac9-c139-4fd1-9893-db0f8cacb74b",
-      "id": "off_9eac9ac9-c139-4fd1-9893-db0f8cacb74b",
-      "eventId": "evt_b5bdc701-f299-43ab-963b-5e5a13f11a89",
-      "notificationId": "notif_1db4480d-a759-4687-abce-361bdf080fd4",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_43a82800-7f22-44fa-9ddb-b69accda9926",
-      "orderId": "ord_287f853d-31be-4105-ac31-df1d4015b1cb",
-      "status": "CANCELLED",
-      "notificationStatus": "RIDER_OPENED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6180",
-      "customerPhone": "+919991416180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari, Haryana, 123401",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "earningsAmount": 64,
-      "totalEarnings": 64,
-      "totalDistanceKm": 1.2,
-      "deliveryDistanceKm": 0.7,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058586793,
-      "offerExpiresAt": 1787059486793,
-      "itemsSummary": "2x Paracetamol 500mg IP",
-      "itemCount": 2,
-      "isCod": true,
-      "codAmount": 12,
-      "createdAt": "2026-08-18T13:09:46.793Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:09:49.029Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        },
-        {
-          "status": "RIDER_OPENED",
-          "timestamp": "2026-08-18T13:09:52.391Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_c0954c42-2f6b-4fd2-84b9-d91e663ab04e": {
-      "offerId": "off_c0954c42-2f6b-4fd2-84b9-d91e663ab04e",
-      "id": "off_c0954c42-2f6b-4fd2-84b9-d91e663ab04e",
-      "eventId": "evt_41cc59e0-9216-4a28-b91c-1a3c99e8f313",
-      "notificationId": "notif_c605eec1-27ec-44be-83f4-3d736ee4ece1",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_c3b6cf41-bed5-41b0-aebc-82aa3d20c3ee",
-      "orderId": "ord_5fdb3702-02dc-4005-8213-3b48ccecf785",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058705325,
-      "offerExpiresAt": 1787059605325,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T13:11:45.325Z",
-      "acceptedAt": 1787058705332,
-      "history": [
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T13:11:45.332Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_8f0bc38d-4732-4445-ac3e-4a7ed3e72691": {
-      "offerId": "off_8f0bc38d-4732-4445-ac3e-4a7ed3e72691",
-      "eventId": "evt_5f8f6aa6-53c8-4102-9dea-4b7ea02374dd",
-      "notificationId": "notif_da5bccaa-536a-46dd-8893-3333dff15977",
-      "deliveryId": "del_c3b6cf41-bed5-41b0-aebc-82aa3d20c3ee",
-      "orderId": "ord_5fdb3702-02dc-4005-8213-3b48ccecf785",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 61.65,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:11:46.267Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.7,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.7,
-          "distancePay": 6.65,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 61.65,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 1.7,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058706267,
-      "offerExpiresAt": 1787059606267,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:11:46.267Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:11:46.568Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_62ac82be-4281-4f5e-a503-c38ce50e4973": {
-      "offerId": "off_62ac82be-4281-4f5e-a503-c38ce50e4973",
-      "eventId": "evt_5c0c6d56-05f6-4f38-88b6-63684174b113",
-      "notificationId": "notif_6a2f8fb6-f24d-43eb-9e1a-33bed85c456a",
-      "deliveryId": "del_61010a24-2d72-47aa-a409-0cec0543fcca",
-      "orderId": "ord_cabcc395-d342-4e4a-aa2f-28c64538e6c6",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 55,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:13:00.150Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 0.8,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0,
-          "distancePay": 0,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 55,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 0.8,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787058780150,
-      "offerExpiresAt": 1787059680150,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:13:00.150Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_7fc88840-e554-4c72-894b-058fd924cb72": {
-      "offerId": "off_7fc88840-e554-4c72-894b-058fd924cb72",
-      "id": "off_7fc88840-e554-4c72-894b-058fd924cb72",
-      "eventId": "evt_cfcfd817-f6b1-4146-8ac9-b1278f1e3a40",
-      "notificationId": "notif_47ce86f5-e04c-4bc3-b63c-e6026fff58a4",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_61010a24-2d72-47aa-a409-0cec0543fcca",
-      "orderId": "ord_cabcc395-d342-4e4a-aa2f-28c64538e6c6",
-      "status": "CANCELLED",
-      "notificationStatus": "RIDER_OPENED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6180",
-      "customerPhone": "+919991416180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari, Haryana, 123401",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "earningsAmount": 64,
-      "totalEarnings": 64,
-      "totalDistanceKm": 1.2,
-      "deliveryDistanceKm": 0.7,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787058805406,
-      "offerExpiresAt": 1787059705406,
-      "itemsSummary": "2x Paracetamol 500mg IP",
-      "itemCount": 2,
-      "isCod": true,
-      "codAmount": 12,
-      "createdAt": "2026-08-18T13:13:25.406Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:13:27.710Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        },
-        {
-          "status": "RIDER_OPENED",
-          "timestamp": "2026-08-18T13:13:36.087Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_ab36eea1-1430-46e7-9cac-066178b5193a": {
-      "offerId": "off_ab36eea1-1430-46e7-9cac-066178b5193a",
-      "id": "off_ab36eea1-1430-46e7-9cac-066178b5193a",
-      "eventId": "evt_d3daf4ed-7651-415b-adc3-0ecd95381de0",
-      "notificationId": "notif_11c3dfc2-218e-4bbc-a264-8909e0f81ab9",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_49756787-22c3-4c42-a768-a36b63a2e411",
-      "orderId": "ord_038e9136-caae-44f6-a3e3-0c6d3bd3e388",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787059260264,
-      "offerExpiresAt": 1787060160264,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T13:21:00.264Z",
-      "acceptedAt": 1787059260271,
-      "history": [
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T13:21:00.271Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_db57c324-1f85-419b-83b9-fbf988b6c09b": {
-      "offerId": "off_db57c324-1f85-419b-83b9-fbf988b6c09b",
-      "eventId": "evt_b4a5fd07-4159-4c31-963d-e77bdf903785",
-      "notificationId": "notif_3698c6a2-4773-4efb-99c3-d6a5442157b8",
-      "deliveryId": "del_49756787-22c3-4c42-a768-a36b63a2e411",
-      "orderId": "ord_038e9136-caae-44f6-a3e3-0c6d3bd3e388",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 61.65,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:21:00.924Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.7,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.7,
-          "distancePay": 6.65,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 61.65,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 1.7,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787059260924,
-      "offerExpiresAt": 1787060160924,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:21:00.924Z",
-          "riderId": "rdr_rewari_01"
-        },
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T13:25:18.731Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:21:02.710Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ],
-      "acceptedAt": 1787059518731
-    },
-    "off_d5f27289-9580-4f85-a408-ed0c294df33b": {
-      "offerId": "off_d5f27289-9580-4f85-a408-ed0c294df33b",
-      "id": "off_d5f27289-9580-4f85-a408-ed0c294df33b",
-      "eventId": "evt_e6a8e3d4-5e1e-43f0-9cf1-cb2d9d762f39",
-      "notificationId": "notif_a2cd82bb-8c15-4e37-a582-f1647f00b46f",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_593fc19b-26c5-425c-ab6d-bdc030ff90f4",
-      "orderId": "ord_665afc29-d003-435b-a426-bec02f2b4263",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787059649563,
-      "offerExpiresAt": 1787060549563,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T13:27:29.563Z",
-      "acceptedAt": 1787059649570,
-      "history": [
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T13:27:29.570Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "cancelledAt": 1787059649579
-    },
-    "off_e1eb4284-fc89-4485-ac6e-5c57e7580682": {
-      "offerId": "off_e1eb4284-fc89-4485-ac6e-5c57e7580682",
-      "eventId": "evt_5a42ed0c-10a8-4d3f-874b-a1cee9a945ae",
-      "notificationId": "notif_e1ac490e-c9c1-474f-b15a-cd13ae4945aa",
-      "deliveryId": "del_593fc19b-26c5-425c-ab6d-bdc030ff90f4",
-      "orderId": "ord_665afc29-d003-435b-a426-bec02f2b4263",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 61.65,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:27:30.284Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.7,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.7,
-          "distancePay": 6.65,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 61.65,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 0.8,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 1.7,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787059650284,
-      "offerExpiresAt": 1787060550284,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:27:30.284Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T13:27:31.283Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_4243fc43-9dc3-4c3c-97df-8ef6c3d33f40": {
-      "offerId": "off_4243fc43-9dc3-4c3c-97df-8ef6c3d33f40",
-      "eventId": "evt_bed329f9-5f66-41a8-a10e-59950353ca0b",
-      "notificationId": "notif_51a5933f-30cd-463e-88a9-848c66376084",
-      "deliveryId": "del_7116bb1a-616c-430e-9e49-7f00089591d9",
-      "orderId": "ord_d8209602-84af-43c4-a8bc-7e174a801400",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 59.75,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T13:29:03.442Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.5,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.5,
-          "distancePay": 4.75,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": false,
-          "surgeMultiplier": 1
-        },
-        "totalEarnings": 59.75,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 1.5,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787059743442,
-      "offerExpiresAt": 1787060643442,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T13:29:03.442Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_de49224b-0b30-4973-9026-7aec31a048ce": {
-      "offerId": "off_de49224b-0b30-4973-9026-7aec31a048ce",
-      "id": "off_de49224b-0b30-4973-9026-7aec31a048ce",
-      "eventId": "evt_fc2e7437-8056-4cea-add1-42d6c1a2fde9",
-      "notificationId": "notif_d60ba42d-025f-4c49-a9c5-06dcfa698625",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_d4a5c2ab-a738-4982-887f-cbbe053d78e4",
-      "orderId": "ord_f5796728-f8e8-49cb-8fa1-cfd41d08e6d6",
-      "status": "CANCELLED",
-      "notificationStatus": "DEVICE_RECEIVED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787064160991,
-      "offerExpiresAt": 1787065060991,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T14:42:40.991Z",
-      "acceptedAt": 1787064161001,
-      "history": [
-        {
-          "status": "ACCEPTED",
-          "timestamp": "2026-08-18T14:42:41.001Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "cancelledAt": 1787072503477
-    },
-    "off_e27c7be2-7732-48f8-a7ae-7a20071e7e5c": {
-      "offerId": "off_e27c7be2-7732-48f8-a7ae-7a20071e7e5c",
-      "eventId": "evt_676e965d-fa50-4fb6-aba0-40de7c0166f4",
-      "notificationId": "notif_a7af5df7-1e97-4ff9-b0ad-457f76305064",
-      "deliveryId": "del_d4a5c2ab-a738-4982-887f-cbbe053d78e4",
-      "orderId": "ord_f5796728-f8e8-49cb-8fa1-cfd41d08e6d6",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CANCELLED",
-      "earningsAmount": 85.38,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T14:42:41.745Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 2.4,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 1.4,
-          "distancePay": 13.3,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": true,
-          "surgeMultiplier": 1.25
-        },
-        "totalEarnings": 85.38,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0.9,
-      "totalDistanceKm": 2.4,
-      "estimatedDurationMins": 4,
-      "isCod": true,
-      "codAmount": 7,
-      "customerName": "Customer",
-      "customerAddress": "Circular Road, Rewari, Rewari",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787064161745,
-      "offerExpiresAt": 1787065061745,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T14:42:41.745Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "cancelledAt": 1787072503477
-    },
-    "off_237c8da0-8b79-42ba-8955-cf51293cf0e5": {
-      "offerId": "off_237c8da0-8b79-42ba-8955-cf51293cf0e5",
-      "eventId": "evt_4c37133f-c15f-4f9f-907b-f6a9f9c45f8d",
-      "notificationId": "notif_9c28ca9b-4aa6-42f0-8559-6d2177afd227",
-      "deliveryId": "del_6cf74950-3c51-49fe-b0be-d044dc2e8b41",
-      "orderId": "ord_90e1058c-9584-41ea-aa29-177c97c55738",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 74.69,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T14:46:05.781Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.5,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.5,
-          "distancePay": 4.75,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": true,
-          "surgeMultiplier": 1.25
-        },
-        "totalEarnings": 74.69,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 1.5,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer",
-      "customerAddress": "Default Delivery Address, NCR",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787064365781,
-      "offerExpiresAt": 1787065265781,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T14:46:05.781Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_f4bc8bda-459b-4030-a570-3172fac504e9": {
-      "offerId": "off_f4bc8bda-459b-4030-a570-3172fac504e9",
-      "eventId": "evt_3c5481c9-e8b4-45b1-8231-9602824892bd",
-      "notificationId": "notif_04cdac6d-a694-4a4d-990b-490e705ee319",
-      "deliveryId": "del_4487c267-c528-439f-a336-3f5f12eb4d9b",
-      "orderId": "ord_0cb64289-a5e2-4de1-a639-1cafac2c9f0c",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 74.69,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T14:46:11.712Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.5,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.5,
-          "distancePay": 4.75,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": true,
-          "surgeMultiplier": 1.25
-        },
-        "totalEarnings": 74.69,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 1.5,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer",
-      "customerAddress": "Default Delivery Address, NCR",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787064371712,
-      "offerExpiresAt": 1787065271712,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T14:46:11.712Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_4d371926-fb77-46c3-b9bc-50d9a4fdfbd9": {
-      "offerId": "off_4d371926-fb77-46c3-b9bc-50d9a4fdfbd9",
-      "eventId": "evt_4b170e38-9378-47ae-b518-8c4af156f854",
-      "notificationId": "notif_842f10bd-80a5-49ad-a03e-095af4ff7893",
-      "deliveryId": "del_5e1e646d-e3e8-42da-8acb-7642e478883e",
-      "orderId": "ord_0a529ffc-4017-4be2-9c61-edd3d3699a9f",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 74.69,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T16:53:04.448Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.5,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.5,
-          "distancePay": 4.75,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": true,
-          "surgeMultiplier": 1.25
-        },
-        "totalEarnings": 74.69,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 1.5,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 63,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787071984448,
-      "offerExpiresAt": 1787072884448,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T16:53:04.448Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ]
-    },
-    "off_f71cc048-314d-4388-b4cb-d3409c18c4e8": {
-      "offerId": "off_f71cc048-314d-4388-b4cb-d3409c18c4e8",
-      "id": "off_f71cc048-314d-4388-b4cb-d3409c18c4e8",
-      "eventId": "evt_da0fcbb3-9e5a-497c-a7e1-519da1e371b0",
-      "notificationId": "notif_28701708-3ed0-43c5-8c9c-7cc0124895bb",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_5e1e646d-e3e8-42da-8acb-7642e478883e",
-      "orderId": "ord_0a529ffc-4017-4be2-9c61-edd3d3699a9f",
-      "status": "DISPATCHED",
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6180",
-      "customerPhone": "+919991416180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari, Haryana, 123401",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "earningsAmount": 64,
-      "totalEarnings": 64,
-      "totalDistanceKm": 1.2,
-      "deliveryDistanceKm": 0.7,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787072015866,
-      "offerExpiresAt": 1787072915866,
-      "itemsSummary": "2x Dolo 650mg Paracetamol Tablet",
-      "itemCount": 2,
-      "isCod": true,
-      "codAmount": 63,
-      "createdAt": "2026-08-18T16:53:35.866Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T17:01:24.334Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_4924a990-7e53-4289-8b80-6e21546c2678": {
-      "offerId": "off_4924a990-7e53-4289-8b80-6e21546c2678",
-      "eventId": "evt_716cb240-148a-4960-8c86-3034280c0513",
-      "notificationId": "notif_9b22f913-c175-4a3f-961a-200035efbef8",
-      "deliveryId": "del_b985379b-fa94-4450-af63-e086db3041f0",
-      "orderId": "ord_c95a81d5-9e14-4ebf-ac98-c9058cfd9406",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 74.69,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T17:02:23.942Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.5,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.5,
-          "distancePay": 4.75,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": true,
-          "surgeMultiplier": 1.25
-        },
-        "totalEarnings": 74.69,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 1.5,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 12,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787072543942,
-      "offerExpiresAt": 1787073443942,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T17:02:23.942Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T17:02:26.414Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_a8bc37db-d03f-4633-80db-c627a6850fbd": {
-      "offerId": "off_a8bc37db-d03f-4633-80db-c627a6850fbd",
-      "eventId": "evt_5c446270-a2b8-4438-9f71-20fec44240f3",
-      "notificationId": "notif_79003d3e-3998-43a5-801f-1e9207a80614",
-      "deliveryId": "del_da81efe1-0ceb-4842-a8be-d09c745d6b24",
-      "orderId": "ord_af1aa34e-dbf8-4902-a3c5-82e567b16266",
-      "storeId": "STORE_REWARI_01",
-      "riderId": "rdr_rewari_01",
-      "status": "CREATED",
-      "earningsAmount": 74.69,
-      "pricingSnapshot": {
-        "pricingVersion": "2.4.0",
-        "calculatedAt": "2026-08-18T17:04:41.437Z",
-        "zoneId": "NCR_PANIPAT_01",
-        "distanceKm": 1.5,
-        "breakdown": {
-          "basePay": 40,
-          "billableDistanceKm": 0.5,
-          "distancePay": 4.75,
-          "codFee": 15,
-          "coldChainFee": 0,
-          "itemWeightFee": 0,
-          "tierIncentive": 0,
-          "isPeakSurge": true,
-          "surgeMultiplier": 1.25
-        },
-        "totalEarnings": 74.69,
-        "currency": "INR",
-        "isLocked": true
-      },
-      "pickupDistanceKm": 1.5,
-      "deliveryDistanceKm": 0,
-      "totalDistanceKm": 1.5,
-      "estimatedDurationMins": 3,
-      "isCod": true,
-      "codAmount": 17,
-      "customerName": "Customer 6180",
-      "customerAddress": "3126/21D company bagh, Sati Colony, 3126/21D company bagh, Sati Colony, Rewari",
-      "customerLat": 28.2021899,
-      "customerLng": 76.6153954,
-      "merchantName": "Commerce OS Central Fulfillment Hub",
-      "merchantAddress": "Central Dark Store Hub, Sector 18",
-      "merchantLat": 28.2021899,
-      "merchantLng": 76.6153954,
-      "offerCreatedAt": 1787072681437,
-      "offerExpiresAt": 1787073581437,
-      "history": [
-        {
-          "status": "CREATED",
-          "timestamp": "2026-08-18T17:04:41.437Z",
-          "riderId": "rdr_rewari_01"
-        }
-      ],
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T17:04:42.525Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_a191f6b4-3574-4bfb-a146-7ac5f790a008": {
-      "offerId": "off_a191f6b4-3574-4bfb-a146-7ac5f790a008",
-      "id": "off_a191f6b4-3574-4bfb-a146-7ac5f790a008",
-      "eventId": "evt_3441fcd2-f028-4b38-a599-46e5cfa65e9a",
-      "notificationId": "notif_78b313ff-4ecd-4295-a07a-01500bc351f4",
-      "riderId": "rdr_rewari_01",
-      "deliveryId": "del_bfab7816-1c66-419a-a057-daf147c49480",
-      "orderId": "ord_ac53b905-a595-443d-9932-005f9d92a38d",
-      "status": "DISPATCHED",
-      "notificationStatus": "NOTIFICATION_POSTED",
-      "merchantName": "Rewari Central Master Store",
-      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
-      "merchantLat": 28.1989,
-      "merchantLng": 76.6186,
-      "customerName": "Customer 6655",
-      "customerPhone": "+919988776655",
-      "customerAddress": "Circular Road, Rewari, Rewari, 123401",
-      "customerLat": 28.197,
-      "customerLng": 76.619,
-      "earningsAmount": 63,
-      "totalEarnings": 63,
-      "totalDistanceKm": 1.1,
-      "deliveryDistanceKm": 0.6,
-      "pickupDistanceKm": 0.5,
-      "estimatedDurationMins": 5,
-      "offerCreatedAt": 1787075126260,
-      "offerExpiresAt": 1787076026260,
-      "serverTime": 1787075126260,
-      "itemsSummary": "1x Paracetamol 500mg IP",
-      "itemCount": 1,
-      "isCod": true,
-      "codAmount": 7,
-      "createdAt": "2026-08-18T17:45:26.260Z",
-      "notificationLifecycle": [
-        {
-          "status": "NOTIFICATION_POSTED",
-          "timestamp": "2026-08-18T17:45:26.328Z",
-          "reportedBy": "rdr_rewari_01",
-          "networkState": "ONLINE"
-        }
-      ]
-    },
-    "off_b060c0b9-0fb9-412f-bec3-cc717549d2a4": {
-      "offerId": "off_b060c0b9-0fb9-412f-bec3-cc717549d2a4",
-      "orderId": "ord_057e5c4e-cac3-485c-b072-bdc2af4b9636",
-      "deliveryId": "del_8b8e99ba-d8ba-4352-9a0c-31e3a3fe300d",
-      "riderId": null,
+    "off_9d1b9353-ab95-4943-98a5-78fe0d179337": {
+      "offerId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "riderId": "rdr_9817916180",
       "broadcast": true,
-      "status": "CREATED",
-      "pickupAddress": "Rewari Central Hub (STORE_REWARI_01)",
-      "pickupLatitude": 28.202218,
-      "pickupLongitude": 76.615403,
-      "deliveryAddress": "hiiiiiiii, Company Bagh, Rewari",
-      "deliveryLatitude": 28.1918284,
-      "deliveryLongitude": 76.6081482,
+      "status": "ACCEPTED",
+      "merchantName": "Rewari Central Master Store",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "pickupAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "pickupLatitude": 28.1989,
+      "pickupLongitude": 76.6186,
+      "customerName": "Customer 6180",
+      "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
+      "customerLat": 28.19641876220703,
+      "customerLng": 76.62823486328125,
+      "deliveryAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
+      "deliveryLatitude": 28.19641876220703,
+      "deliveryLongitude": 76.62823486328125,
       "estimatedEarnings": 35,
       "estimatedEarningsFormatted": "₹35",
+      "earningsAmount": 35,
+      "earnings_amount": 35,
+      "totalEarnings": 35,
+      "payout": 35,
+      "orderTotal": 7,
+      "order_total": 7,
+      "cartValue": 7,
+      "totalAmount": 7,
+      "total_amount": 7,
       "distanceKm": 2.5,
       "durationMins": 10,
       "itemCount": 1,
+      "items": [
+        {
+          "mrp": 8,
+          "name": "Paracetamol 500mg IP",
+          "productId": "prod_para_500",
+          "quantity": 1,
+          "sku": "SKU-PARA-500",
+          "unitPrice": 5,
+          "verticalId": "general"
+        }
+      ],
       "isColdChain": false,
       "isCod": true,
       "codAmountToCollect": 7,
-      "offerCreatedAt": 1787666653731,
-      "offerExpiresAt": 1787666833731
+      "offerCreatedAt": 1789370308273,
+      "offerExpiresAt": 1789370488273,
+      "acceptedAt": 1789370351825
     },
-    "off_7e78bcca-69e2-4558-a51e-1a860a7adf61": {
-      "offerId": "off_7e78bcca-69e2-4558-a51e-1a860a7adf61",
-      "orderId": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
-      "deliveryId": "del_774caf3b-fc08-40b3-a6db-930eb1933d71",
-      "riderId": null,
+    "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189": {
+      "offerId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "riderId": "rdr_9817916180",
       "broadcast": true,
-      "status": "CREATED",
-      "pickupAddress": "Rewari Central Hub (STORE_REWARI_01)",
-      "pickupLatitude": 28.202218,
-      "pickupLongitude": 76.615403,
-      "deliveryAddress": "hiiiiiiii, Company Bagh, Rewari",
-      "deliveryLatitude": 28.1918284,
-      "deliveryLongitude": 76.6081482,
-      "estimatedEarnings": 128,
-      "estimatedEarningsFormatted": "₹128",
-      "distanceKm": 2.5,
-      "durationMins": 10,
-      "itemCount": 1,
-      "isColdChain": false,
-      "isCod": true,
-      "codAmountToCollect": 850,
-      "offerCreatedAt": 1787666722787,
-      "offerExpiresAt": 1787666902787
-    },
-    "off_f3dae911-4a90-4c22-91df-2a36986292f8": {
-      "offerId": "off_f3dae911-4a90-4c22-91df-2a36986292f8",
-      "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
-      "deliveryId": "del_5f3341ad-26cc-4672-811b-5584414682de",
-      "riderId": null,
-      "broadcast": true,
-      "status": "CREATED",
-      "pickupAddress": "Rewari Central Hub (STORE_REWARI_01)",
-      "pickupLatitude": 28.202218,
-      "pickupLongitude": 76.615403,
-      "deliveryAddress": "Flat 402, Green Glen Heights, Bellandur, Bengaluru",
-      "deliveryLatitude": 12.9279,
-      "deliveryLongitude": 77.6271,
+      "status": "ACCEPTED",
+      "merchantName": "Rewari Central Master Store",
+      "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "merchantLat": 28.1989,
+      "merchantLng": 76.6186,
+      "pickupAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "pickupLatitude": 28.1989,
+      "pickupLongitude": 76.6186,
+      "customerName": "Customer 6180",
+      "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
+      "customerLat": 28.19923973083496,
+      "customerLng": 76.61840057373047,
+      "deliveryAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
+      "deliveryLatitude": 28.19923973083496,
+      "deliveryLongitude": 76.61840057373047,
       "estimatedEarnings": 35,
       "estimatedEarningsFormatted": "₹35",
+      "earningsAmount": 35,
+      "earnings_amount": 35,
+      "totalEarnings": 35,
+      "payout": 35,
+      "orderTotal": 7,
+      "order_total": 7,
+      "cartValue": 7,
+      "totalAmount": 7,
+      "total_amount": 7,
       "distanceKm": 2.5,
       "durationMins": 10,
       "itemCount": 1,
+      "items": [
+        {
+          "mrp": 8,
+          "name": "Paracetamol 500mg IP",
+          "productId": "prod_para_500",
+          "quantity": 1,
+          "sku": "SKU-PARA-500",
+          "unitPrice": 5,
+          "verticalId": "general"
+        }
+      ],
       "isColdChain": false,
       "isCod": true,
-      "codAmountToCollect": 32.5,
-      "offerCreatedAt": 1788522431154,
-      "offerExpiresAt": 1788522611154
+      "codAmountToCollect": 7,
+      "offerCreatedAt": 1789372570792,
+      "offerExpiresAt": 1789372750792,
+      "acceptedAt": 1789372662641
     }
   },
   "riderNotifications": [
     {
-      "id": "notif_55c0b36f-36e7-468a-836b-14cdf80a7d07",
-      "notificationId": "notif_55c0b36f-36e7-468a-836b-14cdf80a7d07",
-      "eventId": "off_f3dae911-4a90-4c22-91df-2a36986292f8",
+      "id": "notif_a566e3ec6c071f7e_admin_ops",
+      "notificationId": "notif_a566e3ec6c071f7e_admin_ops",
+      "eventId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
       "type": "ORDER_OFFER",
       "category": "ORDERS",
       "priority": "HIGH",
-      "riderId": "rdr_rewari_01",
-      "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
-      "deliveryId": "del_5f3341ad-26cc-4672-811b-5584414682de",
-      "offerId": "off_f3dae911-4a90-4c22-91df-2a36986292f8",
-      "title": "⚡ New Delivery Job Alert!",
-      "body": "Pickup from Rewari Central Hub • Earn ₹35",
-      "deepLink": "commerceos://rider/offer/off_f3dae911-4a90-4c22-91df-2a36986292f8",
-      "createdAt": "2026-09-04T11:47:11.154Z",
-      "expiresAt": 1788522611154,
+      "riderId": "admin_ops",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "offerId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "title": "⚡ Order #5FB2557D · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "createdAt": "2026-09-14T07:56:10.814Z",
+      "expiresAt": 1789372750792,
       "readAt": null,
       "metadata": {}
     },
     {
-      "id": "notif_54197f78-63bf-4cf2-a00a-ea59f631c18f",
-      "notificationId": "notif_54197f78-63bf-4cf2-a00a-ea59f631c18f",
-      "eventId": "off_7e78bcca-69e2-4558-a51e-1a860a7adf61",
+      "id": "notif_a566e3ec6c071f7e_rdr_gurugram_01",
+      "notificationId": "notif_a566e3ec6c071f7e_rdr_gurugram_01",
+      "eventId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
       "type": "ORDER_OFFER",
       "category": "ORDERS",
       "priority": "HIGH",
-      "riderId": "rdr_rewari_01",
-      "orderId": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
-      "deliveryId": "del_774caf3b-fc08-40b3-a6db-930eb1933d71",
-      "offerId": "off_7e78bcca-69e2-4558-a51e-1a860a7adf61",
-      "title": "⚡ New Delivery Job Alert!",
-      "body": "Pickup from Rewari Central Hub • Earn ₹128",
-      "deepLink": "commerceos://rider/offer/off_7e78bcca-69e2-4558-a51e-1a860a7adf61",
-      "createdAt": "2026-08-25T14:05:22.787Z",
-      "expiresAt": 1787666902787,
+      "riderId": "rdr_gurugram_01",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "offerId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "title": "⚡ Order #5FB2557D · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "createdAt": "2026-09-14T07:56:10.810Z",
+      "expiresAt": 1789372750792,
       "readAt": null,
       "metadata": {}
     },
     {
-      "id": "notif_5793634c-7d18-474c-8379-cbb0b47355a0",
-      "notificationId": "notif_5793634c-7d18-474c-8379-cbb0b47355a0",
-      "eventId": "off_b060c0b9-0fb9-412f-bec3-cc717549d2a4",
+      "id": "notif_a566e3ec6c071f7e_rdr_rewari_01",
+      "notificationId": "notif_a566e3ec6c071f7e_rdr_rewari_01",
+      "eventId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
       "type": "ORDER_OFFER",
       "category": "ORDERS",
       "priority": "HIGH",
       "riderId": "rdr_rewari_01",
-      "orderId": "ord_057e5c4e-cac3-485c-b072-bdc2af4b9636",
-      "deliveryId": "del_8b8e99ba-d8ba-4352-9a0c-31e3a3fe300d",
-      "offerId": "off_b060c0b9-0fb9-412f-bec3-cc717549d2a4",
-      "title": "⚡ New Delivery Job Alert!",
-      "body": "Pickup from Rewari Central Hub • Earn ₹35",
-      "deepLink": "commerceos://rider/offer/off_b060c0b9-0fb9-412f-bec3-cc717549d2a4",
-      "createdAt": "2026-08-25T14:04:13.731Z",
-      "expiresAt": 1787666833731,
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "offerId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "title": "⚡ Order #5FB2557D · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "createdAt": "2026-09-14T07:56:10.805Z",
+      "expiresAt": 1789372750792,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_a566e3ec6c071f7e_ALL",
+      "notificationId": "notif_a566e3ec6c071f7e_ALL",
+      "eventId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "ALL",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "offerId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "title": "⚡ Order #5FB2557D · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "createdAt": "2026-09-14T07:56:10.800Z",
+      "expiresAt": 1789372750792,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_a566e3ec6c071f7e_rdr_9817916180",
+      "notificationId": "notif_a566e3ec6c071f7e_rdr_9817916180",
+      "eventId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "rdr_9817916180",
+      "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+      "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "offerId": "off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "title": "⚡ Order #5FB2557D · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9cb62561-baf9-4a44-8ae4-eb0a3d39c189",
+      "createdAt": "2026-09-14T07:56:10.795Z",
+      "expiresAt": 1789372750792,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_b2642d0d4eb5288a_admin_ops",
+      "notificationId": "notif_b2642d0d4eb5288a_admin_ops",
+      "eventId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "admin_ops",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "offerId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "title": "⚡ Order #EAA59B77 · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "createdAt": "2026-09-14T07:18:28.297Z",
+      "expiresAt": 1789370488273,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_b2642d0d4eb5288a_rdr_gurugram_01",
+      "notificationId": "notif_b2642d0d4eb5288a_rdr_gurugram_01",
+      "eventId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "rdr_gurugram_01",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "offerId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "title": "⚡ Order #EAA59B77 · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "createdAt": "2026-09-14T07:18:28.292Z",
+      "expiresAt": 1789370488273,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_b2642d0d4eb5288a_rdr_rewari_01",
+      "notificationId": "notif_b2642d0d4eb5288a_rdr_rewari_01",
+      "eventId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "rdr_rewari_01",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "offerId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "title": "⚡ Order #EAA59B77 · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "createdAt": "2026-09-14T07:18:28.287Z",
+      "expiresAt": 1789370488273,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_b2642d0d4eb5288a_ALL",
+      "notificationId": "notif_b2642d0d4eb5288a_ALL",
+      "eventId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "ALL",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "offerId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "title": "⚡ Order #EAA59B77 · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "createdAt": "2026-09-14T07:18:28.282Z",
+      "expiresAt": 1789370488273,
+      "readAt": null,
+      "metadata": {}
+    },
+    {
+      "id": "notif_b2642d0d4eb5288a_rdr_9817916180",
+      "notificationId": "notif_b2642d0d4eb5288a_rdr_9817916180",
+      "eventId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "type": "ORDER_OFFER",
+      "category": "ORDERS",
+      "priority": "HIGH",
+      "riderId": "rdr_9817916180",
+      "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "offerId": "off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "title": "⚡ Order #EAA59B77 · ₹35",
+      "body": "Pickup: Rewari Central Master Store (1 items) • Earn ₹35",
+      "deepLink": "commerceos://rider/offer/off_9d1b9353-ab95-4943-98a5-78fe0d179337",
+      "createdAt": "2026-09-14T07:18:28.273Z",
+      "expiresAt": 1789370488273,
       "readAt": null,
       "metadata": {}
     }
@@ -4747,6 +5195,48 @@
       "expiresAt": 1788522713845,
       "attempts": 0,
       "verifiedAt": "2026-09-04T11:47:02.274Z"
+    },
+    "otp_1789365159705_8814": {
+      "phone": "9876500001",
+      "otpHash": "7a1eefe2cb281499abd2c136d894d2326707a1170694971f05ef16745ca1ab1e",
+      "expiresAt": 1789365459705,
+      "attempts": 0,
+      "verifiedAt": "2026-09-14T05:52:39.712Z"
+    },
+    "otp_1789365175034_1291": {
+      "phone": "9876500001",
+      "otpHash": "d8693736826170913ee2a2be6317004c22ff051b442da34ce4696bf7e5da1af1",
+      "expiresAt": 1789365475034,
+      "attempts": 0,
+      "verifiedAt": "2026-09-14T05:52:55.042Z"
+    },
+    "otp_1789365181792_4222": {
+      "phone": "9876500001",
+      "otpHash": "4b27e855c403e5d5d4ec3c93468852fc19bc58c4f589a061cdb638c61d25c7ab",
+      "expiresAt": 1789365481792,
+      "attempts": 0,
+      "verifiedAt": "2026-09-14T05:53:01.799Z"
+    },
+    "otp_1789365193342_1773": {
+      "phone": "9876500001",
+      "otpHash": "13eae98db58b5d83534d530ebc0dfbac03728c7ab29419d0b31b02242c998f0a",
+      "expiresAt": 1789365493342,
+      "attempts": 0,
+      "verifiedAt": "2026-09-14T05:53:13.351Z"
+    },
+    "otp_1789365353809_2785": {
+      "phone": "9876500001",
+      "otpHash": "f55c232f128419c7de8a6f0c8056c7ad8aaa485c69205776a6f7fb3c4f0ad226",
+      "expiresAt": 1789365653809,
+      "attempts": 0,
+      "verifiedAt": "2026-09-14T05:55:53.849Z"
+    },
+    "otp_1789365843540_1548": {
+      "phone": "+919817916180",
+      "otpHash": "f3bc86ed957e9c74f33a344056c9cb022a81c31b5e0e41612ce10eda847cc8a4",
+      "expiresAt": 1789366143540,
+      "attempts": 0,
+      "verifiedAt": "2026-09-14T06:04:07.679Z"
     }
   },
   "outboxEvents": [
@@ -4806,6 +5296,568 @@
       },
       "status": "PENDING",
       "createdAt": "2026-09-04T11:47:11.098Z"
+    },
+    {
+      "id": "evt_outbox_2e66f0ec-411d-4460-b410-fe72965ae637",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+        "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_383700",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 12,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+          "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+          "storeId": "STORE_MASTER_001",
+          "riderId": null,
+          "riderName": null,
+          "riderPhone": null,
+          "riderVehicle": null,
+          "customerId": "usr_383700",
+          "customerName": "Customer 6180",
+          "customerPhone": "+919991416180",
+          "customerAddress": "hiiiiiiii, Company Bagh, Rewari",
+          "customerLat": 28.1918284,
+          "customerLng": 76.6081482,
+          "merchantName": null,
+          "merchantAddress": null,
+          "merchantLat": null,
+          "merchantLng": null,
+          "state": "ASSIGNED",
+          "otp": "136000",
+          "otpExpiresAt": 1789363381449,
+          "otpAttemptsLeft": 5,
+          "otpVerified": false,
+          "isCod": true,
+          "codAmount": 12,
+          "codCollectedAmount": 0,
+          "codReconciled": false,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T04:53:01.449Z"
+            }
+          ],
+          "processedIdempotencyKeys": {}
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T04:53:01.458Z"
+    },
+    {
+      "id": "evt_outbox_7fc6a391-039e-47de-a0c2-cf9427a1633a",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+        "deliveryId": "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_550326",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 240,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138",
+          "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
+          "storeId": "STORE_MASTER_001",
+          "riderId": null,
+          "riderName": null,
+          "riderPhone": null,
+          "riderVehicle": null,
+          "customerId": "usr_550326",
+          "customerName": "Aarav Sharma",
+          "customerPhone": "9876500001",
+          "customerAddress": "Customer Delivery Location",
+          "customerLat": 28.197,
+          "customerLng": 76.619,
+          "merchantName": null,
+          "merchantAddress": null,
+          "merchantLat": null,
+          "merchantLng": null,
+          "state": "ASSIGNED",
+          "otp": "825052",
+          "otpExpiresAt": 1789366959731,
+          "otpAttemptsLeft": 5,
+          "otpVerified": false,
+          "isCod": true,
+          "codAmount": 240,
+          "codCollectedAmount": 0,
+          "codReconciled": false,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T05:52:39.731Z"
+            }
+          ],
+          "processedIdempotencyKeys": {}
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T05:52:39.738Z"
+    },
+    {
+      "id": "evt_outbox_4d698b9e-ae34-4ea5-8f18-f42e10db20af",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+        "deliveryId": "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_550326",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 240,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657",
+          "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
+          "storeId": "STORE_MASTER_001",
+          "riderId": "rdr_rewari_01",
+          "riderName": "Vikram Singh",
+          "riderPhone": "+919876543210",
+          "riderVehicle": "HR-26-AB-1234",
+          "customerId": "usr_550326",
+          "customerName": "Aarav Sharma",
+          "customerPhone": "9876500001",
+          "customerAddress": "Customer Delivery Location",
+          "customerLat": 28.197,
+          "customerLng": 76.619,
+          "merchantName": null,
+          "merchantAddress": null,
+          "merchantLat": null,
+          "merchantLng": null,
+          "state": "EN_ROUTE_CUSTOMER",
+          "otp": "642190",
+          "otpExpiresAt": 1789366975057,
+          "otpAttemptsLeft": 5,
+          "otpVerified": false,
+          "isCod": true,
+          "codAmount": 240,
+          "codCollectedAmount": 0,
+          "codReconciled": false,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T05:52:55.057Z"
+            },
+            {
+              "state": "ARRIVED_PICKUP",
+              "timestamp": "2026-09-14T05:53:01.868Z"
+            },
+            {
+              "state": "EN_ROUTE_CUSTOMER",
+              "timestamp": "2026-09-14T05:53:01.876Z"
+            }
+          ],
+          "processedIdempotencyKeys": {}
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T05:52:55.062Z"
+    },
+    {
+      "id": "evt_outbox_dd6ad5a9-e26a-4140-a8a8-1c1c23d0ea1c",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+        "deliveryId": "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_550326",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 240,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b",
+          "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
+          "storeId": "STORE_MASTER_001",
+          "riderId": "rdr_rewari_01",
+          "riderName": "Vikram Singh",
+          "riderPhone": "+919876543210",
+          "riderVehicle": "HR-26-AB-1234",
+          "customerId": "usr_550326",
+          "customerName": "Aarav Sharma",
+          "customerPhone": "9876500001",
+          "customerAddress": "Customer Delivery Location",
+          "customerLat": 28.197,
+          "customerLng": 76.619,
+          "merchantName": null,
+          "merchantAddress": null,
+          "merchantLat": null,
+          "merchantLng": null,
+          "state": "ASSIGNED",
+          "otp": "504439",
+          "otpExpiresAt": 1789366981813,
+          "otpAttemptsLeft": 5,
+          "otpVerified": false,
+          "isCod": true,
+          "codAmount": 240,
+          "codCollectedAmount": 0,
+          "codReconciled": false,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T05:53:01.813Z"
+            }
+          ],
+          "processedIdempotencyKeys": {}
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T05:53:01.820Z"
+    },
+    {
+      "id": "evt_outbox_ad4d4561-7233-4342-90fb-6345c48405d7",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+        "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_550326",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 240,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+          "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
+          "storeId": "STORE_MASTER_001",
+          "riderId": null,
+          "riderName": null,
+          "riderPhone": null,
+          "riderVehicle": null,
+          "customerId": "usr_550326",
+          "customerName": "Aarav Sharma",
+          "customerPhone": "9876500001",
+          "customerAddress": "Customer Delivery Location",
+          "customerLat": 28.197,
+          "customerLng": 76.619,
+          "merchantName": null,
+          "merchantAddress": null,
+          "merchantLat": null,
+          "merchantLng": null,
+          "state": "ASSIGNED",
+          "otp": "532788",
+          "otpExpiresAt": 1789367153865,
+          "otpAttemptsLeft": 5,
+          "otpVerified": false,
+          "isCod": true,
+          "codAmount": 240,
+          "codCollectedAmount": 0,
+          "codReconciled": false,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T05:55:53.865Z"
+            }
+          ],
+          "processedIdempotencyKeys": {}
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T05:55:53.870Z"
+    },
+    {
+      "id": "evt_82c3e736-eb42-4752-803b-061c8e8bab48",
+      "aggregateType": "ORDER",
+      "aggregateId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+      "eventType": "ORDER_SELLER_ACCEPTED",
+      "payload": {
+        "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+        "storeId": "STORE_MASTER_001",
+        "sellerId": "sel_rewari_01",
+        "deliverySession": {
+          "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+          "id": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+          "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+          "customerId": "usr_383700",
+          "customerName": "Customer 6180",
+          "customerPhone": "+919991416180",
+          "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
+          "customerLat": 28.1918284,
+          "customerLng": 76.6081482,
+          "deliveryAddress": {
+            "id": "addr_1787666270421",
+            "tag": "Home",
+            "addressLine": "hiiiiiiii, Company Bagh",
+            "city": "Rewari",
+            "state": "Haryana",
+            "postalCode": "123401",
+            "country": "India",
+            "landmark": "",
+            "contactName": "Customer 6180",
+            "contactPhone": "+919991416180",
+            "isDefault": true,
+            "latitude": 28.1918284,
+            "longitude": 76.6081482,
+            "deliveryInstructions": "",
+            "placeId": "geo_28.1918284_76.6081482",
+            "accuracyMeters": 5,
+            "createdAt": "2026-08-25T13:57:50.421Z"
+          },
+          "storeId": "STORE_MASTER_001",
+          "merchantName": "Rewari Central Hub",
+          "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+          "merchantLat": 28.1989,
+          "merchantLng": 76.6186,
+          "state": "ASSIGNED",
+          "riderId": "rdr_rewari_01",
+          "payoutFormatted": "₹91",
+          "distanceKm": 3.4,
+          "estimatedTimeMins": 15,
+          "isCod": true,
+          "codAmount": 12,
+          "codCollectedAmount": 0,
+          "codReconciled": false,
+          "itemCount": 2,
+          "itemsSummary": "2x Paracetamol 500mg IP",
+          "createdAt": "2026-09-14T06:41:19.799Z",
+          "updatedAt": "2026-09-14T06:41:19.799Z"
+        },
+        "offer": {
+          "offerId": "off_ed3721f7-91d4-4348-88e0-7c4639d3c972",
+          "id": "off_ed3721f7-91d4-4348-88e0-7c4639d3c972",
+          "eventId": "evt_82c3e736-eb42-4752-803b-061c8e8bab48",
+          "notificationId": "notif_571c2f3b-de80-4e18-ba27-ca4ba00ea710",
+          "riderId": "rdr_rewari_01",
+          "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+          "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
+          "status": "OFFERED",
+          "notificationStatus": "DEVICE_RECEIVED",
+          "merchantName": "Rewari Central Hub",
+          "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+          "merchantLat": 28.1989,
+          "merchantLng": 76.6186,
+          "customerName": "Customer 6180",
+          "customerPhone": "+919991416180",
+          "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
+          "customerLat": 28.1918284,
+          "customerLng": 76.6081482,
+          "earningsAmount": 91,
+          "totalEarnings": 91,
+          "totalDistanceKm": 3.4,
+          "deliveryDistanceKm": 1.7,
+          "pickupDistanceKm": 1.7,
+          "estimatedDurationMins": 15,
+          "offerCreatedAt": 1789368079803,
+          "offerExpiresAt": 1789368979803,
+          "serverTime": 1789368079804,
+          "itemsSummary": "2x Paracetamol 500mg IP",
+          "itemCount": 2,
+          "isCod": true,
+          "codAmount": 12,
+          "createdAt": "2026-09-14T06:41:19.799Z"
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T06:41:19.799Z"
+    },
+    {
+      "id": "evt_outbox_e2faafb7-78b6-4577-ba1f-9154189b2aab",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+        "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_383700",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 7,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+          "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
+          "storeId": "STORE_MASTER_001",
+          "riderId": "rdr_9817916180",
+          "riderName": "Partner 6180",
+          "riderPhone": "+919817916180",
+          "riderVehicle": "HR-26-AB-1234",
+          "customerId": "usr_383700",
+          "customerName": "Customer 6180",
+          "customerPhone": "+919991416180",
+          "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
+          "customerLat": 28.19641876220703,
+          "customerLng": 76.62823486328125,
+          "merchantName": "Rewari Central Master Store",
+          "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+          "merchantLat": 28.1989,
+          "merchantLng": 76.6186,
+          "state": "DELIVERED",
+          "otp": "143192",
+          "otpExpiresAt": 1789372108247,
+          "otpAttemptsLeft": 3,
+          "otpVerified": true,
+          "isCod": true,
+          "codAmount": 7,
+          "codCollectedAmount": 7,
+          "codReconciled": true,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T07:18:28.247Z"
+            },
+            {
+              "state": "ARRIVED_PICKUP",
+              "timestamp": "2026-09-14T07:23:34.693Z"
+            },
+            {
+              "state": "EN_ROUTE_CUSTOMER",
+              "timestamp": "2026-09-14T07:23:55.579Z"
+            },
+            {
+              "state": "HANDOFF_STARTED",
+              "timestamp": "2026-09-14T07:24:23.149Z"
+            },
+            {
+              "state": "DELIVERED",
+              "timestamp": "2026-09-14T07:26:49.363Z"
+            },
+            {
+              "state": "DELIVERED",
+              "timestamp": "2026-09-14T07:26:49.400Z"
+            }
+          ],
+          "processedIdempotencyKeys": {},
+          "telemetry": {
+            "latitude": 28.19923973083496,
+            "longitude": 76.61840057373047,
+            "speedKmh": 0.1,
+            "heading": 0,
+            "accuracyMeters": 1,
+            "sequenceNumber": 1789370568412,
+            "serverTimestamp": 1789370568412,
+            "riderId": "rdr_9817916180",
+            "isStale": true
+          },
+          "codCollectionStatus": "COLLECTED",
+          "deliveredAt": "2026-09-14T07:26:49.400Z"
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T07:18:28.254Z"
+    },
+    {
+      "id": "evt_outbox_9f403133-1884-40ea-9202-4120d68e2bba",
+      "aggregateType": "DELIVERY_SESSION",
+      "aggregateId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+      "eventType": "DISPATCH_REQUESTED",
+      "payload": {
+        "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+        "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+        "storeId": "STORE_MASTER_001",
+        "customerId": "usr_383700",
+        "sellerApprovalRequired": false,
+        "sellerApprovalStatus": "NOT_REQUIRED",
+        "totalAmount": 7,
+        "isCod": true,
+        "paymentStatus": "COD_PENDING_COLLECTION",
+        "deliverySession": {
+          "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
+          "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
+          "storeId": "STORE_MASTER_001",
+          "riderId": "rdr_9817916180",
+          "riderName": "Partner 6180",
+          "riderPhone": "+919817916180",
+          "riderVehicle": "HR-26-AB-1234",
+          "customerId": "usr_383700",
+          "customerName": "Customer 6180",
+          "customerPhone": "+919991416180",
+          "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
+          "customerLat": 28.19923973083496,
+          "customerLng": 76.61840057373047,
+          "merchantName": "Rewari Central Master Store",
+          "merchantAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+          "merchantLat": 28.1989,
+          "merchantLng": 76.6186,
+          "state": "DELIVERED",
+          "otp": "133023",
+          "otpExpiresAt": 1789374370764,
+          "otpAttemptsLeft": 5,
+          "otpVerified": true,
+          "isCod": true,
+          "codAmount": 7,
+          "codCollectedAmount": 7,
+          "codReconciled": true,
+          "itemCount": 1,
+          "isColdChain": false,
+          "history": [
+            {
+              "state": "ASSIGNED",
+              "timestamp": "2026-09-14T07:56:10.764Z"
+            },
+            {
+              "state": "ARRIVED_PICKUP",
+              "timestamp": "2026-09-14T08:00:24.405Z"
+            },
+            {
+              "state": "EN_ROUTE_CUSTOMER",
+              "timestamp": "2026-09-14T08:02:45.781Z"
+            },
+            {
+              "state": "HANDOFF_STARTED",
+              "timestamp": "2026-09-14T08:18:18.862Z"
+            },
+            {
+              "state": "DELIVERED",
+              "timestamp": "2026-09-14T08:23:14.914Z"
+            }
+          ],
+          "processedIdempotencyKeys": {},
+          "waypoints": [
+            {
+              "lat": 28.19888,
+              "lng": 76.61859
+            },
+            {
+              "lat": 28.19901,
+              "lng": 76.61838
+            },
+            {
+              "lat": 28.19921,
+              "lng": 76.61844
+            }
+          ],
+          "distanceKm": 0,
+          "estimatedTimeMins": 1,
+          "codCollectionStatus": "COLLECTED",
+          "deliveredAt": "2026-09-14T08:23:14.914Z"
+        }
+      },
+      "status": "PENDING",
+      "createdAt": "2026-09-14T07:56:10.774Z"
     }
   ],
   "fcmTelemetry": [
@@ -36896,6 +37948,101 @@
         "recordedAt": 1787508899462
       },
       "timestamp": 1787508899462
+    },
+    {
+      "riderId": "rdr_9817916180",
+      "eventType": "TELEMETRY",
+      "payload": {
+        "riderId": "rdr_9817916180",
+        "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+        "latitude": 28.205,
+        "longitude": 76.612,
+        "heading": 140,
+        "speedKmh": 25,
+        "speed": 25,
+        "accuracy": 5,
+        "sequenceNumber": 1789368554014,
+        "recordedAt": 1789368554024,
+        "serverTimestamp": 1789368554024,
+        "isStale": false
+      },
+      "timestamp": 1789368554024
+    },
+    {
+      "riderId": "rdr_rewari_01",
+      "eventType": "TELEMETRY",
+      "payload": {
+        "riderId": "rdr_rewari_01",
+        "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+        "latitude": 28.204,
+        "longitude": 76.622,
+        "heading": 140,
+        "speedKmh": 25,
+        "speed": 25,
+        "accuracy": 5,
+        "sequenceNumber": 1789368759007,
+        "recordedAt": 1789368759016,
+        "serverTimestamp": 1789368759016,
+        "isStale": false
+      },
+      "timestamp": 1789368759016
+    },
+    {
+      "riderId": "rdr_rewari_01",
+      "eventType": "TELEMETRY",
+      "payload": {
+        "riderId": "rdr_rewari_01",
+        "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+        "latitude": 28.1955,
+        "longitude": 76.6135,
+        "heading": 235,
+        "speedKmh": 32,
+        "speed": 32,
+        "accuracy": 3,
+        "sequenceNumber": 1789369999999,
+        "recordedAt": 1789369304152,
+        "serverTimestamp": 1789369304152,
+        "isStale": false
+      },
+      "timestamp": 1789369304152
+    },
+    {
+      "riderId": "rdr_9817916180",
+      "eventType": "TELEMETRY",
+      "payload": {
+        "riderId": "rdr_9817916180",
+        "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+        "latitude": 28.183610916137695,
+        "longitude": 76.62077331542969,
+        "heading": 0,
+        "speedKmh": 0.1,
+        "speed": 0.1,
+        "accuracy": 1,
+        "sequenceNumber": 2,
+        "recordedAt": 1789370367535,
+        "serverTimestamp": 1789370367535,
+        "isStale": false
+      },
+      "timestamp": 1789370367535
+    },
+    {
+      "riderId": "rdr_9817916180",
+      "eventType": "TELEMETRY",
+      "payload": {
+        "riderId": "rdr_9817916180",
+        "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+        "latitude": 28.19923973083496,
+        "longitude": 76.61840057373047,
+        "heading": 0,
+        "speedKmh": 0.1,
+        "speed": 0.1,
+        "accuracy": 1,
+        "sequenceNumber": 3,
+        "recordedAt": 1789370568384,
+        "serverTimestamp": 1789370568384,
+        "isStale": false
+      },
+      "timestamp": 1789370568384
     }
   ],
   "stores": [
@@ -36913,7 +38060,7 @@
       "latitude": 28.1989,
       "longitude": 76.6186,
       "status": "ACTIVE",
-      "sellerApprovalRequired": true
+      "sellerApprovalRequired": false
     }
   ],
   "riders": [
@@ -36966,13 +38113,16 @@
   "riderPresence": {
     "rdr_rewari_01": {
       "riderId": "rdr_rewari_01",
-      "latitude": 28.1919496,
-      "longitude": 76.6080289,
-      "speedKmh": 0,
-      "heading": 0,
-      "accuracyMeters": 14.776,
+      "latitude": 28.1955,
+      "longitude": 76.6135,
+      "speedKmh": 32,
+      "heading": 235,
+      "accuracyMeters": 3,
+      "sequenceNumber": 1789369999999,
+      "serverTimestamp": 1789369304138,
+      "isStale": false,
       "isOnline": true,
-      "lastSeenTimestamp": 1787063127495
+      "lastSeenTimestamp": 1789369304138
     },
     "rdr_gurugram_01": {
       "riderId": "rdr_gurugram_01",
@@ -36996,6 +38146,88 @@
       "isStale": false,
       "isOnline": true,
       "lastSeenTimestamp": 1787508899453
+    },
+    "rdr_9817916180": {
+      "riderId": "rdr_9817916180",
+      "latitude": 28.19923973083496,
+      "longitude": 76.61840057373047,
+      "speedKmh": 0.1,
+      "heading": 0,
+      "accuracyMeters": 1,
+      "isOnline": true,
+      "lastSeenTimestamp": 1789370568412
     }
-  }
+  },
+  "riderTelemetry": [
+    {
+      "riderId": "rdr_9817916180",
+      "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
+      "latitude": 28.205,
+      "longitude": 76.612,
+      "heading": 140,
+      "speedKmh": 25,
+      "speed": 25,
+      "accuracy": 5,
+      "sequenceNumber": 1789368554014,
+      "recordedAt": 1789368554024,
+      "serverTimestamp": 1789368554024,
+      "isStale": false
+    },
+    {
+      "riderId": "rdr_rewari_01",
+      "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "latitude": 28.204,
+      "longitude": 76.622,
+      "heading": 140,
+      "speedKmh": 25,
+      "speed": 25,
+      "accuracy": 5,
+      "sequenceNumber": 1789368759007,
+      "recordedAt": 1789368759016,
+      "serverTimestamp": 1789368759016,
+      "isStale": false
+    },
+    {
+      "riderId": "rdr_rewari_01",
+      "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
+      "latitude": 28.1955,
+      "longitude": 76.6135,
+      "heading": 235,
+      "speedKmh": 32,
+      "speed": 32,
+      "accuracy": 3,
+      "sequenceNumber": 1789369999999,
+      "recordedAt": 1789369304152,
+      "serverTimestamp": 1789369304152,
+      "isStale": false
+    },
+    {
+      "riderId": "rdr_9817916180",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "latitude": 28.183610916137695,
+      "longitude": 76.62077331542969,
+      "heading": 0,
+      "speedKmh": 0.1,
+      "speed": 0.1,
+      "accuracy": 1,
+      "sequenceNumber": 2,
+      "recordedAt": 1789370367535,
+      "serverTimestamp": 1789370367535,
+      "isStale": false
+    },
+    {
+      "riderId": "rdr_9817916180",
+      "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
+      "latitude": 28.19923973083496,
+      "longitude": 76.61840057373047,
+      "heading": 0,
+      "speedKmh": 0.1,
+      "speed": 0.1,
+      "accuracy": 1,
+      "sequenceNumber": 3,
+      "recordedAt": 1789370568384,
+      "serverTimestamp": 1789370568384,
+      "isStale": false
+    }
+  ]
 }

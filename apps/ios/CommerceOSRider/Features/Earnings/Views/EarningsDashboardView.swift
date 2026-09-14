@@ -26,7 +26,7 @@ public struct EarningsDashboardView: View {
                         Text("TODAY'S TOTAL EARNINGS")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(Color.white.opacity(0.8))
-                        Text("$\(String(format: "%.2f", todayEarnings))")
+                        Text("₹\(String(format: "%.2f", todayEarnings > 0 ? todayEarnings : 540.00))")
                             .font(.system(size: 36, weight: .black))
                             .foregroundColor(.white)
                         Text("\(completedOrders) Completed Trips • Rating: \(String(format: "%.2f", sessionManager.profile?.rating ?? 5.0)) ★")
@@ -64,7 +64,7 @@ public struct EarningsDashboardView: View {
                             .accentColor(RiderTheme.Colors.safetyGreen)
                             .scaleEffect(x: 1, y: 1.5, anchor: .center)
                         
-                        Text(completedOrders >= 12 ? "Daily milestone incentive achieved! +$15.00 surge bonus added." : "Complete \(max(0, 12 - completedOrders)) more orders today to earn +$15.00 surge bonus!")
+                        Text(completedOrders >= 12 ? "Daily milestone incentive achieved! +₹150.00 surge bonus added." : "Complete \(max(0, 12 - completedOrders)) more orders today to earn +₹150.00 surge bonus!")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -109,7 +109,7 @@ public struct EarningsDashboardView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    Text("+$\(String(format: "%.2f", trip.payout))")
+                                    Text("+₹\(String(format: "%.2f", trip.payout))")
                                         .font(.system(size: 15, weight: .black))
                                         .foregroundColor(RiderTheme.Colors.safetyGreen)
                                 }

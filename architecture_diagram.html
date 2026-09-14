@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommerceOS Unified System Architecture</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #131b2e;
+      --card-border: #1e293b;
+      --primary: #38bdf8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 40px 20px; line-height: 1.5; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 40px; }
+    h1 { font-size: 32px; font-weight: 800; color: #fff; margin-bottom: 8px; letter-spacing: -0.5px; }
+    p.subtitle { color: var(--text-muted); font-size: 16px; }
+    
+    .tier-box {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+      position: relative;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+    .tier-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--primary);
+      font-weight: 700;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .grid-5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    
+    .node-card {
+      background: #18233c;
+      border: 1px solid #283756;
+      border-radius: 12px;
+      padding: 16px;
+      transition: all 0.2s ease;
+    }
+    .node-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+    .node-name { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .node-tech { font-size: 12px; color: var(--text-muted); }
+    .node-desc { font-size: 13px; color: #cbd5e1; margin-top: 8px; }
+    
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+    .badge-green { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+    .badge-amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    .arrow-divider {
+      text-align: center;
+      margin: -10px 0 14px 0;
+      color: var(--primary);
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .table-tag {
+      display: inline-block;
+      background: #0f172a;
+      border: 1px solid #334155;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #38bdf8;
+      margin: 4px 4px 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>CommerceOS System Architecture</h1>
+      <p class="subtitle">Unified Cloud Topology: Single Authoritative Server (Render) & Single Database (Supabase)</p>
+    </header>
+
+    <!-- TIER 1: CLIENTS -->
+    <div class="tier-box">
+      <div class="tier-title">1. Omnichannel Client Tier</div>
+      <div class="grid-5">
+        <div class="node-card">
+          <div class="node-name">Android Customer</div>
+          <div class="node-tech">Kotlin / Jetpack Compose</div>
+          <div class="node-desc">Customer storefront, Google Maps order tracking, cart & checkout.</div>
+          <span class="badge badge-green">Target: Render API</span>
+        </div>
+        <div class="node-card">
+          <div class="node-name">iOS Customer</div>
+          <div class="node-tech">Swift / SwiftUI (iOS 17+)</div>
+          <div class="node-desc">Prescription OCR scanner, Biometric passkeys, MapKit live delivery.</div>
+          <span class="badge badge-green">Target: Render API</span>
+        </div>
+        <div class="node-card">
+          <div class="node-name">Android Rider</div>
+          <div class="node-tech">Kotlin / Navigation SDK</div>
+          <div class="node-desc">Turn-by-turn routing, 50m geofence auto-arrival, telemetry buffer.</div>
+          <span class="badge badge-green">Target: Render API</span>
+        </div>
+        <div class="node-card">
+          <div class="node-name">iOS Rider</div>
+          <div class="node-tech">SwiftUI / CoreLocation</div>
+          <div class="node-desc">CLCircularRegion arrival, velocity dead-reckoning, OTP handoff.</div>
+          <span class="badge badge-green">Target: Render API</span>
+        </div>
+        <div class="node-card">
+          <div class="node-name">Merchant Portal</div>
+          <div class="node-tech">Next.js 14 / TypeScript</div>
+          <div class="node-desc">Dark store dispatching, order packing state machine, SKU management.</div>
+          <span class="badge badge-green">Target: Render API</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-divider">▼ HTTPS / REST / Server-Sent Events (SSE) ▼</div>
+
+    <!-- TIER 2: AUTHORITATIVE SERVER -->
+    <div class="tier-box" style="border-color: #0284c7;">
+      <div class="tier-title" style="color: #38bdf8;">2. Single Authoritative Server: Render Cloud Gateway</div>
+      <div style="background: #0f172a; padding: 12px 18px; border-radius: 8px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-family: monospace; color: #38bdf8; font-size: 14px;">URL: https://commerce-os-api.onrender.com</span>
+        <span class="badge badge-blue">Entry: platform/server/production-server.js</span>
+      </div>
+      <div class="grid-4">
+        <div class="node-card">
+          <div class="node-name">Auth & OTP Engine</div>
+          <div class="node-desc">6-digit OTP generation, SHA-256 HMAC challenge validation, 2Factor.in carrier SMS & voice calls.</div>
+        </div>
+        <div class="node-card">
+          <div class="node-name">Order & Dispatch State Machine</div>
+          <div class="node-desc">ACID transaction boundaries, row-level locks (SELECT ... FOR UPDATE), conditional offer claiming.</div>
+        </div>
+        <div class="node-card">
+          <div class="node-name">Authoritative Routing & Pricing</div>
+          <div class="node-desc">OSRM road routing adapter, map matching, dynamic ETA calculations, and peak surge fee engine.</div>
+        </div>
+        <div class="node-card">
+          <div class="node-name">Transactional Outbox & SSE</div>
+          <div class="node-desc">500ms background outbox poller for FCM/APNs push notifications & HotLocationBus SSE streamer.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-divider">▼ ACID Transactions / PostgreSQL Connection Pool ▼</div>
+
+    <!-- TIER 3: AUTHORITATIVE DATABASE -->
+    <div class="tier-box" style="border-color: #10b981;">
+      <div class="tier-title" style="color: #34d399;">3. Single Authoritative Database: Supabase PostgreSQL 16+</div>
+      <div style="background: #0f172a; padding: 12px 18px; border-radius: 8px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-family: monospace; color: #34d399; font-size: 14px;">Host: aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres</span>
+        <span class="badge badge-green">SSL Enabled / PostgreSQL 16</span>
+      </div>
+      <div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold;">IDENTITY & ADDRESSES:</div>
+          <span class="table-tag">customers</span>
+          <span class="table-tag">customer_addresses</span>
+          <span class="table-tag">auth_challenges</span>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold;">CATALOG & INVENTORY:</div>
+          <span class="table-tag">products</span>
+          <span class="table-tag">inventory</span>
+          <span class="table-tag">inventory_ledger</span>
+          <span class="table-tag">stores</span>
+          <span class="table-tag">sellers</span>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold;">ORDERS & FULFILLMENT:</div>
+          <span class="table-tag">orders</span>
+          <span class="table-tag">delivery_sessions</span>
+          <span class="table-tag">payments</span>
+          <span class="table-tag">cod_ledger</span>
+          <span class="table-tag">carts</span>
+          <span class="table-tag">prescriptions</span>
+        </div>
+        <div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold;">FLEET & TELEMETRY:</div>
+          <span class="table-tag">riders</span>
+          <span class="table-tag">offers</span>
+          <span class="table-tag">rider_telemetry</span>
+          <span class="table-tag">rider_presence</span>
+          <span class="table-tag">rider_device_tokens</span>
+          <span class="table-tag">outbox_events</span>
+          <span class="table-tag">audit_logs</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

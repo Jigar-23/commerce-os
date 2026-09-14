@@ -120,12 +120,19 @@ public final class RiderTelemetryStreamer: ObservableObject {
             batteryPct: Int(max(0, battery * 100))
         )
         
-        DispatchQueue.main.async {
+        self.lastTransmissionTime = Date()
+        self.lastRecordedLocation = location
+        
+        let updateUI = {
             self.streamCount += 1
             self.lastStreamedCoordinate = location.coordinate
             self.lastSpeedKmh = speedKmh
-            self.lastTransmissionTime = Date()
-            self.lastRecordedLocation = location
+        }
+        
+        if Thread.isMainThread {
+            updateUI()
+        } else {
+            DispatchQueue.main.async(execute: updateUI)
         }
     }
     

@@ -43,8 +43,8 @@ fun CustomerHandoffView(
 
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -59,7 +59,7 @@ fun CustomerHandoffView(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        color = Color(0xFFF59E0B).copy(alpha = 0.2f),
+                        color = Color(0xFFF59E0B).copy(alpha = 0.15f),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.size(44.dp)
                     ) {
@@ -75,9 +75,9 @@ fun CustomerHandoffView(
                 }
 
                 Surface(
-                    color = Color(0xFF1E293B),
+                    color = Color(0xFF22252E),
                     shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2B2F3B)),
                     modifier = Modifier.clickable {
                         val ph = session.customerPhone.ifBlank { session.maskedCustomerPhone }
                         com.commerceos.rider.util.RiderNavigationUtils.dialPhoneNumber(context, ph)
@@ -101,23 +101,24 @@ fun CustomerHandoffView(
 
             // Customer Delivery Address Box
             Surface(
-                color = Color(0xFF1E293B).copy(alpha = 0.6f),
+                color = Color(0xFF22252E),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2B2F3B)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Text("Delivery Address", fontSize = 11.sp, color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+                    Text("Delivery Address", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = session.customerAddress,
                         fontSize = 13.sp,
-                        color = Color(0xFFCBD5E1),
+                        color = Color.White,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
 
-            HorizontalDivider(color = Color(0xFF1E293B), thickness = 1.dp)
+            HorizontalDivider(color = Color(0xFF262933), thickness = 1.dp)
 
             // ==========================================
             // STEP 1: CASH COLLECTION (FOR COD ORDERS)
@@ -157,7 +158,7 @@ fun CustomerHandoffView(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Surface(
-                                    color = if (enteredCodAmount == codAmountExpected.toString()) Color(0xFFFBBF24) else Color(0xFF1E293B),
+                                    color = if (enteredCodAmount == codAmountExpected.toString()) Color(0xFFFBBF24) else Color(0xFF262933),
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
                                         .weight(1f)
@@ -176,7 +177,7 @@ fun CustomerHandoffView(
                                 listOf(100, 200, 500).forEach { note ->
                                     if (note >= codAmountExpected) {
                                         Surface(
-                                            color = if (enteredCodAmount == note.toString()) Color(0xFFFBBF24) else Color(0xFF1E293B),
+                                            color = if (enteredCodAmount == note.toString()) Color(0xFFFBBF24) else Color(0xFF262933),
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier
                                                 .weight(1f)
@@ -261,9 +262,9 @@ fun CustomerHandoffView(
             // STEP 2: DOORSTEP DELIVERY PIN VERIFICATION
             // ==========================================
             Surface(
-                color = Color(0xFF1E293B),
+                color = Color(0xFF22252E),
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (!session.isCod || session.codReconciled) Color(0xFF38BDF8).copy(alpha = 0.5f) else Color(0xFF334155)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (!session.isCod || session.codReconciled) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF2B2F3B)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(

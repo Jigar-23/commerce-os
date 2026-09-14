@@ -11,6 +11,7 @@ public struct CatalogScreen: View {
     @State private var isLoading: Bool = false
     @State private var errorMessage: String? = nil
     @State private var searchTask: Task<Void, Never>? = nil
+    @State private var selectedProductForDetail: ProductDto? = nil
     
     public init() {}
     
@@ -112,7 +113,9 @@ public struct CatalogScreen: View {
                             ForEach(filteredResults) { product in
                                 VStack(spacing: 8) {
                                     // Main Product Row
-                                    ProductListRow(product: product)
+                                    ProductListRow(product: product, onSelect: { prod in
+                                        selectedProductForDetail = prod
+                                    })
                                     
                                     // Generic Bio-Equivalent Alternative Card if Available
                                     if let generic = product.genericSubstitute {
@@ -133,6 +136,9 @@ public struct CatalogScreen: View {
             }
             .navigationTitle("Salt & Medicine Catalog")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selectedProductForDetail) { prod in
+                ProductDetailSheet(product: prod)
+            }
             .onAppear {
                 loadProducts()
             }
@@ -140,6 +146,7 @@ public struct CatalogScreen: View {
                 performSearch(query: newQuery)
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     private var filteredResults: [ProductDto] {
@@ -212,10 +219,15 @@ public struct CatalogScreen: View {
 }
 
 public struct ProductListRow: View {
-    @EnvironmentObject private var cartStore: CartLocalStore
     @EnvironmentObject private var configProvider: ClientConfigProvider
     let product: ProductDto
-    
+    var onSelect: ((ProductDto) -> Void)? = nil
+
+    public init(product: ProductDto, onSelect: ((ProductDto) -> Void)? = nil) {
+        self.product = product
+        self.onSelect = onSelect
+    }
+
     public var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -227,9 +239,21 @@ public struct ProductListRow: View {
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
-                Text("$\(String(format: "%.2f", product.price))")
-                    .font(.system(size: 16, weight: .black))
-                    .foregroundColor(configProvider.currentConfig.theme.primaryColor)
+                HStack(spacing: 6) {
+                    Text("₹\(String(format: "%.2f", product.price))")
+                        .font(.system(size: 16, weight: .black))
+                        .foregroundColor(configProvider.currentConfig.theme.primaryColor)
+                    if product.mrp > product.price {
+                        Text("₹\(String(format: "%.2f", product.mrp))")
+                            .font(.system(size: 12))
+                            .strikethrough()
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect?(product)
             }
             
             Spacer()
@@ -254,7 +278,7 @@ public struct GenericComparisonCard: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.green)
                 }
-                Text("Same active salt • $\(String(format: "%.2f", substitute.genericPrice)) vs $\(String(format: "%.2f", substitute.brandPrice))")
+                Text("Same active salt • ₹\(String(format: "%.2f", substitute.genericPrice)) vs ₹\(String(format: "%.2f", substitute.brandPrice))")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }

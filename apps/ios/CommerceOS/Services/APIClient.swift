@@ -24,9 +24,19 @@ public enum APIError: LocalizedError {
 public struct CustomerAuthResponse: Codable {
     public let userId: String
     public let phone: String
+    public let name: String?
     public let roles: [String]
     public let accessToken: String
     public let refreshToken: String?
+
+    public init(userId: String, phone: String, name: String? = nil, roles: [String] = ["ROLE_CUSTOMER"], accessToken: String, refreshToken: String? = nil) {
+        self.userId = userId
+        self.phone = phone
+        self.name = name
+        self.roles = roles
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+    }
 }
 
 public class APIClient: ObservableObject {
@@ -67,6 +77,74 @@ public class APIClient: ObservableObject {
         self.currentCustomerId = nil
         KeychainHelper.shared.delete(key: "auth_token")
         KeychainHelper.shared.delete(key: "customer_id")
+    }
+
+    public struct OtpChallengeResponse: Codable {
+        public let ok: Bool?
+        public let challengeId: String?
+        public let phone: String?
+        public let message: String?
+        public let expiresInSeconds: Int?
+        public let debugOtp: String?
+        public let masterOtp: String?
+    }
+
+    public struct OtpSendResult {
+        public let challengeId: String
+        public let debugOtp: String?
+    }
+
+    public struct CustomerDetailsResponse: Codable {
+        public let id: String?
+        public let phone: String?
+        public let name: String?
+        public let email: String?
+    }
+
+    public struct CustomerVerifyResponse: Codable {
+        public let ok: Bool?
+        public let accessToken: String
+        public let userId: String?
+        public let phone: String?
+        public let customer: CustomerDetailsResponse?
+    }
+
+    public func sendOtp(phone: String) async throws -> OtpSendResult {
+        struct SendBody: Codable {
+            let phone: String
+        }
+        let res: OtpChallengeResponse = try await post(endpoint: "/api/v1/auth/customer/otp/send", body: SendBody(phone: phone))
+        guard let ch = res.challengeId, !ch.isEmpty else {
+            throw APIError.serverError(500, res.message ?? "Failed to request OTP.")
+        }
+        return OtpSendResult(challengeId: ch, debugOtp: res.debugOtp ?? res.masterOtp)
+    }
+
+    public func verifyOtp(challengeId: String, phone: String, code: String, name: String? = nil) async throws -> CustomerAuthResponse {
+        struct VerifyBody: Codable {
+            let challengeId: String
+            let phone: String
+            let otpCode: String
+            let fullName: String?
+        }
+        let res: CustomerVerifyResponse = try await post(
+            endpoint: "/api/v1/auth/customer/otp/verify",
+            body: VerifyBody(challengeId: challengeId, phone: phone, otpCode: code, fullName: name)
+        )
+        let userId = res.userId ?? res.customer?.id ?? "cust_\(phone.suffix(4))"
+        let customerName = res.customer?.name ?? name
+        let authRes = CustomerAuthResponse(
+            userId: userId,
+            phone: res.phone ?? phone,
+            name: customerName,
+            roles: ["ROLE_CUSTOMER"],
+            accessToken: res.accessToken,
+            refreshToken: nil
+        )
+        await MainActor.run {
+            self.setAuth(token: authRes.accessToken, customerId: authRes.userId)
+        }
+        return authRes
     }
 
     public func loginWithPhone(phone: String, otp: String) async throws -> CustomerAuthResponse {

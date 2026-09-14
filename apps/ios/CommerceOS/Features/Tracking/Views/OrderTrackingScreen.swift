@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import MapKit
 
 public struct OrderTrackingScreen: View {
     @EnvironmentObject private var container: AppContainer
@@ -8,6 +9,10 @@ public struct OrderTrackingScreen: View {
     
     public let orderId: String?
     @State private var trackingData: CustomerOrderTrackingDto? = nil
+    @State private var copiedOrderId: Bool = false
+    @State private var selectedRating: Int = 5
+    @State private var ratingSubmitted: Bool = false
+    @State private var localRoadRoute: [CLLocationCoordinate2D] = []
     
     public init(orderId: String? = nil) {
         self.orderId = orderId
@@ -73,12 +78,25 @@ public struct OrderTrackingScreen: View {
                 )
                 self.trackingData = updatedDto
                 self.updateLiveActivity(with: updatedDto)
+                self.resolveRoadRouteIfNeeded(for: updatedDto)
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     @ViewBuilder
     private func activeTrackingView(_ trackingData: CustomerOrderTrackingDto) -> some View {
+        if trackingData.status.uppercased() == "DELIVERED" {
+            // SCENARIO: ORDER DELIVERED - Map is completely hidden, replaced with rich completion summary
+            deliveredCompletionView(trackingData)
+        } else {
+            // SCENARIO: ACTIVE ORDER - Live road polyline tracking on dark mode map
+            liveTrackingMapView(trackingData)
+        }
+    }
+    
+    @ViewBuilder
+    private func liveTrackingMapView(_ trackingData: CustomerOrderTrackingDto) -> some View {
         ZStack(alignment: .bottom) {
             // Background Dark Map with dynamic coordinates
             ZomatoDarkMapView(
@@ -88,144 +106,360 @@ public struct OrderTrackingScreen: View {
                 routeCoordinates: buildRouteCoordinates(trackingData)
             )
             .edgesIgnoringSafeArea(.all)
-                
-                // Bottom Tracking Card Modal
-                VStack(spacing: 12) {
-                    // Pull Pill
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.gray.opacity(0.4))
-                        .frame(width: 36, height: 5)
-                        .padding(.top, 8)
+            
+            // Top Floating Authoritative Order ID Badge with Copy Button
+            VStack {
+                HStack(spacing: 8) {
+                    Text("ORDER #\(trackingData.orderId)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
                     
-                    // Live SSE Status Pill
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(trackingRepo.isLiveStreaming ? CommerceOSTheme.Colors.brandPrimary : CommerceOSTheme.Colors.warning)
-                            .frame(width: 7, height: 7)
-                        Text(trackingRepo.isLiveStreaming ? "REALTIME SSE STREAM ACTIVE" : "SNAPSHOT TRACKING")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(trackingRepo.isLiveStreaming ? CommerceOSTheme.Colors.brandPrimary : .secondary)
-                        Spacer()
-                        if let err = trackingRepo.streamError {
-                            Text(err)
-                                .font(.system(size: 9))
-                                .foregroundColor(CommerceOSTheme.Colors.error)
-                                .lineLimit(1)
+                    Button(action: {
+                        UIPasteboard.general.string = trackingData.orderId
+                        copiedOrderId = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            copiedOrderId = false
                         }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: copiedOrderId ? "checkmark" : "doc.on.doc")
+                            Text(copiedOrderId ? "COPIED" : "COPY")
+                        }
+                        .font(.system(size: 9, weight: .black))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(copiedOrderId ? Color(hex: "10B981") : Color.white.opacity(0.2))
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
                     }
-                    .padding(.horizontal)
-                    
-                    // ETA Header Bar
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(20)
+                .padding(.top, 54)
+                
+                Spacer()
+            }
+            
+            // Bottom Tracking Card Modal
+            VStack(spacing: 12) {
+                // Pull Pill
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(Color.gray.opacity(0.4))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 8)
+                
+                // Live SSE Status Pill
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(trackingRepo.isLiveStreaming ? CommerceOSTheme.Colors.brandPrimary : CommerceOSTheme.Colors.warning)
+                        .frame(width: 7, height: 7)
+                    Text(trackingRepo.isLiveStreaming ? "REALTIME SSE STREAM ACTIVE" : "SNAPSHOT TRACKING")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(trackingRepo.isLiveStreaming ? CommerceOSTheme.Colors.brandPrimary : .secondary)
+                    Spacer()
+                    if let err = trackingRepo.streamError {
+                        Text(err)
+                            .font(.system(size: 9))
+                            .foregroundColor(CommerceOSTheme.Colors.error)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal)
+                
+                // ETA Header Bar
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("ARRIVING IN \(trackingData.estimatedMinutes) MINUTES")
+                            .font(.system(size: 16, weight: .black))
+                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                        Text(stageDescription(for: trackingData.status))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "timer")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                }
+                .padding(.horizontal)
+                
+                // Authoritative 4-Digit Delivery OTP Card
+                if let otp = trackingData.deliveryOtp {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("ARRIVING IN \(trackingData.estimatedMinutes) MINUTES")
-                                .font(.system(size: 16, weight: .black))
-                                .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
-                            Text(stageDescription(for: trackingData.status))
-                                .font(.system(size: 12, weight: .medium))
+                            Text("DELIVERY VERIFICATION PIN")
+                                .font(.system(size: 10, weight: .black))
                                 .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "timer")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
-                    }
-                    .padding(.horizontal)
-                    
-                    // Authoritative 4-Digit Delivery OTP Card
-                    if let otp = trackingData.deliveryOtp {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("DELIVERY VERIFICATION PIN")
-                                    .font(.system(size: 10, weight: .black))
-                                    .foregroundColor(.secondary)
-                                Text("Share this code with rider upon arrival")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Text(otp)
-                                .font(.system(size: 24, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 6)
-                                .background(CommerceOSTheme.Colors.brandPrimarySoft)
-                                .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
-                                .cornerRadius(8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(CommerceOSTheme.Colors.brandPrimaryDark, lineWidth: 1)
-                                )
-                        }
-                        .padding(12)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(10)
-                        .padding(.horizontal)
-                    }
-                    
-                    // Stage Timeline Bar
-                    HStack(spacing: 4) {
-                        ForEach(1...4, id: \.self) { stage in
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(stage <= trackingData.currentStage ? CommerceOSTheme.Colors.brandPrimary : Color.gray.opacity(0.3))
-                                .frame(height: 6)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Rider Profile Card
-                    HStack(spacing: 12) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(CommerceOSTheme.Colors.brandSecondary)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(trackingData.riderName ?? "Assigned Partner")
-                                .font(.system(size: 14, weight: .bold))
-                            Text("Vaccinated • Electric Scooter")
+                            Text("Share this code with rider upon arrival")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
-                        
                         Spacer()
-                        
-                        Button(action: {
-                            if let phone = trackingData.riderPhone, let url = URL(string: "tel://\(phone.replacingOccurrences(of: " ", with: ""))") {
-                                UIApplication.shared.open(url)
-                            }
-                        }) {
-                            Image(systemName: "phone.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
-                        }
+                        Text(otp)
+                            .font(.system(size: 24, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background(CommerceOSTheme.Colors.brandPrimarySoft)
+                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(CommerceOSTheme.Colors.brandPrimaryDark, lineWidth: 1)
+                            )
                     }
                     .padding(12)
                     .background(Color(.systemGray6))
-                    .cornerRadius(12)
+                    .cornerRadius(10)
                     .padding(.horizontal)
-                    .padding(.bottom, 16)
                 }
-                .background(Color(.systemBackground))
-                .cornerRadius(20, corners: [.topLeft, .topRight])
-                .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: -4)
+                
+                // Stage Timeline Bar
+                HStack(spacing: 4) {
+                    ForEach(1...4, id: \.self) { stage in
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(stage <= trackingData.currentStage ? CommerceOSTheme.Colors.brandPrimary : Color.gray.opacity(0.3))
+                            .frame(height: 6)
+                    }
+                }
+                .padding(.horizontal)
+                
+                // Rider Profile Card
+                HStack(spacing: 12) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(CommerceOSTheme.Colors.brandSecondary)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(trackingData.riderName ?? "Assigned Partner")
+                            .font(.system(size: 14, weight: .bold))
+                        Text("Vaccinated • Electric Scooter")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        if let phone = trackingData.riderPhone, let url = URL(string: "tel://\(phone.replacingOccurrences(of: " ", with: ""))") {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        Image(systemName: "phone.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                    }
+                }
+                .padding(12)
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+            }
+            .background(Color(.systemBackground))
+            .cornerRadius(20, corners: [.topLeft, .topRight])
+            .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: -4)
         }
     }
     
+    @ViewBuilder
+    private func deliveredCompletionView(_ trackingData: CustomerOrderTrackingDto) -> some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                // 1. Success Hero Card
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: "10B981").opacity(0.15))
+                            .frame(width: 88, height: 88)
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 48, weight: .bold))
+                            .foregroundColor(Color(hex: "10B981"))
+                    }
+                    .padding(.top, 28)
+                    
+                    Text("Order Delivered Successfully 🎉")
+                        .font(.system(size: 22, weight: .black))
+                        .foregroundColor(.primary)
+                    
+                    Text("Your package has been safely handed over at your doorstep.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 4)
+                
+                // 2. Authoritative Order ID Badge with Tap to Copy
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("ORDER NUMBER")
+                            .font(.system(size: 10, weight: .black))
+                            .foregroundColor(.secondary)
+                        Text("#\(trackingData.orderId)")
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundColor(.primary)
+                    }
+                    Spacer()
+                    Button(action: {
+                        UIPasteboard.general.string = trackingData.orderId
+                        copiedOrderId = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            copiedOrderId = false
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: copiedOrderId ? "checkmark" : "doc.on.doc")
+                            Text(copiedOrderId ? "COPIED" : "COPY")
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(copiedOrderId ? Color(hex: "10B981").opacity(0.15) : Color(.systemGray5))
+                        .foregroundColor(copiedOrderId ? Color(hex: "10B981") : .primary)
+                        .cornerRadius(8)
+                    }
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                
+                // 3. Delivery Partner Rating (Interactive 5 Stars)
+                VStack(spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Rate Delivery Experience")
+                                .font(.system(size: 14, weight: .bold))
+                            Text(trackingData.riderName ?? "Delivery Partner")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if ratingSubmitted {
+                            Text("Rated \(selectedRating) ★")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color(hex: "10B981"))
+                        }
+                    }
+                    
+                    HStack(spacing: 14) {
+                        ForEach(1...5, id: \.self) { star in
+                            Button(action: {
+                                selectedRating = star
+                                ratingSubmitted = true
+                            }) {
+                                Image(systemName: star <= selectedRating ? "star.fill" : "star")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(star <= selectedRating ? Color(hex: "F59E0B") : Color.gray.opacity(0.35))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .padding(16)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                
+                // 4. Delivery Handoff Verification Details
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Delivery Details")
+                        .font(.system(size: 14, weight: .bold))
+                    
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.shield.fill")
+                            .foregroundColor(Color(hex: "10B981"))
+                        Text("Handed off with PIN verification")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if let addr = trackingData.customerAddress {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "house.fill")
+                                .foregroundColor(Color(hex: "0284C7"))
+                            Text(addr)
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                
+                // 5. Done Button
+                Button(action: {
+                    container.trackingRepository.activeTracking = nil
+                }) {
+                    Text("DONE")
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color(hex: "10B981"))
+                        .cornerRadius(12)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+        }
+        .background(Color(.systemBackground).ignoresSafeArea())
+    }
+    
+    // MARK: - Road Polyline Resolution (Zero Straight Lines Across Buildings)
     private func buildRouteCoordinates(_ data: CustomerOrderTrackingDto) -> [CLLocationCoordinate2D] {
         if let poly = data.routePolyline, !poly.isEmpty {
             let decoded = decodePolyline(poly)
             if !decoded.isEmpty { return decoded }
         }
-        var coords: [CLLocationCoordinate2D] = []
-        if let mLat = data.merchantLat, let mLng = data.merchantLng {
-            coords.append(CLLocationCoordinate2D(latitude: mLat, longitude: mLng))
+        if !localRoadRoute.isEmpty {
+            return localRoadRoute
         }
-        if let rLat = data.riderLat, let rLng = data.riderLng {
-            coords.append(CLLocationCoordinate2D(latitude: rLat, longitude: rLng))
+        // NEVER draw straight-line chords between points.
+        // Return empty array until real road directions are resolved.
+        return []
+    }
+    
+    private func resolveRoadRouteIfNeeded(for data: CustomerOrderTrackingDto) {
+        guard localRoadRoute.isEmpty else { return }
+        guard data.routePolyline == nil || data.routePolyline!.isEmpty else { return }
+        
+        let origin: CLLocationCoordinate2D? = {
+            if let rLat = data.riderLat, let rLng = data.riderLng {
+                return CLLocationCoordinate2D(latitude: rLat, longitude: rLng)
+            }
+            if let mLat = data.merchantLat, let mLng = data.merchantLng {
+                return CLLocationCoordinate2D(latitude: mLat, longitude: mLng)
+            }
+            return nil
+        }()
+        
+        guard let startCoord = origin,
+              let cLat = data.customerLat, let cLng = data.customerLng else { return }
+        
+        let destCoord = CLLocationCoordinate2D(latitude: cLat, longitude: cLng)
+        
+        let req = MKDirections.Request()
+        req.source = MKMapItem(placemark: MKPlacemark(coordinate: startCoord))
+        req.destination = MKMapItem(placemark: MKPlacemark(coordinate: destCoord))
+        req.transportType = .automobile
+        
+        let directions = MKDirections(request: req)
+        directions.calculate { response, error in
+            guard let route = response?.routes.first else { return }
+            var points = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
+            route.polyline.getCoordinates(&points, range: NSRange(location: 0, length: route.polyline.pointCount))
+            DispatchQueue.main.async {
+                self.localRoadRoute = points
+            }
         }
-        if let cLat = data.customerLat, let cLng = data.customerLng {
-            coords.append(CLLocationCoordinate2D(latitude: cLat, longitude: cLng))
-        }
-        return coords
     }
     
     private func decodePolyline(_ encoded: String) -> [CLLocationCoordinate2D] {

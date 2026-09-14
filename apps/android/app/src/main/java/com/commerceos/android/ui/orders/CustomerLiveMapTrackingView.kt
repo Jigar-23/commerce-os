@@ -69,24 +69,50 @@ fun CustomerLiveMapTrackingView(
     val activeStage = liveTracking?.stage ?: when (order.orderStatus.uppercase()) {
         "DELIVERED" -> "DELIVERED"
         "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> "AT_DOORSTEP"
-        "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU" -> "OUT_FOR_DELIVERY"
-        "PICKED_UP", "ARRIVED_PICKUP", "EN_ROUTE_PICKUP" -> "AT_STORE"
-        "SELLER_ACCEPTED" -> "HEADING_TO_STORE"
+        "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU" -> "OUT_FOR_DELIVERY"
+        "ARRIVED_PICKUP", "EN_ROUTE_PICKUP", "AT_STORE" -> "AT_STORE"
+        "SELLER_ACCEPTED", "ACCEPTED", "EN_ROUTE_STORE", "ASSIGNED" -> "HEADING_TO_STORE"
         else -> "ASSIGNING_PARTNER"
     }
 
+    val isHeadingToCustomer = activeStage in listOf(
+        "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU",
+        "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
+    )
+    val isHeadingToStore = activeStage in listOf(
+        "HEADING_TO_STORE", "ACCEPTED", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE",
+        "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "PACKED", "SELLER_ACCEPTED", "ASSIGNED"
+    )
+    val isOrderPlaced = !isHeadingToCustomer && !isHeadingToStore
+
+    val effectiveRiderLat = realRiderLat ?: cachedRiderLat ?: if (isHeadingToCustomer) merchantLat else null
+    val effectiveRiderLng = realRiderLng ?: cachedRiderLng ?: if (isHeadingToCustomer) merchantLng else null
+
     LaunchedEffect(liveTracking?.waypoints, merchantLat, merchantLng, customerLat, customerLng, realRiderLat, realRiderLng, activeStage) {
+        // Stage 1 (Order Placed): Strictly NO polyline / route fetching between Store and Home while nothing is moving
+        if (isOrderPlaced) {
+            dynamicRoadPoints = emptyList()
+            lastRoutedStage = activeStage
+            return@LaunchedEffect
+        }
         if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
             dynamicRoadPoints = emptyList()
             return@LaunchedEffect
         }
-        val isPhase1 = activeStage in listOf("HEADING_TO_STORE", "ASSIGNING_PARTNER", "AT_STORE")
         val effectiveRiderLat = realRiderLat ?: cachedRiderLat
         val effectiveRiderLng = realRiderLng ?: cachedRiderLng
-        val originLat = if (isPhase1) (effectiveRiderLat ?: (merchantLat - 0.008)) else merchantLat
-        val originLng = if (isPhase1) (effectiveRiderLng ?: (merchantLng - 0.006)) else merchantLng
-        val destLat = if (isPhase1) merchantLat else customerLat
-        val destLng = if (isPhase1) merchantLng else customerLng
+        if (effectiveRiderLat == null || effectiveRiderLng == null) {
+            dynamicRoadPoints = emptyList()
+            return@LaunchedEffect
+        }
+
+        // Origin is always the moving rider; Destination depends on stage:
+        // Stage 2 (Heading to store): Rider -> Merchant Store
+        // Stage 3 (Heading to customer): Rider -> Customer Home
+        val originLat = effectiveRiderLat
+        val originLng = effectiveRiderLng
+        val destLat = if (isHeadingToStore) merchantLat else customerLat
+        val destLng = if (isHeadingToStore) merchantLng else customerLng
 
         // Throttle route queries if position displacement is minimal (< 40m)
         val prevLat = lastRoutedOriginLat
@@ -101,6 +127,41 @@ fun CustomerLiveMapTrackingView(
 
         if (originLat != destLat || originLng != destLng) {
             withContext(Dispatchers.IO) {
+                // 1. Authoritative Backend Routing (Host Google Directions + OSRM)
+                try {
+                    val backendBase = com.commerceos.android.network.NetworkClient.baseUrl.trimEnd('/')
+                    val backendUrl = "$backendBase/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
+                    val url = URL(backendUrl)
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 3500
+                        readTimeout = 3500
+                        setRequestProperty("User-Agent", "CommerceOS-Customer/2.0")
+                    }
+                    if (conn.responseCode == 200) {
+                        val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                        val json = JSONObject(jsonStr)
+                        if (json.optBoolean("ok", false) && json.has("waypoints")) {
+                            val arr = json.getJSONArray("waypoints")
+                            val pts = mutableListOf<MapRoutePoint>()
+                            for (i in 0 until arr.length()) {
+                                val pt = arr.getJSONObject(i)
+                                pts.add(MapRoutePoint(lat = pt.getDouble("lat"), lng = pt.getDouble("lng")))
+                            }
+                            if (pts.size >= 2) {
+                                withContext(Dispatchers.Main) {
+                                    dynamicRoadPoints = pts
+                                    lastRoutedOriginLat = originLat
+                                    lastRoutedOriginLng = originLng
+                                    lastRoutedStage = activeStage
+                                }
+                                return@withContext
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 2. Direct OSRM Fallback
                 try {
                     val url = URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
                     val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -124,6 +185,9 @@ fun CustomerLiveMapTrackingView(
                             if (pts.size >= 2) {
                                 withContext(Dispatchers.Main) {
                                     dynamicRoadPoints = pts
+                                    lastRoutedOriginLat = originLat
+                                    lastRoutedOriginLng = originLng
+                                    lastRoutedStage = activeStage
                                 }
                             }
                         }
@@ -133,13 +197,13 @@ fun CustomerLiveMapTrackingView(
         }
     }
 
-    val routePoints = remember(liveTracking?.waypoints, dynamicRoadPoints, merchantLat, merchantLng, customerLat, customerLng) {
-        if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
+    val routePoints = remember(liveTracking?.waypoints, dynamicRoadPoints, isOrderPlaced) {
+        if (isOrderPlaced) {
+            emptyList()
+        } else if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
             liveTracking!!.waypoints.map { MapRoutePoint(it.lat, it.lng) }
         } else if (dynamicRoadPoints.isNotEmpty()) {
             dynamicRoadPoints
-        } else if (hasLocations) {
-            listOf(MapRoutePoint(merchantLat, merchantLng), MapRoutePoint(customerLat, customerLng))
         } else {
             emptyList()
         }
@@ -185,8 +249,8 @@ fun CustomerLiveMapTrackingView(
                     merchantLng = merchantLng,
                     customerLat = customerLat,
                     customerLng = customerLng,
-                    riderLat = realRiderLat,
-                    riderLng = realRiderLng,
+                    riderLat = effectiveRiderLat,
+                    riderLng = effectiveRiderLng,
                     riderHeading = heading,
                     speedKmh = telemetry?.speedKmh,
                     waypoints = routePoints,
@@ -288,8 +352,8 @@ fun CustomerLiveMapTrackingView(
                     merchantLng = merchantLng,
                     customerLat = customerLat,
                     customerLng = customerLng,
-                    riderLat = realRiderLat,
-                    riderLng = realRiderLng,
+                    riderLat = effectiveRiderLat,
+                    riderLng = effectiveRiderLng,
                     riderHeading = heading,
                     speedKmh = telemetry?.speedKmh,
                     waypoints = routePoints,

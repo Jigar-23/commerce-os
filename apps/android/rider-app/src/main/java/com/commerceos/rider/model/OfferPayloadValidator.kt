@@ -77,12 +77,40 @@ object OfferPayloadValidator {
             val customerLat = json.optDoubleOrNull("customerLat") ?: json.optDoubleOrNull("customer_lat") ?: json.optDoubleOrNull("destLat") ?: 28.202224
             val customerLng = json.optDoubleOrNull("customerLng") ?: json.optDoubleOrNull("customer_lng") ?: json.optDoubleOrNull("destLng") ?: 76.615418
 
+            val isCod = json.optBoolean("isCod", json.optBoolean("is_cod", false))
+            val codAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount") ?: 0.0
+
+            val orderTotal = json.optDoubleOrNull("orderTotal")
+                ?: json.optDoubleOrNull("order_total")
+                ?: json.optDoubleOrNull("totalAmount")
+                ?: json.optDoubleOrNull("total_amount")
+                ?: json.optDoubleOrNull("cartValue")
+                ?: (if (isCod && codAmount > 0.0) codAmount else null)
+
             val earningsAmount = (json.optDoubleOrNull("earningsAmount")
                 ?: json.optDoubleOrNull("earnings_amount")
                 ?: json.optDoubleOrNull("totalEarnings")
                 ?: json.optDoubleOrNull("payout")
                 ?: json.optDoubleOrNull("earnings")
-                ?: 50.0)
+                ?: json.optDoubleOrNull("estimatedEarnings")
+                ?: json.optDoubleOrNull("estimated_earnings")
+                ?: (orderTotal?.times(0.15)?.coerceAtLeast(35.0))
+                ?: 35.0)
+
+            val itemsList = mutableListOf<RiderOrderItem>()
+            val itemsArray = json.optJSONArray("items")
+            if (itemsArray != null) {
+                for (i in 0 until itemsArray.length()) {
+                    val itObj = itemsArray.optJSONObject(i)
+                    if (itObj != null) {
+                        val name = itObj.optString("name").takeIf { it.isNotBlank() } ?: itObj.optString("productName").takeIf { it.isNotBlank() } ?: "Item"
+                        val qty = itObj.optInt("quantity", 1)
+                        val price = itObj.optDouble("price", itObj.optDouble("unitPrice", 0.0))
+                        val sku = itObj.optString("sku", "")
+                        itemsList.add(RiderOrderItem(name = name, quantity = qty, price = price, sku = sku))
+                    }
+                }
+            }
 
             val deliveryDistanceKm = json.optDoubleOrNull("deliveryDistanceKm") ?: json.optDoubleOrNull("delivery_distance_km") ?: 1.5
             val pickupDistanceKm = json.optDoubleOrNull("pickupDistanceKm") ?: json.optDoubleOrNull("pickup_distance_km") ?: 0.5
@@ -102,9 +130,6 @@ object OfferPayloadValidator {
             val serverTime = if (json.has("serverTime") && !json.isNull("serverTime")) json.getLong("serverTime")
                 else nowMs
 
-            val isCod = json.optBoolean("isCod", json.optBoolean("is_cod", false))
-            val codAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount") ?: 0.0
-
             return ServerOffer(
                 offerId = offerId,
                 eventId = eventId,
@@ -120,6 +145,8 @@ object OfferPayloadValidator {
                 estimatedDurationMins = estimatedDurationMins,
                 isCod = isCod,
                 codAmount = codAmount,
+                orderTotal = orderTotal,
+                items = itemsList,
                 customerName = customerName,
                 customerAddress = customerAddress,
                 customerLat = customerLat,
@@ -185,10 +212,22 @@ object OfferPayloadValidator {
             val customerLat = data["customerLat"]?.toDoubleOrNull() ?: 28.202224
             val customerLng = data["customerLng"]?.toDoubleOrNull() ?: 76.615418
 
+            val isCod = data["isCod"]?.toBoolean() ?: false
+            val codAmount = data["codAmount"]?.toDoubleOrNull() ?: 0.0
+
+            val orderTotal = data["orderTotal"]?.toDoubleOrNull()
+                ?: data["order_total"]?.toDoubleOrNull()
+                ?: data["totalAmount"]?.toDoubleOrNull()
+                ?: data["total_amount"]?.toDoubleOrNull()
+                ?: data["cartValue"]?.toDoubleOrNull()
+                ?: (if (isCod && codAmount > 0.0) codAmount else null)
+
             val earningsAmount = data["earningsAmount"]?.toDoubleOrNull()
                 ?: data["totalEarnings"]?.toDoubleOrNull()
                 ?: data["payout"]?.toDoubleOrNull()
-                ?: 50.0
+                ?: data["estimatedEarnings"]?.toDoubleOrNull()
+                ?: (orderTotal?.times(0.15)?.coerceAtLeast(35.0))
+                ?: 35.0
 
             val deliveryDistanceKm = data["deliveryDistanceKm"]?.toDoubleOrNull() ?: 1.5
             val pickupDistanceKm = data["pickupDistanceKm"]?.toDoubleOrNull() ?: 0.5
@@ -205,9 +244,6 @@ object OfferPayloadValidator {
 
             val serverTime = data["serverTime"]?.toLongOrNull() ?: nowMs
 
-            val isCod = data["isCod"]?.toBoolean() ?: false
-            val codAmount = data["codAmount"]?.toDoubleOrNull() ?: 0.0
-
             return ServerOffer(
                 offerId = offerId,
                 eventId = eventId,
@@ -223,6 +259,8 @@ object OfferPayloadValidator {
                 estimatedDurationMins = estimatedDurationMins,
                 isCod = isCod,
                 codAmount = codAmount,
+                orderTotal = orderTotal,
+                items = emptyList(),
                 customerName = customerName,
                 customerAddress = customerAddress,
                 customerLat = customerLat,

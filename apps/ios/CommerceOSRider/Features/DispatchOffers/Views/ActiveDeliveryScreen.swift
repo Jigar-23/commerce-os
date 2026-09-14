@@ -14,6 +14,12 @@ public struct ActiveDeliveryScreen: View {
     @State private var otpErrorMessage: String? = nil
     @State private var isSubmittingOtp: Bool = false
     @State private var isDelivered: Bool = false
+    @State private var copiedOrderId: Bool = false
+    @State private var completedOrderId: String? = nil
+    @State private var completedCustomerName: String = ""
+    @State private var completedIsCod: Bool = false
+    @State private var completedCodAmount: Double? = nil
+    @State private var showCelebrationModal: Bool = false
     
     public init() {}
     
@@ -84,8 +90,28 @@ public struct ActiveDeliveryScreen: View {
                     // Status Badge & Order Number
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("ORDER \(session.orderId)")
-                                .font(.system(size: 13, weight: .black))
+                            HStack(spacing: 6) {
+                                Text("ORDER \(session.orderId)")
+                                    .font(.system(size: 13, weight: .black))
+                                Button(action: {
+                                    UIPasteboard.general.string = session.orderId
+                                    copiedOrderId = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                        copiedOrderId = false
+                                    }
+                                }) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: copiedOrderId ? "checkmark" : "doc.on.doc")
+                                        Text(copiedOrderId ? "COPIED" : "COPY")
+                                    }
+                                    .font(.system(size: 8, weight: .black))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(copiedOrderId ? RiderTheme.Colors.safetyGreen.opacity(0.3) : Color.gray.opacity(0.3))
+                                    .foregroundColor(copiedOrderId ? RiderTheme.Colors.safetyGreen : .white)
+                                    .cornerRadius(4)
+                                }
+                            }
                             Text(stageTitle)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(RiderTheme.Colors.safetyYellow)
@@ -172,12 +198,52 @@ public struct ActiveDeliveryScreen: View {
                 .cornerRadius(18)
                 .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: -4)
             }
+            
+            // Celebration Modal Overlay
+            if showCelebrationModal, let orderId = completedOrderId {
+                DeliveryCompletionCelebrationView(
+                    orderId: orderId,
+                    customerName: completedCustomerName,
+                    payoutFormatted: "₹65.00",
+                    isCod: completedIsCod,
+                    codAmount: completedCodAmount,
+                    onDismiss: {
+                        showCelebrationModal = false
+                        sessionManager.activeSession = nil
+                        container.locationManager.activeDeliveryId = nil
+                    }
+                )
+                .zIndex(200)
+                .transition(.opacity.combined(with: .scale))
+            }
         }
         .sheet(isPresented: $showingOtpDialog) {
-            DeliveryOtpEntryDialog(
-                orderId: sessionManager.activeSession?.orderId ?? "",
-                onVerify: verifyDeliveryOtp
-            )
+            if let session = sessionManager.activeSession {
+                NavigationView {
+                    ScrollView {
+                        CustomerHandoffView(
+                            session: session,
+                            onVerifyOtp: { otp, cash in
+                                return await verifyDeliveryOtp(otp, cashCollected: cash)
+                            },
+                            onComplete: {
+                                showingOtpDialog = false
+                            }
+                        )
+                        .padding()
+                    }
+                    .background(Color(hex: "0D0F14").ignoresSafeArea())
+                    .navigationTitle("Customer Handoff")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Close") { showingOtpDialog = false }
+                                .foregroundColor(Color(hex: "38BDF8"))
+                        }
+                    }
+                }
+                .navigationViewStyle(.stack)
+            }
         }
         .onAppear {
             if let s = sessionManager.activeSession {
@@ -311,10 +377,10 @@ public struct ActiveDeliveryScreen: View {
         }
     }
     
-    private func verifyDeliveryOtp(_ otp: String) async -> Bool {
+    private func verifyDeliveryOtp(_ otp: String, cashCollected: Double? = nil) async -> Bool {
         guard let session = sessionManager.activeSession else { return false }
         do {
-            let req = DeliverWithOtpRequest(otp: otp, cashCollected: session.codAmountToCollect)
+            let req = DeliverWithOtpRequest(otp: otp, cashCollected: cashCollected ?? session.codAmountToCollect)
             let res: DeliverWithOtpResponse = try await container.apiClient.post(
                 endpoint: .deliverWithOtp(deliveryId: session.deliveryId),
                 body: req
@@ -322,9 +388,12 @@ public struct ActiveDeliveryScreen: View {
             
             if res.success {
                 await MainActor.run {
+                    completedOrderId = session.orderId
+                    completedCustomerName = session.customerName
+                    completedIsCod = session.isCod
+                    completedCodAmount = cashCollected ?? session.codAmountToCollect
                     showingOtpDialog = false
-                    sessionManager.activeSession = nil
-                    container.locationManager.activeDeliveryId = nil
+                    showCelebrationModal = true
                 }
                 return true
             }

@@ -42,12 +42,7 @@ class SessionManager(context: Context) {
     init {
         val savedUrl = prefs.getString(KEY_BASE_URL, null)
         if (!savedUrl.isNullOrBlank()) {
-            if (savedUrl.contains("192.168.") || savedUrl.contains("10.0.2.2") || savedUrl.contains("127.0.0.1") || savedUrl.contains("localhost")) {
-                NetworkClient.baseUrl = BuildConfig.API_BASE_URL
-                prefs.edit().putString(KEY_BASE_URL, BuildConfig.API_BASE_URL).apply()
-            } else {
-                NetworkClient.baseUrl = savedUrl
-            }
+            NetworkClient.baseUrl = savedUrl
         } else {
             NetworkClient.baseUrl = BuildConfig.API_BASE_URL
         }

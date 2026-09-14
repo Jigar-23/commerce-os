@@ -1,5 +1,6 @@
 package com.commerceos.rider.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -7,7 +8,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -42,6 +42,7 @@ fun EarningsView(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(Color(0xFF0D0F14))
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -49,7 +50,8 @@ fun EarningsView(
         // Today's Total Earnings Hero Card
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+            border = BorderStroke(1.dp, Color(0xFF262933)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
@@ -90,7 +92,7 @@ fun EarningsView(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Color(0xFF1E293B))
+                HorizontalDivider(color = Color(0xFF262933))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
@@ -114,7 +116,8 @@ fun EarningsView(
         // Payout Schedule Information
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
+            border = BorderStroke(1.dp, Color(0xFF262933)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

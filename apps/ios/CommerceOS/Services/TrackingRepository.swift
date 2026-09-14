@@ -19,6 +19,102 @@ public struct LiveTrackingPayload: Codable {
     public let totalAmount: Double?
     public let isLiveTelemetryAvailable: Bool?
     public let routePolyline: String?
+
+    enum CodingKeys: String, CodingKey {
+        case orderId = "order_id"
+        case orderIdCamel = "orderId"
+        case status
+        case state
+        case etaMinutes = "eta_minutes"
+        case etaMinutesCamel = "etaMinutes"
+        case estimatedArrivalMins
+        case riderName = "rider_name"
+        case riderNameCamel = "riderName"
+        case riderPhone = "rider_phone"
+        case riderPhoneCamel = "riderPhone"
+        case riderLat = "rider_lat"
+        case riderLatCamel = "riderLat"
+        case riderLng = "rider_lng"
+        case riderLngCamel = "riderLng"
+        case merchantLat = "merchant_lat"
+        case merchantLatCamel = "merchantLat"
+        case merchantLng = "merchant_lng"
+        case merchantLngCamel = "merchantLng"
+        case customerLat = "customer_lat"
+        case customerLatCamel = "customerLat"
+        case customerLng = "customer_lng"
+        case customerLngCamel = "customerLng"
+        case deliveryOtp = "delivery_otp"
+        case deliveryOtpCamel = "deliveryOtp"
+        case isCod = "is_cod"
+        case isCodCamel = "isCod"
+        case totalAmount = "total_amount"
+        case totalAmountCamel = "totalAmount"
+        case isLiveTelemetryAvailable = "is_live_telemetry_available"
+        case isLiveTelemetryAvailableCamel = "isLiveTelemetryAvailable"
+        case routePolyline = "route_polyline"
+        case routePolylineCamel = "routePolyline"
+        case active
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.orderId = (try? container.decode(String.self, forKey: .orderId))
+            ?? (try? container.decode(String.self, forKey: .orderIdCamel))
+            ?? ""
+        self.status = (try? container.decode(String.self, forKey: .status))
+            ?? (try? container.decode(String.self, forKey: .state))
+            ?? "PLACED"
+        self.etaMinutes = (try? container.decode(Int.self, forKey: .etaMinutes))
+            ?? (try? container.decode(Int.self, forKey: .etaMinutesCamel))
+            ?? (try? container.decode(Int.self, forKey: .estimatedArrivalMins))
+        self.riderName = (try? container.decode(String.self, forKey: .riderName))
+            ?? (try? container.decode(String.self, forKey: .riderNameCamel))
+        self.riderPhone = (try? container.decode(String.self, forKey: .riderPhone))
+            ?? (try? container.decode(String.self, forKey: .riderPhoneCamel))
+        self.riderLat = (try? container.decode(Double.self, forKey: .riderLat))
+            ?? (try? container.decode(Double.self, forKey: .riderLatCamel))
+        self.riderLng = (try? container.decode(Double.self, forKey: .riderLng))
+            ?? (try? container.decode(Double.self, forKey: .riderLngCamel))
+        self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat))
+            ?? (try? container.decode(Double.self, forKey: .merchantLatCamel))
+        self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng))
+            ?? (try? container.decode(Double.self, forKey: .merchantLngCamel))
+        self.customerLat = (try? container.decode(Double.self, forKey: .customerLat))
+            ?? (try? container.decode(Double.self, forKey: .customerLatCamel))
+        self.customerLng = (try? container.decode(Double.self, forKey: .customerLng))
+            ?? (try? container.decode(Double.self, forKey: .customerLngCamel))
+        self.deliveryOtp = (try? container.decode(String.self, forKey: .deliveryOtp))
+            ?? (try? container.decode(String.self, forKey: .deliveryOtpCamel))
+        self.isCod = (try? container.decode(Bool.self, forKey: .isCod))
+            ?? (try? container.decode(Bool.self, forKey: .isCodCamel))
+        self.totalAmount = (try? container.decode(Double.self, forKey: .totalAmount))
+            ?? (try? container.decode(Double.self, forKey: .totalAmountCamel))
+        self.isLiveTelemetryAvailable = (try? container.decode(Bool.self, forKey: .isLiveTelemetryAvailable))
+            ?? (try? container.decode(Bool.self, forKey: .isLiveTelemetryAvailableCamel))
+        self.routePolyline = (try? container.decode(String.self, forKey: .routePolyline))
+            ?? (try? container.decode(String.self, forKey: .routePolylineCamel))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(orderId, forKey: .orderId)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(etaMinutes, forKey: .etaMinutes)
+        try container.encodeIfPresent(riderName, forKey: .riderName)
+        try container.encodeIfPresent(riderPhone, forKey: .riderPhone)
+        try container.encodeIfPresent(riderLat, forKey: .riderLat)
+        try container.encodeIfPresent(riderLng, forKey: .riderLng)
+        try container.encodeIfPresent(merchantLat, forKey: .merchantLat)
+        try container.encodeIfPresent(merchantLng, forKey: .merchantLng)
+        try container.encodeIfPresent(customerLat, forKey: .customerLat)
+        try container.encodeIfPresent(customerLng, forKey: .customerLng)
+        try container.encodeIfPresent(deliveryOtp, forKey: .deliveryOtp)
+        try container.encodeIfPresent(isCod, forKey: .isCod)
+        try container.encodeIfPresent(totalAmount, forKey: .totalAmount)
+        try container.encodeIfPresent(isLiveTelemetryAvailable, forKey: .isLiveTelemetryAvailable)
+        try container.encodeIfPresent(routePolyline, forKey: .routePolyline)
+    }
 }
 
 public class TrackingRepository: ObservableObject {
@@ -40,7 +136,11 @@ public class TrackingRepository: ObservableObject {
         do {
             let tracking: LiveTrackingPayload = try await apiClient.get(endpoint: "/api/v1/orders/active-delivery")
             await MainActor.run {
-                self.activeTracking = tracking
+                if tracking.orderId.isEmpty || tracking.status == "NO_ACTIVE_ORDER" {
+                    self.activeTracking = nil
+                } else {
+                    self.activeTracking = tracking
+                }
                 self.streamError = nil
             }
         } catch {

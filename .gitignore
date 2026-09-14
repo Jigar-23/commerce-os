@@ -46,3 +46,4 @@ DerivedData/
 *.log
 
 .github/
+apps/ios/build-ipad/

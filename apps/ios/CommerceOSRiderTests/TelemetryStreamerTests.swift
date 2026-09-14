@@ -1,6 +1,7 @@
 import XCTest
 import CoreLocation
 import Combine
+@testable import CommerceOSRider
 
 final class TelemetryStreamerTests: XCTestCase {
     private var streamer: RiderTelemetryStreamer!

@@ -37,7 +37,7 @@ public final class CartLocalStore: ObservableObject {
     }
     
     public var hasPrescriptionItem: Bool {
-        false
+        items.values.contains { $0.product.requiresPrescription }
     }
     
     public func add(product: ProductDto) {

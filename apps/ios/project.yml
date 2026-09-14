@@ -1,0 +1,148 @@
+name: CommerceOS
+options:
+  bundleIdPrefix: com.commerceos
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_PREVIEWS: YES
+    ALWAYS_SEARCH_USER_PATHS: NO
+    DEVELOPMENT_TEAM: "H6JD3WVN26"
+    CODE_SIGN_STYLE: "Automatic"
+
+targets:
+  CommerceOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.commerceos.customer
+    sources:
+      - path: CommerceOS
+    info:
+      path: CommerceOS/Info.plist
+      properties:
+        CFBundleDisplayName: "CommerceOS"
+        CFBundleIdentifier: "com.commerceos.customer"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSCameraUsageDescription: "Camera access is needed for scanning medical prescriptions via VisionKit."
+        NSFaceIDUsageDescription: "FaceID is used to securely unlock and access the encrypted prescription vault."
+        NSLocationWhenInUseUsageDescription: "Location is used for delivery address selection and live courier tracking."
+        NSSupportsLiveActivities: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: MapKit.framework
+      - sdk: CoreLocation.framework
+      - sdk: LocalAuthentication.framework
+      - sdk: VisionKit.framework
+      - sdk: Vision.framework
+      - sdk: ActivityKit.framework
+
+  CommerceOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    sources:
+      - path: CommerceOSTests
+    dependencies:
+      - target: CommerceOS
+
+  CommerceOSRider:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.commerceos.rider
+    sources:
+      - path: CommerceOSRider
+    info:
+      path: CommerceOSRider/Info.plist
+      properties:
+        CFBundleDisplayName: "CommerceOS Rider"
+        CFBundleIdentifier: "com.commerceos.rider"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Always and When In Use location is required for live courier dispatch, turn-by-turn navigation, and background telemetry streaming."
+        NSLocationWhenInUseUsageDescription: "Location is required for turn-by-turn navigation."
+        UIBackgroundModes:
+          - location
+          - remote-notification
+          - audio
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: MapKit.framework
+      - sdk: CoreLocation.framework
+      - sdk: AVFoundation.framework
+      - sdk: AudioToolbox.framework
+      - sdk: UserNotifications.framework
+
+  CommerceOSRiderTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    sources:
+      - path: CommerceOSRiderTests
+    dependencies:
+      - target: CommerceOSRider
+
+schemes:
+  CommerceOS:
+    build:
+      targets:
+        CommerceOS: all
+        CommerceOSTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CommerceOSTests
+
+  CommerceOSRider:
+    build:
+      targets:
+        CommerceOSRider: all
+        CommerceOSRiderTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CommerceOSRiderTests

@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+@testable import CommerceOS
 
 final class CartStoreTests: XCTestCase {
     private var cartStore: CartLocalStore!
