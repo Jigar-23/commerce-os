@@ -556,12 +556,14 @@ public struct CartScreen: View {
                     prescriptionId: nil
                 )
                 
-                let _: ServerOrderResponse = try await container.apiClient.post(
+                let orderRes: ServerOrderResponse = try await container.apiClient.post(
                     endpoint: .placeOrder,
                     body: payload
                 )
                 
                 await MainActor.run {
+                    self.container.orderRepository.lastPlacedOrder = orderRes
+                    self.container.orderRepository.customerOrders.insert(orderRes, at: 0)
                     self.cartStore.clear()
                     self.isPlacingOrder = false
                     self.orderError = nil

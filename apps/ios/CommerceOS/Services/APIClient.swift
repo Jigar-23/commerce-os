@@ -16,7 +16,22 @@ public enum APIError: LocalizedError {
         case .forbidden(let msg): return "Access forbidden: \(msg)"
         case .serverError(let code, let msg): return "Server error (\(code)): \(msg)"
         case .decodingError(let err): return "Failed to process server response: \(err.localizedDescription)"
-        case .networkError(let err): return "Network connection failure: \(err.localizedDescription)"
+        case .networkError(let err):
+            if let urlErr = err as? URLError {
+                switch urlErr.code {
+                case .timedOut:
+                    return "Network timeout: The server took too long to respond. Please try again."
+                case .notConnectedToInternet:
+                    return "No internet connection. Please check your network and try again."
+                case .networkConnectionLost:
+                    return "Network connection interrupted: The server closed the connection. Retrying may resolve this."
+                case .cannotConnectToHost:
+                    return "Unable to reach server. Please check your network connection."
+                default:
+                    return "Network connection failure: \(urlErr.localizedDescription)"
+                }
+            }
+            return "Network connection failure: \(err.localizedDescription)"
         }
     }
 }
@@ -52,8 +67,17 @@ public class APIClient: ObservableObject {
 
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
-        self.session = session
+    public init(session: URLSession? = nil) {
+        if let customSession = session {
+            self.session = customSession
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 45.0
+            config.timeoutIntervalForResource = 90.0
+            config.waitsForConnectivity = true
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            self.session = URLSession(configuration: config)
+        }
         // Secure Keychain Loading
         if let token = KeychainHelper.shared.get(key: "auth_token"),
            let customerId = KeychainHelper.shared.get(key: "customer_id") {
@@ -188,6 +212,8 @@ public class APIClient: ObservableObject {
 
         var req = URLRequest(url: url)
         req.httpMethod = method
+        req.timeoutInterval = 45.0
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
@@ -198,43 +224,60 @@ public class APIClient: ObservableObject {
         headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         req.httpBody = body
 
-        do {
-            let (data, response) = try await session.data(for: req)
-            guard let httpRes = response as? HTTPURLResponse else {
-                throw APIError.serverError(0, "Invalid HTTP response")
-            }
+        var attempts = 0
+        let maxAttempts = 2
 
-            if httpRes.statusCode == 401 {
-                if let authHdr = req.value(forHTTPHeaderField: "Authorization"), !authHdr.isEmpty {
-                    await MainActor.run {
-                        self.clearAuth()
-                        NotificationCenter.default.post(name: APIClient.sessionExpiredNotification, object: nil)
+        while true {
+            attempts += 1
+            do {
+                let hasAuth = req.value(forHTTPHeaderField: "Authorization") != nil
+                print("[APIClient] \(method) \(url.path) (auth: \(hasAuth), attempt: \(attempts))")
+                let (data, response) = try await session.data(for: req)
+                guard let httpRes = response as? HTTPURLResponse else {
+                    throw APIError.serverError(0, "Invalid HTTP response")
+                }
+
+                print("[APIClient] \(method) \(url.path) -> HTTP \(httpRes.statusCode)")
+
+                if httpRes.statusCode == 401 {
+                    if let authHdr = req.value(forHTTPHeaderField: "Authorization"), !authHdr.isEmpty {
+                        await MainActor.run {
+                            self.clearAuth()
+                            NotificationCenter.default.post(name: APIClient.sessionExpiredNotification, object: nil)
+                        }
                     }
+                    throw APIError.unauthenticated
                 }
-                throw APIError.unauthenticated
-            }
 
-            if httpRes.statusCode >= 400 {
-                let errorObj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let message = errorObj?["message"] as? String ?? errorObj?["error"] as? String ?? "HTTP \(httpRes.statusCode)"
-                if httpRes.statusCode == 403 {
-                    throw APIError.forbidden(message)
+                if httpRes.statusCode >= 400 {
+                    let errorObj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    let message = errorObj?["message"] as? String ?? errorObj?["error"] as? String ?? "HTTP \(httpRes.statusCode)"
+                    if httpRes.statusCode == 403 {
+                        throw APIError.forbidden(message)
+                    }
+                    throw APIError.serverError(httpRes.statusCode, message)
                 }
-                throw APIError.serverError(httpRes.statusCode, message)
-            }
 
-            let decoder = JSONDecoder()
-            if let decoded = try? decoder.decode(T.self, from: data) {
-                return decoded
+                let decoder = JSONDecoder()
+                if let decoded = try? decoder.decode(T.self, from: data) {
+                    return decoded
+                }
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                return try decoder.decode(T.self, from: data)
+            } catch let err as APIError {
+                print("[APIClient] APIError for \(method) \(url.path): \(err.localizedDescription)")
+                throw err
+            } catch let decErr as DecodingError {
+                print("[APIClient] DecodingError for \(method) \(url.path): \(decErr)")
+                throw APIError.decodingError(decErr)
+            } catch let urlErr as URLError where attempts < maxAttempts && (urlErr.code == .networkConnectionLost || urlErr.code == .timedOut) {
+                print("[APIClient] Network warning (\(urlErr.code.rawValue): \(urlErr.localizedDescription)). Auto-retrying request with fresh connection (attempt \(attempts + 1)/\(maxAttempts))...")
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                continue
+            } catch {
+                print("[APIClient] Underlying network error for \(method) \(url.path): \(error) (\((error as NSError).domain) code: \((error as NSError).code))")
+                throw APIError.networkError(error)
             }
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
-            return try decoder.decode(T.self, from: data)
-        } catch let err as APIError {
-            throw err
-        } catch let decErr as DecodingError {
-            throw APIError.decodingError(decErr)
-        } catch {
-            throw APIError.networkError(error)
         }
     }
 

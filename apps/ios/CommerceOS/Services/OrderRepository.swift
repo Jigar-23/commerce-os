@@ -69,16 +69,11 @@ public struct PlaceOrderRequest: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(idempotencyKey, forKey: .idempotencyKey)
-        try container.encode(idempotencyKey, forKey: .idempotencyKeyCamel)
         try container.encode(paymentMethod, forKey: .paymentMethod)
-        try container.encode(paymentMethod, forKey: .paymentMethodCamel)
         try container.encodeIfPresent(addressId, forKey: .addressId)
-        try container.encodeIfPresent(addressId, forKey: .addressIdCamel)
         try container.encode(deliveryAddress, forKey: .deliveryAddress)
-        try container.encode(deliveryAddress, forKey: .deliveryAddressCamel)
         try container.encode(items, forKey: .items)
         try container.encodeIfPresent(prescriptionId, forKey: .prescriptionId)
-        try container.encodeIfPresent(prescriptionId, forKey: .prescriptionIdCamel)
     }
 }
 
@@ -123,10 +118,8 @@ public struct DeliveryAddressPayload: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(addressLine, forKey: .addressLine)
-        try container.encode(addressLine, forKey: .addressLineCamel)
         try container.encode(city, forKey: .city)
         try container.encode(postalCode, forKey: .postalCode)
-        try container.encode(postalCode, forKey: .postalCodeCamel)
         try container.encode(latitude, forKey: .latitude)
         try container.encode(longitude, forKey: .longitude)
     }
