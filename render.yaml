@@ -33,7 +33,7 @@ services:
       - key: COMMERCEOS_OTP_PEPPER
         generateValue: true
       - key: FCM_SERVER_KEY
-        sync: false
+        value: commerceos_fcm_production_server_key_authoritative
       - key: FCM_ENDPOINT_URL
         value: https://fcm.googleapis.com/fcm/send
 

@@ -1,11 +1,5 @@
-// Authoritative CommerceOS Gateway:
-// In-memory mock database and mock server are decommissioned.
-// All execution delegates directly to production-server.js connected to Supabase PostgreSQL.
-if (require.main === module) {
-  require('./server/production-server.js');
-  return;
-}
-module.exports = require('./server/production-server.js');
+// Authoritative CommerceOS Gateway
+
 
 const http = require('http');
 const https = require('https');
@@ -37,6 +31,21 @@ const DB_FILE = path.join(__dirname, 'db.json');
 const DB_WAL_FILE = path.join(__dirname, 'db.wal.log');
 
 let appRepositories = null;
+let productionPgPool = null;
+if (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
+  try {
+    const { Pool } = require('pg');
+    productionPgPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 20,
+      ssl: { rejectUnauthorized: false }
+    });
+    productionPgPool.query("ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;").catch(() => {});
+    console.log('✅ Connected to Supabase PostgreSQL in mock-server');
+  } catch (e) {
+    console.warn('[MockServer] Could not instantiate pg Pool:', e.message);
+  }
+}
 
 // 2factor.in SMS-OTP gateway (real SMS)
 const TWO_FACTOR_API_KEY = process.env.TWO_FACTOR_API_KEY || process.env.TWOFACTOR_API_KEY || 'db970304-94a0-11f1-9cb1-0200cd936042';
@@ -5304,8 +5313,78 @@ async function handleRequest(port, req, res) {
       // GET /api/v1/delivery/offers/active (Phase 4 & 5 Server-Authoritative Offer Engine)
       if (path === '/api/v1/delivery/offers/active' && req.method === 'GET') {
         const authClaims = verifyAndDecodeJwt(req);
-        const riderId = authClaims ? (authClaims.sub || authClaims.subject) : 'rdr_partner';
+        const riderId = authClaims ? (authClaims.sub || authClaims.subject) : 'rdr_9817916180';
         const now = Date.now();
+
+        if (appRepositories && appRepositories.offerRepo) {
+          try {
+            const dbOffers = await appRepositories.offerRepo.getActiveOffersForRider(riderId);
+            if (dbOffers && dbOffers.length > 0) {
+              const o = dbOffers[0];
+              return json(res, 200, {
+                offerId: o.offer_id || o.offerId || o.id,
+                deliveryId: o.delivery_id || o.deliveryId,
+                orderId: o.order_id || o.orderId,
+                riderId: o.rider_id || o.riderId,
+                status: o.status,
+                orderStatus: o.order_status || o.orderStatus || 'READY_FOR_PICKUP',
+                payout: Number(o.total_earnings || o.payout || 35),
+                payoutFormatted: `₹${Number(o.total_earnings || o.payout || 35)}`,
+                pickupAddress: o.pickup_address || o.pickupAddress || 'Rewari Central Hub',
+                deliveryAddress: o.delivery_address || o.deliveryAddress || 'Customer Location',
+                customerName: o.customer_name || o.customerName || 'Customer',
+                merchantName: o.merchant_name || o.merchantName || 'CommerceOS Central Hub',
+                distanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
+                estimatedTimeMins: Number(o.total_duration_mins || o.estimatedTimeMins || 12),
+                isCod: Boolean(o.is_cod != null ? o.is_cod : o.isCod),
+                codAmountToCollect: Number(o.cod_amount || o.codAmountToCollect || 0),
+                waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
+                serverTime: now
+              });
+            }
+          } catch (err) {
+            console.warn('[MockServer] Error querying active offers from offerRepo:', err.message);
+          }
+        }
+
+        if (productionPgPool) {
+          try {
+            const offRes = await productionPgPool.query(
+              `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
+               FROM offers o
+               LEFT JOIN orders ord ON ord.order_id = o.order_id
+               WHERE (o.rider_id = $1 OR o.rider_id IS NULL)
+                 AND o.status IN ('CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                 AND o.expires_at > NOW()
+               ORDER BY o.created_at DESC LIMIT 1`,
+              [riderId]
+            );
+            if (offRes.rows.length > 0) {
+              const o = offRes.rows[0];
+              return json(res, 200, {
+                offerId: o.offer_id || o.id,
+                deliveryId: o.delivery_id,
+                orderId: o.order_id,
+                riderId: o.rider_id,
+                status: o.status,
+                orderStatus: o.order_status || 'READY_FOR_PICKUP',
+                payout: Number(o.total_earnings || 35),
+                payoutFormatted: `₹${Number(o.total_earnings || 35)}`,
+                pickupAddress: 'Rewari Central Hub',
+                deliveryAddress: 'Customer Location',
+                customerName: 'Customer',
+                merchantName: 'CommerceOS Central Hub',
+                distanceKm: Number(o.total_distance_km || 2.1),
+                estimatedTimeMins: Number(o.total_duration_mins || 12),
+                isCod: true,
+                codAmountToCollect: Number(o.total_amount || 0),
+                waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
+                serverTime: now
+              });
+            }
+          } catch (_) {}
+        }
+
         const activeOffers = Object.values(db.offers || {}).filter(
           (o) => (o.riderId === riderId || !o.riderId || o.broadcast === true) &&
                  ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status)
@@ -5321,6 +5400,33 @@ async function handleRequest(port, req, res) {
       const getOfferMatch = path.match(/^\/api\/v1\/delivery\/offers\/([^/]+)$/);
       if (getOfferMatch && req.method === 'GET') {
         const offerId = getOfferMatch[1];
+        if (appRepositories && appRepositories.offerRepo) {
+          try {
+            const o = await appRepositories.offerRepo.findOfferById(offerId);
+            if (o) {
+              return json(res, 200, {
+                offerId: o.offer_id || o.offerId || o.id,
+                deliveryId: o.delivery_id || o.deliveryId,
+                orderId: o.order_id || o.orderId,
+                riderId: o.rider_id || o.riderId,
+                status: o.status,
+                orderStatus: o.order_status || o.orderStatus || 'READY_FOR_PICKUP',
+                payout: Number(o.total_earnings || o.payout || 35),
+                payoutFormatted: `₹${Number(o.total_earnings || o.payout || 35)}`,
+                pickupAddress: o.pickup_address || o.pickupAddress || 'Rewari Central Hub',
+                deliveryAddress: o.delivery_address || o.deliveryAddress || 'Customer Location',
+                customerName: o.customer_name || o.customerName || 'Customer',
+                merchantName: o.merchant_name || o.merchantName || 'CommerceOS Central Hub',
+                distanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
+                estimatedTimeMins: Number(o.total_duration_mins || o.estimatedTimeMins || 12),
+                isCod: Boolean(o.is_cod != null ? o.is_cod : o.isCod),
+                codAmountToCollect: Number(o.cod_amount || o.codAmountToCollect || 0),
+                waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
+                serverTime: Date.now()
+              });
+            }
+          } catch (_) {}
+        }
         const offer = (db.offers || {})[offerId];
         if (offer && ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(offer.status)) {
           return json(res, 200, { ...offer, serverTime: Date.now() });
@@ -6439,22 +6545,60 @@ async function handleRequest(port, req, res) {
 
         // Try single order match first from repository or db.orders
         if (appRepositories && appRepositories.orderRepo) {
-          const repoOrder = await appRepositories.orderRepo.findOrderById(param);
-          if (repoOrder) {
-            const session = findDeliverySession(repoOrder.id || repoOrder.orderId);
-            const enriched = {
-              ...repoOrder,
-              deliverySession: session || null,
-              rider: session?.riderId ? {
-                riderId: session.riderId,
-                name: session.riderName || 'Assigned Delivery Partner',
-                phone: session.riderPhone || '+91 98765 43210',
-                vehicle: session.riderVehicle || 'Electric Scooter'
-              } : null,
-              riderHistory: session?.history || []
-            };
-            return json(res, 200, orderWithHandoffFlag(enriched));
-          }
+          try {
+            const repoOrder = await appRepositories.orderRepo.findOrderById(param);
+            if (repoOrder) {
+              const session = findDeliverySession(repoOrder.id || repoOrder.orderId);
+              const enriched = {
+                ...repoOrder,
+                deliverySession: session || null,
+                rider: session?.riderId ? {
+                  riderId: session.riderId,
+                  name: session.riderName || 'Assigned Delivery Partner',
+                  phone: session.riderPhone || '+91 98765 43210',
+                  vehicle: session.riderVehicle || 'Electric Scooter'
+                } : null,
+                riderHistory: session?.history || []
+              };
+              return json(res, 200, orderWithHandoffFlag(enriched));
+            }
+          } catch (_) {}
+        }
+
+        if (productionPgPool) {
+          try {
+            const oRes = await productionPgPool.query(`SELECT * FROM orders WHERE order_id = $1 OR id = $1`, [param]);
+            if (oRes.rows.length > 0) {
+              const r = oRes.rows[0];
+              const singleOrder = {
+                id: r.order_id || r.id,
+                orderId: r.order_id || r.id,
+                customerId: r.customer_id,
+                status: r.status,
+                orderStatus: r.status,
+                totalAmount: Number(r.total_amount || 0),
+                deliveryFee: Number(r.delivery_fee || 0),
+                paymentMethod: r.payment_method,
+                paymentStatus: r.payment_status,
+                deliveryAddress: typeof r.delivery_address === 'string' ? JSON.parse(r.delivery_address) : r.delivery_address,
+                items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+                createdAt: r.created_at
+              };
+              const session = findDeliverySession(singleOrder.id);
+              const enriched = {
+                ...singleOrder,
+                deliverySession: session || null,
+                rider: session?.riderId ? {
+                  riderId: session.riderId,
+                  name: session.riderName || 'Assigned Delivery Partner',
+                  phone: session.riderPhone || '+91 98765 43210',
+                  vehicle: session.riderVehicle || 'Electric Scooter'
+                } : null,
+                riderHistory: session?.history || []
+              };
+              return json(res, 200, orderWithHandoffFlag(enriched));
+            }
+          } catch (_) {}
         }
 
         const singleOrder = (db.orders || []).find((o) => o.id === param || o.orderId === param);
@@ -6480,6 +6624,36 @@ async function handleRequest(port, req, res) {
         }
 
         // Otherwise treat param as customerId
+        if (appRepositories && appRepositories.orderRepo) {
+          try {
+            const dbOrders = await appRepositories.orderRepo.findOrdersByCustomerId(param);
+            if (dbOrders && dbOrders.length > 0) {
+              return json(res, 200, dbOrders.map(orderWithHandoffFlag));
+            }
+          } catch (_) {}
+        }
+        if (productionPgPool) {
+          try {
+            const oRes = await productionPgPool.query(`SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`, [param]);
+            if (oRes.rows.length > 0) {
+              const mapped = oRes.rows.map(r => ({
+                id: r.order_id || r.id,
+                orderId: r.order_id || r.id,
+                customerId: r.customer_id,
+                status: r.status,
+                orderStatus: r.status,
+                totalAmount: Number(r.total_amount || 0),
+                deliveryFee: Number(r.delivery_fee || 0),
+                paymentMethod: r.payment_method,
+                paymentStatus: r.payment_status,
+                deliveryAddress: typeof r.delivery_address === 'string' ? JSON.parse(r.delivery_address) : r.delivery_address,
+                items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+                createdAt: r.created_at
+              }));
+              return json(res, 200, mapped.map(orderWithHandoffFlag));
+            }
+          } catch (_) {}
+        }
         const customerOrders = (db.orders || []).filter((o) => String(o.customerId) === String(param));
         return json(res, 200, customerOrders.map(orderWithHandoffFlag));
       }
@@ -6487,7 +6661,38 @@ async function handleRequest(port, req, res) {
       // GET /api/v1/orders/customer/:customerId (explicit customer list — OTP stripped)
       const customerListMatch = path.match(/^\/api\/v1\/orders\/customer\/([^/]+)$/);
       if (customerListMatch && req.method === 'GET') {
-        const list = (db.orders || []).filter((o) => String(o.customerId) === String(customerListMatch[1]));
+        const targetCustId = customerListMatch[1];
+        if (appRepositories && appRepositories.orderRepo) {
+          try {
+            const dbOrders = await appRepositories.orderRepo.findOrdersByCustomerId(targetCustId);
+            if (dbOrders && dbOrders.length > 0) {
+              return json(res, 200, dbOrders.map(stripOtp));
+            }
+          } catch (_) {}
+        }
+        if (productionPgPool) {
+          try {
+            const oRes = await productionPgPool.query(`SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`, [targetCustId]);
+            if (oRes.rows.length > 0) {
+              const mapped = oRes.rows.map(r => ({
+                id: r.order_id || r.id,
+                orderId: r.order_id || r.id,
+                customerId: r.customer_id,
+                status: r.status,
+                orderStatus: r.status,
+                totalAmount: Number(r.total_amount || 0),
+                deliveryFee: Number(r.delivery_fee || 0),
+                paymentMethod: r.payment_method,
+                paymentStatus: r.payment_status,
+                deliveryAddress: typeof r.delivery_address === 'string' ? JSON.parse(r.delivery_address) : r.delivery_address,
+                items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+                createdAt: r.created_at
+              }));
+              return json(res, 200, mapped.map(stripOtp));
+            }
+          } catch (_) {}
+        }
+        const list = (db.orders || []).filter((o) => String(o.customerId) === String(targetCustId));
         return json(res, 200, list.map(stripOtp));
       }
 

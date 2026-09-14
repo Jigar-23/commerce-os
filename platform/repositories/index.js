@@ -2069,8 +2069,10 @@ class TransactionalOfferRepository {
       riderId: r.rider_id,
       status: r.status,
       orderStatus: orderStatus,
-      order_status: orderStatus,
       earningsAmount: Number(r.earnings_amount || r.total_earnings || 0),
+      payoutAmount: Number(r.earnings_amount || r.total_earnings || 0),
+      payout: Number(r.earnings_amount || r.total_earnings || 0),
+      totalEarnings: Number(r.earnings_amount || r.total_earnings || 0),
       totalDistanceKm: Number(r.total_distance_km || 0),
       estimatedDurationMins: Number(r.estimated_duration_mins || 0),
       merchantName: r.merchant_name || '',
@@ -2132,6 +2134,9 @@ class TransactionalOfferRepository {
         orderStatus: orderStatus,
         order_status: orderStatus,
         earningsAmount: Number(r.earnings_amount || r.total_earnings || 0),
+        payoutAmount: Number(r.earnings_amount || r.total_earnings || 0),
+        payout: Number(r.earnings_amount || r.total_earnings || 0),
+        totalEarnings: Number(r.earnings_amount || r.total_earnings || 0),
         totalDistanceKm: Number(r.total_distance_km || 0),
         estimatedDurationMins: Number(r.estimated_duration_mins || 0),
         merchantName: r.merchant_name || '',
@@ -4781,7 +4786,9 @@ class TransactionalPresenceRepository {
       const lat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
       const lng = r.last_known_lng != null ? Number(r.last_known_lng) : null;
       return {
+        id: r.rider_id,
         riderId: r.rider_id,
+        rider_id: r.rider_id,
         status: r.status,
         lastSeenAt: r.last_seen_at,
         last_seen_at: r.last_seen_at,
@@ -5299,6 +5306,10 @@ class DispatchService {
       return { ok: true, distanceKm: dist, durationMins: mins };
     });
     this.pricingCalculator = pricingCalculator || (require('../pricing-engine').calculateAuthoritativeEarnings);
+  }
+
+  async dispatchForOrder(commandOrSession, explicitTargetRiderId = null) {
+    return this.processDispatch(commandOrSession, explicitTargetRiderId);
   }
 
   async processDispatch(commandOrSession, explicitTargetRiderId = null) {
