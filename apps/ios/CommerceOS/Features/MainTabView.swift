@@ -5,7 +5,7 @@ public struct MainTabView: View {
     @EnvironmentObject private var cartStore: CartLocalStore
     @EnvironmentObject private var configProvider: ClientConfigProvider
     @State private var selectedTab: Int = 0
-    @State private var showTrackingSheet: Bool = false
+    @State private var trackingOrderId: String? = nil
     
     public init() {}
     
@@ -21,8 +21,8 @@ public struct MainTabView: View {
                 case 2:
                     OrderHistoryScreen()
                 case 3:
-                    CartScreen(onCheckoutSuccess: {
-                        showTrackingSheet = true
+                    CartScreen(onCheckoutSuccess: { orderId in
+                        trackingOrderId = orderId
                     })
                 default:
                     HomeScreen(onOpenCatalog: { selectedTab = 1 })
@@ -45,15 +45,19 @@ public struct MainTabView: View {
             androidBottomNavBar
         }
         .background(Color(hex: "F4F5F7").ignoresSafeArea())
-        .sheet(isPresented: $showTrackingSheet) {
+        .sheet(item: Binding<IdentifiableOrderWrapper?>(
+            get: { trackingOrderId.map { IdentifiableOrderWrapper(value: $0) } },
+            set: { trackingOrderId = $0?.value }
+        )) { wrapper in
             NavigationView {
-                OrderTrackingScreen()
+                OrderTrackingScreen(orderId: wrapper.value)
                     .navigationTitle("Order Status")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Close") {
-                                showTrackingSheet = false
+                            Button("Done") {
+                                trackingOrderId = nil
+                                selectedTab = 2
                             }
                         }
                     }

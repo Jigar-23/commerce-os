@@ -34,7 +34,7 @@ public struct RiderOfferCardView: View {
                         .font(.system(size: 13, weight: .bold))
                 }
                 Spacer()
-                Text("$\(String(format: "%.2f", offer.payoutAmount))")
+                Text("₹\(String(format: "%.0f", offer.payoutAmount))")
                     .font(.system(size: 26, weight: .black))
                     .foregroundColor(RiderTheme.Colors.safetyGreen)
             }

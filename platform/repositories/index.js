@@ -2041,36 +2041,125 @@ class TransactionalOfferRepository {
   }
 
   async findOfferById(offerId) {
-    const res = await this.pool.query(`SELECT * FROM offers WHERE (offer_id = $1 OR id = $1)`, [offerId]);
-    return res.rows[0] || null;
+    if (!this.pool || !offerId) return null;
+    const res = await this.pool.query(
+      `SELECT o.*,
+              ds.merchant_name, ds.merchant_address, ds.merchant_lat, ds.merchant_lng,
+              ds.customer_name, ds.customer_phone, ds.customer_address, ds.customer_lat, ds.customer_lng,
+              ds.is_cod, ds.cod_amount,
+              ord.total_amount AS order_total, ord.items AS order_items, ord.status AS order_status
+       FROM offers o
+       LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
+       LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
+       WHERE (o.offer_id = $1 OR o.id = $1)
+       LIMIT 1`,
+      [offerId]
+    );
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    const items = typeof r.order_items === 'string' ? JSON.parse(r.order_items) : (r.order_items || []);
+    const orderStatus = (r.order_status && r.order_status !== 'PLACED' && r.order_status !== 'PENDING') ? r.order_status : 'READY_FOR_PICKUP';
+    return {
+      id: r.id || r.offer_id,
+      offerId: r.offer_id || r.id,
+      eventId: r.event_id || ('evt_' + (r.offer_id || r.id)),
+      notificationId: r.notification_id || ('notif_' + (r.offer_id || r.id)),
+      deliveryId: r.delivery_id,
+      orderId: r.order_id,
+      riderId: r.rider_id,
+      status: r.status,
+      orderStatus: orderStatus,
+      order_status: orderStatus,
+      earningsAmount: Number(r.earnings_amount || r.total_earnings || 0),
+      totalDistanceKm: Number(r.total_distance_km || 0),
+      estimatedDurationMins: Number(r.estimated_duration_mins || 0),
+      merchantName: r.merchant_name || '',
+      merchantAddress: r.merchant_address || '',
+      merchantLat: Number(r.merchant_lat) || 28.202224,
+      merchantLng: Number(r.merchant_lng) || 76.615418,
+      customerName: r.customer_name || '',
+      customerPhone: r.customer_phone || '',
+      customerAddress: r.customer_address || '',
+      customerLat: Number(r.customer_lat) || 28.202224,
+      customerLng: Number(r.customer_lng) || 76.615418,
+      isCod: Boolean(r.is_cod),
+      codAmount: Number(r.cod_amount || 0),
+      orderTotal: Number(r.order_total || 0),
+      items: items.map(it => ({
+        name: it.name || it.sku || 'Item',
+        quantity: Number(it.quantity) || 1,
+        price: Number(it.unitPrice || it.price || 0),
+        sku: it.sku || ''
+      })),
+      waypoints: typeof r.waypoints === 'string' ? JSON.parse(r.waypoints) : (r.waypoints || []),
+      pricingSnapshot: typeof r.pricing_snapshot === 'string' ? JSON.parse(r.pricing_snapshot) : (r.pricing_snapshot || {}),
+      offerExpiresAt: r.offer_expires_at ? Number(r.offer_expires_at) : (Date.now() + 900000),
+      expiresAt: r.offer_expires_at ? Number(r.offer_expires_at) : (Date.now() + 900000),
+      offerCreatedAt: r.offer_created_at ? Number(r.offer_created_at) : (r.created_at ? new Date(r.created_at).getTime() : Date.now()),
+      createdAt: r.created_at
+    };
   }
 
   async getActiveOffersForRider(riderId) {
     if (!this.pool || !riderId) return [];
     const res = await this.pool.query(
-      `SELECT * FROM offers 
-       WHERE (rider_id = $1)
-         AND status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
-         AND (offer_expires_at IS NULL OR offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000))
-       ORDER BY created_at DESC`,
+      `SELECT o.*,
+              ds.merchant_name, ds.merchant_address, ds.merchant_lat, ds.merchant_lng,
+              ds.customer_name, ds.customer_phone, ds.customer_address, ds.customer_lat, ds.customer_lng,
+              ds.is_cod, ds.cod_amount,
+              ord.total_amount AS order_total, ord.items AS order_items, ord.status AS order_status
+       FROM offers o
+       LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
+       LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
+       WHERE (o.rider_id = $1)
+         AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
+         AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000))
+       ORDER BY o.created_at DESC`,
       [riderId]
     );
-    return res.rows.map(r => ({
-      id: r.id || r.offer_id,
-      offerId: r.offer_id || r.id,
-      deliveryId: r.delivery_id,
-      orderId: r.order_id,
-      riderId: r.rider_id,
-      status: r.status,
-      earningsAmount: Number(r.earnings_amount || r.total_earnings || 0),
-      totalDistanceKm: Number(r.total_distance_km || 0),
-      estimatedDurationMins: Number(r.estimated_duration_mins || 0),
-      waypoints: typeof r.waypoints === 'string' ? JSON.parse(r.waypoints) : (r.waypoints || []),
-      pricingSnapshot: typeof r.pricing_snapshot === 'string' ? JSON.parse(r.pricing_snapshot) : (r.pricing_snapshot || {}),
-      offerExpiresAt: r.offer_expires_at,
-      expiresAt: r.expires_at,
-      createdAt: r.created_at
-    }));
+    return res.rows.map(r => {
+      const items = typeof r.order_items === 'string' ? JSON.parse(r.order_items) : (r.order_items || []);
+      const orderStatus = (r.order_status && r.order_status !== 'PLACED' && r.order_status !== 'PENDING') ? r.order_status : 'READY_FOR_PICKUP';
+      return {
+        id: r.id || r.offer_id,
+        offerId: r.offer_id || r.id,
+        eventId: r.event_id || ('evt_' + (r.offer_id || r.id)),
+        notificationId: r.notification_id || ('notif_' + (r.offer_id || r.id)),
+        deliveryId: r.delivery_id,
+        orderId: r.order_id,
+        riderId: r.rider_id,
+        status: r.status,
+        orderStatus: orderStatus,
+        order_status: orderStatus,
+        earningsAmount: Number(r.earnings_amount || r.total_earnings || 0),
+        totalDistanceKm: Number(r.total_distance_km || 0),
+        estimatedDurationMins: Number(r.estimated_duration_mins || 0),
+        merchantName: r.merchant_name || '',
+        merchantAddress: r.merchant_address || '',
+        merchantLat: Number(r.merchant_lat) || 28.202224,
+        merchantLng: Number(r.merchant_lng) || 76.615418,
+        customerName: r.customer_name || '',
+        customerPhone: r.customer_phone || '',
+        customerAddress: r.customer_address || '',
+        customerLat: Number(r.customer_lat) || 28.202224,
+        customerLng: Number(r.customer_lng) || 76.615418,
+        isCod: Boolean(r.is_cod),
+        codAmount: Number(r.cod_amount || 0),
+        orderTotal: Number(r.order_total || 0),
+        items: items.map(it => ({
+          name: it.name || it.sku || 'Item',
+          quantity: Number(it.quantity) || 1,
+          price: Number(it.unitPrice || it.price || 0),
+          sku: it.sku || ''
+        })),
+        waypoints: typeof r.waypoints === 'string' ? JSON.parse(r.waypoints) : (r.waypoints || []),
+        pricingSnapshot: typeof r.pricing_snapshot === 'string' ? JSON.parse(r.pricing_snapshot) : (r.pricing_snapshot || {}),
+        offerExpiresAt: r.offer_expires_at ? Number(r.offer_expires_at) : (Date.now() + 900000),
+        expiresAt: r.offer_expires_at ? Number(r.offer_expires_at) : (Date.now() + 900000),
+        offerCreatedAt: r.offer_created_at ? Number(r.offer_created_at) : (r.created_at ? new Date(r.created_at).getTime() : Date.now()),
+        createdAt: r.created_at
+      };
+    });
   }
 
   async findActiveOffersForRider(riderId) {
@@ -3531,6 +3620,17 @@ class TransactionalOrderRepository {
 
   async getRecentCustomerOrders(customerId, limit = 5) {
     if (!this.pool) return [];
+    const res = await this.pool.query(
+      `SELECT * FROM orders 
+       WHERE customer_id = $1 
+       ORDER BY created_at DESC LIMIT $2`,
+      [customerId, limit]
+    );
+    return res.rows;
+  }
+
+  async findOrdersByCustomerId(customerId, limit = 50) {
+    if (!this.pool || !customerId) return [];
     const res = await this.pool.query(
       `SELECT * FROM orders 
        WHERE customer_id = $1 
@@ -6299,6 +6399,14 @@ async function initApplicationRepositories(options = {}) {
         await notificationService.dispatchOfferNotification(payload.offerId, payload.targetRiderId, payload.offer);
       } else if (event.event_type === 'DISPATCH_REQUESTED') {
         let deliverySession = payload.deliverySession || payload;
+        const targetOrderId = payload.orderId || payload.order_id || event.aggregate_id;
+        const oCheck = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [targetOrderId]);
+        if (oCheck.rows.length > 0 && oCheck.rows[0].status === 'PLACED') {
+          await pool.query(
+            `UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE (order_id = $1 OR id = $1) AND status = 'PLACED'`,
+            [oCheck.rows[0].order_id || oCheck.rows[0].id]
+          );
+        }
         const cLat = deliverySession.customerLat != null ? deliverySession.customerLat : deliverySession.customer_lat;
         const cLng = deliverySession.customerLng != null ? deliverySession.customerLng : deliverySession.customer_lng;
         if ((cLat == null || cLng == null) && event.aggregate_id) {
@@ -6306,7 +6414,7 @@ async function initApplicationRepositories(options = {}) {
           if (sRes.rows.length > 0) {
             deliverySession = sRes.rows[0];
           } else {
-            const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
+            const oRes = oCheck.rows.length > 0 ? oCheck : await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
             if (oRes.rows.length > 0) {
               const ord = oRes.rows[0];
               const addr = (typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : ord.delivery_address) || {};
@@ -6575,8 +6683,17 @@ function createProductionRepositories(pool, options = {}) {
 
     if (event.event_type === 'DISPATCH_REQUESTED' || event.event_type === 'ORDER_SELLER_ACCEPTED') {
       let deliverySession = payload.deliverySession || payload;
-      const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
+      const targetOrderId = payload.orderId || payload.order_id || event.aggregate_id;
+      const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [targetOrderId]);
       const ord = oRes.rows[0] || null;
+
+      if (ord && ord.status === 'PLACED') {
+        await pool.query(
+          `UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE (order_id = $1 OR id = $1) AND status = 'PLACED'`,
+          [ord.order_id || ord.id]
+        );
+        ord.status = 'READY_FOR_PICKUP';
+      }
 
       // Payment Gating: Prepaid orders with PAYMENT_PENDING must NOT dispatch until payment is captured
       const isCod = ord ? (ord.payment_method === 'COD' || ord.is_cod === true || ord.payment_status === 'COD_PENDING') : true;

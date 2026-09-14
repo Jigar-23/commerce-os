@@ -12,6 +12,7 @@ public enum RiderEndpoint {
     case toggleShift(online: Bool)
     case getProfile
     case activeSession
+    case getActiveOffers
 
     public var path: String {
         switch self {
@@ -37,6 +38,8 @@ public enum RiderEndpoint {
             return "api/v1/rider/profile"
         case .activeSession:
             return "api/v1/rider/active-session"
+        case .getActiveOffers:
+            return "api/v1/delivery/offers/active"
         }
     }
 
@@ -44,7 +47,7 @@ public enum RiderEndpoint {
         switch self {
         case .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .toggleShift:
             return "POST"
-        case .getTripsHistory, .getProfile, .activeSession:
+        case .getTripsHistory, .getProfile, .activeSession, .getActiveOffers:
             return "GET"
         }
     }

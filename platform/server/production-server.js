@@ -106,6 +106,7 @@ if (DATABASE_URL) {
     connectionTimeoutMillis: 10000,
     ssl: { rejectUnauthorized: false }
   });
+  pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
 }
 
 // 3. Authoritative OSRM Route Resolver Adapter
@@ -2839,6 +2840,184 @@ const server = http.createServer(async (req, res) => {
       };
 
       return sendJson(res, placeResult.httpStatus || 201, customerOrderDto);
+    }
+
+    // -------------------------------------------------------------
+    // Customer Orders Query: GET /api/v1/orders/customer/:customerId
+    // -------------------------------------------------------------
+    const customerOrdersMatch = pathname.match(/^\/api\/v1\/orders\/customer\/([^/]+)$/);
+    if (customerOrdersMatch && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required.' });
+      }
+      const requestedCustomerId = customerOrdersMatch[1];
+      const authenticatedCustomerId = authClaims.sub;
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+
+      if (requestedCustomerId !== authenticatedCustomerId && !isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Cannot access orders belonging to another customer.' });
+      }
+
+      let orders = [];
+      if (appRepositories && appRepositories.orderRepo && typeof appRepositories.orderRepo.findOrdersByCustomerId === 'function') {
+        orders = await appRepositories.orderRepo.findOrdersByCustomerId(requestedCustomerId);
+      } else if (pool) {
+        const oRes = await pool.query(
+          `SELECT id, order_id, customer_id, store_id, prescription_id, order_type,
+                  status, seller_approval_status, total_amount, tax_amount, delivery_fee,
+                  payment_method, payment_status, is_cod, cod_amount, delivery_address, items,
+                  created_at, updated_at
+           FROM orders
+           WHERE customer_id = $1
+           ORDER BY created_at DESC`,
+          [requestedCustomerId]
+        );
+        orders = oRes.rows;
+      }
+
+      const mappedCustomerOrders = orders.map(ord => {
+        const orderIdVal = ord.order_id || ord.id;
+        const rawItems = typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []);
+        const rawAddr = typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : (ord.delivery_address || {});
+        return {
+          id: orderIdVal,
+          orderId: orderIdVal,
+          order_id: orderIdVal,
+          customerId: ord.customer_id || ord.customerId,
+          customer_id: ord.customer_id || ord.customerId,
+          storeId: ord.store_id || ord.storeId,
+          store_id: ord.store_id || ord.storeId,
+          prescriptionId: ord.prescription_id || ord.prescriptionId || null,
+          prescription_id: ord.prescription_id || ord.prescriptionId || null,
+          orderType: ord.order_type || ord.orderType || 'QUICK_COMMERCE_10MIN',
+          order_type: ord.order_type || ord.orderType || 'QUICK_COMMERCE_10MIN',
+          status: ord.status,
+          orderStatus: ord.status,
+          order_status: ord.status,
+          sellerApprovalStatus: ord.seller_approval_status || ord.sellerApprovalStatus || 'NOT_REQUIRED',
+          seller_approval_status: ord.seller_approval_status || ord.sellerApprovalStatus || 'NOT_REQUIRED',
+          totalAmount: Number(ord.total_amount || ord.totalAmount || 0),
+          total_amount: Number(ord.total_amount || ord.totalAmount || 0),
+          taxAmount: Number(ord.tax_amount || ord.taxAmount || 0),
+          tax_amount: Number(ord.tax_amount || ord.taxAmount || 0),
+          deliveryFee: Number(ord.delivery_fee || ord.deliveryFee || 0),
+          delivery_fee: Number(ord.delivery_fee || ord.deliveryFee || 0),
+          paymentMethod: ord.payment_method || ord.paymentMethod || 'COD',
+          payment_method: ord.payment_method || ord.paymentMethod || 'COD',
+          paymentStatus: ord.payment_status || ord.paymentStatus || 'COD_PENDING',
+          payment_status: ord.payment_status || ord.paymentStatus || 'COD_PENDING',
+          isCod: Boolean(ord.is_cod != null ? ord.is_cod : ord.isCod),
+          is_cod: Boolean(ord.is_cod != null ? ord.is_cod : ord.isCod),
+          codAmount: Number(ord.cod_amount || ord.codAmount || 0),
+          cod_amount: Number(ord.cod_amount || ord.codAmount || 0),
+          items: rawItems,
+          deliveryAddress: rawAddr,
+          delivery_address: rawAddr,
+          createdAt: ord.created_at || ord.createdAt,
+          created_at: ord.created_at || ord.createdAt,
+          updatedAt: ord.updated_at || ord.updatedAt,
+          updated_at: ord.updated_at || ord.updatedAt
+        };
+      });
+
+      return sendJson(res, 200, mappedCustomerOrders);
+    }
+
+    // -------------------------------------------------------------
+    // Single Order Snapshot: GET /api/v1/orders/:orderId
+    // -------------------------------------------------------------
+    const singleOrderMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)$/);
+    if (singleOrderMatch && method === 'GET' &&
+        !['health', 'ready', 'serviceability', 'seller', 'cod-ledger', 'active-delivery', 'audit', 'prescription-verification-queue', 'customer'].includes(singleOrderMatch[1])) {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required.' });
+      }
+      const orderId = singleOrderMatch[1];
+      let order = null;
+      if (appRepositories && appRepositories.orderRepo) {
+        order = await appRepositories.orderRepo.getOrderById(orderId);
+      } else if (pool) {
+        const oRes = await pool.query(
+          `SELECT id, order_id, customer_id, store_id, prescription_id, order_type,
+                  status, seller_approval_status, total_amount, tax_amount, delivery_fee,
+                  payment_method, payment_status, is_cod, cod_amount, delivery_address, items,
+                  created_at, updated_at
+           FROM orders
+           WHERE order_id = $1 OR id = $1`,
+          [orderId]
+        );
+        order = oRes.rows[0] || null;
+      }
+
+      if (!order) {
+        return sendJson(res, 404, { code: 'ORDER_NOT_FOUND', error: 'NOT_FOUND', message: `Order ${orderId} not found.` });
+      }
+
+      const orderCustomerId = order.customer_id || order.customerId;
+      const orderStoreId = order.store_id || order.storeId;
+      const isOwner = orderCustomerId === authClaims.sub;
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+      const isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && authClaims.storeId === orderStoreId);
+
+      let isAssignedRider = false;
+      if (authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'))) {
+        const sessRes = await pool.query(
+          `SELECT rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) AND rider_id = $2`,
+          [orderId, authClaims.sub]
+        );
+        isAssignedRider = sessRes.rows.length > 0;
+      }
+
+      if (!isOwner && !isAdmin && !isSeller && !isAssignedRider) {
+        return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to view this order.' });
+      }
+
+      const orderIdVal = order.order_id || order.id;
+      const rawItems = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
+      const rawAddr = typeof order.delivery_address === 'string' ? JSON.parse(order.delivery_address) : (order.delivery_address || {});
+      const singleOrderDto = {
+        id: orderIdVal,
+        orderId: orderIdVal,
+        order_id: orderIdVal,
+        customerId: order.customer_id || order.customerId,
+        customer_id: order.customer_id || order.customerId,
+        storeId: order.store_id || order.storeId,
+        store_id: order.store_id || order.storeId,
+        prescriptionId: order.prescription_id || order.prescriptionId || null,
+        prescription_id: order.prescription_id || order.prescriptionId || null,
+        orderType: order.order_type || order.orderType || 'QUICK_COMMERCE_10MIN',
+        order_type: order.order_type || order.orderType || 'QUICK_COMMERCE_10MIN',
+        status: order.status,
+        orderStatus: order.status,
+        order_status: order.status,
+        sellerApprovalStatus: order.seller_approval_status || order.sellerApprovalStatus || 'NOT_REQUIRED',
+        seller_approval_status: order.seller_approval_status || order.sellerApprovalStatus || 'NOT_REQUIRED',
+        totalAmount: Number(order.total_amount || order.totalAmount || 0),
+        total_amount: Number(order.total_amount || order.totalAmount || 0),
+        taxAmount: Number(order.tax_amount || order.taxAmount || 0),
+        tax_amount: Number(order.tax_amount || order.taxAmount || 0),
+        deliveryFee: Number(order.delivery_fee || order.deliveryFee || 0),
+        delivery_fee: Number(order.delivery_fee || order.deliveryFee || 0),
+        paymentMethod: order.payment_method || order.paymentMethod || 'COD',
+        payment_method: order.payment_method || order.paymentMethod || 'COD',
+        paymentStatus: order.payment_status || order.paymentStatus || 'COD_PENDING',
+        payment_status: order.payment_status || order.paymentStatus || 'COD_PENDING',
+        isCod: Boolean(order.is_cod != null ? order.is_cod : order.isCod),
+        is_cod: Boolean(order.is_cod != null ? order.is_cod : order.isCod),
+        codAmount: Number(order.cod_amount || order.codAmount || 0),
+        cod_amount: Number(order.cod_amount || order.codAmount || 0),
+        items: rawItems,
+        deliveryAddress: rawAddr,
+        delivery_address: rawAddr,
+        createdAt: order.created_at || order.createdAt,
+        created_at: order.created_at || order.createdAt,
+        updatedAt: order.updated_at || order.updatedAt,
+        updated_at: order.updated_at || order.updatedAt
+      };
+
+      return sendJson(res, 200, singleOrderDto);
     }
 
     // -------------------------------------------------------------

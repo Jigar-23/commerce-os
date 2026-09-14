@@ -30,6 +30,10 @@ public final class RiderSessionManager: ObservableObject {
         } else {
             self.profile = nil
         }
+
+        if self.isShiftOnline {
+            RiderOfferEventPipeline.shared.startListening()
+        }
     }
 
     public func toggleShift() async throws {
@@ -45,8 +49,10 @@ public final class RiderSessionManager: ObservableObject {
 
         if newStatus {
             await refreshActiveSession()
+            RiderOfferEventPipeline.shared.startListening()
         } else {
             activeSession = nil
+            RiderOfferEventPipeline.shared.stopListening()
         }
     }
 

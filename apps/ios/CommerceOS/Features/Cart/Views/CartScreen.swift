@@ -28,9 +28,9 @@ public struct CartScreen: View {
     @State private var activeCartSheet: CartSheetDestination? = nil
     @State private var isPrescriptionAttached: Bool = true
     
-    let onCheckoutSuccess: () -> Void
+    let onCheckoutSuccess: (String) -> Void
     
-    public init(onCheckoutSuccess: @escaping () -> Void = {}) {
+    public init(onCheckoutSuccess: @escaping (String) -> Void = { _ in }) {
         self.onCheckoutSuccess = onCheckoutSuccess
     }
     
@@ -563,11 +563,16 @@ public struct CartScreen: View {
                 
                 await MainActor.run {
                     self.container.orderRepository.lastPlacedOrder = orderRes
-                    self.container.orderRepository.customerOrders.insert(orderRes, at: 0)
+                    if !self.container.orderRepository.customerOrders.contains(where: { $0.id == orderRes.id }) {
+                        self.container.orderRepository.customerOrders.insert(orderRes, at: 0)
+                    }
                     self.cartStore.clear()
                     self.isPlacingOrder = false
                     self.orderError = nil
-                    self.onCheckoutSuccess()
+                    self.onCheckoutSuccess(orderRes.id)
+                }
+                Task {
+                    await self.container.orderRepository.fetchCustomerOrders()
                 }
             } catch {
                 await MainActor.run {

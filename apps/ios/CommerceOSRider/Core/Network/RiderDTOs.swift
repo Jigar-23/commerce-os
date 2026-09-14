@@ -45,6 +45,142 @@ public struct DispatchOfferDto: Identifiable, Codable {
         self.totalDistanceKm = totalDistanceKm
         self.expiresAt = expiresAt
     }
+
+    enum CodingKeys: String, CodingKey {
+        case offerId
+        case offer_id
+        case id
+        case orderId
+        case order_id
+        case payoutAmount
+        case payout_amount
+        case earningsAmount
+        case earnings_amount
+        case totalEarnings
+        case merchantName
+        case merchant_name
+        case merchantAddress
+        case merchant_address
+        case merchantLat
+        case merchant_lat
+        case merchantLng
+        case merchant_lng
+        case customerName
+        case customer_name
+        case customerAddress
+        case customer_address
+        case customerLat
+        case customer_lat
+        case customerLng
+        case customer_lng
+        case totalDistanceKm
+        case total_distance_km
+        case expiresAt
+        case expires_at
+        case offerExpiresAt
+        case offer_expires_at
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let resolvedOfferId = (try? container.decode(String.self, forKey: .offerId))
+            ?? (try? container.decode(String.self, forKey: .offer_id))
+            ?? (try? container.decode(String.self, forKey: .id))
+            ?? UUID().uuidString
+        self.offerId = resolvedOfferId
+
+        self.orderId = (try? container.decode(String.self, forKey: .orderId))
+            ?? (try? container.decode(String.self, forKey: .order_id))
+            ?? ""
+
+        var resolvedPayout: Double? = try? container.decode(Double.self, forKey: .payoutAmount)
+        if resolvedPayout == nil { resolvedPayout = try? container.decode(Double.self, forKey: .payout_amount) }
+        if resolvedPayout == nil { resolvedPayout = try? container.decode(Double.self, forKey: .earningsAmount) }
+        if resolvedPayout == nil { resolvedPayout = try? container.decode(Double.self, forKey: .earnings_amount) }
+        if resolvedPayout == nil { resolvedPayout = try? container.decode(Double.self, forKey: .totalEarnings) }
+        self.payoutAmount = resolvedPayout ?? 35.0
+
+        self.merchantName = (try? container.decode(String.self, forKey: .merchantName))
+            ?? (try? container.decode(String.self, forKey: .merchant_name))
+            ?? "Merchant Partner"
+
+        self.merchantAddress = (try? container.decode(String.self, forKey: .merchantAddress))
+            ?? (try? container.decode(String.self, forKey: .merchant_address))
+            ?? "Merchant Hub"
+
+        self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat))
+            ?? (try? container.decode(Double.self, forKey: .merchant_lat))
+            ?? 28.202224
+
+        self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng))
+            ?? (try? container.decode(Double.self, forKey: .merchant_lng))
+            ?? 76.615418
+
+        self.customerName = (try? container.decode(String.self, forKey: .customerName))
+            ?? (try? container.decode(String.self, forKey: .customer_name))
+            ?? "Customer"
+
+        self.customerAddress = (try? container.decode(String.self, forKey: .customerAddress))
+            ?? (try? container.decode(String.self, forKey: .customer_address))
+            ?? "Delivery Address"
+
+        self.customerLat = (try? container.decode(Double.self, forKey: .customerLat))
+            ?? (try? container.decode(Double.self, forKey: .customer_lat))
+            ?? 28.202224
+
+        self.customerLng = (try? container.decode(Double.self, forKey: .customerLng))
+            ?? (try? container.decode(Double.self, forKey: .customer_lng))
+            ?? 76.615418
+
+        self.totalDistanceKm = (try? container.decode(Double.self, forKey: .totalDistanceKm))
+            ?? (try? container.decode(Double.self, forKey: .total_distance_km))
+            ?? 2.0
+
+        var rawExpMs: Double? = try? container.decode(Double.self, forKey: .offerExpiresAt)
+        if rawExpMs == nil { rawExpMs = try? container.decode(Double.self, forKey: .offer_expires_at) }
+        if rawExpMs == nil { rawExpMs = try? container.decode(Double.self, forKey: .expiresAt) }
+        if rawExpMs == nil { rawExpMs = try? container.decode(Double.self, forKey: .expires_at) }
+
+        if let expMs = rawExpMs {
+            if expMs > 1_000_000_000_000 {
+                self.expiresAt = Date(timeIntervalSince1970: expMs / 1000.0)
+            } else if expMs > 1_000_000_000 {
+                self.expiresAt = Date(timeIntervalSince1970: expMs)
+            } else {
+                self.expiresAt = Date().addingTimeInterval(30)
+            }
+        } else {
+            self.expiresAt = Date().addingTimeInterval(30)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(offerId, forKey: .offerId)
+        try container.encode(orderId, forKey: .orderId)
+        try container.encode(payoutAmount, forKey: .payoutAmount)
+        try container.encode(merchantName, forKey: .merchantName)
+        try container.encode(merchantAddress, forKey: .merchantAddress)
+        try container.encode(merchantLat, forKey: .merchantLat)
+        try container.encode(merchantLng, forKey: .merchantLng)
+        try container.encode(customerName, forKey: .customerName)
+        try container.encode(customerAddress, forKey: .customerAddress)
+        try container.encode(customerLat, forKey: .customerLat)
+        try container.encode(customerLng, forKey: .customerLng)
+        try container.encode(totalDistanceKm, forKey: .totalDistanceKm)
+    }
+}
+
+public struct ActiveOffersResponseDto: Codable {
+    public let ok: Bool?
+    public let count: Int?
+    public let offers: [DispatchOfferDto]?
+
+    public init(ok: Bool? = true, count: Int? = nil, offers: [DispatchOfferDto]? = nil) {
+        self.ok = ok
+        self.count = count
+        self.offers = offers
+    }
 }
 
 public struct ActiveDeliverySessionDto: Identifiable, Codable {

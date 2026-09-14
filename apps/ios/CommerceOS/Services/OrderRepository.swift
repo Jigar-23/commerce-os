@@ -129,13 +129,49 @@ public struct ServerOrderItemResponse: Codable {
     public let sku: String
     public let name: String?
     public let price: Double?
+    public let unitPrice: Double?
     public let quantity: Int
 
-    public init(sku: String, name: String? = nil, price: Double? = nil, quantity: Int = 1) {
+    public var effectivePrice: Double {
+        return unitPrice ?? price ?? 0.0
+    }
+
+    public init(sku: String, name: String? = nil, price: Double? = nil, unitPrice: Double? = nil, quantity: Int = 1) {
         self.sku = sku
         self.name = name
-        self.price = price
+        self.price = price ?? unitPrice
+        self.unitPrice = unitPrice ?? price
         self.quantity = quantity
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sku
+        case name
+        case price
+        case unitPrice
+        case unit_price
+        case quantity
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sku = (try? container.decode(String.self, forKey: .sku)) ?? ""
+        self.name = try? container.decode(String.self, forKey: .name)
+        let rawPrice = try? container.decode(Double.self, forKey: .price)
+        let rawUnitPrice = (try? container.decode(Double.self, forKey: .unitPrice))
+            ?? (try? container.decode(Double.self, forKey: .unit_price))
+        self.price = rawPrice ?? rawUnitPrice
+        self.unitPrice = rawUnitPrice ?? rawPrice
+        self.quantity = (try? container.decode(Int.self, forKey: .quantity)) ?? 1
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sku, forKey: .sku)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(price, forKey: .price)
+        try container.encodeIfPresent(unitPrice, forKey: .unitPrice)
+        try container.encode(quantity, forKey: .quantity)
     }
 }
 
@@ -151,7 +187,20 @@ public struct ServerOrderResponse: Identifiable, Codable {
     public let paymentStatus: String?
     public let deliveryOtp: String?
     public let createdAt: String?
+    public let deliverySlaMins: Int?
+    public let deliveryAddress: DeliveryAddressPayload?
     public let items: [ServerOrderItemResponse]?
+
+    public var effectiveDeliveryPin: String? {
+        guard let pin = deliveryOtp?.trimmingCharacters(in: .whitespacesAndNewlines), !pin.isEmpty else {
+            return nil
+        }
+        return pin
+    }
+
+    public var effectiveSlaMins: Int {
+        return deliverySlaMins ?? 10
+    }
 
     public init(
         id: String,
@@ -165,6 +214,8 @@ public struct ServerOrderResponse: Identifiable, Codable {
         paymentStatus: String? = nil,
         deliveryOtp: String? = nil,
         createdAt: String? = nil,
+        deliverySlaMins: Int? = 10,
+        deliveryAddress: DeliveryAddressPayload? = nil,
         items: [ServerOrderItemResponse]? = nil
     ) {
         self.id = id
@@ -178,6 +229,8 @@ public struct ServerOrderResponse: Identifiable, Codable {
         self.paymentStatus = paymentStatus
         self.deliveryOtp = deliveryOtp
         self.createdAt = createdAt
+        self.deliverySlaMins = deliverySlaMins
+        self.deliveryAddress = deliveryAddress
         self.items = items
     }
 
@@ -202,6 +255,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
         case deliveryOtpCamel = "deliveryOtp"
         case createdAt = "created_at"
         case createdAtCamel = "createdAt"
+        case deliverySlaMins = "delivery_sla_mins"
+        case deliverySlaMinsCamel = "deliverySlaMins"
+        case deliveryAddress = "delivery_address"
+        case deliveryAddressCamel = "deliveryAddress"
         case items
     }
 
@@ -235,6 +292,11 @@ public struct ServerOrderResponse: Identifiable, Codable {
             ?? (try? container.decode(String.self, forKey: .deliveryOtpCamel))
         self.createdAt = (try? container.decode(String.self, forKey: .createdAt))
             ?? (try? container.decode(String.self, forKey: .createdAtCamel))
+        self.deliverySlaMins = (try? container.decode(Int.self, forKey: .deliverySlaMins))
+            ?? (try? container.decode(Int.self, forKey: .deliverySlaMinsCamel))
+            ?? 10
+        self.deliveryAddress = (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddress))
+            ?? (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddressCamel))
         self.items = try? container.decode([ServerOrderItemResponse].self, forKey: .items)
     }
 
@@ -251,6 +313,8 @@ public struct ServerOrderResponse: Identifiable, Codable {
         try container.encodeIfPresent(paymentStatus, forKey: .paymentStatus)
         try container.encodeIfPresent(deliveryOtp, forKey: .deliveryOtp)
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(deliverySlaMins, forKey: .deliverySlaMins)
+        try container.encodeIfPresent(deliveryAddress, forKey: .deliveryAddress)
         try container.encodeIfPresent(items, forKey: .items)
     }
 }
@@ -314,6 +378,7 @@ public class OrderRepository: ObservableObject {
     public func fetchCustomerOrders(customerId: String? = nil) async {
         let targetId = customerId
             ?? apiClient.currentCustomerId
+            ?? UserDefaults.standard.string(forKey: "customer_id")
             ?? KeychainHelper.shared.get(key: "customer_id")
             ?? "usr_383700"
 
@@ -334,6 +399,17 @@ public class OrderRepository: ObservableObject {
                 self.isLoadingOrders = false
             }
         }
+    }
+
+    public func cancelOrder(orderId: String, reason: String = "USER_REQUESTED_CANCELLATION") async throws {
+        struct CancelRequest: Codable {
+            let reason: String
+        }
+        let _: [String: String]? = try? await apiClient.post(
+            endpoint: "/api/v1/orders/\(orderId)/cancel",
+            body: CancelRequest(reason: reason)
+        )
+        await fetchCustomerOrders()
     }
 
     public func getOrderById(orderId: String) async throws -> ServerOrderResponse {
