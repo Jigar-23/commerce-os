@@ -72,6 +72,7 @@
 		A32037A41218F44635A7084D /* CommerceOSRiderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B008E37E12147B841A4039A /* CommerceOSRiderApp.swift */; };
 		A41FD01D472C7EFA212E90F1 /* RiderBackgroundLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FDF2A7583B3B16F31287C07 /* RiderBackgroundLocationManager.swift */; };
 		AFCDC810122ECC1E30445974 /* ProductDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D3D4B5A574F9CC6DDBAE86 /* ProductDetailSheet.swift */; };
+		AFCDC810122ECC1E30445975 /* SearchScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D3D4B5A574F9CC6DDBAE87 /* SearchScreenView.swift */; };
 		B7942EDD868D115B9389F6AC /* HomeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71FDDC3B3E127042E0634B02 /* HomeScreen.swift */; };
 		BA743F50EFC87221269A684C /* CategoriesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F78B07C77749BBA7364F85B /* CategoriesScreen.swift */; };
 		BA8D96BCD8E4196E00539642 /* CartStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7FE1A2C1BD9AD61D3425F7 /* CartStoreTests.swift */; };
@@ -146,6 +147,7 @@
 		420E63E20F61009AB0079B8D /* MapKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MapKit.framework; path = System/Library/Frameworks/MapKit.framework; sourceTree = SDKROOT; };
 		4403BFF12A0FF259FE8B8149 /* MedicineImageResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicineImageResolver.swift; sourceTree = "<group>"; };
 		44D3D4B5A574F9CC6DDBAE86 /* ProductDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductDetailSheet.swift; sourceTree = "<group>"; };
+		44D3D4B5A574F9CC6DDBAE87 /* SearchScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchScreenView.swift; sourceTree = "<group>"; };
 		45C2031D5300D5914E545DFB /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		484B0BE07532472F07D7AE66 /* AddressSelectionBottomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddressSelectionBottomSheet.swift; sourceTree = "<group>"; };
 		4901DAED6D0BDE4AD3F8DFD1 /* CommerceOSRider.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CommerceOSRider.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -337,6 +339,7 @@
 			children = (
 				BAB1EA69D5AEF299F9E0974A /* CatalogScreen.swift */,
 				44D3D4B5A574F9CC6DDBAE86 /* ProductDetailSheet.swift */,
+				44D3D4B5A574F9CC6DDBAE87 /* SearchScreenView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1035,6 +1038,7 @@
 				43ACD4DF1069B83AEC195558 /* OrderTrackingScreen.swift in Sources */,
 				670D9FE32ABB2CC556A135F0 /* PrescriptionVaultScreen.swift in Sources */,
 				AFCDC810122ECC1E30445974 /* ProductDetailSheet.swift in Sources */,
+				AFCDC810122ECC1E30445975 /* SearchScreenView.swift in Sources */,
 				4439EE96309AA5112FD7C18A /* RecipientSelector.swift in Sources */,
 				3ADF5CA93AB20407E9060338 /* ServerEnvironmentConfig.swift in Sources */,
 				9E76841517BE08791BF205EC /* ServerSettingsSheet.swift in Sources */,

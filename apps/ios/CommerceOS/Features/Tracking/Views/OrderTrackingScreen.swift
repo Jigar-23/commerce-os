@@ -22,6 +22,7 @@ public struct OrderTrackingScreen: View {
     @State private var isShowingCancelSheet: Bool = false
     @State private var pulseScale: CGFloat = 0.85
     @State private var pulseAlpha: Double = 0.5
+    @State private var toastMessage: String? = nil
     
     public init(orderId: String? = nil, onBack: (() -> Void)? = nil) {
         self.orderId = orderId
@@ -163,6 +164,11 @@ public struct OrderTrackingScreen: View {
                                 cancelOrderButton
                             }
                             
+                            // Order Again Button (Android Parity OrderTrackingScreen.kt line 1045)
+                            if !items.isEmpty {
+                                orderAgainButton
+                            }
+                            
                             // Need Help / Support Button
                             supportButton
                         }
@@ -172,7 +178,30 @@ public struct OrderTrackingScreen: View {
                     }
                 }
             }
+            
+            // Toast feedback notification overlay
+            if let msg = toastMessage {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(Color(hex: "059669"))
+                        Text(msg)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 3)
+                    .padding(.bottom, 24)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(100)
+            }
         }
+
         .navigationBarHidden(true)
         .onAppear {
             initializeScreen()
@@ -584,6 +613,7 @@ public struct OrderTrackingScreen: View {
                     Button(action: {
                         userRating = star
                         ratingSubmitted = true
+                        submitRatingFeedback(rating: star)
                     }) {
                         Image(systemName: star <= userRating ? "star.fill" : "star")
                             .font(.system(size: 22))
@@ -595,7 +625,7 @@ public struct OrderTrackingScreen: View {
             .padding(.top, 4)
             
             if ratingSubmitted {
-                Text("Thank you for your rating!")
+                Text("Thank you for your rating! ⭐")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Color(hex: "059669"))
             }
@@ -700,7 +730,7 @@ public struct OrderTrackingScreen: View {
                                     .padding(.vertical, 2)
                                     .background(Color(hex: "F1F5F9"))
                                     .cornerRadius(4)
-                                
+                                    
                                 Text("₹\(Int(item.effectivePrice)) each")
                                     .font(.system(size: 12))
                                     .foregroundColor(Color(hex: "64748B"))
@@ -709,14 +739,53 @@ public struct OrderTrackingScreen: View {
                         
                         Spacer()
                         
-                        // Item Total
-                        Text("₹\(Int(item.effectivePrice * Double(item.quantity)))")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(Color(hex: "0F172A"))
+                        // Item Total & 1-Tap Reorder
+                        VStack(alignment: .trailing, spacing: 5) {
+                            Text("₹\(Int(item.effectivePrice * Double(item.quantity)))")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(Color(hex: "0F172A"))
+                            
+                            Button(action: {
+                                let prod = ProductDto(
+                                    id: item.sku,
+                                    sku: item.sku,
+                                    name: item.name ?? item.sku,
+                                    mrp: item.effectivePrice,
+                                    price: item.effectivePrice,
+                                    category: "Medicines",
+                                    inStock: true
+                                )
+                                CartLocalStore.shared.add(product: prod)
+                                withAnimation {
+                                    toastMessage = "Added \(item.name ?? "item") to cart"
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                    withAnimation {
+                                        if toastMessage == "Added \(item.name ?? "item") to cart" {
+                                            toastMessage = nil
+                                        }
+                                    }
+                                }
+                            }) {
+                                Text("+ Reorder")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(Color(hex: "059669"))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color(hex: "ECFDF5"))
+                                    .cornerRadius(6)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color(hex: "059669").opacity(0.3), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
                     }
                 }
             }
         }
+
         .padding(16)
         .background(Color.white)
         .cornerRadius(16)
@@ -949,6 +1018,84 @@ public struct OrderTrackingScreen: View {
         }
         .buttonStyle(PlainButtonStyle())
     }
+    
+    // MARK: - Order Again Button (Reorder all items, matching Android OrderTrackingScreen.kt line 1045)
+    private var orderAgainButton: some View {
+        Button(action: {
+            for item in items {
+                let prod = ProductDto(
+                    id: item.sku,
+                    sku: item.sku,
+                    name: item.name ?? item.sku,
+                    mrp: item.effectivePrice,
+                    price: item.effectivePrice,
+                    category: "Medicines",
+                    inStock: true
+                )
+                for _ in 0..<max(1, item.quantity) {
+                    CartLocalStore.shared.add(product: prod)
+                }
+            }
+            withAnimation {
+                toastMessage = "Reordered \(items.count) item(s) to cart!"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                withAnimation {
+                    if toastMessage == "Reordered \(items.count) item(s) to cart!" {
+                        toastMessage = nil
+                    }
+                }
+            }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .bold))
+                Text("Order Again")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(Color(hex: "059669"))
+            .cornerRadius(12)
+            .shadow(color: Color(hex: "059669").opacity(0.3), radius: 3, x: 0, y: 1)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func submitRatingFeedback(rating: Int) {
+        struct RatingPayload: Codable {
+            let rating: Int
+            let feedback: String
+        }
+        struct FeedbackResponse: Codable {
+            let ok: Bool?
+            let message: String?
+        }
+        Task {
+            let idToRate = effectiveOrderId
+            guard !idToRate.isEmpty && idToRate != "UNKNOWN" else { return }
+            let _: FeedbackResponse? = try? await container.apiClient.post(
+                endpoint: "/api/v1/orders/\(idToRate)/feedback",
+                body: RatingPayload(rating: rating, feedback: "Rated \(rating) stars on iOS")
+            )
+            await MainActor.run {
+                withAnimation {
+                    self.toastMessage = "Thank you for rating \(rating) stars!"
+                }
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run {
+                withAnimation {
+                    if self.toastMessage == "Thank you for rating \(rating) stars!" {
+                        self.toastMessage = nil
+                    }
+                }
+            }
+        }
+    }
+
+
     
     // MARK: - Helpers & Presentation Logic
     private var statusBadgeTitle: String {

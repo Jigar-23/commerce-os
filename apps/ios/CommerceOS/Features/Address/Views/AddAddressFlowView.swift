@@ -333,100 +333,34 @@ public struct AddAddressFlowView: View {
                                     }
                                 )
 
-                                // Contact Details (Myself vs Someone Else)
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Contact details")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundColor(Color(hex: "64748B"))
-
-                                    HStack(spacing: 16) {
-                                        // Myself Radio
-                                        Button(action: {
-                                            isForSomeoneElse = false
-                                            var copy = currentForm
-                                            copy.recipientType = .me
+                                // Contact Details (RecipientSelector 1:1 Android Parity)
+                                RecipientSelector(
+                                    recipientType: currentForm.recipientType,
+                                    contactName: currentForm.contactName,
+                                    contactPhone: currentForm.contactPhone,
+                                    nameError: validationResult.contactNameError,
+                                    phoneError: validationResult.contactPhoneError,
+                                    onRecipientTypeChanged: { rType in
+                                        isForSomeoneElse = (rType == .someoneElse)
+                                        var copy = currentForm
+                                        copy.recipientType = rType
+                                        if rType == .me {
                                             copy.contactName = ""
-                                            viewModel.updateFormAddress(copy)
-                                        }) {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: !isForSomeoneElse ? "largecircle.fill.circle" : "circle")
-                                                    .foregroundColor(!isForSomeoneElse ? Color(hex: "16A34A") : Color(hex: "94A3B8"))
-                                                Text("Myself")
-                                                    .font(.system(size: 13, weight: !isForSomeoneElse ? .bold : .medium))
-                                                    .foregroundColor(!isForSomeoneElse ? Color(hex: "0F172A") : Color(hex: "64748B"))
-                                            }
                                         }
-                                        .buttonStyle(PlainButtonStyle())
-
-                                        // Someone else Radio
-                                        Button(action: {
-                                            isForSomeoneElse = true
-                                            var copy = currentForm
-                                            copy.recipientType = .someoneElse
-                                            viewModel.updateFormAddress(copy)
-                                        }) {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: isForSomeoneElse ? "largecircle.fill.circle" : "circle")
-                                                    .foregroundColor(isForSomeoneElse ? Color(hex: "16A34A") : Color(hex: "94A3B8"))
-                                                Text("Someone else")
-                                                    .font(.system(size: 13, weight: isForSomeoneElse ? .bold : .medium))
-                                                    .foregroundColor(isForSomeoneElse ? Color(hex: "0F172A") : Color(hex: "64748B"))
-                                            }
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
+                                        viewModel.updateFormAddress(copy)
+                                    },
+                                    onContactNameChanged: { name in
+                                        var copy = currentForm
+                                        copy.contactName = name
+                                        viewModel.updateFormAddress(copy)
+                                    },
+                                    onContactPhoneChanged: { phone in
+                                        var copy = currentForm
+                                        copy.contactPhone = phone
+                                        viewModel.updateFormAddress(copy)
                                     }
+                                )
 
-                                    if isForSomeoneElse {
-                                        TextField("Receiver's name*", text: Binding(
-                                            get: { currentForm.contactName },
-                                            set: {
-                                                var copy = currentForm
-                                                copy.contactName = $0
-                                                viewModel.updateFormAddress(copy)
-                                            }
-                                        ))
-                                        .font(.system(size: 13))
-                                        .padding(11)
-                                        .background(Color.white)
-                                        .cornerRadius(12)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(validationResult.contactNameError != nil ? Color(hex: "EF4444") : Color(hex: "CBD5E1"), lineWidth: 1)
-                                        )
-
-                                        if let err = validationResult.contactNameError {
-                                            Text(err)
-                                                .font(.system(size: 11))
-                                                .foregroundColor(Color(hex: "EF4444"))
-                                                .padding(.leading, 4)
-                                        }
-                                    }
-
-                                    TextField(isForSomeoneElse ? "Receiver's phone number*" : "Receiver phone number", text: Binding(
-                                        get: { currentForm.contactPhone },
-                                        set: {
-                                            var copy = currentForm
-                                            copy.contactPhone = $0
-                                            viewModel.updateFormAddress(copy)
-                                        }
-                                    ))
-                                    .keyboardType(.phonePad)
-                                    .font(.system(size: 13))
-                                    .padding(11)
-                                    .background(Color.white)
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(validationResult.contactPhoneError != nil ? Color(hex: "EF4444") : Color(hex: "CBD5E1"), lineWidth: 1)
-                                    )
-
-                                    if let err = validationResult.contactPhoneError {
-                                        Text(err)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(Color(hex: "EF4444"))
-                                            .padding(.leading, 4)
-                                    }
-                                }
 
                                 // Conflict Warning Alert Banner (Address ↔ Geocode Conflict)
                                 if conflictWarning.hasConflict {

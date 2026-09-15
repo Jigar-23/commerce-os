@@ -100,6 +100,9 @@ public struct CartScreen: View {
                     )
                     .padding(.horizontal, 14)
                     
+                    // Free Delivery Progress Banner (1:1 Android Parity)
+                    freeDeliveryBanner
+                    
                     // Cart Items List
                     VStack(spacing: 0) {
                         ForEach(Array(cartStore.items.values), id: \.product.sku) { entry in
@@ -590,4 +593,49 @@ public struct CartScreen: View {
             }
         }
     }
+
+    // MARK: - Free Delivery Progress Banner (1:1 Android Parity)
+    private var freeDeliveryBanner: some View {
+        let threshold: Double = 199.0
+        let currentSubtotal = cartStore.subtotal
+        let remaining = max(0.0, threshold - currentSubtotal)
+        let isUnlocked = remaining <= 0.0
+        let progress = min(max(currentSubtotal / threshold, 0.0), 1.0)
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(isUnlocked ? "🎉 Free delivery unlocked!" : "Add ₹\(Int(ceil(remaining))) more for FREE Express Delivery")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(isUnlocked ? Color(hex: "059669") : Color(hex: "0F172A"))
+                Spacer()
+                if !isUnlocked {
+                    Text("₹\(Int(currentSubtotal)) / ₹199")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Color(hex: "64748B"))
+                }
+            }
+            
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(hex: "E2E8F0"))
+                        .frame(height: 6)
+                    
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(isUnlocked ? Color(hex: "059669") : Color(hex: "10B981"))
+                        .frame(width: max(0, min(geo.size.width * CGFloat(progress), geo.size.width)), height: 6)
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(12)
+        .background(isUnlocked ? Color(hex: "ECFDF5") : Color.white)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isUnlocked ? Color(hex: "A7F3D0") : Color(hex: "E2E8F0"), lineWidth: 1)
+        )
+        .padding(.horizontal, 14)
+    }
 }
+

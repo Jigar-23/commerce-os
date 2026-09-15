@@ -254,6 +254,34 @@ public struct ProductDetailSheet: View {
                             
                             if let salt = product.saltComposition, !salt.isEmpty {
                                 DetailRow(title: "Salt Composition", value: salt)
+                                
+                                // Active Molecule Breakdown Pills
+                                let molecules = salt.components(separatedBy: "+").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                                if molecules.count > 1 {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 6) {
+                                            ForEach(molecules, id: \.self) { mol in
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "cross.fill")
+                                                        .font(.system(size: 8))
+                                                        .foregroundColor(Color(hex: "059669"))
+                                                    Text(mol)
+                                                        .font(.system(size: 11, weight: .semibold))
+                                                        .foregroundColor(Color(hex: "0F172A"))
+                                                }
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color(hex: "ECFDF5"))
+                                                .cornerRadius(6)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .stroke(Color(hex: "059669").opacity(0.2), lineWidth: 1)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    .padding(.vertical, 2)
+                                }
                             }
                             
                             DetailRow(title: "Category", value: product.category)
@@ -269,6 +297,10 @@ public struct ProductDetailSheet: View {
                                 .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
                         )
                         .padding(.horizontal)
+                        
+                        // Safety Advice & Guidance Accordion (1:1 Android Parity)
+                        SafetyGuidanceSection()
+                            .padding(.horizontal)
                         
                         // Generic Substitute Banner (if applicable)
                         if let sub = product.genericSubstitute {
@@ -414,3 +446,87 @@ private struct DetailRow: View {
         .padding(.vertical, 2)
     }
 }
+
+// MARK: - Safety Advice & Guidance Accordion
+private struct SafetyGuidanceSection: View {
+    @State private var expandedItem: String? = nil
+    
+    private let safetyItems: [(id: String, icon: String, title: String, warning: String, detail: String, colorHex: String)] = [
+        ("alcohol", "wineglass.fill", "Alcohol", "Caution Advised", "Consuming alcohol with this medication may increase dizziness, drowsiness, or alter drug metabolism.", "D97706"),
+        ("pregnancy", "figure.and.child.holdinghands", "Pregnancy", "Consult Doctor", "Please consult your healthcare provider before taking this medication during pregnancy.", "2563EB"),
+        ("breastfeeding", "heart.text.square.fill", "Breastfeeding", "Safe if Prescribed", "Limited data available. Use only if clearly advised by your physician.", "059669"),
+        ("driving", "car.fill", "Driving", "Caution Advised", "May cause drowsiness or dizziness. Avoid operating heavy machinery if affected.", "D97706"),
+        ("kidney", "shield.fill", "Kidney & Liver", "Dose Adjustment May Be Needed", "Patients with renal or hepatic impairment should consult their physician for tailored dosage.", "64748B")
+    ]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Safety Advice & Guidance")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(Color(hex: "0F172A"))
+            
+            VStack(spacing: 8) {
+                ForEach(safetyItems, id: \.id) { item in
+                    let isExpanded = expandedItem == item.id
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                expandedItem = isExpanded ? nil : item.id
+                            }
+                        }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: item.icon)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(Color(hex: item.colorHex))
+                                    .frame(width: 24)
+                                
+                                Text(item.title)
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(Color(hex: "0F172A"))
+                                
+                                Spacer()
+                                
+                                Text(item.warning)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(Color(hex: item.colorHex))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color(hex: item.colorHex).opacity(0.12))
+                                    .cornerRadius(6)
+                                
+                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(Color(hex: "94A3B8"))
+                            }
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        if isExpanded {
+                            Text(item.detail)
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(hex: "475569"))
+                                .lineSpacing(3)
+                                .padding(.top, 4)
+                                .padding(.leading, 34)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color(hex: "F8FAFC"))
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
+                    )
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.white)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(CommerceOSTheme.Colors.border, lineWidth: 1)
+        )
+    }
+}
+

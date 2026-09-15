@@ -4439,6 +4439,22 @@ async function handleRequest(port, req, res) {
         return result.ok ? json(res, 200, order) : json(res, 409, { error: result.error });
       }
 
+      // POST /api/v1/orders/:id/feedback or :id/rating
+      const feedbackMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/(?:feedback|rating)$/);
+      if (feedbackMatch && req.method === 'POST') {
+        const order = findOrder(feedbackMatch[1]);
+        if (!order) return json(res, 404, { error: 'Order not found' });
+        const body = await parseBody(req);
+        order.feedback = {
+          rating: Number(body.rating || 5),
+          comment: body.comment || body.feedback || '',
+          submittedAt: nowIso(),
+        };
+        saveDb();
+        return json(res, 200, { ok: true, message: 'Feedback recorded', feedback: order.feedback });
+      }
+
+
       // POST /api/v1/orders/:id/resolve-cancellation  (seller/admin response to a CANCELLATION_REQUESTED)
       const resolveCancellationMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/resolve-cancellation$/);
       if (resolveCancellationMatch && req.method === 'POST') {

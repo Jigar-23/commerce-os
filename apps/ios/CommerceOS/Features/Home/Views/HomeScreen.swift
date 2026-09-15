@@ -17,6 +17,7 @@ public struct HomeScreen: View {
         case addAddressFlow
         case serverSettings
         case productDetail(ProductDto)
+        case search
 
         var id: String {
             switch self {
@@ -25,6 +26,7 @@ public struct HomeScreen: View {
             case .addAddressFlow: return "addAddressFlow"
             case .serverSettings: return "serverSettings"
             case .productDetail(let prod): return "product_\(prod.id)"
+            case .search: return "search"
             }
         }
     }
@@ -146,6 +148,10 @@ public struct HomeScreen: View {
                 ServerSettingsSheet()
             case .productDetail(let product):
                 ProductDetailSheet(product: product)
+            case .search:
+                SearchScreenView(onBack: {
+                    activeSheet = nil
+                })
             }
         }
         .task {
@@ -222,7 +228,9 @@ public struct HomeScreen: View {
 
     // MARK: - Universal Search Bar (Matching Android UniversalSearchBar)
     private var universalSearchBar: some View {
-        Button(action: onOpenCatalog) {
+        Button(action: {
+            activeSheet = .search
+        }) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 16))

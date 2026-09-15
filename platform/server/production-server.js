@@ -3214,6 +3214,30 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------------------------------------
+    // Order Feedback / Rating: POST /api/v1/orders/:id/feedback or :id/rating
+    // -------------------------------------------------------------
+    const feedbackMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/(?:feedback|rating)$/);
+    if (feedbackMatch && method === 'POST') {
+      const orderId = feedbackMatch[1];
+      const body = await parseJsonBody(req);
+      const rating = Number(body.rating || 5);
+      const comment = body.comment || body.feedback || '';
+
+      if (pool) {
+        try {
+          await pool.query(
+            `UPDATE orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{feedback}', $1::jsonb) WHERE (id = $2 OR order_id = $2)`,
+            [JSON.stringify({ rating, comment, submittedAt: new Date().toISOString() }), orderId]
+          );
+        } catch (_err) {
+          // Schema metadata column is optional
+        }
+      }
+      return sendJson(res, 200, { ok: true, message: 'Feedback recorded', rating, comment });
+    }
+
+
+    // -------------------------------------------------------------
     // Payment Gateway Webhook: POST /api/v1/payments/webhook
     // -------------------------------------------------------------
     if (pathname === '/api/v1/payments/webhook' && method === 'POST') {
