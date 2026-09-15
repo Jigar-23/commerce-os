@@ -38,7 +38,8 @@ export default function MerchantOperationsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchOverviewData = async (showSpinner = true) => {
-    if (!session?.token) return;
+    const s = session || sellerApi.getSession();
+    if (!s?.token) return;
     if (showSpinner) setIsLoading(true);
     try {
       const [ordRes, catRes, codRes, auditRes] = await Promise.all([
@@ -85,77 +86,15 @@ export default function MerchantOperationsPage() {
   };
 
   useEffect(() => {
-    if (!session?.token) return;
-    const playOrderChime = () => {
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.6);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.6);
-      } catch (_) {}
-    };
-
     fetchOverviewData(true);
 
-    // 1. Realtime SSE Stream Subscription with Scoped Ticket
-    let eventSource: EventSource | null = null;
-    let isSubscribed = true;
-
-    async function initRealtimeStream() {
-      try {
-        const token = session?.token;
-        if (!token || !isSubscribed) return;
-        const gatewayUrl = sellerApi.getBaseUrl();
-        
-        let streamUrl = `${gatewayUrl}/api/v1/realtime/stream?token=${encodeURIComponent(token)}`;
-        try {
-          const res = await fetch(`${gatewayUrl}/api/v1/realtime/ticket`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.ticket) {
-              streamUrl = `${gatewayUrl}/api/v1/realtime/stream?ticket=${encodeURIComponent(data.ticket)}`;
-            }
-          }
-        } catch (_) {}
-
-        if (!isSubscribed) return;
-        eventSource = new EventSource(streamUrl);
-        eventSource.onmessage = () => fetchOverviewData(false);
-        eventSource.addEventListener('ORDER_PLACED', () => {
-          playOrderChime();
-          fetchOverviewData(false);
-        });
-        eventSource.addEventListener('ORDER_STATUS_CHANGED', () => fetchOverviewData(false));
-        eventSource.addEventListener('DISPATCH_REQUESTED', () => fetchOverviewData(false));
-        eventSource.addEventListener('SELLER_ORDER_ACCEPTED', () => fetchOverviewData(false));
-        eventSource.onerror = () => {};
-      } catch (_) {}
-    }
-
-    initRealtimeStream();
-
-    // 2. Heartbeat Fast Polling Reconciliation Fallback (5 seconds)
+    // Heartbeat Fast Polling Reconciliation (5 seconds)
     const timer = setInterval(() => {
       fetchOverviewData(false);
     }, 5000);
 
     return () => {
-      isSubscribed = false;
       clearInterval(timer);
-      if (eventSource) eventSource.close();
     };
   }, [session?.token]);
 

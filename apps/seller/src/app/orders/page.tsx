@@ -24,7 +24,8 @@ export default function OrdersPage() {
   const { session, storeName } = useSellerSession();
 
   const fetchOrders = async (showSpinner = true) => {
-    if (!session?.token) return;
+    const s = session || sellerApi.getSession();
+    if (!s?.token) return;
     if (showSpinner) setIsLoading(true);
     try {
       const res = await sellerApi.get('/api/v1/orders/seller');
@@ -77,57 +78,15 @@ export default function OrdersPage() {
   };
 
   useEffect(() => {
-    if (!session?.token) return;
     fetchOrders(true);
 
-    // 1. Realtime SSE Stream Subscription with Scoped Ticket
-    let eventSource: EventSource | null = null;
-    let isSubscribed = true;
-
-    async function initRealtimeStream() {
-      try {
-        const token = session?.token;
-        if (!token || !isSubscribed) return;
-        const gatewayUrl = sellerApi.getBaseUrl();
-        
-        let streamUrl = `${gatewayUrl}/api/v1/realtime/stream?token=${encodeURIComponent(token)}`;
-        try {
-          const res = await fetch(`${gatewayUrl}/api/v1/realtime/ticket`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.ticket) {
-              streamUrl = `${gatewayUrl}/api/v1/realtime/stream?ticket=${encodeURIComponent(data.ticket)}`;
-            }
-          }
-        } catch (_) {}
-
-        if (!isSubscribed) return;
-        eventSource = new EventSource(streamUrl);
-        eventSource.onmessage = () => fetchOrders(false);
-        eventSource.addEventListener('ORDER_PLACED', () => {
-          playOrderChime();
-          fetchOrders(false);
-        });
-        eventSource.addEventListener('ORDER_STATUS_CHANGED', () => fetchOrders(false));
-        eventSource.addEventListener('DISPATCH_REQUESTED', () => fetchOrders(false));
-        eventSource.addEventListener('SELLER_ORDER_ACCEPTED', () => fetchOrders(false));
-        eventSource.onerror = () => {};
-      } catch (_) {}
-    }
-
-    initRealtimeStream();
-
-    // 2. Heartbeat Fast Polling Reconciliation Fallback (5 seconds)
+    // Heartbeat Fast Polling Reconciliation (5 seconds)
     const timer = setInterval(() => {
       fetchOrders(false);
     }, 5000);
 
     return () => {
       clearInterval(timer);
-      if (eventSource) eventSource.close();
     };
   }, [session?.token]);
 
@@ -146,10 +105,27 @@ export default function OrdersPage() {
 
       const st = String(o.orderStatus || o.status || '').toUpperCase();
       let matchFilter = true;
-      if (orderFilter === 'PENDING') matchFilter = st === 'PLACED' || st === 'PENDING_APPROVAL' || st === 'PROCESSING';
-      if (orderFilter === 'DISPATCHED') matchFilter = st === 'ACCEPTED' || st === 'DISPATCH_REQUESTED' || st === 'RIDER_ASSIGNED' || st === 'OUT_FOR_DELIVERY';
-      if (orderFilter === 'DELIVERED') matchFilter = st === 'DELIVERED';
-      if (orderFilter === 'CANCELLED') matchFilter = st === 'CANCELLED';
+      if (orderFilter === 'ALL') {
+        matchFilter = true;
+      } else if (orderFilter === 'READY_FOR_PICKUP') {
+        matchFilter = st === 'READY_FOR_PICKUP';
+      } else if (orderFilter === 'PLACED') {
+        matchFilter = st === 'PLACED' || st === 'PENDING_APPROVAL';
+      } else if (orderFilter === 'SELLER_ACCEPTED') {
+        matchFilter = st === 'SELLER_ACCEPTED' || st === 'ACCEPTED';
+      } else if (orderFilter === 'PACKED') {
+        matchFilter = st === 'PACKED';
+      } else if (orderFilter === 'OUT_FOR_DELIVERY') {
+        matchFilter = st === 'OUT_FOR_DELIVERY' || st === 'RIDER_ASSIGNED' || st === 'DISPATCH_REQUESTED' || st === 'SHIPPED';
+      } else if (orderFilter === 'DELIVERED') {
+        matchFilter = st === 'DELIVERED';
+      } else if (orderFilter === 'CANCELLED') {
+        matchFilter = st === 'CANCELLED';
+      } else if (orderFilter === 'COD_PENDING') {
+        matchFilter = (o.paymentMethod === 'COD' || o.is_cod) && o.paymentStatus !== 'PAID';
+      } else {
+        matchFilter = st === orderFilter;
+      }
 
       return matchSearch && matchFilter;
     });
@@ -207,6 +183,7 @@ export default function OrdersPage() {
                   className="px-3 py-2 bg-surface-subtle border border-border-default rounded-xl text-xs font-bold text-content-secondary outline-none"
                 >
                   <option value="ALL">ALL STATUSES</option>
+                  <option value="READY_FOR_PICKUP">READY FOR PICKUP</option>
                   <option value="PLACED">PLACED</option>
                   <option value="SELLER_ACCEPTED">SELLER ACCEPTED</option>
                   <option value="PACKED">PACKED</option>

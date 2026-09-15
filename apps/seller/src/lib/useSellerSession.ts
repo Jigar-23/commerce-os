@@ -9,7 +9,14 @@ export function useSellerSession() {
 
   useEffect(() => {
     setIsMounted(true);
-    setSession(sellerApi.getSession());
+    const existing = sellerApi.getSession();
+    if (existing) {
+      setSession(existing);
+    } else {
+      sellerApi.ensureSession().then((s) => {
+        if (s) setSession(s);
+      });
+    }
 
     const interval = setInterval(() => {
       const current = sellerApi.getSession();

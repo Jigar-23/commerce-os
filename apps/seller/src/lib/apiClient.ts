@@ -97,6 +97,18 @@ class SellerApiClient {
     }
   }
 
+  public async ensureSession(): Promise<SellerSession | null> {
+    const s = this.getSession();
+    if (s && s.token) return s;
+    if (!isProduction) {
+      const res = await this.login('admin', '1234');
+      if (res.ok && res.session) {
+        return res.session;
+      }
+    }
+    return null;
+  }
+
   public async login(identifier: string, password: string): Promise<{ ok: boolean; session?: SellerSession; error?: string }> {
     const res = await this.request<{
       accessToken: string;
@@ -139,7 +151,7 @@ class SellerApiClient {
     // Auto-login in dev if session is missing
     if (!session && !isProduction && !endpoint.includes('/auth/seller/login')) {
       try {
-        await this.login('seller_rewari_01', 'rewari_hub_sec_881');
+        await this.login('admin', '1234');
         session = this.getSession();
       } catch {
         // Continue if dev login fails
@@ -178,7 +190,7 @@ class SellerApiClient {
         if (res.status === 401 && !endpoint.includes('/auth/seller/login')) {
           this.clearSession();
           if (!isProduction) {
-            const loginRes = await this.login('seller_rewari_01', 'rewari_hub_sec_881');
+            const loginRes = await this.login('admin', '1234');
             if (loginRes.ok) {
               return this.request<T>(endpoint, options);
             }
