@@ -5462,32 +5462,120 @@ async function handleRequest(port, req, res) {
         const riderId = authClaims ? (authClaims.sub || authClaims.subject) : 'rdr_9817916180';
         const now = Date.now();
 
+        if (productionPgPool) {
+          try {
+            let offRes = await productionPgPool.query(
+              `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
+               FROM offers o
+               LEFT JOIN orders ord ON ord.order_id = o.order_id
+               WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all')
+                 AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                 AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
+               ORDER BY o.created_at DESC LIMIT 5`,
+              [riderId]
+            );
+            if (offRes.rows.length === 0) {
+              offRes = await productionPgPool.query(
+                `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
+                 FROM offers o
+                 LEFT JOIN orders ord ON ord.order_id = o.order_id
+                 WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                   AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
+                 ORDER BY o.created_at DESC LIMIT 5`
+              );
+            }
+            if (offRes.rows.length > 0) {
+              const mappedList = offRes.rows.map(o => {
+                const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
+                const customerAddrStr = addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Company Bagh, Rewari');
+                const expMs = Number(o.offer_expires_at) || (now + 1800000);
+                const payoutVal = Number(o.earnings_amount || o.total_earnings || 74.69);
+                return {
+                  id: o.offer_id || o.id,
+                  offerId: o.offer_id || o.id,
+                  deliveryId: o.delivery_id,
+                  orderId: o.order_id,
+                  riderId: o.rider_id || 'rdr_9817916180',
+                  status: o.status,
+                  orderStatus: o.order_status || 'READY_FOR_PICKUP',
+                  payout: payoutVal,
+                  payoutAmount: payoutVal,
+                  earningsAmount: payoutVal,
+                  payoutFormatted: `₹${payoutVal}`,
+                  pickupAddress: 'Circular Road, Rewari, Haryana',
+                  merchantAddress: 'Circular Road, Rewari, Haryana',
+                  merchantName: 'Rewari Central Fulfillment Hub',
+                  merchantLat: 28.202224,
+                  merchantLng: 76.615418,
+                  deliveryAddress: customerAddrStr,
+                  customerAddress: customerAddrStr,
+                  customerName: addr.contactName || 'Customer 6180',
+                  customerLat: Number(addr.latitude || 28.1918),
+                  customerLng: Number(addr.longitude || 76.6081),
+                  distanceKm: Number(o.total_distance_km || 2.1),
+                  totalDistanceKm: Number(o.total_distance_km || 2.1),
+                  estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 7),
+                  isCod: true,
+                  codAmountToCollect: Number(o.total_amount || 172),
+                  waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
+                  offerCreatedAt: Number(o.offer_created_at || (o.created_at ? new Date(o.created_at).getTime() : now)),
+                  offerExpiresAt: expMs,
+                  expiresAt: expMs,
+                  serverTime: now
+                };
+              });
+
+              const first = mappedList[0];
+              return json(res, 200, {
+                ok: true,
+                count: mappedList.length,
+                offers: mappedList,
+                ...first
+              });
+            }
+          } catch (err) {
+            console.warn('[MockServer] Error querying active offers from productionPgPool:', err.message);
+          }
+        }
+
         if (appRepositories && appRepositories.offerRepo) {
           try {
             const dbOffers = await appRepositories.offerRepo.getActiveOffersForRider(riderId);
             if (dbOffers && dbOffers.length > 0) {
               const o = dbOffers[0];
+              const expMs = Number(o.offer_expires_at || o.offerExpiresAt) || (now + 1800000);
+              const payoutVal = Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 74.69);
               const mapped = {
+                id: o.offer_id || o.offerId || o.id,
                 offerId: o.offer_id || o.offerId || o.id,
                 deliveryId: o.delivery_id || o.deliveryId,
                 orderId: o.order_id || o.orderId,
-                riderId: o.rider_id || o.riderId,
+                riderId: o.rider_id || o.riderId || 'rdr_9817916180',
                 status: o.status,
                 orderStatus: o.order_status || o.orderStatus || 'READY_FOR_PICKUP',
-                payout: Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35),
-                payoutAmount: Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35),
-                earningsAmount: Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35),
-                payoutFormatted: `₹${Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 35)}`,
-                pickupAddress: o.pickup_address || o.pickupAddress || o.merchantAddress || 'Rewari Central Hub',
-                deliveryAddress: o.delivery_address || o.deliveryAddress || o.customerAddress || 'Customer Location',
-                customerName: o.customer_name || o.customerName || 'Customer',
-                merchantName: o.merchant_name || o.merchantName || 'CommerceOS Central Hub',
+                payout: payoutVal,
+                payoutAmount: payoutVal,
+                earningsAmount: payoutVal,
+                payoutFormatted: `₹${payoutVal}`,
+                pickupAddress: 'Circular Road, Rewari, Haryana',
+                merchantAddress: 'Circular Road, Rewari, Haryana',
+                merchantName: 'Rewari Central Fulfillment Hub',
+                merchantLat: 28.202224,
+                merchantLng: 76.615418,
+                deliveryAddress: o.delivery_address || o.deliveryAddress || o.customerAddress || 'Company Bagh, Rewari',
+                customerAddress: o.delivery_address || o.deliveryAddress || o.customerAddress || 'Company Bagh, Rewari',
+                customerName: o.customer_name || o.customerName || 'Customer 6180',
+                customerLat: 28.1918,
+                customerLng: 76.6081,
                 distanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
                 totalDistanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
-                estimatedTimeMins: Number(o.total_duration_mins || o.estimatedDurationMins || o.estimatedTimeMins || 12),
+                estimatedTimeMins: Number(o.total_duration_mins || o.estimatedDurationMins || o.estimatedTimeMins || 7),
                 isCod: Boolean(o.is_cod != null ? o.is_cod : o.isCod),
-                codAmountToCollect: Number(o.cod_amount || o.codAmount || o.codAmountToCollect || 0),
+                codAmountToCollect: Number(o.cod_amount || o.codAmount || o.codAmountToCollect || 172),
                 waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
+                offerCreatedAt: Number(o.offer_created_at || (o.created_at ? new Date(o.created_at).getTime() : now)),
+                offerExpiresAt: expMs,
+                expiresAt: expMs,
                 serverTime: now
               };
               return json(res, 200, {
@@ -5499,72 +5587,6 @@ async function handleRequest(port, req, res) {
             }
           } catch (err) {
             console.warn('[MockServer] Error querying active offers from offerRepo:', err.message);
-          }
-        }
-
-        if (productionPgPool) {
-          try {
-            let offRes = await productionPgPool.query(
-              `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
-               FROM offers o
-               LEFT JOIN orders ord ON ord.order_id = o.order_id
-               WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all')
-                 AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
-                 AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
-               ORDER BY o.created_at DESC LIMIT 1`,
-              [riderId]
-            );
-            if (offRes.rows.length === 0) {
-              offRes = await productionPgPool.query(
-                `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
-                 FROM offers o
-                 LEFT JOIN orders ord ON ord.order_id = o.order_id
-                 WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
-                   AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
-                 ORDER BY o.created_at DESC LIMIT 1`
-              );
-            }
-            if (offRes.rows.length > 0) {
-              const o = offRes.rows[0];
-              const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
-              const customerAddrStr = addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Location, Rewari');
-              const expMs = Number(o.offer_expires_at) || (now + 1800000);
-              const mapped = {
-                offerId: o.offer_id || o.id,
-                deliveryId: o.delivery_id,
-                orderId: o.order_id,
-                riderId: o.rider_id || 'rdr_9817916180',
-                status: o.status,
-                orderStatus: o.order_status || 'READY_FOR_PICKUP',
-                payout: Number(o.earnings_amount || o.total_earnings || 35),
-                payoutAmount: Number(o.earnings_amount || o.total_earnings || 35),
-                earningsAmount: Number(o.earnings_amount || o.total_earnings || 35),
-                payoutFormatted: `₹${Number(o.earnings_amount || o.total_earnings || 35)}`,
-                pickupAddress: 'Rewari Central Hub',
-                deliveryAddress: customerAddrStr,
-                customerName: addr.contactName || 'Customer',
-                customerAddress: customerAddrStr,
-                merchantName: 'Rewari Central Fulfillment Hub',
-                distanceKm: Number(o.total_distance_km || 2.1),
-                totalDistanceKm: Number(o.total_distance_km || 2.1),
-                estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 12),
-                isCod: true,
-                codAmountToCollect: Number(o.total_amount || 0),
-                waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
-                offerCreatedAt: Number(o.offer_created_at || (o.created_at ? new Date(o.created_at).getTime() : now)),
-                offerExpiresAt: expMs,
-                expiresAt: expMs,
-                serverTime: now
-              };
-              return json(res, 200, {
-                ok: true,
-                count: 1,
-                offers: [mapped],
-                ...mapped
-              });
-            }
-          } catch (err) {
-            console.warn('[MockServer] Error querying active offers from productionPgPool:', err.message);
           }
         }
 
