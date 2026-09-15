@@ -5,7 +5,7 @@ import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
-import { Layers, Search, Plus, CheckCircle2, RefreshCw, RotateCcw, AlertTriangle, ArrowUpDown } from 'lucide-react';
+import { Layers, Search, CheckCircle2, RefreshCw, RotateCcw, AlertCircle } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 
 interface InventoryItem {
@@ -93,7 +93,7 @@ export default function DedicatedInventoryPage() {
         sku: item.sku,
         delta,
         reason,
-        storeId: session.storeId,
+        storeId: session?.storeId || 'store_rewari_hub_01',
       });
 
       if (res.ok && res.data) {
@@ -106,53 +106,72 @@ export default function DedicatedInventoryPage() {
           reason,
           timestamp: new Date().toLocaleTimeString(),
         });
-        showToast(`Stock for ${item.sku} adjusted by ${delta > 0 ? '+' : ''}${delta} units.`);
-        fetchInventory();
+
+        // Optimistic UI Update
+        setInventory(prev =>
+          prev.map(p =>
+            p.sku === item.sku
+              ? {
+                  ...p,
+                  onHand: p.onHand + delta,
+                  available: Math.max(0, p.onHand + delta - p.reserved),
+                  stockCount: p.stockCount + delta,
+                }
+              : p
+          )
+        );
+
+        showToast(`Stock for ${item.name} adjusted by ${delta > 0 ? '+' : ''}${delta}`, 'success');
       } else {
-        showToast(res.error || 'Failed to record stock adjustment', 'error');
+        showToast(res.error || 'Failed to apply inventory mutation.', 'error');
       }
     } catch (e: any) {
-      showToast(e.message || 'Error recording inventory adjustment', 'error');
-    }
-  };
-
-  // Reverse Specific Adjustment by ID (Transactional Reverse Adjustment)
-  const handleUndoAdjustment = async () => {
-    if (!lastAdjustment || isUndoing) return;
-
-    setIsUndoing(true);
-    try {
-      const res = await sellerApi.post('/api/v1/catalog/inventory/adjust/undo', {
-        adjustmentId: lastAdjustment.adjustmentId,
-        sku: lastAdjustment.sku,
-        reverseDelta: -lastAdjustment.delta,
-        reason: `UNDO_ADJUSTMENT_${lastAdjustment.adjustmentId}`,
-        storeId: session.storeId,
-      });
-
-      if (res.ok) {
-        showToast(`Adjustment reverted: ${lastAdjustment.sku} adjusted by ${-lastAdjustment.delta > 0 ? '+' : ''}${-lastAdjustment.delta}`);
-        setLastAdjustment(null);
-        fetchInventory();
-      } else {
-        showToast(res.error || 'Failed to revert adjustment', 'error');
-      }
-    } catch (e: any) {
-      showToast(e.message || 'Network error reverting adjustment', 'error');
-    } finally {
-      setIsUndoing(false);
+      showToast(e.message || 'Network error adjusting stock.', 'error');
     }
   };
 
   const handleManualInputSubmit = (item: InventoryItem) => {
-    const rawVal = customAddInputs[item.id] || '0';
-    const amount = parseInt(rawVal, 10);
-    if (isNaN(amount) || amount === 0) {
-      showToast('Please enter a valid stock increment or decrement number', 'error');
+    const raw = customAddInputs[item.id];
+    if (!raw) return;
+    const delta = parseInt(raw, 10);
+    if (isNaN(delta) || delta === 0) {
+      showToast('Enter a valid non-zero adjustment delta.', 'error');
       return;
     }
-    handleAdjustStock(item, amount, 'MANUAL_BATCH_ENTRY');
+    handleAdjustStock(item, delta, delta > 0 ? 'MANUAL_RESTOCK' : 'DAMAGED_EXPIRED_WRITE_OFF');
     setCustomAddInputs({ ...customAddInputs, [item.id]: '' });
+  };
+
+  const handleUndoAdjustment = async () => {
+    if (!lastAdjustment || isUndoing) return;
+    setIsUndoing(true);
+    try {
+      const targetItem = inventory.find(i => i.sku === lastAdjustment.sku);
+      if (!targetItem) {
+        showToast('SKU not found for undo action.', 'error');
+        return;
+      }
+
+      const reverseDelta = -lastAdjustment.delta;
+      const res = await sellerApi.post('/api/v1/catalog/inventory/adjust', {
+        sku: lastAdjustment.sku,
+        delta: reverseDelta,
+        reason: 'LEDGER_COMPENSATING_ROLLBACK',
+        storeId: session?.storeId || 'store_rewari_hub_01',
+      });
+
+      if (res.ok) {
+        showToast(`Undid adjustment for ${lastAdjustment.name} (${reverseDelta > 0 ? '+' : ''}${reverseDelta})`, 'success');
+        setLastAdjustment(null);
+        await fetchInventory();
+      } else {
+        showToast(res.error || 'Failed to rollback ledger transaction.', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error executing rollback.', 'error');
+    } finally {
+      setIsUndoing(false);
+    }
   };
 
   const filteredInventory = inventory.filter(item =>
@@ -163,181 +182,192 @@ export default function DedicatedInventoryPage() {
 
   return (
     <SellerAuthGuard>
-      <div className="flex h-screen bg-surface-inverse text-content-inverse font-sans overflow-hidden">
+      <div className="flex h-screen bg-surface-canvas text-content-primary font-sans antialiased overflow-hidden">
         {/* Sidebar Navigation */}
-      <SellerSidebar activeTab="inventory" inventoryCount={inventory.length} onRefresh={fetchInventory} isLoading={isLoading} />
+        <SellerSidebar
+          activeTab="inventory"
+          inventoryCount={inventory.length}
+          onRefresh={fetchInventory}
+          isLoading={isLoading}
+        />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        {/* Top Header */}
-        <header className="h-16 bg-surface-inverse border-b border-border-strong px-6 flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-3">
-            <Layers className="w-5 h-5 text-content-accent" />
-            <div>
-              <h2 className="text-sm font-bold text-white">Inventory & Stock Ledger</h2>
-              <p className="text-2xs text-content-muted" suppressHydrationWarning>{storeName} • Real-time stock reservation sync</p>
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+          {/* Top Header */}
+          <header className="h-16 bg-white border-b border-border-default px-8 flex items-center justify-between shrink-0">
+            <div className="flex items-center space-x-3">
+              <span className="px-3 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-xs font-black border border-border-brandSubtle flex items-center space-x-1.5">
+                <Layers className="w-3.5 h-3.5" />
+                <span>Stock Inventory</span>
+              </span>
+              <span className="text-content-muted">/</span>
+              <span className="text-xs font-bold text-content-primary" suppressHydrationWarning>Rewari Central Hub</span>
+              <span className="text-2xs text-content-muted">({inventory.length} stocked SKUs)</span>
             </div>
-          </div>
 
-          <div className="flex items-center space-x-3">
-            <HeaderQuickSearch onSelectOrder={() => {}} />
-            <button
-              onClick={fetchInventory}
-              disabled={isLoading}
-              className="p-2 bg-surface-inverse hover:bg-surface-inverse rounded-xl text-content-muted transition"
-              title="Refresh Inventory"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-        </header>
-
-        {/* Status Toast */}
-        {statusMessage && (
-          <div className={`mx-6 mt-4 p-3 rounded-xl flex items-center space-x-2 text-xs font-semibold ${
-            statusMessage.type === 'success'
-              ? 'bg-surface-brandSubtle border border-border-brand text-content-brand'
-              : 'bg-surface-dangerSubtle border border-border-danger text-content-danger'
-          }`}>
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>{statusMessage.text}</span>
-          </div>
-        )}
-
-        {/* Undo Notification Bar */}
-        {lastAdjustment && (
-          <div className="mx-6 mt-4 p-3 bg-surface-accentSubtle border border-border-accent rounded-xl flex items-center justify-between shadow-lg">
-            <div className="flex items-center space-x-3 text-xs text-content-accent">
-              <span className="font-bold">Last Action:</span>
-              <span>{lastAdjustment.sku} ({lastAdjustment.delta > 0 ? '+' : ''}{lastAdjustment.delta} units)</span>
-              <span className="text-2xs text-content-muted font-mono">at {lastAdjustment.timestamp}</span>
+            <div className="flex items-center space-x-3">
+              <HeaderQuickSearch onSelectOrder={() => {}} />
+              <button
+                onClick={fetchInventory}
+                disabled={isLoading}
+                className="p-2 bg-white hover:bg-surface-subtle border border-border-default rounded-xl text-content-muted transition shadow-sm"
+                title="Refresh Inventory"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-content-accent' : ''}`} />
+              </button>
             </div>
-            <button
-              onClick={handleUndoAdjustment}
-              disabled={isUndoing}
-              className="flex items-center space-x-1.5 px-3 py-1 bg-action-speedBg hover:bg-action-speedHover text-white rounded-lg text-xs font-bold shadow transition"
-            >
-              <RotateCcw className={`w-3.5 h-3.5 ${isUndoing ? 'animate-spin' : ''}`} />
-              <span>{isUndoing ? 'Reverting…' : 'Undo Adjustment'}</span>
-            </button>
-          </div>
-        )}
+          </header>
 
-        {/* Search & Filter Bar */}
-        <div className="p-6 pb-2">
-          <div className="flex items-center justify-between mb-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="w-4 h-4 absolute left-3.5 top-3 text-content-secondary" />
-              <input
-                type="text"
-                placeholder="Filter by SKU or medicine title…"
-                value={inventoryQuery}
-                onChange={e => setInventoryQuery(e.target.value)}
-                className="w-full bg-surface-inverse border border-border-strong rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder:text-content-muted focus:outline-none focus:border-border-accent"
-              />
-            </div>
-            <div className="text-xs text-content-muted font-medium">
-              Showing {filteredInventory.length} of {inventory.length} SKUs
-            </div>
-          </div>
-
-          {/* Inventory Table */}
-          <div className="bg-surface-inverse border border-border-strong rounded-2xl overflow-hidden shadow-xl">
-            <table className="w-full text-left text-sm text-content-muted">
-              <thead className="bg-surface-inverse text-content-muted uppercase text-2xs font-bold tracking-wider border-b border-border-strong">
-                <tr>
-                  <th className="px-6 py-4">SKU / Item</th>
-                  <th className="px-4 py-4">Category</th>
-                  <th className="px-4 py-4">Unit Price</th>
-                  <th className="px-4 py-4">On Hand</th>
-                  <th className="px-4 py-4">Reserved</th>
-                  <th className="px-4 py-4">Available</th>
-                  <th className="px-6 py-4 text-right">Adjust Stock</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-strong/60">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
-                      <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-content-accent" />
-                      <span>Loading authoritative inventory records…</span>
-                    </td>
-                  </tr>
-                ) : filteredInventory.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
-                      <Layers className="w-8 h-8 mx-auto mb-2 text-content-secondary" />
-                      <span>No inventory items match your search.</span>
-                    </td>
-                  </tr>
+          <main className="p-8 space-y-6 flex-1">
+            {/* Status Toast */}
+            {statusMessage && (
+              <div className={`p-4 rounded-2xl flex items-center space-x-2 text-xs font-semibold shadow-sm ${
+                statusMessage.type === 'success'
+                  ? 'bg-surface-brandSubtle border border-border-brandSubtle text-content-brand'
+                  : 'bg-surface-dangerSubtle border border-border-danger text-content-danger'
+              }`}>
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
                 ) : (
-                  filteredInventory.map(item => (
-                    <tr key={item.id} className="hover:bg-surface-inverse transition">
-                      <td className="px-6 py-4">
-                        <div className="font-mono text-xs font-bold text-content-accent">{item.sku}</div>
-                        <div className="font-bold text-white text-sm">{item.name}</div>
-                        <div className="text-2xs text-content-muted">{item.packSize}</div>
-                      </td>
-                      <td className="px-4 py-4 text-xs text-content-muted">{item.category}</td>
-                      <td className="px-4 py-4 font-bold text-content-brand">₹{item.price.toFixed(2)}</td>
-                      <td className="px-4 py-4 font-mono font-bold text-content-subtle">{item.onHand}</td>
-                      <td className="px-4 py-4 font-mono text-content-warning">
-                        {item.reserved > 0 ? `${item.reserved} held` : '0'}
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold ${
-                          item.available > 10
-                            ? 'bg-surface-brandSubtle text-content-brand border border-border-brand'
-                            : item.available > 0
-                            ? 'bg-surface-warningSubtle text-content-warning border border-border-warning'
-                            : 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
-                        }`}>
-                          {item.available} units
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
-                            onClick={() => handleAdjustStock(item, 10, 'QUICK_REPLENISHMENT')}
-                            className="px-2.5 py-1 bg-surface-inverse hover:bg-surface-inverse border border-border-strong rounded-lg text-xs font-bold text-content-brand transition"
-                            title="Add 10 units"
-                          >
-                            +10
-                          </button>
-                          <button
-                            onClick={() => handleAdjustStock(item, 50, 'QUICK_REPLENISHMENT')}
-                            className="px-2.5 py-1 bg-surface-inverse hover:bg-surface-inverse border border-border-strong rounded-lg text-xs font-bold text-content-brand transition"
-                            title="Add 50 units"
-                          >
-                            +50
-                          </button>
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{statusMessage.text}</span>
+              </div>
+            )}
 
-                          <div className="flex items-center space-x-1">
-                            <input
-                              type="number"
-                              placeholder="±Qty"
-                              value={customAddInputs[item.id] || ''}
-                              onChange={e => setCustomAddInputs({ ...customAddInputs, [item.id]: e.target.value })}
-                              className="w-16 bg-surface-inverse border border-border-strong rounded-lg px-2 py-1 text-xs text-center text-white focus:outline-none focus:border-border-accent font-mono"
-                            />
-                            <button
-                              onClick={() => handleManualInputSubmit(item)}
-                              className="px-2.5 py-1 bg-action-speedBg hover:bg-action-speedHover text-white rounded-lg text-xs font-bold transition shadow"
-                            >
-                              Apply
-                            </button>
-                          </div>
-                        </div>
+            {/* Undo Notification Bar */}
+            {lastAdjustment && (
+              <div className="p-4 bg-surface-accentSubtle border border-border-accent rounded-2xl flex items-center justify-between shadow-sm">
+                <div className="flex items-center space-x-3 text-xs text-content-accent">
+                  <span className="font-bold">Last Adjustment:</span>
+                  <span>{lastAdjustment.sku} ({lastAdjustment.delta > 0 ? '+' : ''}{lastAdjustment.delta} units)</span>
+                  <span className="text-2xs text-content-muted font-mono">at {lastAdjustment.timestamp}</span>
+                </div>
+                <button
+                  onClick={handleUndoAdjustment}
+                  disabled={isUndoing}
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl text-xs font-bold shadow transition"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isUndoing ? 'animate-spin' : ''}`} />
+                  <span>{isUndoing ? 'Reverting…' : 'Undo Adjustment'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Search & Filter Bar */}
+            <div className="flex items-center justify-between">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 absolute left-3.5 top-3 text-content-secondary" />
+                <input
+                  type="text"
+                  placeholder="Filter by SKU or medicine title…"
+                  value={inventoryQuery}
+                  onChange={e => setInventoryQuery(e.target.value)}
+                  className="w-full bg-white border border-border-default rounded-xl pl-10 pr-4 py-2 text-xs text-content-primary placeholder:text-content-muted focus:outline-none focus:border-border-accent shadow-sm"
+                />
+              </div>
+              <div className="text-xs text-content-muted font-medium">
+                Showing {filteredInventory.length} of {inventory.length} SKUs in stock
+              </div>
+            </div>
+
+            {/* Inventory Table */}
+            <div className="bg-white border border-border-default rounded-2xl overflow-hidden shadow-sm">
+              <table className="w-full text-left text-sm text-content-secondary">
+                <thead className="bg-surface-subtle text-content-muted uppercase text-2xs font-bold tracking-wider border-b border-border-default">
+                  <tr>
+                    <th className="px-6 py-4">SKU / Item</th>
+                    <th className="px-4 py-4">Category</th>
+                    <th className="px-4 py-4">Unit Price</th>
+                    <th className="px-4 py-4">On Hand</th>
+                    <th className="px-4 py-4">Reserved</th>
+                    <th className="px-4 py-4">Available</th>
+                    <th className="px-6 py-4 text-right">Quick Stock Adjustment</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-default">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
+                        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-content-accent" />
+                        <span>Loading authoritative inventory records…</span>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ) : filteredInventory.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
+                        <Layers className="w-8 h-8 mx-auto mb-2 text-content-secondary" />
+                        <span>No inventory items match your search.</span>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredInventory.map(item => (
+                      <tr key={item.id} className="hover:bg-surface-subtle/50 transition">
+                        <td className="px-6 py-4">
+                          <div className="font-mono text-xs font-bold text-content-accent">{item.sku}</div>
+                          <div className="font-bold text-content-primary text-sm">{item.name}</div>
+                          <div className="text-2xs text-content-muted">{item.packSize}</div>
+                        </td>
+                        <td className="px-4 py-4 text-xs text-content-muted">{item.category}</td>
+                        <td className="px-4 py-4 font-bold text-content-primary">₹{item.price.toFixed(2)}</td>
+                        <td className="px-4 py-4 font-mono font-bold text-content-primary">{item.onHand}</td>
+                        <td className="px-4 py-4 font-mono text-content-warning font-semibold">
+                          {item.reserved > 0 ? `${item.reserved} held` : '0'}
+                        </td>
+                        <td className="px-4 py-4">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold ${
+                            item.available > 10
+                              ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
+                              : item.available > 0
+                              ? 'bg-surface-warningSubtle text-content-warning border border-border-warning'
+                              : 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
+                          }`}>
+                            {item.available} units
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => handleAdjustStock(item, 10, 'QUICK_REPLENISHMENT')}
+                              className="px-2.5 py-1 bg-surface-subtle hover:bg-surface-accentSubtle border border-border-default rounded-lg text-xs font-bold text-content-accent transition"
+                              title="Add 10 units"
+                            >
+                              +10
+                            </button>
+                            <button
+                              onClick={() => handleAdjustStock(item, 50, 'QUICK_REPLENISHMENT')}
+                              className="px-2.5 py-1 bg-surface-subtle hover:bg-surface-accentSubtle border border-border-default rounded-lg text-xs font-bold text-content-accent transition"
+                              title="Add 50 units"
+                            >
+                              +50
+                            </button>
+
+                            <div className="flex items-center space-x-1.5">
+                              <input
+                                type="number"
+                                placeholder="±Qty"
+                                value={customAddInputs[item.id] || ''}
+                                onChange={e => setCustomAddInputs({ ...customAddInputs, [item.id]: e.target.value })}
+                                className="w-16 bg-white border border-border-default rounded-lg px-2 py-1 text-xs text-center text-content-primary focus:outline-none focus:border-border-accent font-mono shadow-sm"
+                              />
+                              <button
+                                onClick={() => handleManualInputSubmit(item)}
+                                className="px-2.5 py-1 bg-action-speedBg hover:bg-action-speedHover text-white rounded-lg text-xs font-bold transition shadow-sm"
+                              >
+                                Apply
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </main>
         </div>
       </div>
-    </div>
     </SellerAuthGuard>
   );
 }
