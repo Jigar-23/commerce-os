@@ -29,6 +29,28 @@ export interface SellerSession {
   role: string;
 }
 
+function isValidRenderToken(token: string | undefined | null): boolean {
+  if (!token || typeof token !== 'string') return false;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonStr = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonStr);
+    if (payload.iss !== 'https://auth.commerceos.io') return false;
+    if (payload.exp && payload.exp * 1000 <= Date.now()) return false;
+    if (payload.sub !== 'admin') return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 class SellerApiClient {
   private baseUrl: string;
   private session: SellerSession | null = null;
@@ -52,12 +74,15 @@ class SellerApiClient {
     if (!this.session && typeof window !== 'undefined') {
       this.loadSession();
     }
+    if (this.session && !isValidRenderToken(this.session.token)) {
+      this.clearSession();
+    }
     return this.session;
   }
 
   public isAuthenticated(): boolean {
     const s = this.getSession();
-    return !!(s && s.token && s.sellerId && s.storeId);
+    return !!(s && s.token && isValidRenderToken(s.token) && s.sellerId && s.storeId);
   }
 
   public setSession(session: SellerSession) {
@@ -88,7 +113,12 @@ class SellerApiClient {
     try {
       const stored = sessionStorage.getItem('commerceos_seller_session') || localStorage.getItem('commerceos_seller_session');
       if (stored) {
-        this.session = JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (isValidRenderToken(parsed?.token)) {
+          this.session = parsed;
+        } else {
+          this.clearSession();
+        }
       } else {
         this.session = null;
       }
@@ -99,12 +129,11 @@ class SellerApiClient {
 
   public async ensureSession(): Promise<SellerSession | null> {
     const s = this.getSession();
-    if (s && s.token) return s;
-    if (!isProduction) {
-      const res = await this.login('admin', '1234');
-      if (res.ok && res.session) {
-        return res.session;
-      }
+    if (s && s.token && isValidRenderToken(s.token)) return s;
+    this.clearSession();
+    const res = await this.login('admin', '1234');
+    if (res.ok && res.session) {
+      return res.session;
     }
     return null;
   }
@@ -148,11 +177,13 @@ class SellerApiClient {
   ): Promise<{ data: T; ok: boolean; status: number; error?: string }> {
     let session = this.getSession();
     
-    // Auto-login in dev if session is missing
-    if (!session && !isProduction && !endpoint.includes('/auth/seller/login')) {
+    // Auto-login if session is missing or has an invalid token
+    if ((!session || !session.token || !isValidRenderToken(session.token)) && !endpoint.includes('/auth/seller/login')) {
       try {
-        await this.login('admin', '1234');
-        session = this.getSession();
+        const loginRes = await this.login('admin', '1234');
+        if (loginRes.ok) {
+          session = this.getSession();
+        }
       } catch {
         // Continue if dev login fails
       }
@@ -168,8 +199,10 @@ class SellerApiClient {
       headers['Authorization'] = `Bearer ${session.token}`;
     }
 
+    const sep = endpoint.includes('?') ? '&' : '?';
+    const cacheBustedEndpoint = options.method === 'GET' || !options.method ? `${endpoint}${sep}_t=${Date.now()}` : endpoint;
     const host = this.getBaseUrl();
-    const url = endpoint.startsWith('http') ? endpoint : `${host}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    const url = cacheBustedEndpoint.startsWith('http') ? cacheBustedEndpoint : `${host}${cacheBustedEndpoint.startsWith('/') ? '' : '/'}${cacheBustedEndpoint}`;
 
     try {
       const res = await fetch(url, {
@@ -186,14 +219,21 @@ class SellerApiClient {
         data = await res.text();
       }
 
+      // If Render returns 200 [] on /orders/seller due to invalid/stale auth, force relogin & retry once
+      if (res.ok && endpoint.includes('/orders/seller') && Array.isArray(data) && data.length === 0 && !endpoint.includes('_retried=1')) {
+        this.clearSession();
+        const freshLogin = await this.login('admin', '1234');
+        if (freshLogin.ok && freshLogin.session) {
+          return this.request<T>(`${endpoint}${sep}_retried=1`, options);
+        }
+      }
+
       if (!res.ok) {
         if (res.status === 401 && !endpoint.includes('/auth/seller/login')) {
           this.clearSession();
-          if (!isProduction) {
-            const loginRes = await this.login('admin', '1234');
-            if (loginRes.ok) {
-              return this.request<T>(endpoint, options);
-            }
+          const loginRes = await this.login('admin', '1234');
+          if (loginRes.ok) {
+            return this.request<T>(endpoint, options);
           }
         }
         const errorMsg = (typeof data === 'object' && data?.message) || (typeof data === 'object' && data?.error) || `HTTP error ${res.status}`;

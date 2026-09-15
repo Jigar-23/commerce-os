@@ -6,17 +6,26 @@ import { sellerApi, SellerSession } from './apiClient';
 export function useSellerSession() {
   const [session, setSession] = useState<SellerSession | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [isResolving, setIsResolving] = useState(true);
 
   useEffect(() => {
     setIsMounted(true);
-    const existing = sellerApi.getSession();
-    if (existing) {
-      setSession(existing);
-    } else {
-      sellerApi.ensureSession().then((s) => {
-        if (s) setSession(s);
-      });
+    let active = true;
+
+    async function init() {
+      try {
+        const s = await sellerApi.ensureSession();
+        if (active && s) {
+          setSession(s);
+        }
+      } catch (e) {
+        console.error('[useSellerSession] Failed to ensure session:', e);
+      } finally {
+        if (active) setIsResolving(false);
+      }
     }
+
+    init();
 
     const interval = setInterval(() => {
       const current = sellerApi.getSession();
@@ -28,12 +37,16 @@ export function useSellerSession() {
       });
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   return {
     session,
     isMounted,
+    isResolving,
     isAuthenticated: !!(session && session.token),
     storeName: isMounted && session?.storeName ? session.storeName : 'Rewari Central Hub'
   };

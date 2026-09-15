@@ -11,15 +11,15 @@ interface SellerAuthGuardProps {
 
 export default function SellerAuthGuard({ children }: SellerAuthGuardProps) {
   const router = useRouter();
-  const { session, isMounted, isAuthenticated } = useSellerSession();
+  const { isMounted, isResolving, isAuthenticated } = useSellerSession();
 
   useEffect(() => {
-    if (isMounted && !session?.token) {
+    if (isMounted && !isResolving && !isAuthenticated) {
       router.replace('/login');
     }
-  }, [isMounted, session, router]);
+  }, [isMounted, isResolving, isAuthenticated, router]);
 
-  if (!isMounted) {
+  if (!isMounted || isResolving) {
     return (
       <div className="h-screen w-screen bg-surface-canvas flex flex-col items-center justify-center space-y-4 font-sans">
         <div className="w-10 h-10 rounded-xl bg-action-speedBg text-white flex items-center justify-center animate-pulse">
@@ -34,14 +34,7 @@ export default function SellerAuthGuard({ children }: SellerAuthGuardProps) {
   }
 
   if (!isAuthenticated) {
-    return (
-      <div className="h-screen w-screen bg-surface-canvas flex flex-col items-center justify-center space-y-4 font-sans">
-        <div className="w-10 h-10 rounded-xl bg-action-speedBg text-white flex items-center justify-center">
-          <ShieldCheck className="w-5 h-5" />
-        </div>
-        <p className="text-content-secondary text-xs font-bold">Redirecting to merchant authentication…</p>
-      </div>
-    );
+    return null;
   }
 
   return <>{children}</>;
