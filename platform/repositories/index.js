@@ -4852,7 +4852,8 @@ class TransactionalPresenceRepository {
          AND NOT EXISTS (
            SELECT 1 FROM delivery_sessions ds 
            WHERE ds.rider_id = r.rider_id 
-             AND ds.state IN ('ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+             AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+             AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
          )
         ORDER BY (CASE WHEN r.rider_id = 'rdr_9817916180' THEN 1 ELSE 2 END), rp.last_seen_at DESC`
     );
@@ -4868,7 +4869,8 @@ class TransactionalPresenceRepository {
            AND NOT EXISTS (
              SELECT 1 FROM delivery_sessions ds 
              WHERE ds.rider_id = r.rider_id 
-               AND ds.state IN ('ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+               AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+               AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
            )
          ORDER BY (CASE WHEN r.rider_id = 'rdr_9817916180' THEN 1 ELSE 2 END), rp.last_seen_at DESC`
       );
@@ -4886,11 +4888,6 @@ class TransactionalPresenceRepository {
          FROM riders r
          LEFT JOIN rider_presence rp ON rp.rider_id = r.rider_id
          WHERE r.status = 'ACTIVE'
-           AND NOT EXISTS (
-             SELECT 1 FROM delivery_sessions ds 
-             WHERE ds.rider_id = r.rider_id 
-               AND ds.state IN ('ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
-           )
          ORDER BY (CASE WHEN r.rider_id = 'rdr_9817916180' THEN 1 ELSE 2 END), COALESCE(rp.last_seen_at, r.created_at) DESC`
       );
     }
