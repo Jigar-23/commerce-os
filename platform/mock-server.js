@@ -266,11 +266,70 @@ function findDeliverySession(idOrOrderId) {
   // Search by deliveryId or orderId
   for (const key of Object.keys(db.deliverySessions)) {
     const s = db.deliverySessions[key];
-    if (s && (s.deliveryId === queryStr || s.orderId === queryStr)) {
+    if (s && (s.deliveryId === queryStr || s.orderId === queryStr || s.id === queryStr)) {
       if (s.telemetry) {
         s.telemetry.isStale = (Date.now() - (s.telemetry.serverTimestamp || 0)) > 15000;
       }
       return s;
+    }
+  }
+  return null;
+}
+
+async function getOrFetchDeliverySession(idOrOrderId) {
+  let session = findDeliverySession(idOrOrderId);
+  if (session) return session;
+  if (productionPgPool) {
+    try {
+      const q = String(idOrOrderId).trim();
+      const res = await productionPgPool.query(
+        `SELECT ds.*, ord.items as order_items
+         FROM delivery_sessions ds
+         LEFT JOIN orders ord ON (ord.order_id = ds.order_id OR ord.id = ds.order_id)
+         WHERE (ds.delivery_id = $1 OR ds.id = $1 OR ds.order_id = $1)
+         ORDER BY ds.created_at DESC LIMIT 1`,
+        [q]
+      );
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        let items = [];
+        if (row.order_items) {
+          try { items = typeof row.order_items === 'string' ? JSON.parse(row.order_items) : row.order_items; } catch (_) {}
+        }
+        session = {
+          deliveryId: row.delivery_id || row.id,
+          orderId: row.order_id,
+          riderId: row.rider_id,
+          riderName: row.rider_name,
+          riderPhone: row.rider_phone,
+          riderVehicle: row.rider_vehicle,
+          state: row.state,
+          merchantName: row.merchant_name || 'Rewari Central Fulfillment Hub',
+          merchantAddress: row.merchant_address || 'Circular Road, Rewari, Haryana',
+          merchantLat: Number(row.merchant_lat || 28.202224),
+          merchantLng: Number(row.merchant_lng || 76.615418),
+          customerName: row.customer_name || 'Customer',
+          customerPhone: row.customer_phone || '+919817916180',
+          customerAddress: row.customer_address || 'hiiiiiiii, Company Bagh',
+          customerLat: Number(row.customer_lat || 28.1918),
+          customerLng: Number(row.customer_lng || 76.6081),
+          distanceKm: Number(row.distance_km || 2.1),
+          isCod: Boolean(row.is_cod),
+          codAmount: Number(row.cod_amount || 0),
+          codCollectedAmount: Number(row.cod_collected_amount || 0),
+          codReconciled: Boolean(row.cod_reconciled),
+          otpVerified: Boolean(row.otp_verified),
+          waypoints: row.waypoints || [],
+          history: row.history || [],
+          items: items
+        };
+        db.deliverySessions = db.deliverySessions || {};
+        db.deliverySessions[session.deliveryId] = session;
+        if (session.orderId) db.deliverySessions[session.orderId] = session;
+        return session;
+      }
+    } catch (e) {
+      console.warn('[getOrFetchDeliverySession] DB fetch warning:', e.message);
     }
   }
   return null;
@@ -5638,6 +5697,67 @@ async function handleRequest(port, req, res) {
           realVehicle: (riderProfile && (riderProfile.vehicle || riderProfile.vehicleNumber)) || authClaims.vehicle || 'HR-26-AB-1234'
         };
 
+        if (appRepositories && appRepositories.offerRepo && appRepositories.offerRepo.acceptOfferTransactionally) {
+          try {
+            const result = await appRepositories.offerRepo.acceptOfferTransactionally(offerId, riderId, normalizedProfile);
+            if (result.ok) {
+              const sessionObj = result.session || {};
+              const normalizedSession = {
+                deliveryId: sessionObj.delivery_id || sessionObj.deliveryId || offerId,
+                orderId: sessionObj.order_id || sessionObj.orderId || result.offer?.order_id,
+                riderId: sessionObj.rider_id || sessionObj.riderId || riderId,
+                riderName: sessionObj.rider_name || sessionObj.riderName || normalizedProfile.realName,
+                riderPhone: sessionObj.rider_phone || sessionObj.riderPhone || normalizedProfile.realPhone,
+                riderVehicle: sessionObj.rider_vehicle || sessionObj.riderVehicle || normalizedProfile.realVehicle,
+                status: sessionObj.state || sessionObj.status || 'ACCEPTED',
+                state: sessionObj.state || sessionObj.status || 'ACCEPTED',
+                merchantName: sessionObj.merchant_name || 'Rewari Central Fulfillment Hub',
+                merchantAddress: sessionObj.merchant_address || 'Circular Road, Rewari, Haryana',
+                merchantLat: Number(sessionObj.merchant_lat || 28.202224),
+                merchantLng: Number(sessionObj.merchant_lng || 76.615418),
+                customerName: sessionObj.customer_name || 'Customer',
+                customerPhone: sessionObj.customer_phone || '+919817916180',
+                customerAddress: sessionObj.customer_address || 'hiiiiiiii, Company Bagh',
+                customerLat: Number(sessionObj.customer_lat || 28.1918),
+                customerLng: Number(sessionObj.customer_lng || 76.6081),
+                isCod: Boolean(sessionObj.is_cod),
+                codAmountToCollect: Number(sessionObj.cod_amount || sessionObj.cod_amount_to_collect || 0),
+                codReconciled: Boolean(sessionObj.cod_reconciled),
+                waypoints: sessionObj.waypoints || []
+              };
+
+              db.deliverySessions = db.deliverySessions || {};
+              db.deliverySessions[normalizedSession.deliveryId] = normalizedSession;
+              if (normalizedSession.orderId) {
+                db.deliverySessions[normalizedSession.orderId] = normalizedSession;
+                const dbOrder = (db.orders || []).find(o => o.id === normalizedSession.orderId || o.orderId === normalizedSession.orderId);
+                if (dbOrder) {
+                  dbOrder.riderId = riderId;
+                  dbOrder.riderName = normalizedProfile.realName;
+                  dbOrder.riderPhone = normalizedProfile.realPhone;
+                  dbOrder.status = 'RIDER_ASSIGNED';
+                  dbOrder.orderStatus = 'RIDER_ASSIGNED';
+                }
+              }
+              saveDb();
+
+              return json(res, 200, {
+                ok: true,
+                status: 'ACCEPTED',
+                deliveryId: normalizedSession.deliveryId,
+                orderId: normalizedSession.orderId,
+                riderId: riderId,
+                session: normalizedSession,
+                ...normalizedSession
+              });
+            } else if (result.httpStatus && result.httpStatus !== 404) {
+              return json(res, result.httpStatus, result);
+            }
+          } catch (repoErr) {
+            console.error('[OfferAccept] Repository accept error:', repoErr);
+          }
+        }
+
         const offer = (db.offers || {})[offerId];
         if (!offer) {
           return json(res, 404, { error: 'OFFER_NOT_FOUND', message: `Offer ${offerId} not found.` });
@@ -5953,9 +6073,58 @@ async function handleRequest(port, req, res) {
           return json(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT authentication required.' });
         }
         const riderId = authClaims.sub || authClaims.subject;
-        const active = Object.values(db.deliverySessions || {}).find(
+        let active = Object.values(db.deliverySessions || {}).find(
           (s) => s.riderId === riderId && !['DELIVERED', 'CANCELLED', 'DECLINED'].includes(s.state)
         );
+        if (!active && productionPgPool) {
+          try {
+            const pgActive = await productionPgPool.query(
+              `SELECT ds.*, ord.items as order_items
+               FROM delivery_sessions ds
+               LEFT JOIN orders ord ON (ord.order_id = ds.order_id OR ord.id = ds.order_id)
+               WHERE ds.rider_id = $1 AND ds.state NOT IN ('DELIVERED', 'CANCELLED', 'DECLINED')
+               ORDER BY ds.updated_at DESC LIMIT 1`,
+              [riderId]
+            );
+            if (pgActive.rows.length > 0) {
+              const row = pgActive.rows[0];
+              let items = [];
+              if (row.order_items) {
+                try { items = typeof row.order_items === 'string' ? JSON.parse(row.order_items) : row.order_items; } catch (_) {}
+              }
+              active = {
+                deliveryId: row.delivery_id || row.id,
+                orderId: row.order_id,
+                riderId: row.rider_id,
+                riderName: row.rider_name,
+                riderPhone: row.rider_phone,
+                riderVehicle: row.rider_vehicle,
+                state: row.state,
+                merchantName: row.merchant_name || 'Rewari Central Fulfillment Hub',
+                merchantAddress: row.merchant_address || 'Circular Road, Rewari, Haryana',
+                merchantLat: Number(row.merchant_lat || 28.202224),
+                merchantLng: Number(row.merchant_lng || 76.615418),
+                customerName: row.customer_name || 'Customer',
+                customerPhone: row.customer_phone || '+919817916180',
+                customerAddress: row.customer_address || 'hiiiiiiii, Company Bagh',
+                customerLat: Number(row.customer_lat || 28.1918),
+                customerLng: Number(row.customer_lng || 76.6081),
+                distanceKm: Number(row.distance_km || 2.1),
+                isCod: Boolean(row.is_cod),
+                codAmount: Number(row.cod_amount || 0),
+                codCollectedAmount: Number(row.cod_collected_amount || 0),
+                codReconciled: Boolean(row.cod_reconciled),
+                otpVerified: Boolean(row.otp_verified),
+                waypoints: row.waypoints || [],
+                history: row.history || [],
+                items: items
+              };
+              db.deliverySessions = db.deliverySessions || {};
+              db.deliverySessions[active.deliveryId] = active;
+              if (active.orderId) db.deliverySessions[active.orderId] = active;
+            }
+          } catch (_) {}
+        }
         if (active) {
           return json(res, 200, buildOpsDeliveryDTO(active));
         }
@@ -5989,7 +6158,7 @@ async function handleRequest(port, req, res) {
         const authClaims = verifyAndDecodeJwt(req);
         if (!authClaims) return json(res, 401, { error: 'UNAUTHORIZED' });
 
-        const session = findDeliverySession(arriveMerchantMatch[1]);
+        const session = await getOrFetchDeliverySession(arriveMerchantMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
         session.state = 'ARRIVED_PICKUP';
@@ -6009,6 +6178,10 @@ async function handleRequest(port, req, res) {
         }
         saveDb();
 
+        if (productionPgPool) {
+          productionPgPool.query(`UPDATE delivery_sessions SET state = $1, updated_at = NOW() WHERE (delivery_id = $2 OR order_id = $2)`, ['ARRIVED_PICKUP', session.deliveryId]).catch(() => {});
+        }
+
         broadcastDeliveryEvent(session.deliveryId, 'STATE_TRANSITION', session);
         return json(res, 200, { ok: true, session: buildRiderDeliveryDTO(session), ...buildRiderDeliveryDTO(session) });
       }
@@ -6019,7 +6192,7 @@ async function handleRequest(port, req, res) {
         const authClaims = verifyAndDecodeJwt(req);
         if (!authClaims) return json(res, 401, { error: 'UNAUTHORIZED' });
 
-        const session = findDeliverySession(pickupMatch[1]);
+        const session = await getOrFetchDeliverySession(pickupMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
         session.state = 'EN_ROUTE_CUSTOMER';
@@ -6052,6 +6225,11 @@ async function handleRequest(port, req, res) {
         }
         saveDb();
 
+        if (productionPgPool) {
+          productionPgPool.query(`UPDATE delivery_sessions SET state = 'EN_ROUTE_CUSTOMER', updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId]).catch(() => {});
+          productionPgPool.query(`UPDATE orders SET status = 'OUT_FOR_DELIVERY', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId]).catch(() => {});
+        }
+
         broadcastDeliveryEvent(session.deliveryId, 'STATE_TRANSITION', session);
         return json(res, 200, { ok: true, session: buildRiderDeliveryDTO(session), ...buildRiderDeliveryDTO(session) });
       }
@@ -6062,7 +6240,7 @@ async function handleRequest(port, req, res) {
         const authClaims = verifyAndDecodeJwt(req);
         if (!authClaims) return json(res, 401, { error: 'UNAUTHORIZED' });
 
-        const session = findDeliverySession(arriveCustomerMatch[1]);
+        const session = await getOrFetchDeliverySession(arriveCustomerMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
         session.state = 'HANDOFF_STARTED';
@@ -6084,6 +6262,10 @@ async function handleRequest(port, req, res) {
         }
         saveDb();
 
+        if (productionPgPool) {
+          productionPgPool.query(`UPDATE delivery_sessions SET state = 'HANDOFF_STARTED', updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId]).catch(() => {});
+        }
+
         broadcastDeliveryEvent(session.deliveryId, 'STATE_TRANSITION', session);
         return json(res, 200, { ok: true, session: buildRiderDeliveryDTO(session), ...buildRiderDeliveryDTO(session) });
       }
@@ -6094,7 +6276,7 @@ async function handleRequest(port, req, res) {
         const authClaims = verifyAndDecodeJwt(req);
         if (!authClaims) return json(res, 401, { error: 'UNAUTHORIZED' });
 
-        const session = findDeliverySession(codMatch[1]);
+        const session = await getOrFetchDeliverySession(codMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
         const body = await parseBody(req);
@@ -6114,6 +6296,10 @@ async function handleRequest(port, req, res) {
         }
         saveDb();
 
+        if (productionPgPool) {
+          productionPgPool.query(`UPDATE delivery_sessions SET cod_reconciled = true, cod_collected_amount = $1, updated_at = NOW() WHERE (delivery_id = $2 OR order_id = $2)`, [collectedAmount, session.deliveryId]).catch(() => {});
+        }
+
         broadcastDeliveryEvent(session.deliveryId, 'COD_RECONCILED', session);
         return json(res, 200, { ok: true, reconciled: true, collectedAmount, session: buildRiderDeliveryDTO(session) });
       }
@@ -6124,7 +6310,7 @@ async function handleRequest(port, req, res) {
         const authClaims = verifyAndDecodeJwt(req);
         if (!authClaims) return json(res, 401, { error: 'UNAUTHORIZED' });
 
-        const session = findDeliverySession(verifyOtpMatch[1]);
+        const session = await getOrFetchDeliverySession(verifyOtpMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
         const body = await parseBody(req);
@@ -6161,6 +6347,11 @@ async function handleRequest(port, req, res) {
           });
         }
         saveDb();
+
+        if (productionPgPool) {
+          productionPgPool.query(`UPDATE delivery_sessions SET state = 'DELIVERED', otp_verified = true, updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId]).catch(() => {});
+          productionPgPool.query(`UPDATE orders SET status = 'DELIVERED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId]).catch(() => {});
+        }
 
         broadcastDeliveryEvent(session.deliveryId, 'DELIVERED', session);
         return json(res, 200, { ok: true, verified: true, session: buildRiderDeliveryDTO(session), order });

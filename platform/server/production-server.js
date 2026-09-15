@@ -4027,7 +4027,43 @@ const server = http.createServer(async (req, res) => {
         realVehicle
       });
 
-      return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
+      if (result.ok) {
+        const sessionObj = result.session || {};
+        const normalizedSession = {
+          deliveryId: sessionObj.delivery_id || sessionObj.deliveryId || offerId,
+          orderId: sessionObj.order_id || sessionObj.orderId || result.offer?.order_id,
+          riderId: sessionObj.rider_id || sessionObj.riderId || authorizedRider.rider_id,
+          riderName: sessionObj.rider_name || sessionObj.riderName || realName,
+          riderPhone: sessionObj.rider_phone || sessionObj.riderPhone || realPhone,
+          riderVehicle: sessionObj.rider_vehicle || sessionObj.riderVehicle || realVehicle,
+          status: sessionObj.state || sessionObj.status || 'ACCEPTED',
+          state: sessionObj.state || sessionObj.status || 'ACCEPTED',
+          merchantName: sessionObj.merchant_name || 'Rewari Central Fulfillment Hub',
+          merchantAddress: sessionObj.merchant_address || 'Circular Road, Rewari, Haryana',
+          merchantLat: Number(sessionObj.merchant_lat || 28.202224),
+          merchantLng: Number(sessionObj.merchant_lng || 76.615418),
+          customerName: sessionObj.customer_name || 'Customer',
+          customerPhone: sessionObj.customer_phone || '+919817916180',
+          customerAddress: sessionObj.customer_address || 'hiiiiiiii, Company Bagh',
+          customerLat: Number(sessionObj.customer_lat || 28.1918),
+          customerLng: Number(sessionObj.customer_lng || 76.6081),
+          isCod: Boolean(sessionObj.is_cod),
+          codAmountToCollect: Number(sessionObj.cod_amount || sessionObj.cod_amount_to_collect || 0),
+          codReconciled: Boolean(sessionObj.cod_reconciled),
+          waypoints: sessionObj.waypoints || []
+        };
+        return sendJson(res, 200, {
+          ok: true,
+          status: 'ACCEPTED',
+          deliveryId: normalizedSession.deliveryId,
+          orderId: normalizedSession.orderId,
+          riderId: authorizedRider.rider_id,
+          session: normalizedSession,
+          ...normalizedSession
+        });
+      }
+
+      return sendJson(res, result.httpStatus || 400, result);
     }
 
     // POST /api/v1/delivery/offers/:id/decline OR /api/v1/rider/offers/:id/decline
