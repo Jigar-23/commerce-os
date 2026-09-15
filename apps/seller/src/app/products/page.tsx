@@ -4,8 +4,10 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
-import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
+import SellerSidebar from '../../components/SellerSidebar';
+import HeaderQuickSearch from '../../components/HeaderQuickSearch';
 
 interface ProductItem {
   id: string;
@@ -99,13 +101,12 @@ export default function ProductsPage() {
         category: newCategory,
         price: priceNum,
         mrp: mrpNum,
-        discountedPrice: priceNum,
-        stockCount: stockNum,
+        initialStock: stockNum,
         rxRequirement: newRx,
-        storeId: session.storeId
+        storeId: session?.storeId || 'store_rewari_hub_01',
       };
 
-      const res = await sellerApi.post('/api/v1/catalog/products', payload);
+      const res = await sellerApi.post('/api/v1/catalog/seller/products', payload);
       if (res.ok) {
         setFormSuccess(true);
         setTimeout(() => {
@@ -118,12 +119,12 @@ export default function ProductsPage() {
           setNewMrp('');
           setNewStock('50');
           loadProducts();
-        }, 1000);
+        }, 1200);
       } else {
-        setFormError(res.error || 'Failed to create product in catalog.');
+        setFormError(res.error || 'Failed to register product in catalog.');
       }
     } catch (err: any) {
-      setFormError(err.message || 'Network error while adding product.');
+      setFormError(err.message || 'Error occurred while saving product.');
     } finally {
       setIsSubmitting(false);
     }
@@ -139,297 +140,304 @@ export default function ProductsPage() {
 
   return (
     <SellerAuthGuard>
-      <div className="min-h-screen bg-surface-inverse text-white p-8">
-        <div className="max-w-7xl mx-auto space-y-6">
-        {/* Navigation & Header */}
-        <div className="flex items-center justify-between border-b border-border-strong pb-4">
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-2xs font-extrabold bg-surface-accentSubtle text-content-accent border border-border-accent" suppressHydrationWarning>
-                {storeName}
+      <div className="flex h-screen bg-surface-canvas text-content-primary font-sans antialiased overflow-hidden">
+        {/* Sidebar Navigation */}
+        <SellerSidebar
+          activeTab="products"
+          onRefresh={loadProducts}
+          isLoading={isLoading}
+        />
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+          {/* Top Header */}
+          <header className="h-16 bg-white border-b border-border-default px-8 flex items-center justify-between shrink-0">
+            <div className="flex items-center space-x-3">
+              <span className="px-3 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-xs font-black border border-border-brandSubtle flex items-center space-x-1.5">
+                <Store className="w-3.5 h-3.5" />
+                <span>Products & SKUs</span>
               </span>
+              <span className="text-content-muted">/</span>
+              <span className="text-xs font-bold text-content-primary" suppressHydrationWarning>Rewari Central Hub</span>
+              <span className="text-2xs text-content-muted">({products.length} registered SKUs)</span>
             </div>
-            <h1 className="text-2xl font-black text-white mt-1">Catalog & Products</h1>
-            <p className="text-xs text-content-muted">Authoritative Catalog Repository • {products.length} registered SKUs</p>
-          </div>
-          <div className="flex items-center space-x-3 text-sm">
-            <Link href="/" className="px-3 py-1.5 rounded-lg bg-surface-inverse hover:bg-surface-inverse">Dashboard</Link>
-            <Link href="/orders" className="px-3 py-1.5 rounded-lg bg-surface-inverse hover:bg-surface-inverse">Orders</Link>
-            <Link href="/products" className="px-3 py-1.5 rounded-lg bg-action-speedBg font-bold">Catalog</Link>
-            <Link href="/inventory" className="px-3 py-1.5 rounded-lg bg-surface-inverse hover:bg-surface-inverse">Inventory</Link>
-            <Link href="/cod" className="px-3 py-1.5 rounded-lg bg-surface-inverse hover:bg-surface-inverse">COD</Link>
-          </div>
-        </div>
 
-        {/* Action Controls & Filters */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center space-x-3 flex-1 max-w-md">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3.5 top-3 text-content-secondary" />
-              <input
-                type="text"
-                placeholder="Search SKU or product title…"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-surface-inverse border border-border-strong rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder:text-content-muted focus:outline-none focus:border-border-accent"
-              />
-            </div>
-            <select
-              value={categoryFilter}
-              onChange={e => setCategoryFilter(e.target.value)}
-              className="bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-content-muted focus:outline-none focus:border-border-accent"
-            >
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={loadProducts}
-              disabled={isLoading}
-              className="p-2.5 bg-surface-inverse hover:bg-surface-inverse border border-border-strong rounded-xl text-content-muted transition"
-              title="Refresh Catalog"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-action-primaryBg hover:bg-action-primaryHover rounded-xl text-sm font-bold text-white shadow-lg shadow-subtle transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add New Product</span>
-            </button>
-          </div>
-        </div>
-
-        {error && (
-          <div className="p-4 bg-surface-dangerSubtle border border-border-danger rounded-2xl flex items-center space-x-3 text-content-danger text-xs">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Products Table */}
-        <div className="bg-surface-inverse border border-border-strong rounded-2xl overflow-hidden shadow-xl">
-          <table className="w-full text-left text-sm text-content-muted">
-            <thead className="bg-surface-inverse text-content-muted uppercase text-2xs font-bold tracking-wider border-b border-border-strong">
-              <tr>
-                <th className="px-6 py-4">SKU / Item</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Pack Size</th>
-                <th className="px-6 py-4">Unit Price</th>
-                <th className="px-6 py-4">Stock</th>
-                <th className="px-6 py-4">Rx Required</th>
-                <th className="px-6 py-4 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-strong/60">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
-                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-content-accent" />
-                    <span>Loading products from repository…</span>
-                  </td>
-                </tr>
-              ) : filteredProducts.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
-                    <Package className="w-8 h-8 mx-auto mb-2 text-content-secondary" />
-                    <span>No products found matching your filter criteria.</span>
-                  </td>
-                </tr>
-              ) : (
-                filteredProducts.map(p => (
-                  <tr key={p.id || p.sku} className="hover:bg-surface-inverse/30 transition">
-                    <td className="px-6 py-4">
-                      <div className="font-mono text-xs font-bold text-content-accent">{p.sku}</div>
-                      <div className="font-bold text-white text-sm">{p.name}</div>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-content-muted">{p.category || 'General'}</td>
-                    <td className="px-6 py-4 text-xs text-content-muted">{p.packSize || '1 Unit'}</td>
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-content-brand">₹{(p.discountedPrice ?? p.price ?? 0).toFixed(2)}</div>
-                      {p.mrp && p.mrp > (p.discountedPrice ?? p.price) && (
-                        <div className="text-2xs text-content-secondary line-through">₹{p.mrp.toFixed(2)}</div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-xs">
-                      {p.stockCount ?? 0} units
-                    </td>
-                    <td className="px-6 py-4">
-                      {p.rxRequirement && p.rxRequirement !== 'OTC' ? (
-                        <span className="px-2 py-0.5 rounded text-2xs font-bold bg-surface-warningSubtle text-content-warning border border-border-warning">
-                          {p.rxRequirement}
-                        </span>
-                      ) : (
-                        <span className="text-2xs text-content-secondary">OTC</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className={`px-2.5 py-1 rounded-full text-2xs font-extrabold ${
-                        (p.stockCount ?? 0) > 0
-                          ? 'bg-surface-brandSubtle text-content-brand border border-border-brand'
-                          : 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
-                      }`}>
-                        {(p.stockCount ?? 0) > 0 ? 'AVAILABLE' : 'OUT OF STOCK'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add Product Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-surface-inverse border border-border-strong rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
-            <div className="px-6 py-4 border-b border-border-strong flex items-center justify-between">
-              <h3 className="font-bold text-white text-base">Add New Product to Catalog</h3>
+            <div className="flex items-center space-x-3">
+              <HeaderQuickSearch onSelectOrder={() => {}} />
               <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-content-muted hover:text-white text-xl font-bold"
+                onClick={() => setIsAddModalOpen(true)}
+                className="flex items-center space-x-2 px-4 py-2 bg-action-speedBg hover:bg-action-speedHover rounded-xl text-xs font-bold text-white shadow-md shadow-subtle transition"
               >
-                ×
+                <Plus className="w-4 h-4" />
+                <span>Add Product</span>
               </button>
             </div>
+          </header>
 
-            <form onSubmit={handleCreateProduct} className="p-6 space-y-4">
-              {formError && (
-                <div className="p-3 bg-surface-dangerSubtle border border-border-danger rounded-xl text-content-danger text-xs flex items-center space-x-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
-              {formSuccess && (
-                <div className="p-3 bg-surface-brandSubtle border border-border-brand rounded-xl text-content-brand text-xs flex items-center space-x-2">
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span>Product created successfully in catalog!</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">SKU *</label>
+          <main className="p-8 space-y-6 flex-1">
+            {/* Action Controls & Filters */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center space-x-3 flex-1 max-w-md">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3.5 top-3 text-content-secondary" />
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. SKU-MED-PARA-500"
-                    value={newSku}
-                    onChange={e => setNewSku(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent font-mono"
+                    placeholder="Search SKU or product title…"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full bg-white border border-border-default rounded-xl pl-10 pr-4 py-2 text-xs text-content-primary placeholder:text-content-muted focus:outline-none focus:border-border-accent shadow-sm"
                   />
                 </div>
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Category</label>
-                  <input
-                    type="text"
-                    placeholder="Pharmacy & OTC"
-                    value={newCategory}
-                    onChange={e => setNewCategory(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Product Title *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Paracetamol 500mg Strip of 10"
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                  className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Price (₹) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="28.50"
-                    value={newPrice}
-                    onChange={e => setNewPrice(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">MRP (₹)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="35.00"
-                    value={newMrp}
-                    onChange={e => setNewMrp(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Initial Stock</label>
-                  <input
-                    type="number"
-                    placeholder="50"
-                    value={newStock}
-                    onChange={e => setNewStock(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Pack Size</label>
-                  <input
-                    type="text"
-                    placeholder="10 Tablets / 100ml"
-                    value={newPackSize}
-                    onChange={e => setNewPackSize(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Prescription Rule</label>
-                  <select
-                    value={newRx}
-                    onChange={e => setNewRx(e.target.value)}
-                    className="w-full bg-surface-inverse border border-border-strong rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-border-accent"
-                  >
-                    <option value="OTC">OTC (No Rx required)</option>
-                    <option value="RX_REQUIRED">Rx Required (Pharmacist approval)</option>
-                    <option value="SCHEDULE_H">Schedule H (Strict Rx)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="pt-4 flex items-center justify-end space-x-3 border-t border-border-strong">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-content-muted hover:bg-surface-inverse transition"
+                <select
+                  value={categoryFilter}
+                  onChange={e => setCategoryFilter(e.target.value)}
+                  className="bg-white border border-border-default rounded-xl px-3 py-2 text-xs text-content-secondary focus:outline-none focus:border-border-accent shadow-sm"
                 >
-                  Cancel
-                </button>
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center space-x-3">
                 <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2 bg-action-primaryBg hover:bg-action-primaryHover rounded-xl text-xs font-bold text-white shadow-lg transition"
+                  onClick={loadProducts}
+                  disabled={isLoading}
+                  className="p-2 bg-white hover:bg-surface-subtle border border-border-default rounded-xl text-content-muted transition shadow-sm"
+                  title="Refresh Catalog"
                 >
-                  {isSubmitting ? 'Registering SKU…' : 'Save Product'}
+                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-content-accent' : ''}`} />
                 </button>
               </div>
-            </form>
-          </div>
+            </div>
+
+            {error && (
+              <div className="p-4 bg-surface-dangerSubtle border border-border-danger rounded-2xl flex items-center space-x-3 text-content-danger text-xs font-semibold">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Products Table */}
+            <div className="bg-white border border-border-default rounded-2xl overflow-hidden shadow-sm">
+              <table className="w-full text-left text-sm text-content-secondary">
+                <thead className="bg-surface-subtle text-content-muted uppercase text-2xs font-bold tracking-wider border-b border-border-default">
+                  <tr>
+                    <th className="px-6 py-4">SKU / Item</th>
+                    <th className="px-6 py-4">Category</th>
+                    <th className="px-6 py-4">Pack Size</th>
+                    <th className="px-6 py-4">Unit Price</th>
+                    <th className="px-6 py-4">Stock</th>
+                    <th className="px-6 py-4">Rx Required</th>
+                    <th className="px-6 py-4 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-default">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
+                        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-content-accent" />
+                        <span>Loading products from repository…</span>
+                      </td>
+                    </tr>
+                  ) : filteredProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
+                        <Package className="w-8 h-8 mx-auto mb-2 text-content-secondary" />
+                        <span>No products found matching your filter criteria.</span>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProducts.map(p => (
+                      <tr key={p.id || p.sku} className="hover:bg-surface-subtle/50 transition">
+                        <td className="px-6 py-4">
+                          <div className="font-mono text-xs font-bold text-content-accent">{p.sku}</div>
+                          <div className="font-bold text-content-primary text-sm">{p.name}</div>
+                        </td>
+                        <td className="px-6 py-4 text-xs text-content-muted">{p.category || 'General'}</td>
+                        <td className="px-6 py-4 text-xs text-content-muted">{p.packSize || '1 Unit'}</td>
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-content-primary">₹{(p.discountedPrice ?? p.price ?? 0).toFixed(2)}</div>
+                          {p.mrp && p.mrp > (p.discountedPrice ?? p.price) && (
+                            <div className="text-2xs text-content-muted line-through">₹{p.mrp.toFixed(2)}</div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-xs font-bold text-content-primary">
+                          {p.stockCount ?? 0} units
+                        </td>
+                        <td className="px-6 py-4">
+                          {p.rxRequirement && p.rxRequirement !== 'OTC' ? (
+                            <span className="px-2 py-0.5 rounded text-2xs font-bold bg-surface-warningSubtle text-content-warning border border-border-warning">
+                              {p.rxRequirement}
+                            </span>
+                          ) : (
+                            <span className="text-2xs text-content-muted font-bold">OTC</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <span className={`px-2.5 py-1 rounded-full text-2xs font-extrabold ${
+                            (p.stockCount ?? 0) > 0
+                              ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
+                              : 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
+                          }`}>
+                            {(p.stockCount ?? 0) > 0 ? 'AVAILABLE' : 'OUT OF STOCK'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </main>
         </div>
-      )}
-    </div>
+
+        {/* Add Product Modal */}
+        {isAddModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white border border-border-default rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
+              <div className="px-6 py-4 border-b border-border-default flex items-center justify-between">
+                <h3 className="font-bold text-content-primary text-base">Add New Product to Catalog</h3>
+                <button
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="text-content-muted hover:text-content-primary p-1 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateProduct} className="p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 bg-surface-dangerSubtle border border-border-danger rounded-xl text-content-danger text-xs flex items-center space-x-2 font-semibold">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{formError}</span>
+                  </div>
+                )}
+                {formSuccess && (
+                  <div className="p-3 bg-surface-brandSubtle border border-border-brand rounded-xl text-content-brand text-xs flex items-center space-x-2 font-semibold">
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                    <span>Product created successfully in catalog!</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">SKU *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. SKU-MED-PARA-500"
+                      value={newSku}
+                      onChange={e => setNewSku(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Category</label>
+                    <input
+                      type="text"
+                      placeholder="Pharmacy & OTC"
+                      value={newCategory}
+                      onChange={e => setNewCategory(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Product Title *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Paracetamol 500mg Strip of 10"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Price (₹) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      placeholder="28.50"
+                      value={newPrice}
+                      onChange={e => setNewPrice(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">MRP (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="35.00"
+                      value={newMrp}
+                      onChange={e => setNewMrp(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Initial Stock</label>
+                    <input
+                      type="number"
+                      placeholder="50"
+                      value={newStock}
+                      onChange={e => setNewStock(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Pack Size</label>
+                    <input
+                      type="text"
+                      placeholder="10 Tablets / 100ml"
+                      value={newPackSize}
+                      onChange={e => setNewPackSize(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Prescription Rule</label>
+                    <select
+                      value={newRx}
+                      onChange={e => setNewRx(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    >
+                      <option value="OTC">OTC (No Rx required)</option>
+                      <option value="RX_REQUIRED">Rx Required (Pharmacist approval)</option>
+                      <option value="SCHEDULE_H">Schedule H (Strict Rx)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-4 flex items-center justify-end space-x-3 border-t border-border-default">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddModalOpen(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-content-muted hover:bg-surface-subtle transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-2 bg-action-speedBg hover:bg-action-speedHover rounded-xl text-xs font-bold text-white shadow-md transition disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Registering SKU…' : 'Save Product'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
     </SellerAuthGuard>
   );
 }
