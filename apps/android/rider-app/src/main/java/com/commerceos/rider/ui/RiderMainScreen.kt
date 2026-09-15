@@ -136,6 +136,11 @@ fun RiderMainScreen(
             repository.registerDeviceToken(cachedFcmToken)
         }
 
+        // Initial sync of shift status so rider is marked online in dispatch engine
+        if (sessionManager.getAuthToken().isNotBlank()) {
+            repository.updateShiftStatus(true)
+        }
+
         // Initial Trips / Order History Fetch
         val initialTrips = repository.fetchTrips()
         if (initialTrips.isNotEmpty()) {

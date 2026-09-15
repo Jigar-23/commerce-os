@@ -171,11 +171,107 @@ export default function DeliveryRiderApp() {
     }
   }, []);
 
+  // 1b. Synchronize Shift Status to Backend
+  const syncShiftStatus = useCallback(async (online: boolean) => {
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      await fetch(`${ORDER_API}/api/v1/delivery/rider/shift-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify({ status: online ? 'ONLINE' : 'OFFLINE', latitude: 28.202224, longitude: 76.615418 }),
+      });
+    } catch {}
+  }, []);
+
+  // 1c. Fetch Active Dispatch Offers (Polling every 3s when online and without active session)
+  const loadActiveOffers = useCallback(async () => {
+    if (!isOnline || session) return;
+    const token = getAuthToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${ORDER_API}/api/v1/delivery/offers/active`, {
+        headers: getAuthHeader(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const offersList = Array.isArray(data.offers) ? data.offers : (data.offer ? [data.offer] : []);
+        if (offersList.length > 0) {
+          const raw = offersList[0];
+          const mapped = {
+            id: raw.offerId || raw.id,
+            totalAmount: Number(raw.orderTotal || raw.totalAmount || 250),
+            estimatedPayout: Number(raw.payout || raw.payoutAmount || raw.earningsAmount || 40),
+            tipAmount: Number(raw.tipAmount || 0),
+            distanceKm: Number(raw.totalDistanceKm || raw.distanceKm || 2.5),
+            estimatedMinutes: Number(raw.estimatedTimeMins || raw.estimatedDurationMins || 15),
+            pickupStore: raw.merchantName || 'CommerceOS Central Hub',
+            pickupAddress: raw.pickupAddress || raw.merchantAddress || 'Main Market, Rewari',
+            customerName: raw.customerName || 'Customer',
+            customerAddress: raw.deliveryAddress || raw.customerAddress || 'Delivery Address, Rewari',
+            paymentMethod: raw.isCod ? 'COD' : 'ONLINE',
+            codAmount: Number(raw.codAmountToCollect || raw.codAmount || 0),
+          };
+          setActiveOffer((prev: any) => (prev?.id === mapped.id ? prev : mapped));
+        } else {
+          setActiveOffer(null);
+        }
+      } else {
+        setActiveOffer(null);
+      }
+    } catch {
+      // transient network failure
+    }
+  }, [isOnline, session]);
+
+  // 1d. Accept Delivery Offer Handler
+  const handleAcceptOffer = async (offerId: string) => {
+    setIsSubmitting(true);
+    setNotificationMsg(null);
+    try {
+      const res = await fetch(`${ORDER_API}/api/v1/delivery/offers/${offerId}/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const newSession = await res.json();
+        setSession(newSession);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(newSession));
+        setActiveOffer(null);
+        setActiveTab('duty');
+        setNotificationMsg('Offer accepted! Proceeding to pickup store.');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setNotificationMsg(`Failed to accept offer: ${err.message || 'Server error'}`);
+      }
+    } catch (e: any) {
+      setNotificationMsg(`Network error accepting offer: ${e.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   useEffect(() => {
     loadRiderProfile();
     loadDeliverySession();
     loadQueueFromDisk();
-  }, [loadRiderProfile, loadDeliverySession, loadQueueFromDisk]);
+    syncShiftStatus(true);
+  }, [loadRiderProfile, loadDeliverySession, loadQueueFromDisk, syncShiftStatus]);
+
+  useEffect(() => {
+    if (!isOnline || session) return;
+    loadActiveOffers();
+    const interval = setInterval(loadActiveOffers, 3000);
+    return () => clearInterval(interval);
+  }, [isOnline, session, loadActiveOffers]);
 
   // 2. REAL-TIME SSE EVENT STREAM SUBSCRIPTION VIA SECURE SINGLE-USE TICKET
   useEffect(() => {
@@ -463,6 +559,7 @@ export default function DeliveryRiderApp() {
             setIsOnline={(online) => {
               setIsOnline(online);
               if (!online) setActiveOffer(null);
+              syncShiftStatus(online);
             }}
             gpsStatus={gpsStatus}
             gpsStaleSeconds={gpsStaleSeconds}
@@ -632,11 +729,7 @@ export default function DeliveryRiderApp() {
           {activeOffer && (
             <OrderOfferModal
               offer={activeOffer}
-              onAccept={() => {
-                handleTransitionState('ACCEPTED');
-                setActiveOffer(null);
-                setActiveTab('duty');
-              }}
+              onAccept={() => handleAcceptOffer(activeOffer.id)}
               onDecline={() => setActiveOffer(null)}
             />
           )}
