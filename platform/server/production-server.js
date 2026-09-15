@@ -720,10 +720,12 @@ function parseRawBody(req) {
 }
 
 function sendJson(res, statusCode, data, extraHeaders = {}) {
+  const origin = res.reqOrigin || '*';
   const headers = {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept',
     ...extraHeaders
@@ -741,6 +743,9 @@ const server = http.createServer(async (req, res) => {
   const pathname = parsedUrl.pathname;
   const method = req.method;
 
+  const origin = req.headers.origin || '*';
+  res.reqOrigin = origin;
+
   // Support X-Client-Platform & X-Client-Version for native iOS / iOS-Rider / Android clients
   const clientPlatform = req.headers['x-client-platform'] || req.headers['X-Client-Platform'] || '';
   const clientVersion = req.headers['x-client-version'] || req.headers['X-Client-Version'] || '';
@@ -754,7 +759,8 @@ const server = http.createServer(async (req, res) => {
   // Handle CORS preflight options
   if (method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Credentials': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept',
       'Access-Control-Max-Age': '86400'

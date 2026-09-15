@@ -11,17 +11,17 @@
 const isProduction = process.env.NODE_ENV === 'production';
 
 function resolveSellerApiUrl(): string {
-  if (typeof window !== 'undefined' && window.location.hostname) {
-    return `http://${window.location.hostname}:8090`;
-  }
   const url = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
   if (url && url.trim().length > 0) {
     return url.trim();
   }
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return `http://${window.location.hostname}:8080`;
+  }
   if (isProduction) {
     return ''; // Fail closed in production rather than silently connecting to localhost
   }
-  return 'http://localhost:8090';
+  return 'http://127.0.0.1:8080';
 }
 
 const API_BASE_URL = resolveSellerApiUrl();
@@ -47,10 +47,14 @@ class SellerApiClient {
   }
 
   public getBaseUrl(): string {
-    if (typeof window !== 'undefined' && window.location.hostname) {
-      return `http://${window.location.hostname}:8090`;
+    const url = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
+    if (url && url.trim().length > 0) {
+      return url.trim().replace(/\/$/, '');
     }
-    return this.baseUrl || 'http://localhost:8090';
+    if (typeof window !== 'undefined' && window.location.hostname) {
+      return `http://${window.location.hostname}:8080`;
+    }
+    return this.baseUrl || 'http://127.0.0.1:8080';
   }
 
   public getSession(): SellerSession | null {
@@ -168,7 +172,6 @@ class SellerApiClient {
       const res = await fetch(url, {
         cache: 'no-store',
         ...options,
-        credentials: 'include',
         headers,
       });
 
