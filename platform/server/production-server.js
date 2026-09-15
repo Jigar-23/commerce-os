@@ -3937,8 +3937,8 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
       const riderId = authClaims.riderId || authClaims.sub;
-      const offers = await appRepositories.offerRepo.getActiveOffersForRider(riderId);
-      return sendJson(res, 200, { ok: true, count: (offers || []).length, offers: offers || [] });
+      const first = (offers && offers.length > 0) ? offers[0] : null;
+      return sendJson(res, 200, { ok: true, count: (offers || []).length, offers: offers || [], ...(first || {}) });
     }
 
     // POST /api/v1/delivery/offers/:id/ack
