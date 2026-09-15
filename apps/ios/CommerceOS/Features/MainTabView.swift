@@ -10,60 +10,57 @@ public struct MainTabView: View {
     public init() {}
     
     public var body: some View {
-        VStack(spacing: 0) {
-            // Main Content Area
-            ZStack {
-                switch selectedTab {
-                case 0:
-                    HomeScreen(onOpenCatalog: { selectedTab = 1 })
-                case 1:
-                    CategoriesScreen()
-                case 2:
-                    OrderHistoryScreen()
-                case 3:
-                    CartScreen(onCheckoutSuccess: { orderId in
-                        trackingOrderId = orderId
-                    })
-                default:
-                    HomeScreen(onOpenCatalog: { selectedTab = 1 })
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            
-            // Global Sticky Cart Bar floating directly above bottom navigation
-            if cartStore.totalItemCount > 0 && selectedTab != 3 {
-                GlobalCartBar(onTap: {
-                    selectedTab = 3
-                })
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: cartStore.totalItemCount)
-            }
-            
-            // Android-style Material 3 Bottom Navigation Bar pinned strictly to the bottom
-            androidBottomNavBar
-        }
-        .background(Color(hex: "F4F5F7").ignoresSafeArea())
-        .sheet(item: Binding<IdentifiableOrderWrapper?>(
-            get: { trackingOrderId.map { IdentifiableOrderWrapper(value: $0) } },
-            set: { trackingOrderId = $0?.value }
-        )) { wrapper in
-            NavigationView {
-                OrderTrackingScreen(orderId: wrapper.value)
-                    .navigationTitle("Order Status")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Done") {
-                                trackingOrderId = nil
-                                selectedTab = 2
-                            }
+        ZStack {
+            if let orderId = trackingOrderId {
+                OrderTrackingScreen(
+                    orderId: orderId,
+                    onBack: {
+                        trackingOrderId = nil
+                        selectedTab = 2 // Returns directly to Orders tab
+                    }
+                )
+                .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
+            } else {
+                VStack(spacing: 0) {
+                    // Main Content Area
+                    ZStack {
+                        switch selectedTab {
+                        case 0:
+                            HomeScreen(onOpenCatalog: { selectedTab = 1 })
+                        case 1:
+                            CategoriesScreen()
+                        case 2:
+                            OrderHistoryScreen(onTrackOrder: { id in
+                                trackingOrderId = id
+                            })
+                        case 3:
+                            CartScreen(onCheckoutSuccess: { orderId in
+                                trackingOrderId = orderId
+                            })
+                        default:
+                            HomeScreen(onOpenCatalog: { selectedTab = 1 })
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    
+                    // Global Sticky Cart Bar floating directly above bottom navigation
+                    if cartStore.totalItemCount > 0 && selectedTab != 3 {
+                        GlobalCartBar(onTap: {
+                            selectedTab = 3
+                        })
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: cartStore.totalItemCount)
+                    }
+                    
+                    // Android-style Material 3 Bottom Navigation Bar pinned strictly to the bottom
+                    androidBottomNavBar
+                }
+                .background(Color(hex: "F4F5F7").ignoresSafeArea())
             }
-            .navigationViewStyle(.stack)
         }
+        .animation(.easeInOut(duration: 0.25), value: trackingOrderId)
         .onChange(of: selectedTab) { newTab in
             if newTab == 2 {
                 Task {

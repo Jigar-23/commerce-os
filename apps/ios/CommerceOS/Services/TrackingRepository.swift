@@ -160,6 +160,7 @@ public class TrackingRepository: ObservableObject {
     @Published public var activeTracking: LiveTrackingPayload? = nil
     @Published public var isLiveStreaming: Bool = false
     @Published public var streamError: String? = nil
+    @Published public var isStreamReconnecting: Bool = false
 
     private var streamTask: Task<Void, Never>? = nil
     private var reconciliationTimer: Timer? = nil
@@ -261,11 +262,17 @@ public class TrackingRepository: ObservableObject {
                     guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
                         let delay = self.calculateBackoffDelay(attempt: retryAttempt)
                         retryAttempt += 1
+                        await MainActor.run {
+                            self.isStreamReconnecting = true
+                        }
                         try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                         continue
                     }
 
                     // Reset retry attempt on successful 200 stream connection
+                    await MainActor.run {
+                        self.isStreamReconnecting = false
+                    }
                     retryAttempt = 0
 
                     for try await line in bytes.lines {
@@ -279,6 +286,7 @@ public class TrackingRepository: ObservableObject {
                                     await MainActor.run {
                                         self.activeTracking = update
                                         self.streamError = nil
+                                        self.isStreamReconnecting = false
                                     }
                                 }
                             }
@@ -289,6 +297,7 @@ public class TrackingRepository: ObservableObject {
                         let delay = self.calculateBackoffDelay(attempt: retryAttempt)
                         retryAttempt += 1
                         await MainActor.run {
+                            self.isStreamReconnecting = true
                             self.streamError = "Reconnecting in \(String(format: "%.1f", delay))s..."
                         }
                         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -319,5 +328,6 @@ public class TrackingRepository: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         isLiveStreaming = false
+        isStreamReconnecting = false
     }
 }

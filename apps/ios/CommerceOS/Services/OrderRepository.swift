@@ -206,6 +206,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
     public let deliverySlaMins: Int?
     public let deliveryAddress: DeliveryAddressPayload?
     public let items: [ServerOrderItemResponse]?
+    public let riderName: String?
+    public let riderPhone: String?
+    public let riderVehicle: String?
+    public let storeName: String?
 
     public var effectiveDeliveryPin: String? {
         guard let pin = deliveryOtp?.trimmingCharacters(in: .whitespacesAndNewlines), !pin.isEmpty else {
@@ -215,7 +219,7 @@ public struct ServerOrderResponse: Identifiable, Codable {
     }
 
     public var effectiveSlaMins: Int {
-        return deliverySlaMins ?? 10
+        return max(deliverySlaMins ?? 10, 8)
     }
 
     public init(
@@ -232,7 +236,11 @@ public struct ServerOrderResponse: Identifiable, Codable {
         createdAt: String? = nil,
         deliverySlaMins: Int? = 10,
         deliveryAddress: DeliveryAddressPayload? = nil,
-        items: [ServerOrderItemResponse]? = nil
+        items: [ServerOrderItemResponse]? = nil,
+        riderName: String? = nil,
+        riderPhone: String? = nil,
+        riderVehicle: String? = nil,
+        storeName: String? = nil
     ) {
         self.id = id
         self.orderId = orderId ?? id
@@ -245,9 +253,13 @@ public struct ServerOrderResponse: Identifiable, Codable {
         self.paymentStatus = paymentStatus
         self.deliveryOtp = deliveryOtp
         self.createdAt = createdAt
-        self.deliverySlaMins = deliverySlaMins
+        self.deliverySlaMins = max(deliverySlaMins ?? 10, 8)
         self.deliveryAddress = deliveryAddress
         self.items = items
+        self.riderName = riderName
+        self.riderPhone = riderPhone
+        self.riderVehicle = riderVehicle
+        self.storeName = storeName
     }
 
     enum CodingKeys: String, CodingKey {
@@ -276,6 +288,14 @@ public struct ServerOrderResponse: Identifiable, Codable {
         case deliveryAddress = "delivery_address"
         case deliveryAddressCamel = "deliveryAddress"
         case items
+        case riderName = "rider_name"
+        case riderNameCamel = "riderName"
+        case riderPhone = "rider_phone"
+        case riderPhoneCamel = "riderPhone"
+        case riderVehicle = "rider_vehicle"
+        case riderVehicleCamel = "riderVehicle"
+        case storeName = "store_name"
+        case storeNameCamel = "storeName"
     }
 
     public init(from decoder: Decoder) throws {
@@ -332,7 +352,7 @@ public struct ServerOrderResponse: Identifiable, Codable {
                 resolvedSla = Int(d)
             }
         }
-        self.deliverySlaMins = resolvedSla ?? 10
+        self.deliverySlaMins = max(resolvedSla ?? 10, 8)
 
         // Delivery address: Object or stringified JSON
         if let addr = (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddress))
@@ -357,6 +377,15 @@ public struct ServerOrderResponse: Identifiable, Codable {
         } else {
             self.items = nil
         }
+
+        self.riderName = (try? container.decode(String.self, forKey: .riderName))
+            ?? (try? container.decode(String.self, forKey: .riderNameCamel))
+        self.riderPhone = (try? container.decode(String.self, forKey: .riderPhone))
+            ?? (try? container.decode(String.self, forKey: .riderPhoneCamel))
+        self.riderVehicle = (try? container.decode(String.self, forKey: .riderVehicle))
+            ?? (try? container.decode(String.self, forKey: .riderVehicleCamel))
+        self.storeName = (try? container.decode(String.self, forKey: .storeName))
+            ?? (try? container.decode(String.self, forKey: .storeNameCamel))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -375,6 +404,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
         try container.encodeIfPresent(deliverySlaMins, forKey: .deliverySlaMins)
         try container.encodeIfPresent(deliveryAddress, forKey: .deliveryAddress)
         try container.encodeIfPresent(items, forKey: .items)
+        try container.encodeIfPresent(riderName, forKey: .riderName)
+        try container.encodeIfPresent(riderPhone, forKey: .riderPhone)
+        try container.encodeIfPresent(riderVehicle, forKey: .riderVehicle)
+        try container.encodeIfPresent(storeName, forKey: .storeName)
     }
 }
 
@@ -505,5 +538,32 @@ public class OrderRepository: ObservableObject {
 
     public func getOrderById(orderId: String) async throws -> ServerOrderResponse {
         return try await apiClient.get(endpoint: "/api/v1/orders/\(orderId)")
+    }
+
+    public func fetchOrderDetail(orderId: String) async -> ServerOrderResponse? {
+        if let existing = customerOrders.first(where: { $0.id == orderId || $0.orderId == orderId }) {
+            return existing
+        }
+        struct SingleOrderWrapper: Decodable {
+            let ok: Bool?
+            let order: ServerOrderResponse?
+        }
+        if let direct: ServerOrderResponse = try? await apiClient.get(endpoint: "/api/v1/orders/\(orderId)") {
+            await MainActor.run {
+                if !self.customerOrders.contains(where: { $0.id == direct.id }) {
+                    self.customerOrders.insert(direct, at: 0)
+                }
+            }
+            return direct
+        }
+        if let wrapped: SingleOrderWrapper = try? await apiClient.get(endpoint: "/api/v1/orders/\(orderId)"), let ord = wrapped.order {
+            await MainActor.run {
+                if !self.customerOrders.contains(where: { $0.id == ord.id }) {
+                    self.customerOrders.insert(ord, at: 0)
+                }
+            }
+            return ord
+        }
+        return nil
     }
 }

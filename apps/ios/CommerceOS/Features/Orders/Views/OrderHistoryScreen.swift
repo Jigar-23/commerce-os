@@ -13,8 +13,11 @@ public struct OrderHistoryScreen: View {
     @State private var selectedFilter: String = "ALL"
     @State private var trackedOrderId: String? = nil
     @State private var pollTimer: Timer? = nil
+    public var onTrackOrder: ((String) -> Void)? = nil
     
-    public init() {}
+    public init(onTrackOrder: ((String) -> Void)? = nil) {
+        self.onTrackOrder = onTrackOrder
+    }
     
     public var body: some View {
         ScrollView(showsIndicators: false) {
@@ -81,7 +84,13 @@ public struct OrderHistoryScreen: View {
                         ForEach(filteredOrders) { order in
                             OrderHistoryCard(
                                 order: order,
-                                onTrack: { trackedOrderId = order.id },
+                                onTrack: {
+                                    if let onTrackOrder = onTrackOrder {
+                                        onTrackOrder(order.id)
+                                    } else {
+                                        trackedOrderId = order.id
+                                    }
+                                },
                                 onCancel: {
                                     Task {
                                         try? await orderRepo.cancelOrder(orderId: order.id)
