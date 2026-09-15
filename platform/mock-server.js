@@ -5132,8 +5132,9 @@ async function handleRequest(port, req, res) {
         const body = await parseBody(req);
         if (appRepositories && appRepositories.orderRepo) {
           const resCancel = await appRepositories.orderRepo.cancelOrder(orderId, authClaims.sub, body.reason || 'User/Merchant Cancellation');
-          if (!resCancel.ok) return json(res, resCancel.httpStatus || 400, { error: resCancel.error });
-          return json(res, 200, resCancel.order);
+          if (!resCancel.ok) return json(res, resCancel.httpStatus || 400, { error: resCancel.error, message: resCancel.message });
+          const ord = resCancel.order || {};
+          return json(res, 200, { ok: true, order: ord, ...ord });
         } else if (appRepositories && appRepositories.isProduction) {
           return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
         }
@@ -5141,7 +5142,7 @@ async function handleRequest(port, req, res) {
         if (!order) return json(res, 404, { error: 'Order not found' });
         setOrderStatus(order, 'CANCELLED', authClaims.sub, body.reason || 'Cancelled');
         saveDb();
-        return json(res, 200, order);
+        return json(res, 200, { ok: true, order, ...order });
       }
 
       // POST /api/v1/orders/:id/deliver-with-otp (Atomic Delivery Completion)

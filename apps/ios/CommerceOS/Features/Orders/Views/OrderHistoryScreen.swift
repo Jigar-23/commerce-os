@@ -6,12 +6,24 @@ public struct IdentifiableOrderWrapper: Identifiable {
     public init(value: String) { self.value = value }
 }
 
+public enum ActiveOrderHistorySheet: Identifiable {
+    case tracking(String)
+    case cancel(String)
+    
+    public var id: String {
+        switch self {
+        case .tracking(let id): return "tracking_\(id)"
+        case .cancel(let id): return "cancel_\(id)"
+        }
+    }
+}
+
 public struct OrderHistoryScreen: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var configProvider: ClientConfigProvider
     @ObservedObject private var orderRepo = OrderRepository.shared
     @State private var selectedFilter: String = "ALL"
-    @State private var trackedOrderId: String? = nil
+    @State private var activeSheet: ActiveOrderHistorySheet? = nil
     @State private var pollTimer: Timer? = nil
     public var onTrackOrder: ((String) -> Void)? = nil
     
@@ -88,13 +100,11 @@ public struct OrderHistoryScreen: View {
                                     if let onTrackOrder = onTrackOrder {
                                         onTrackOrder(order.id)
                                     } else {
-                                        trackedOrderId = order.id
+                                        activeSheet = .tracking(order.id)
                                     }
                                 },
                                 onCancel: {
-                                    Task {
-                                        try? await orderRepo.cancelOrder(orderId: order.id)
-                                    }
+                                    activeSheet = .cancel(order.id)
                                 }
                             )
                         }
@@ -127,24 +137,28 @@ public struct OrderHistoryScreen: View {
             pollTimer?.invalidate()
             pollTimer = nil
         }
-        .sheet(item: Binding<IdentifiableOrderWrapper?>(
-            get: { trackedOrderId.map { IdentifiableOrderWrapper(value: $0) } },
-            set: { trackedOrderId = $0?.value }
-        )) { wrapper in
-            NavigationView {
-                OrderTrackingScreen(orderId: wrapper.value)
-                    .navigationTitle("Order Tracking")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Close") {
-                                trackedOrderId = nil
-                                Task { await orderRepo.fetchCustomerOrders() }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .tracking(let orderId):
+                NavigationView {
+                    OrderTrackingScreen(orderId: orderId)
+                        .navigationTitle("Order Tracking")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Close") {
+                                    activeSheet = nil
+                                    Task { await orderRepo.fetchCustomerOrders() }
+                                }
                             }
                         }
-                    }
+                }
+                .navigationViewStyle(.stack)
+            case .cancel(let orderId):
+                CancelOrderSheet(orderId: orderId) {
+                    Task { await orderRepo.fetchCustomerOrders() }
+                }
             }
-            .navigationViewStyle(.stack)
         }
     }
     
@@ -243,7 +257,12 @@ public struct OrderHistoryCard: View {
     
     private var canCancel: Bool {
         let s = order.status.uppercased()
-        return s == "PLACED" || s == "CONFIRMED" || s == "SEARCHING_FOR_RIDER" || s == "READY_FOR_PICKUP"
+        return s == "PLACED" || s == "ORDER_PLACED" || s == "CREATED" ||
+               s == "CONFIRMED" || s == "ACCEPTED" || s == "SELLER_ACCEPTED" ||
+               s == "ORDER_SELLER_ACCEPTED" || s == "ALLOCATED_DARK_STORE" ||
+               s == "PAYMENT_PENDING" || s == "PRESCRIPTION_VERIFICATION_PENDING" ||
+               s == "PACKED" || s == "PACKED_FEFO" || s == "READY_FOR_PICKUP" ||
+               s == "SEARCHING_FOR_RIDER" || s == "LOOKING_FOR_RIDER"
     }
     
     public var body: some View {
@@ -503,11 +522,14 @@ public struct OrderHistoryCard: View {
         
         let label: String = {
             switch s {
-            case "PLACED": return "Order Placed"
-            case "CONFIRMED": return "Confirmed"
-            case "SEARCHING_FOR_RIDER": return "Finding Rider"
+            case "PLACED", "ORDER_PLACED", "CREATED": return "Order Placed"
+            case "CONFIRMED", "ACCEPTED", "SELLER_ACCEPTED", "ORDER_SELLER_ACCEPTED", "ALLOCATED_DARK_STORE": return "Order Confirmed"
+            case "PAYMENT_PENDING": return "Payment Pending"
+            case "PRESCRIPTION_VERIFICATION_PENDING": return "Prescription Review"
+            case "PACKED", "PACKED_FEFO": return "Packed & Ready"
             case "READY_FOR_PICKUP": return "Ready for Pickup"
-            case "PICKED_UP", "OUT_FOR_DELIVERY": return "Out for Delivery"
+            case "SEARCHING_FOR_RIDER", "LOOKING_FOR_RIDER": return "Finding Rider"
+            case "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER": return "Out for Delivery"
             case "DELIVERED": return "Delivered"
             case "CANCELLED": return "Cancelled"
             default: return s.replacingOccurrences(of: "_", with: " ")
@@ -521,5 +543,203 @@ public struct OrderHistoryCard: View {
             .padding(.vertical, 4)
             .background(bg)
             .cornerRadius(8)
+    }
+}
+
+// MARK: - Cancel Order Sheet (1:1 Android Parity with CancelOrderDialog.kt)
+public struct CancelOrderSheet: View {
+    public let orderId: String
+    public var onCancelled: (() -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var orderRepo = OrderRepository.shared
+    
+    public struct CancellationOption: Identifiable {
+        public var id: String { code }
+        public let code: String
+        public let label: String
+        
+        public init(code: String, label: String) {
+            self.code = code
+            self.label = label
+        }
+    }
+    
+    private let standardReasons: [CancellationOption] = [
+        CancellationOption(code: "ORDERED_MISTAKE", label: "Ordered by mistake"),
+        CancellationOption(code: "CHANGED_MIND", label: "Changed my mind"),
+        CancellationOption(code: "DELAYED", label: "Delivery taking too long"),
+        CancellationOption(code: "ADDRESS_CHANGE", label: "Want to change delivery address"),
+        CancellationOption(code: "OTHER", label: "Other reason")
+    ]
+    
+    @State private var selectedReasonCode: String = "ORDERED_MISTAKE"
+    @State private var reasonNote: String = ""
+    @State private var isSubmitting: Bool = false
+    @State private var errorMessage: String? = nil
+    
+    public init(orderId: String, onCancelled: (() -> Void)? = nil) {
+        self.orderId = orderId
+        self.onCancelled = onCancelled
+    }
+    
+    public var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // Informational header
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Why do you want to cancel?")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                        Text("Orders can be cancelled free of charge prior to delivery handoff.")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color(hex: "64748B"))
+                    }
+                    .padding(.top, 4)
+                    
+                    // Reasons list
+                    VStack(spacing: 8) {
+                        ForEach(standardReasons) { reason in
+                            Button(action: {
+                                selectedReasonCode = reason.code
+                            }) {
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .strokeBorder(selectedReasonCode == reason.code ? Color(hex: "059669") : Color(hex: "CBD5E1"), lineWidth: 2)
+                                        .background(
+                                            Circle()
+                                                .fill(selectedReasonCode == reason.code ? Color(hex: "059669") : Color.clear)
+                                                .padding(3)
+                                        )
+                                        .frame(width: 20, height: 20)
+                                    
+                                    Text(reason.label)
+                                        .font(.system(size: 14, weight: selectedReasonCode == reason.code ? .semibold : .regular))
+                                        .foregroundColor(Color(hex: "0F172A"))
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                                .background(selectedReasonCode == reason.code ? Color(hex: "ECFDF5") : Color.white)
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(selectedReasonCode == reason.code ? Color(hex: "10B981") : Color(hex: "E2E8F0"), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    
+                    // Optional Notes Field
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Additional Notes (optional)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color(hex: "475569"))
+                        
+                        TextField("e.g., Placed by mistake", text: $reasonNote)
+                            .font(.system(size: 14))
+                            .padding(12)
+                            .background(Color.white)
+                            .cornerRadius(10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color(hex: "CBD5E1"), lineWidth: 1)
+                            )
+                    }
+                    
+                    // Error Message Banner if any
+                    if let error = errorMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(Color(hex: "DC2626"))
+                            Text(error)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color(hex: "B91C1C"))
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(hex: "FEF2F2"))
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(hex: "FCA5A5"), lineWidth: 1)
+                        )
+                    }
+                    
+                    // Action Buttons
+                    VStack(spacing: 10) {
+                        Button(action: confirmCancel) {
+                            HStack(spacing: 8) {
+                                if isSubmitting {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                }
+                                Text(isSubmitting ? "Cancelling..." : "Confirm Cancellation")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(isSubmitting ? Color(hex: "EF4444").opacity(0.6) : Color(hex: "DC2626"))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(isSubmitting)
+                        
+                        Button(action: { dismiss() }) {
+                            Text("Keep Order")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(hex: "475569"))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(isSubmitting)
+                    }
+                    .padding(.top, 8)
+                }
+                .padding(16)
+            }
+            .background(Color(hex: "F8FAFC").ignoresSafeArea())
+            .navigationTitle("Cancel Order #\(orderId.suffix(8).uppercased())")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                    .disabled(isSubmitting)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+    
+    private func confirmCancel() {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        errorMessage = nil
+        
+        let note = reasonNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedLabel = standardReasons.first(where: { $0.code == selectedReasonCode })?.label ?? selectedReasonCode
+        let reasonText = note.isEmpty ? selectedLabel : "\(selectedLabel): \(note)"
+        
+        Task {
+            do {
+                try await orderRepo.cancelOrder(orderId: orderId, reason: reasonText)
+                await MainActor.run {
+                    isSubmitting = false
+                    onCancelled?()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSubmitting = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }

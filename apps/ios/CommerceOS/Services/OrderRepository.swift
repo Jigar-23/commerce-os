@@ -534,14 +534,57 @@ public class OrderRepository: ObservableObject {
         }
     }
 
+    public struct CancelOrderResponse: Decodable {
+        public let ok: Bool?
+        public let error: String?
+        public let message: String?
+        public let status: String?
+        public let orderStatus: String?
+        public let id: String?
+    }
+
     public func cancelOrder(orderId: String, reason: String = "USER_REQUESTED_CANCELLATION") async throws {
         struct CancelRequest: Codable {
             let reason: String
         }
-        let _: [String: String]? = try? await apiClient.post(
+        let res: CancelOrderResponse = try await apiClient.post(
             endpoint: "/api/v1/orders/\(orderId)/cancel",
             body: CancelRequest(reason: reason)
         )
+        if let ok = res.ok, !ok {
+            let msg = res.message ?? res.error ?? "Order cancellation failed."
+            throw APIError.serverError(400, msg)
+        }
+        
+        await MainActor.run {
+            if let idx = self.customerOrders.firstIndex(where: { $0.id == orderId || $0.orderId == orderId }) {
+                let current = self.customerOrders[idx]
+                let updated = ServerOrderResponse(
+                    id: current.id,
+                    orderId: current.orderId,
+                    customerId: current.customerId,
+                    status: "CANCELLED",
+                    orderStatus: "CANCELLED",
+                    totalAmount: current.totalAmount,
+                    deliveryFee: current.deliveryFee,
+                    paymentMethod: current.paymentMethod,
+                    paymentStatus: current.paymentStatus,
+                    deliveryOtp: current.deliveryOtp,
+                    createdAt: current.createdAt,
+                    deliverySlaMins: current.deliverySlaMins,
+                    deliveryAddress: current.deliveryAddress,
+                    items: current.items,
+                    riderName: current.riderName,
+                    riderPhone: current.riderPhone,
+                    riderVehicle: current.riderVehicle,
+                    storeName: current.storeName
+                )
+                self.customerOrders[idx] = updated
+            }
+            if self.lastPlacedOrder?.id == orderId || self.lastPlacedOrder?.orderId == orderId {
+                self.lastPlacedOrder = nil
+            }
+        }
         await fetchCustomerOrders()
     }
 

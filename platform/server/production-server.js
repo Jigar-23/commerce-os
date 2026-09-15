@@ -3190,7 +3190,27 @@ const server = http.createServer(async (req, res) => {
       }
 
       const cancelResult = await appRepositories.orderRepo.cancelOrder(orderId, authClaims.sub, body.reason || 'USER_REQUESTED_CANCELLATION');
-      return sendJson(res, cancelResult.httpStatus || (cancelResult.ok ? 200 : 400), cancelResult);
+      if (!cancelResult.ok) {
+        return sendJson(res, cancelResult.httpStatus || 400, cancelResult);
+      }
+      const rawOrder = cancelResult.order || {};
+      const formattedOrder = {
+        id: rawOrder.order_id || rawOrder.id,
+        orderId: rawOrder.order_id || rawOrder.id,
+        customerId: rawOrder.customer_id || rawOrder.customerId,
+        storeId: rawOrder.store_id || rawOrder.storeId,
+        orderStatus: rawOrder.status || 'CANCELLED',
+        status: rawOrder.status || 'CANCELLED',
+        totalAmount: Number(rawOrder.total_amount || 0),
+        items: typeof rawOrder.items === 'string' ? JSON.parse(rawOrder.items) : (rawOrder.items || []),
+        deliveryAddress: typeof rawOrder.delivery_address === 'string' ? JSON.parse(rawOrder.delivery_address) : (rawOrder.delivery_address || {}),
+        createdAt: rawOrder.created_at
+      };
+      return sendJson(res, 200, {
+        ok: true,
+        order: formattedOrder,
+        ...formattedOrder
+      });
     }
 
     // -------------------------------------------------------------

@@ -19,6 +19,7 @@ public struct OrderTrackingScreen: View {
     @State private var ratingSubmitted: Bool = false
     @State private var localRoadRoute: [CLLocationCoordinate2D] = []
     @State private var isMapExpanded: Bool = false
+    @State private var isShowingCancelSheet: Bool = false
     @State private var pulseScale: CGFloat = 0.85
     @State private var pulseAlpha: Double = 0.5
     
@@ -50,6 +51,16 @@ public struct OrderTrackingScreen: View {
     
     private var isActive: Bool {
         !isDelivered && !isCancelled
+    }
+    
+    private var canCancel: Bool {
+        let s = effectiveStatus.uppercased()
+        return s == "PLACED" || s == "ORDER_PLACED" || s == "CREATED" ||
+               s == "CONFIRMED" || s == "ACCEPTED" || s == "SELLER_ACCEPTED" ||
+               s == "ORDER_SELLER_ACCEPTED" || s == "ALLOCATED_DARK_STORE" ||
+               s == "PAYMENT_PENDING" || s == "PRESCRIPTION_VERIFICATION_PENDING" ||
+               s == "PACKED" || s == "PACKED_FEFO" || s == "READY_FOR_PICKUP" ||
+               s == "SEARCHING_FOR_RIDER" || s == "LOOKING_FOR_RIDER"
     }
     
     /// Strict Parity with Android `dynamicEtaMins`:
@@ -110,8 +121,8 @@ public struct OrderTrackingScreen: View {
                     VStack(spacing: 0) {
                         // 1. FIRST ELEMENT AT VERY TOP:
                         // Active delivery -> Live interactive Dark Map tracking (300pt height)
-                        // Delivered order -> Clean top app bar with Back button and Order ID (NO MAP)
-                        if !isDelivered {
+                        // Delivered or Cancelled order -> Clean top app bar with Back button and Order ID (NO MAP)
+                        if !isDelivered && !isCancelled {
                             liveMapHeaderView
                         } else {
                             deliveredTopBarView
@@ -120,7 +131,7 @@ public struct OrderTrackingScreen: View {
                         // 2. BELOW TOP HEADER: STATUS CARDS, DETAILS, ITEMS, RECEIPT
                         VStack(spacing: 14) {
                             // Reconnecting notification banner if telemetry stream drops (Exact Android guard string)
-                            if trackingRepo.isStreamReconnecting && !isDelivered {
+                            if trackingRepo.isStreamReconnecting && !isDelivered && !isCancelled {
                                 reconnectingBanner
                             }
                             
@@ -146,6 +157,11 @@ public struct OrderTrackingScreen: View {
                             
                             // Bill Summary & Payment Breakdown
                             billSummaryCard
+                            
+                            // Cancel Order Action Button (Pre-delivery cancellation)
+                            if canCancel {
+                                cancelOrderButton
+                            }
                             
                             // Need Help / Support Button
                             supportButton
@@ -196,6 +212,41 @@ public struct OrderTrackingScreen: View {
             self.trackingData = updatedDto
             self.updateLiveActivity(with: updatedDto)
             self.resolveRoadRouteIfNeeded(for: updatedDto)
+        }
+        .sheet(isPresented: $isShowingCancelSheet) {
+            CancelOrderSheet(orderId: effectiveOrderId) {
+                if let current = self.orderDetail {
+                    self.orderDetail = ServerOrderResponse(
+                        id: current.id,
+                        orderId: current.orderId,
+                        customerId: current.customerId,
+                        status: "CANCELLED",
+                        orderStatus: "CANCELLED",
+                        totalAmount: current.totalAmount,
+                        deliveryFee: current.deliveryFee,
+                        paymentMethod: current.paymentMethod,
+                        paymentStatus: current.paymentStatus,
+                        deliveryOtp: current.deliveryOtp,
+                        createdAt: current.createdAt,
+                        deliverySlaMins: current.deliverySlaMins,
+                        deliveryAddress: current.deliveryAddress,
+                        items: current.items,
+                        riderName: current.riderName,
+                        riderPhone: current.riderPhone,
+                        riderVehicle: current.riderVehicle,
+                        storeName: current.storeName
+                    )
+                } else {
+                    self.orderDetail = ServerOrderResponse(
+                        id: effectiveOrderId,
+                        orderId: effectiveOrderId,
+                        status: "CANCELLED",
+                        orderStatus: "CANCELLED"
+                    )
+                }
+                self.trackingData = nil
+                self.container.trackingRepository.stopLiveTracking()
+            }
         }
     }
     
@@ -848,6 +899,31 @@ public struct OrderTrackingScreen: View {
         .shadow(color: Color.black.opacity(0.03), radius: 4, x: 0, y: 1)
     }
     
+    // MARK: - Cancel Order Button
+    private var cancelOrderButton: some View {
+        Button(action: {
+            isShowingCancelSheet = true
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                Text("Cancel Order")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundColor(Color(hex: "DC2626"))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(Color.white)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(hex: "FCA5A5"), lineWidth: 1.5)
+            )
+            .shadow(color: Color.black.opacity(0.02), radius: 3, x: 0, y: 1)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     // MARK: - Support Button
     private var supportButton: some View {
         Button(action: {

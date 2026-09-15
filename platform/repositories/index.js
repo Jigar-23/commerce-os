@@ -3959,7 +3959,23 @@ class TransactionalOrderRepository {
       }
 
       // State machine validation: Only allow cancellation in allowed pre-delivery states
-      const ALLOWED_CANCELLATION_STATES = ['PLACED', 'PAYMENT_PENDING', 'PRESCRIPTION_VERIFICATION_PENDING', 'SELLER_ACCEPTED', 'PACKED', 'READY_FOR_PICKUP'];
+      const ALLOWED_CANCELLATION_STATES = [
+        'PLACED',
+        'ORDER_PLACED',
+        'CREATED',
+        'CONFIRMED',
+        'ACCEPTED',
+        'SELLER_ACCEPTED',
+        'ORDER_SELLER_ACCEPTED',
+        'ALLOCATED_DARK_STORE',
+        'PAYMENT_PENDING',
+        'PRESCRIPTION_VERIFICATION_PENDING',
+        'PACKED',
+        'PACKED_FEFO',
+        'READY_FOR_PICKUP',
+        'LOOKING_FOR_RIDER',
+        'SEARCHING_FOR_RIDER'
+      ];
       if (!ALLOWED_CANCELLATION_STATES.includes(order.status)) {
         await client.query('ROLLBACK');
         return {
@@ -4026,6 +4042,10 @@ class TransactionalOrderRepository {
 
       await client.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
       await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
+      await client.query(
+        `UPDATE offers SET status = 'EXPIRED', updated_at = NOW() WHERE order_id = $1 AND status IN ('OFFERED', 'CREATED', 'BROADCAST', 'PENDING')`,
+        [order.order_id || order.id]
+      ).catch(() => {});
 
       await client.query(
         `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at)
