@@ -201,10 +201,12 @@ class RiderDeliveryRepository(
     private fun getCandidateUrls(): List<String> {
         val list = mutableListOf<String>()
         val primary = baseUrlProvider().trimEnd('/')
-        if (primary.isNotBlank()) list.add(primary)
-        if (!list.contains("http://127.0.0.1:8090")) list.add("http://127.0.0.1:8090")
-        if (!list.contains("http://192.168.1.76:8090")) list.add("http://192.168.1.76:8090")
-        if (!list.contains("http://10.0.2.2:8090")) list.add("http://10.0.2.2:8090")
+        if (primary.isNotBlank() && !primary.contains("127.0.0.1") && !primary.contains("localhost")) {
+            list.add(primary)
+        }
+        if (!list.contains("https://commerce-os-api.onrender.com")) {
+            list.add("https://commerce-os-api.onrender.com")
+        }
         return list
     }
 
@@ -409,9 +411,12 @@ class RiderDeliveryRepository(
         try {
             val urlsToTry = mutableListOf<String>()
             val primary = baseUrlProvider().trimEnd('/')
-            if (primary.isNotBlank()) urlsToTry.add(primary)
-            if (!urlsToTry.contains("http://127.0.0.1:8090")) urlsToTry.add("http://127.0.0.1:8090")
-            if (!urlsToTry.contains("http://192.168.1.76:8090")) urlsToTry.add("http://192.168.1.76:8090")
+            if (primary.isNotBlank() && !primary.contains("127.0.0.1") && !primary.contains("localhost")) {
+                urlsToTry.add(primary)
+            }
+            if (!urlsToTry.contains("https://commerce-os-api.onrender.com")) {
+                urlsToTry.add("https://commerce-os-api.onrender.com")
+            }
 
             var lastCode = 0
             var lastErrStr = ""

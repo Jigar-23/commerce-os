@@ -36,10 +36,14 @@ class RiderSessionManager private constructor(context: Context) {
 
     fun getBaseUrl(): String {
         val saved = prefs.getString(KEY_BASE_URL, null)
-        if (!saved.isNullOrBlank()) return saved
+        if (!saved.isNullOrBlank() && !saved.contains("127.0.0.1") && !saved.contains("localhost")) {
+            return saved.trimEnd('/')
+        }
         val buildConfigUrl = com.commerceos.rider.BuildConfig.API_BASE_URL
-        if (buildConfigUrl.isNotBlank()) return buildConfigUrl
-        return ""
+        if (buildConfigUrl.isNotBlank() && !buildConfigUrl.contains("127.0.0.1") && !buildConfigUrl.contains("localhost")) {
+            return buildConfigUrl.trimEnd('/')
+        }
+        return "https://commerce-os-api.onrender.com"
     }
 
     fun saveBaseUrl(url: String) {
