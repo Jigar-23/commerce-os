@@ -30,7 +30,23 @@ export default function OrdersPage() {
       const res = await sellerApi.get('/api/v1/orders/seller');
       if (res.ok && res.data) {
         setFetchError(null);
-        setOrders(Array.isArray(res.data) ? res.data : (res.data?.orders || []));
+        const rawList = Array.isArray(res.data) ? res.data : (res.data?.orders || []);
+        const normalized = rawList.map((o: any) => ({
+          ...o,
+          id: o.id || o.order_id,
+          orderStatus: o.orderStatus || o.status,
+          status: o.status || o.orderStatus,
+          totalAmount: o.totalAmount || o.total_amount || '0.00',
+          paymentMethod: o.paymentMethod || o.payment_method || (o.is_cod ? 'COD' : 'ONLINE'),
+          paymentStatus: o.paymentStatus || o.payment_status || 'PENDING',
+          deliveryAddress: o.deliveryAddress || o.delivery_address,
+          customerId: o.customerId || o.customer_id,
+          customerPhone: o.customerPhone || o.customer_phone || o.delivery_address?.contactPhone || o.delivery_address?.phone,
+          customerName: o.customerName || o.customer_name,
+          createdAt: o.createdAt || o.created_at,
+          sellerApprovalStatus: o.sellerApprovalStatus || o.seller_approval_status,
+        }));
+        setOrders(normalized);
       } else {
         setFetchError(res.error || 'Failed to fetch seller orders.');
       }

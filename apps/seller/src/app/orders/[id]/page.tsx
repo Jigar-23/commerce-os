@@ -41,7 +41,23 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
     try {
       const res = await sellerApi.get(`/api/v1/orders/${orderId}`);
       if (res.ok && res.data) {
-        setOrder(res.data);
+        const raw = res.data;
+        const normalized = {
+          ...raw,
+          id: raw.id || raw.order_id,
+          orderStatus: raw.orderStatus || raw.status,
+          status: raw.status || raw.orderStatus,
+          totalAmount: raw.totalAmount || raw.total_amount || '0.00',
+          paymentMethod: raw.paymentMethod || raw.payment_method || (raw.is_cod ? 'COD' : 'ONLINE'),
+          paymentStatus: raw.paymentStatus || raw.payment_status || 'PENDING',
+          deliveryAddress: raw.deliveryAddress || raw.delivery_address,
+          customerId: raw.customerId || raw.customer_id,
+          customerPhone: raw.customerPhone || raw.customer_phone || raw.delivery_address?.contactPhone || raw.delivery_address?.phone,
+          customerName: raw.customerName || raw.customer_name,
+          createdAt: raw.createdAt || raw.created_at,
+          sellerApprovalStatus: raw.sellerApprovalStatus || raw.seller_approval_status,
+        };
+        setOrder(normalized);
       } else {
         showToast(res.error || `Order ${orderId} not found`, 'error');
       }

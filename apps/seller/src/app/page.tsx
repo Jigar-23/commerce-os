@@ -49,7 +49,21 @@ export default function MerchantOperationsPage() {
       ]);
 
       if (ordRes.ok && ordRes.data) {
-        setOrders(Array.isArray(ordRes.data) ? ordRes.data : (ordRes.data?.orders || []));
+        const rawList = Array.isArray(ordRes.data) ? ordRes.data : (ordRes.data?.orders || []);
+        const normalized = rawList.map((o: any) => ({
+          ...o,
+          id: o.id || o.order_id,
+          orderStatus: o.orderStatus || o.status,
+          status: o.status || o.orderStatus,
+          totalAmount: o.totalAmount || o.total_amount || '0.00',
+          paymentMethod: o.paymentMethod || o.payment_method || (o.is_cod ? 'COD' : 'ONLINE'),
+          paymentStatus: o.paymentStatus || o.payment_status || 'PENDING',
+          deliveryAddress: o.deliveryAddress || o.delivery_address,
+          customerId: o.customerId || o.customer_id,
+          createdAt: o.createdAt || o.created_at,
+          sellerApprovalStatus: o.sellerApprovalStatus || o.seller_approval_status,
+        }));
+        setOrders(normalized);
       }
       if (catRes.ok && catRes.data) {
         const items = Array.isArray(catRes.data?.content) ? catRes.data.content : (Array.isArray(catRes.data) ? catRes.data : []);

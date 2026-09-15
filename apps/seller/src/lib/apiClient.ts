@@ -13,15 +13,9 @@ const isProduction = process.env.NODE_ENV === 'production';
 function resolveSellerApiUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
   if (url && url.trim().length > 0) {
-    return url.trim();
+    return url.trim().replace(/\/$/, '');
   }
-  if (typeof window !== 'undefined' && window.location.hostname) {
-    return `http://${window.location.hostname}:8080`;
-  }
-  if (isProduction) {
-    return ''; // Fail closed in production rather than silently connecting to localhost
-  }
-  return 'http://127.0.0.1:8080';
+  return 'https://commerce-os-api.onrender.com';
 }
 
 const API_BASE_URL = resolveSellerApiUrl();
@@ -51,10 +45,7 @@ class SellerApiClient {
     if (url && url.trim().length > 0) {
       return url.trim().replace(/\/$/, '');
     }
-    if (typeof window !== 'undefined' && window.location.hostname) {
-      return `http://${window.location.hostname}:8080`;
-    }
-    return this.baseUrl || 'http://127.0.0.1:8080';
+    return this.baseUrl || 'https://commerce-os-api.onrender.com';
   }
 
   public getSession(): SellerSession | null {
