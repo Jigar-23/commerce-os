@@ -54,10 +54,10 @@ export default function SellerSidebar({
             </div>
             <div>
               <div className="flex items-center space-x-1.5">
-                <div className="w-2 h-2 rounded-full bg-action-primaryBg animate-pulse" />
+                <div className="w-2 h-2 rounded-full bg-action-speedBg animate-pulse" />
                 <h1 className="text-2xs font-black uppercase tracking-wider text-content-muted">Commerce OS</h1>
               </div>
-              <p className="text-sm font-black text-content-primary">Merchant Hub</p>
+              <p className="text-sm font-black text-content-primary">Rewari Central Hub</p>
             </div>
           </Link>
 
@@ -119,21 +119,6 @@ export default function SellerSidebar({
             <div className="flex items-center space-x-3">
               <Bike className="w-4 h-4" />
               <span>Fleet & Riders</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
-
-          <Link
-            href="/stores"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'stores'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <MapPin className="w-4 h-4" />
-              <span>Stores & Hubs</span>
             </div>
             <ChevronRight className="w-3.5 h-3.5 opacity-40" />
           </Link>
@@ -250,10 +235,10 @@ export default function SellerSidebar({
           </div>
           <div className="overflow-hidden flex-1">
             <p className="text-xs font-bold text-content-primary truncate" suppressHydrationWarning>
-              {session?.merchantName ? session.merchantName : (session?.sellerId || 'Merchant')}
+              {session?.merchantName || 'Rewari Merchant'}
             </p>
             <p className="text-2xs text-content-muted truncate" suppressHydrationWarning>
-              {session?.storeName ? session.storeName : 'Rewari Central Hub'}
+              Rewari Central Hub (Single Store)
             </p>
           </div>
         </div>
