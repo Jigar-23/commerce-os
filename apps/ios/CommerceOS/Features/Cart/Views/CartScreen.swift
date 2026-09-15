@@ -422,20 +422,26 @@ public struct CartScreen: View {
                     
                     // Express COD Checkout Trigger Button
                     Button(action: placeExpressOrder) {
-                        if isPlacingOrder {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Text("Place COD Order • ₹\(String(format: "%.2f", grandTotal))")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
+                        HStack {
+                            Spacer()
+                            if isPlacingOrder {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Text("Place COD Order • ₹\(String(format: "%.2f", grandTotal))")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            Spacer()
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(hex: "059669"))
+                        .cornerRadius(12)
+                        .contentShape(Rectangle())
+                        .shadow(color: Color(hex: "059669").opacity(0.35), radius: 8, x: 0, y: 4)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color(hex: "059669"))
-                    .cornerRadius(12)
-                    .shadow(color: Color(hex: "059669").opacity(0.35), radius: 8, x: 0, y: 4)
+                    .buttonStyle(PlainButtonStyle())
                     .padding(.horizontal, 14)
                     .disabled(isPlacingOrder)
                     

@@ -718,8 +718,8 @@ function serviceabilityFor(address, items) {
     etaMinutes: { min: Math.max(2, calculatedEta - 3), max: calculatedEta + 3 },
     etaLabel: `${calculatedEta} Mins Express SLA`,
     fulfillmentNode: {
-      id: process.env.STORE_MASTER_ID || 'STORE_MASTER_001',
-      name: process.env.STORE_MASTER_NAME || 'Commerce OS Central Fulfillment Hub',
+      id: process.env.STORE_MASTER_ID || 'store_rewari_hub_01',
+      name: process.env.STORE_MASTER_NAME || 'Rewari Central Fulfillment Hub',
       latitude: storeLat,
       longitude: storeLng,
       slaMinutes: calculatedEta,
@@ -2100,7 +2100,7 @@ async function newOrder(customerId, payload, cartItems) {
     }
   }
 
-  const fulfillmentNodeStoreId = (serviceability && serviceability.fulfillmentNode && (serviceability.fulfillmentNode.id || serviceability.fulfillmentNode.store_id || serviceability.fulfillmentNode.storeId)) || payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].storeId) || (items[0] && items[0].sellerId) || 'STORE_REWARI_01';
+  const fulfillmentNodeStoreId = (serviceability && serviceability.fulfillmentNode && (serviceability.fulfillmentNode.id || serviceability.fulfillmentNode.store_id || serviceability.fulfillmentNode.storeId)) || payload.storeId || payload.merchantId || payload.sellerId || (items[0] && items[0].storeId) || (items[0] && items[0].sellerId) || 'store_rewari_hub_01';
 
   const order = {
     id: orderId,

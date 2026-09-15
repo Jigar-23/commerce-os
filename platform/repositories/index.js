@@ -1181,11 +1181,14 @@ class ServiceabilityService {
 
     // 4. Decision Policy: Deterministic store ranking
     fulfillableStores.sort((a, b) => {
-      // Primary: Distance ascending (shortest road travel)
+      // Primary: Authoritative single store priority for Rewari Central Hub
+      if (a.id === 'store_rewari_hub_01' && b.id !== 'store_rewari_hub_01') return -1;
+      if (b.id === 'store_rewari_hub_01' && a.id !== 'store_rewari_hub_01') return 1;
+      // Secondary: Distance ascending (shortest road travel)
       if (a.distanceKm !== b.distanceKm) {
         return a.distanceKm - b.distanceKm;
       }
-      // Secondary: SLA minutes ascending (fastest delivery promise)
+      // Tertiary: SLA minutes ascending (fastest delivery promise)
       if ((a.sla_minutes || 10) !== (b.sla_minutes || 10)) {
         return (a.sla_minutes || 10) - (b.sla_minutes || 10);
       }
