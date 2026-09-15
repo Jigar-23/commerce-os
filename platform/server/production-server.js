@@ -905,6 +905,8 @@ const server = http.createServer(async (req, res) => {
       sseBroadcasterInstance.subscribe(authClaims.sub, res, lastEventId);
       sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res, lastEventId);
       sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res, lastEventId);
+      sseBroadcasterInstance.subscribe('riders', res, lastEventId);
+      sseBroadcasterInstance.subscribe('all_riders', res, lastEventId);
       if (authClaims.storeId) {
         sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res, lastEventId);
         sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res, lastEventId);

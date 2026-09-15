@@ -17,6 +17,7 @@
 const assert = require('assert');
 const crypto = require('crypto');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 
 // Ensure production environment variables
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://jigar@localhost:5432/commerceos_test';
@@ -498,6 +499,20 @@ async function run() {
        ) ON CONFLICT (id) DO UPDATE SET status = 'OFFERED', offer_expires_at = $6, rider_id = $4, delivery_id = $2, order_id = $3`,
       [offerId, deliveryId, targetOrderId, riderId, Date.now(), expiresAt]
     );
+
+    // 10b. Test Fleet Offer Fallback for Different Assigned Rider
+    const testOtherRiderHeaders = {
+      'Content-Type': 'application/json',
+      'X-Client-Platform': 'iOS-Rider',
+      'Authorization': `Bearer ${jwt.sign(
+        { sub: 'rdr_other_different_99', role: 'ROLE_RIDER' },
+        process.env.JWT_SECRET,
+        { issuer: process.env.JWT_ISSUER, audience: process.env.JWT_AUDIENCE, expiresIn: '1h' }
+      )}`
+    };
+    const fleetFallbackRes = await apiRequest('GET', '/api/v1/delivery/offers/active', null, testOtherRiderHeaders);
+    const hasFleetFallback = fleetFallbackRes.status === 200 && Array.isArray(fleetFallbackRes.data?.offers) && fleetFallbackRes.data.offers.length > 0;
+    recordResult('GET api/v1/delivery/offers/active (fleet offer fallback)', 'GET', '/api/v1/delivery/offers/active', fleetFallbackRes.status, hasFleetFallback);
 
     // 11. acknowledgeOffer
     const ackRes = await apiRequest('POST', `/api/v1/delivery/offers/${offerId}/ack`, {}, riderHeaders);

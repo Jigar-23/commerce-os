@@ -25,9 +25,9 @@ public final class RiderOfferEventPipeline: ObservableObject {
             await self.pollActiveOffersOnce()
         }
 
-        // 2. Periodic reconciliation polling (every 4 seconds)
+        // 2. Periodic reconciliation polling (every 3 seconds - 1:1 Android parity)
         pollingTimer?.invalidate()
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.pollActiveOffersOnce()
             }
@@ -48,7 +48,6 @@ public final class RiderOfferEventPipeline: ObservableObject {
     private func pollActiveOffersOnce() async {
         guard isListening else { return }
         guard RiderAPIClient.shared.isAuthenticated else { return }
-        guard RiderSessionManager.shared.isShiftOnline else { return }
 
         do {
             let response: ActiveOffersResponseDto = try await RiderAPIClient.shared.request(endpoint: .getActiveOffers)
@@ -69,7 +68,7 @@ public final class RiderOfferEventPipeline: ObservableObject {
         sseStreamTask = Task { [weak self] in
             guard let self = self else { return }
             while !Task.isCancelled {
-                guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
+                guard RiderAPIClient.shared.isAuthenticated else {
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     continue
                 }

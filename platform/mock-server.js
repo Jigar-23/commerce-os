@@ -5336,6 +5336,7 @@ async function handleRequest(port, req, res) {
           global.riderSSEConnections.set('ALL', new Set());
         }
         global.riderSSEConnections.get(riderId).add(res);
+        global.riderSSEConnections.get('ALL').add(res);
 
         const initEvent = JSON.stringify({
           eventId: 'evt_r_init_' + Date.now(),
@@ -5348,6 +5349,7 @@ async function handleRequest(port, req, res) {
 
         req.on('close', () => {
           global.riderSSEConnections.get(riderId)?.delete(res);
+          global.riderSSEConnections.get('ALL')?.delete(res);
         });
         return;
       }
@@ -5400,7 +5402,7 @@ async function handleRequest(port, req, res) {
 
         if (productionPgPool) {
           try {
-            const offRes = await productionPgPool.query(
+            let offRes = await productionPgPool.query(
               `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
                FROM offers o
                LEFT JOIN orders ord ON ord.order_id = o.order_id
@@ -5410,6 +5412,16 @@ async function handleRequest(port, req, res) {
                ORDER BY o.created_at DESC LIMIT 1`,
               [riderId]
             );
+            if (offRes.rows.length === 0) {
+              offRes = await productionPgPool.query(
+                `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
+                 FROM offers o
+                 LEFT JOIN orders ord ON ord.order_id = o.order_id
+                 WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                   AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint)
+                 ORDER BY o.created_at DESC LIMIT 1`
+              );
+            }
             if (offRes.rows.length > 0) {
               const o = offRes.rows[0];
               const mapped = {

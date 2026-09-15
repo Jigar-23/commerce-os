@@ -10,6 +10,7 @@ public final class RiderSessionManager: ObservableObject {
     @Published public var profile: RiderProfileDto? = nil
 
     private let apiClient: RiderAPIClient
+    private var heartbeatTimer: Timer?
 
     public init(apiClient: RiderAPIClient = .shared) {
         self.apiClient = apiClient
@@ -31,13 +32,63 @@ public final class RiderSessionManager: ObservableObject {
             self.profile = nil
         }
 
-        if self.isShiftOnline {
+        if apiClient.isAuthenticated {
+            self.isShiftOnline = true
+            UserDefaults.standard.set(true, forKey: "rider_shift_online")
             RiderOfferEventPipeline.shared.startListening()
+            Task {
+                await self.ensureOnlineShift()
+            }
         }
     }
 
-    public func toggleShift() async throws {
-        let newStatus = !isShiftOnline
+    public func ensureOnlineShift() async {
+        guard apiClient.isAuthenticated else { return }
+        isShiftOnline = true
+        UserDefaults.standard.set(true, forKey: "rider_shift_online")
+
+        struct ShiftPayload: Encodable {
+            let online: Bool
+            let isOnline: Bool
+            let shiftStatus: String
+            let status: String
+            let latitude: Double
+            let longitude: Double
+        }
+
+        let body = ShiftPayload(
+            online: true,
+            isOnline: true,
+            shiftStatus: "ONLINE_AVAILABLE",
+            status: "ONLINE_AVAILABLE",
+            latitude: 28.202224,
+            longitude: 76.615418
+        )
+
+        let _: [String: String]? = try? await apiClient.post(
+            endpoint: .toggleShift(online: true),
+            body: body
+        )
+
+        // Register cached APNs device token if available
+        if let cachedToken = UserDefaults.standard.string(forKey: "rider_apns_device_token"), !cachedToken.isEmpty {
+            struct TokenPayload: Encodable {
+                let fcmToken: String
+                let deviceToken: String
+                let token: String
+                let platform: String
+            }
+            let tokenBody = TokenPayload(fcmToken: cachedToken, deviceToken: cachedToken, token: cachedToken, platform: "IOS")
+            let _: [String: String]? = try? await apiClient.post(endpoint: .registerDeviceToken, body: tokenBody)
+        }
+
+        await refreshActiveSession()
+        RiderOfferEventPipeline.shared.startListening()
+        startHeartbeat()
+    }
+
+    public func toggleShift(forcedOnline: Bool? = nil) async throws {
+        let newStatus = forcedOnline ?? !isShiftOnline
         isShiftOnline = newStatus
         UserDefaults.standard.set(newStatus, forKey: "rider_shift_online")
 
@@ -46,13 +97,17 @@ public final class RiderSessionManager: ObservableObject {
             let isOnline: Bool
             let shiftStatus: String
             let status: String
+            let latitude: Double
+            let longitude: Double
         }
 
         let body = ShiftPayload(
             online: newStatus,
             isOnline: newStatus,
             shiftStatus: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
-            status: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE"
+            status: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
+            latitude: 28.202224,
+            longitude: 76.615418
         )
         let _: [String: String]? = try? await apiClient.post(
             endpoint: .toggleShift(online: newStatus),
@@ -62,10 +117,46 @@ public final class RiderSessionManager: ObservableObject {
         if newStatus {
             await refreshActiveSession()
             RiderOfferEventPipeline.shared.startListening()
+            startHeartbeat()
         } else {
             activeSession = nil
             RiderOfferEventPipeline.shared.stopListening()
+            stopHeartbeat()
         }
+    }
+
+    private func startHeartbeat() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 25.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, self.isShiftOnline, self.apiClient.isAuthenticated else { return }
+                struct HeartbeatPayload: Encodable {
+                    let online: Bool
+                    let isOnline: Bool
+                    let shiftStatus: String
+                    let status: String
+                    let latitude: Double
+                    let longitude: Double
+                }
+                let body = HeartbeatPayload(
+                    online: true,
+                    isOnline: true,
+                    shiftStatus: "ONLINE_AVAILABLE",
+                    status: "ONLINE_AVAILABLE",
+                    latitude: 28.202224,
+                    longitude: 76.615418
+                )
+                let _: [String: String]? = try? await self.apiClient.post(
+                    endpoint: .toggleShift(online: true),
+                    body: body
+                )
+            }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
     }
 
     public func refreshActiveSession() async {
@@ -82,5 +173,9 @@ public final class RiderSessionManager: ObservableObject {
         } catch {
             // Keep existing profile
         }
+    }
+
+    deinit {
+        heartbeatTimer?.invalidate()
     }
 }

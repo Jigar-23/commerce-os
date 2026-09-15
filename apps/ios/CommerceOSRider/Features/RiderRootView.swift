@@ -35,8 +35,7 @@ public struct RiderRootView: View {
             if !container.apiClient.isAuthenticated {
                 RiderAuthView(onLoginSuccess: {
                     Task {
-                        await sessionManager.refreshActiveSession()
-                        try? await sessionManager.toggleShift()
+                        await sessionManager.ensureOnlineShift()
                     }
                 })
             } else {
@@ -154,6 +153,11 @@ public struct RiderRootView: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(100)
+            }
+        }
+        .onAppear {
+            Task {
+                await sessionManager.ensureOnlineShift()
             }
         }
     }
