@@ -350,6 +350,30 @@ async function run() {
     const directOrderId = directOrderRes.data?.orderId || '';
     recordResult('POST api/v1/orders', 'POST', '/api/v1/orders', directOrderRes.status, directOrderOk);
 
+    // 22b. direct placeOrder with temp address and deliveryAddress payload (auto-provision verification)
+    const tempOrderRes = await apiRequest('POST', '/api/v1/orders', {
+      customerId: customerId,
+      storeId: storeId,
+      address_id: 'temp_default_rewari',
+      addressId: 'temp_default_rewari',
+      delivery_address: {
+        address_line: 'Flat 402, Block B, Connaught Residency',
+        city: 'New Delhi',
+        postal_code: '110001',
+        latitude: 28.6320,
+        longitude: 77.2180
+      },
+      items: [{ sku, name: 'Vital Health Tonic 200ml', quantity: 1, price: 120.0 }],
+      paymentMethod: 'COD',
+      isCod: true
+    }, authHeaders);
+    const tempOrderOk = (tempOrderRes.status === 200 || tempOrderRes.status === 201) && Boolean(tempOrderRes.data?.orderId);
+    const tempOrderId = tempOrderRes.data?.orderId || '';
+    recordResult('POST api/v1/orders (auto-provision temp address)', 'POST', '/api/v1/orders', tempOrderRes.status, tempOrderOk);
+    if (tempOrderId) {
+      await apiRequest('POST', `/api/v1/orders/${tempOrderId}/cancel`, { reason: 'Test auto-provision cleanup' }, authHeaders);
+    }
+
     // 23. cancelOrder
     const cancelRes = await apiRequest('POST', `/api/v1/orders/${directOrderId}/cancel`, {
       reason: 'Ordered by mistake'

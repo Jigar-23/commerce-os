@@ -2780,8 +2780,8 @@ const server = http.createServer(async (req, res) => {
 
       const authoritativeStoreId = fulfillmentDecision.storeId;
 
-      // Security: Strip internal-only fields (e.g. targetRiderId, riderId) from public client payload
-      const { targetRiderId, riderId, ...safeOrderPayload } = body;
+      // Security: Strip internal-only and legacy fields from public client payload
+      const { targetRiderId, riderId, address_id, addressId, ...safeOrderPayload } = body;
 
       // Idempotency Key Handling
       const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
@@ -2791,6 +2791,7 @@ const server = http.createServer(async (req, res) => {
         ...safeOrderPayload,
         items: orderItems,
         addressId: customerAddr.id,
+        deliveryAddress: customerAddr,
         paymentMethod: requestedMethod,
         fulfillmentDecision: fulfillmentDecision.decision,
         idempotencyKey
@@ -3102,7 +3103,8 @@ const server = http.createServer(async (req, res) => {
 
       const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || null;
       const placeResult = await appRepositories.orderRepo.placeOrderTransactionally(customerId, {
-        addressId: body.addressId,
+        addressId: customerAddr.id,
+        deliveryAddress: customerAddr,
         paymentMethod: 'COD',
         items: rawCartItems,
         fulfillmentDecision: fulfillmentDecision.decision,

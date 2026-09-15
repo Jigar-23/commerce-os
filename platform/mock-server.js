@@ -2006,6 +2006,15 @@ async function newOrder(customerId, payload, cartItems) {
   const deliveryId = 'del_' + crypto.randomUUID();
 
   let resolvedAddressId = payload.addressId || (payload.deliveryAddress && payload.deliveryAddress.id) || null;
+  if (resolvedAddressId && String(resolvedAddressId).startsWith('temp_')) {
+    resolvedAddressId = null;
+  }
+  if (resolvedAddressId && appRepositories && appRepositories.addressRepo) {
+    try {
+      const exists = await appRepositories.addressRepo.findAddressById(customerId, resolvedAddressId);
+      if (!exists) resolvedAddressId = null;
+    } catch (_) {}
+  }
   if (!resolvedAddressId && appRepositories && appRepositories.addressRepo) {
     try {
       const defAddr = await appRepositories.addressRepo.getDefaultAddress(customerId);

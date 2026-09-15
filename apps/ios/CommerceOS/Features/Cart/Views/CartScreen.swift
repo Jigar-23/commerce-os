@@ -525,13 +525,14 @@ public struct CartScreen: View {
                 
                 // 2. Ensure address has an authoritative ID from PostgreSQL address book
                 var authoritativeId = addr.id
-                if authoritativeId.hasPrefix("temp_") && !customerId.isEmpty {
+                let isKnownSaved = addressRepository.addresses.contains(where: { $0.id == authoritativeId })
+                if !customerId.isEmpty && (authoritativeId.hasPrefix("temp_") || !isKnownSaved) {
                     do {
                         let saved = try await addressRepository.addAddress(customerId: customerId, address: addr)
                         authoritativeId = saved.id
                         await MainActor.run { self.addressRepository.selectAddress(saved) }
                     } catch {
-                        // If auto-save fails, server will provision from deliveryAddress payload
+                        print("[Cart] Auto-provision address returned: \(error.localizedDescription)")
                     }
                 }
                 
@@ -540,8 +541,10 @@ public struct CartScreen: View {
                 }
                 let safeLat = (addr.latitude != 0.0) ? addr.latitude : 28.202224
                 let safeLng = (addr.longitude != 0.0) ? addr.longitude : 76.615418
+                let summary = addr.displaySummary
+                let cleanLine = !summary.isEmpty ? summary : (!addr.addressLine.isEmpty ? addr.addressLine : "Rewari Central Hub, Model Town")
                 let addressPayload = DeliveryAddressPayload(
-                    addressLine: addr.displaySummary.isEmpty ? addr.addressLine : addr.displaySummary,
+                    addressLine: cleanLine,
                     city: addr.city ?? "Rewari",
                     postalCode: addr.postalCode ?? "123401",
                     latitude: safeLat,
