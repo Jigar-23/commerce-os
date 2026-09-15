@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import SellerSidebar from '../../components/SellerSidebar';
 import {
-  Package, Search, CheckCircle2, RefreshCw, Eye, ArrowRight, ShieldCheck, MapPin
+  Package, Search, CheckCircle2, RefreshCw, Eye, ArrowRight, ShieldCheck, MapPin, Bike, AlertCircle
 } from 'lucide-react';
 
 import { sellerApi } from '@/lib/apiClient';
@@ -21,7 +21,52 @@ export default function OrdersPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [orderQuery, setOrderQuery] = useState('');
   const [orderFilter, setOrderFilter] = useState('ALL');
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const { session, storeName } = useSellerSession();
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleAcceptOrder = async (e: React.MouseEvent, orderId: string) => {
+    e.stopPropagation();
+    setActionLoadingId(orderId);
+    try {
+      const res = await sellerApi.post(`/api/v1/orders/${orderId}/accept-by-seller`);
+      if (res.ok) {
+        showToast(`Order #${orderId.slice(-8)} Accepted! Rider broadcast dispatched to fleet.`, 'success');
+        playOrderChime();
+        await fetchOrders(false);
+      } else {
+        showToast(res.error || 'Failed to accept order.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error accepting order.', 'error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleReadyForPickup = async (e: React.MouseEvent, orderId: string) => {
+    e.stopPropagation();
+    setActionLoadingId(orderId);
+    try {
+      const res = await sellerApi.post(`/api/v1/orders/${orderId}/ready-for-pickup`);
+      if (res.ok) {
+        showToast(`Order #${orderId.slice(-8)} Marked Ready for Pickup!`, 'success');
+        playOrderChime();
+        await fetchOrders(false);
+      } else {
+        showToast(res.error || 'Failed to mark ready for pickup.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error updating order.', 'error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   const fetchOrders = async (showSpinner = true) => {
     const s = session || sellerApi.getSession();
@@ -154,6 +199,13 @@ export default function OrdersPage() {
           </div>
         </header>
 
+        {toastMessage && (
+          <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl shadow-2xl font-bold text-xs flex items-center space-x-2 transition-all border ${toastMessage.type === 'success' ? 'bg-action-speedBg text-white border-border-brand' : 'bg-action-dangerBg text-white border-border-danger'}`}>
+            <CheckCircle2 className="w-4 h-4" />
+            <span>{toastMessage.text}</span>
+          </div>
+        )}
+
         <main className="p-8 space-y-6">
           <div className="bg-white border border-border-default rounded-2xl shadow-sm overflow-hidden">
             <div className="p-6 border-b border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -260,13 +312,61 @@ export default function OrdersPage() {
                       </div>
                     </div>
 
-                    <div className="shrink-0 flex items-center space-x-3">
+                    <div className="shrink-0 flex items-center space-x-2.5">
+                      {/* 1. Direct Accept Order Button (Triggers Rider Notification) */}
+                      {(order.sellerApprovalStatus === 'PENDING' || order.status === 'PLACED' || order.status === 'PENDING_APPROVAL') && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleAcceptOrder(e, order.id)}
+                          disabled={actionLoadingId === order.id}
+                          className="px-4 py-2.5 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-2 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                        >
+                          {actionLoadingId === order.id ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Broadcasting to Riders…</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Accept &amp; Broadcast to Riders</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {/* 2. Ready for Pickup Action (if Accepted or Packed) */}
+                      {(order.status === 'SELLER_ACCEPTED' || order.status === 'PACKED') && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleReadyForPickup(e, order.id)}
+                          disabled={actionLoadingId === order.id}
+                          className="px-4 py-2.5 bg-action-primaryBg hover:bg-action-primaryHover text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-2 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                        >
+                          {actionLoadingId === order.id ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Package className="w-4 h-4" />
+                          )}
+                          <span>Ready for Pickup</span>
+                        </button>
+                      )}
+
+                      {/* 3. Rider Broadcast Status Badge */}
+                      {order.status === 'READY_FOR_PICKUP' && (
+                        <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-surface-brandSubtle text-content-brand text-xs font-bold border border-border-brandSubtle">
+                          <Bike className="w-4 h-4 text-content-brand" />
+                          <span>Broadcasted to Riders</span>
+                        </div>
+                      )}
+
+                      {/* 4. Details Navigation */}
                       <div
-                        className="px-5 py-2.5 bg-action-speedBg group-hover:bg-action-speedHover text-white rounded-xl text-xs font-bold shadow-md flex items-center space-x-2 transition-all transform group-hover:scale-105"
+                        className="px-3.5 py-2.5 bg-surface-subtle hover:bg-surface-muted text-content-primary rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all border border-border-default cursor-pointer"
                       >
-                        <Eye className="w-4 h-4" />
-                        <span>View Order Details &amp; Timeline</span>
-                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                        <Eye className="w-3.5 h-3.5 text-content-secondary" />
+                        <span>Details</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-content-muted group-hover:translate-x-1 transition-transform" />
                       </div>
                     </div>
                   </div>

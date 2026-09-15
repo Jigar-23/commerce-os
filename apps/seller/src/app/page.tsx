@@ -36,6 +36,27 @@ export default function MerchantOperationsPage() {
   const [codLedger, setCodLedger] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleAcceptOrder = async (e: React.MouseEvent, orderId: string) => {
+    e.stopPropagation();
+    setActionLoadingId(orderId);
+    try {
+      const res = await sellerApi.post(`/api/v1/orders/${orderId}/accept-by-seller`);
+      if (res.ok) {
+        setToastMessage(`Order #${orderId.slice(-8)} Accepted! Rider broadcast dispatched.`);
+        setTimeout(() => setToastMessage(null), 4000);
+        await fetchOverviewData(false);
+      } else {
+        alert(res.error || 'Failed to accept order.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error accepting order.');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   const fetchOverviewData = async (showSpinner = true) => {
     const s = session || sellerApi.getSession();
@@ -142,6 +163,13 @@ export default function MerchantOperationsPage() {
             </button>
           </div>
         </header>
+
+        {toastMessage && (
+          <div className="fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl shadow-2xl font-bold text-xs flex items-center space-x-2 transition-all bg-action-speedBg text-white border border-border-brand">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
 
         <main className="p-8 space-y-8 max-w-7xl">
           {/* TOP OPERATIONS BANNER */}
@@ -283,9 +311,27 @@ export default function MerchantOperationsPage() {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs font-bold text-content-brand group-hover:translate-x-1 transition-transform shrink-0">
-                      <span>Manage Order Details</span>
-                      <ArrowRight className="w-4 h-4" />
+                    <div className="flex items-center space-x-2 shrink-0">
+                      {(order.sellerApprovalStatus === 'PENDING' || order.status === 'PLACED' || order.status === 'PENDING_APPROVAL') && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleAcceptOrder(e, order.id)}
+                          disabled={actionLoadingId === order.id}
+                          className="px-3.5 py-1.5 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                        >
+                          {actionLoadingId === order.id ? (
+                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>Accept &amp; Dispatch</span>
+                        </button>
+                      )}
+
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-content-brand group-hover:translate-x-1 transition-transform px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-surface-muted border border-border-default">
+                        <span>Details</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </div>
                     </div>
                   </div>
                 ))}
