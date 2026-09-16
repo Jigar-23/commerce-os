@@ -85,7 +85,7 @@ export default function DedicatedInventoryPage() {
   };
 
   // Transactional Ledger Stock Adjustment
-  const handleAdjustStock = async (item: InventoryItem, delta: number, reason: string = 'MANUAL_REPLENISHMENT') => {
+  const handleAdjustStock = async (item: InventoryItem, delta: number, reason: string = 'SELLER_RESTOCK') => {
     if (delta === 0) return;
 
     try {
@@ -138,7 +138,7 @@ export default function DedicatedInventoryPage() {
       showToast('Enter a valid non-zero adjustment delta.', 'error');
       return;
     }
-    handleAdjustStock(item, delta, delta > 0 ? 'MANUAL_RESTOCK' : 'DAMAGED_EXPIRED_WRITE_OFF');
+    handleAdjustStock(item, delta, delta > 0 ? 'SELLER_RESTOCK' : 'SELLER_ADJUSTMENT');
     setCustomAddInputs({ ...customAddInputs, [item.id]: '' });
   };
 
@@ -156,7 +156,7 @@ export default function DedicatedInventoryPage() {
       const res = await sellerApi.post('/api/v1/catalog/inventory/adjust', {
         sku: lastAdjustment.sku,
         delta: reverseDelta,
-        reason: 'LEDGER_COMPENSATING_ROLLBACK',
+        reason: 'SELLER_ADJUSTMENT',
         storeId: session?.storeId || 'store_rewari_hub_01',
       });
 

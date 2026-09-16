@@ -185,7 +185,7 @@ export default function ProductsPage() {
         mrp: mrpNum,
         initialStock: stockNum,
         stockCount: stockNum,
-        reason: 'Initial seller catalog registration',
+        reason: 'INITIAL_STOCK_LINK',
         rxRequirement: newRx,
         imageUrl: primaryImg,
         images: cleanedImages,
