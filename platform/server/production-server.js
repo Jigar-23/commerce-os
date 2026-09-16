@@ -4869,12 +4869,21 @@ const server = http.createServer(async (req, res) => {
       }
       const deliveryId = cancelDeliveryMatch[1];
       const body = await parseJsonBody(req);
-      const delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
-      if (!delivery) return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery session not found.' });
+      let delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
+      if (!delivery && appRepositories.deliveryRepo.findActiveSessionForRider) {
+        delivery = await appRepositories.deliveryRepo.findActiveSessionForRider(authClaims.sub);
+      }
+      if (!delivery) {
+        return sendJson(res, 200, { ok: true, deliveryId, state: 'CANCELLED', message: 'Delivery session already terminated.' });
+      }
       if (delivery.rider_id !== authClaims.sub && !authClaims.role?.includes('ADMIN')) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only assigned rider or admin can cancel delivery.' });
       }
-      await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'CANCELLED', authClaims.sub);
+      await appRepositories.deliveryRepo.transitionStateTransactionally(delivery.delivery_id || deliveryId, 'CANCELLED', authClaims.sub);
+      if (pool && delivery.order_id) {
+        pool.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`, [delivery.order_id, delivery.delivery_id || deliveryId]).catch(() => {});
+        pool.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [delivery.order_id]).catch(() => {});
+      }
       return sendJson(res, 200, { ok: true, deliveryId, state: 'CANCELLED', reason: body.reason || 'Rider cancelled' });
     }
 

@@ -531,9 +531,14 @@ class RiderDeliveryRepository(
 
     suspend fun declineOffer(offerId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
+            if (activeLocalSession?.deliveryId == offerId || activeLocalSession?.orderId == offerId) {
+                activeLocalSession = null
+            }
             val conn = createConnection("/api/v1/delivery/offers/$offerId/decline", "POST")
             conn.doOutput = true
-            if (conn.responseCode in 200..299) return@withContext Result.success(true)
+            if (conn.responseCode in 200..299 || conn.responseCode == 404 || conn.responseCode == 409) {
+                return@withContext Result.success(true)
+            }
             return@withContext Result.failure(Exception("Decline failed"))
         } catch (e: Exception) {
             return@withContext Result.failure(e)
@@ -604,10 +609,6 @@ class RiderDeliveryRepository(
     }
 
     suspend fun fetchActiveSession(): ServerDeliverySession? = withContext(Dispatchers.IO) {
-        val local = activeLocalSession
-        if (local != null && local.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")) {
-            return@withContext local
-        }
         try {
             val conn = createConnection("/api/v1/delivery/rider/active-session", "GET")
             if (conn.responseCode == 200) {
@@ -616,18 +617,30 @@ class RiderDeliveryRepository(
                 val sessionObj = obj.optJSONObject("session")
                 if (sessionObj != null) {
                     val s = parseSessionJson(sessionObj)
-                    activeLocalSession = s
-                    return@withContext s
+                    if (s != null && s.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")) {
+                        activeLocalSession = s
+                        return@withContext s
+                    }
                 }
                 if (obj.optBoolean("active", true) && obj.has("deliveryId")) {
                     val s = parseSessionJson(obj)
-                    activeLocalSession = s
-                    return@withContext s
+                    if (s != null && s.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")) {
+                        activeLocalSession = s
+                        return@withContext s
+                    }
                 }
+                activeLocalSession = null
+                return@withContext null
+            } else if (conn.responseCode == 404) {
+                activeLocalSession = null
                 return@withContext null
             }
         } catch (e: Exception) {
-            // No active session
+            // Network failure: fall back to local session if still active
+            val local = activeLocalSession
+            if (local != null && local.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")) {
+                return@withContext local
+            }
         }
         return@withContext null
     }
@@ -795,6 +808,7 @@ class RiderDeliveryRepository(
     }
 
     suspend fun cancelDelivery(deliveryId: String, reason: String, note: String = ""): Result<Boolean> = withContext(Dispatchers.IO) {
+        activeLocalSession = null
         try {
             val conn = createConnection("/api/v1/delivery/$deliveryId/cancel", "POST")
             conn.doOutput = true
@@ -811,8 +825,8 @@ class RiderDeliveryRepository(
                 conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            if (conn.responseCode in 200..299 || conn.responseCode == 429) {
-                activeLocalSession = null
+            activeLocalSession = null
+            if (conn.responseCode in 200..299 || conn.responseCode == 404 || conn.responseCode == 429) {
                 return@withContext Result.success(true)
             } else {
                 val json = try { JSONObject(responseStr) } catch (e: Exception) { null }

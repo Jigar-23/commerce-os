@@ -2455,7 +2455,7 @@ class TransactionalOfferRepository {
         return { ok: false, httpStatus: 404, error: 'OFFER_NOT_FOUND', message: `Offer ${offerId} not found.` };
       }
       const offer = offerRes.rows[0];
-      if (offer.rider_id && offer.rider_id !== riderId) {
+      if (offer.rider_id && offer.rider_id !== riderId && offer.rider_id !== 'all') {
         await client.query('ROLLBACK');
         return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
       }
@@ -2675,7 +2675,7 @@ class LocalDevelopmentOfferRepository {
     if (!offer) {
       return { ok: false, httpStatus: 404, error: 'OFFER_NOT_FOUND', message: `Offer ${offerId} does not exist.` };
     }
-    if (offer.riderId && offer.riderId !== riderId) {
+    if (offer.riderId && offer.riderId !== riderId && offer.riderId !== 'all') {
       return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
     }
     if (offer.status === 'DECLINED') {

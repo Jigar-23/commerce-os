@@ -973,12 +973,12 @@ fun RiderMainScreen(
             onConfirmCancel = { reason, note ->
                 scope.launch {
                     actionLoading = true
+                    showCancelDeliveryDialog = false
+                    session = null
+                    activeOffer = null
+                    RiderForegroundLocationService.clearDeliverySession()
                     val res = repository.cancelDelivery(currentSession.deliveryId, reason, note)
                     res.onSuccess {
-                        showCancelDeliveryDialog = false
-                        session = null
-                        activeOffer = null
-                        RiderForegroundLocationService.clearDeliverySession()
                         Toast.makeText(context, "Delivery cancelled", Toast.LENGTH_SHORT).show()
                     }.onFailure { err ->
                         Toast.makeText(context, err.message ?: "Cancellation failed", Toast.LENGTH_LONG).show()
