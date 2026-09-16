@@ -12,20 +12,26 @@ export function useSellerSession() {
     setIsMounted(true);
     let active = true;
 
-    async function init() {
-      try {
-        const s = await sellerApi.ensureSession();
-        if (active && s) {
-          setSession(s);
+    // Fast-path: If a valid session exists in storage, resolve immediately without network delay
+    const existing = sellerApi.getSession();
+    if (existing && sellerApi.isAuthenticated()) {
+      setSession(existing);
+      setIsResolving(false);
+    } else {
+      const init = async () => {
+        try {
+          const s = await sellerApi.ensureSession();
+          if (active && s) {
+            setSession(s);
+          }
+        } catch (e) {
+          console.error('[useSellerSession] Failed to ensure session:', e);
+        } finally {
+          if (active) setIsResolving(false);
         }
-      } catch (e) {
-        console.error('[useSellerSession] Failed to ensure session:', e);
-      } finally {
-        if (active) setIsResolving(false);
-      }
+      };
+      init();
     }
-
-    init();
 
     const interval = setInterval(() => {
       const current = sellerApi.getSession();

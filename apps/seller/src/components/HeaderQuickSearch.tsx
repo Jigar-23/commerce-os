@@ -36,21 +36,27 @@ export default function HeaderQuickSearch({
   const [isLoading, setIsLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const loadOrders = async () => {
-      setIsLoading(true);
-      try {
-        const res = await sellerApi.get('/api/v1/orders/seller');
-        if (res.ok && res.data) {
-          setAllOrders(Array.isArray(res.data) ? res.data : (res.data?.orders || []));
-        }
-      } catch (e) {
-        console.error('Quick search order load error:', e);
-      } finally {
-        setIsLoading(false);
+  const loadOrders = async () => {
+    if (isLoading || allOrders.length > 0) return;
+    setIsLoading(true);
+    try {
+      const res = await sellerApi.get('/api/v1/orders/seller');
+      if (res.ok && res.data) {
+        setAllOrders(Array.isArray(res.data) ? res.data : (res.data?.orders || []));
       }
-    };
-    loadOrders();
+    } catch (e) {
+      console.error('Quick search order load error:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Defer loading search records to prioritize active page rendering
+    const timer = setTimeout(() => {
+      loadOrders();
+    }, 2000);
+    return () => clearTimeout(timer);
   }, []);
 
   // Close dropdown on click outside
@@ -82,7 +88,10 @@ export default function HeaderQuickSearch({
           type="text"
           placeholder={placeholder || "Quick View Search (Order ID, Phone #, or User ID)..."}
           value={query}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            setIsOpen(true);
+            loadOrders();
+          }}
           onChange={(e) => {
             const val = e.target.value;
             setQuery(val);
