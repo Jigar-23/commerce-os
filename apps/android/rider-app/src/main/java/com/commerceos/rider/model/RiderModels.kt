@@ -168,7 +168,11 @@ data class RiderNotificationItem(
     val deepLink: String?,
     val createdAt: String,
     val expiresAt: Long?,
-    val readAt: String?
+    val readAt: String?,
+    val offerStatus: String? = null,
+    val orderStatus: String? = null,
+    val orderRiderId: String? = null,
+    val isAvailable: Boolean? = null
 )
 
 data class RoutePoint(

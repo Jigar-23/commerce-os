@@ -239,7 +239,57 @@ private fun NotificationCardItem(
                     )
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isUnread) {
+                        if (item.isAvailable == true) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
+                                modifier = Modifier.padding(end = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .background(Color(0xFF10B981), CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Available",
+                                        color = Color(0xFF10B981),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        } else if (item.isAvailable == false) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f)),
+                                modifier = Modifier.padding(end = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .background(Color(0xFFEF4444), CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Claimed",
+                                        color = Color(0xFFEF4444),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        } else if (isUnread) {
                             Box(
                                 modifier = Modifier
                                     .padding(end = 6.dp)
@@ -321,8 +371,8 @@ private fun NotificationCardItem(
                         letterSpacing = 0.5.sp
                     )
                     Text(
-                        text = "Tap to view →",
-                        color = Color(0xFF10B981),
+                        text = if (item.isAvailable == false) "Job Claimed ✕" else "Tap to view →",
+                        color = if (item.isAvailable == false) Color(0xFFEF4444) else Color(0xFF10B981),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
                     )

@@ -558,23 +558,44 @@ class RiderDeliveryRepository(
                     val item = array.getJSONObject(i)
                     val rId = item.optString("riderId").ifBlank { item.optString("rider_id") }.ifBlank { "rider_self" }
                     val notifId = item.optString("notificationId").ifBlank { item.optString("id", UUID.randomUUID().toString()) }
+                    val offStatus = item.optString("offerStatus").takeIf { it.isNotBlank() } ?: item.optString("offer_status").takeIf { it.isNotBlank() }
+                    val ordStatus = item.optString("orderStatus").takeIf { it.isNotBlank() } ?: item.optString("order_status").takeIf { it.isNotBlank() }
+                    val ordRiderId = item.optString("orderRiderId").takeIf { it.isNotBlank() } ?: item.optString("order_rider_id").takeIf { it.isNotBlank() }
+                    val categoryVal = item.optString("category", "ORDERS")
+                    val typeVal = item.optString("type", "ORDER_OFFER")
+                    val offerIdVal = item.optString("offerId").takeIf { it.isNotBlank() }
+
+                    val isOrderOffer = categoryVal.equals("ORDERS", ignoreCase = true) ||
+                                       typeVal.contains("OFFER", ignoreCase = true) ||
+                                       !offerIdVal.isNullOrBlank()
+
+                    val isTaken = offStatus in listOf("ACCEPTED", "CLAIMED_BY_OTHER", "EXPIRED", "CANCELLED", "DECLINED") ||
+                                  ordStatus in listOf("RIDER_ASSIGNED", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED") ||
+                                  (!ordRiderId.isNullOrBlank() && ordRiderId != rId)
+
+                    val isAvailableVal = if (isOrderOffer) !isTaken else null
+
                     list.add(
                         RiderNotificationItem(
                             notificationId = notifId,
                             eventId = item.optString("eventId").ifBlank { notifId },
-                            type = item.optString("type", "ORDER_OFFER"),
-                            category = item.optString("category", "ORDERS"),
+                            type = typeVal,
+                            category = categoryVal,
                             priority = item.optString("priority", "HIGH"),
                             riderId = rId,
                             orderId = item.optString("orderId").takeIf { it.isNotBlank() },
                             deliveryId = item.optString("deliveryId").takeIf { it.isNotBlank() },
-                            offerId = item.optString("offerId").takeIf { it.isNotBlank() },
+                            offerId = offerIdVal,
                             title = item.optString("title", "New Job Alert"),
                             body = item.optString("body", "New order offer received"),
                             deepLink = item.optString("deepLink").takeIf { it.isNotBlank() },
                             createdAt = item.optString("createdAt", ""),
                             expiresAt = if (item.has("expiresAt") && !item.isNull("expiresAt")) item.getLong("expiresAt") else null,
-                            readAt = if (item.has("readAt") && !item.isNull("readAt")) item.getString("readAt") else null
+                            readAt = if (item.has("readAt") && !item.isNull("readAt")) item.getString("readAt") else null,
+                            offerStatus = offStatus,
+                            orderStatus = ordStatus,
+                            orderRiderId = ordRiderId,
+                            isAvailable = isAvailableVal
                         )
                     )
                 }

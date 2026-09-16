@@ -29,6 +29,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
   const [collectedCashInput, setCollectedCashInput] = useState('');
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelReasonInput, setCancelReasonInput] = useState('');
+  const [showRebroadcastModal, setShowRebroadcastModal] = useState(false);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setStatusMessage({ text, type });
@@ -186,6 +187,20 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
     }
   };
 
+  // Helper to resolve stage rank
+  const getStageRank = (status?: string): number => {
+    if (!status) return 0;
+    const s = String(status).toUpperCase();
+    if (['DELIVERED', 'COMPLETED'].includes(s)) return 7;
+    if (['ARRIVED_CUSTOMER', 'HANDOFF_STARTED'].includes(s)) return 6;
+    if (['OUT_FOR_DELIVERY', 'PICKED_UP', 'EN_ROUTE_CUSTOMER', 'IN_TRANSIT'].includes(s)) return 5;
+    if (['ARRIVED_STORE', 'ARRIVED_PICKUP', 'ARRIVED_MERCHANT'].includes(s)) return 4;
+    if (['RIDER_ASSIGNED', 'ASSIGNED'].includes(s)) return 3;
+    if (['SELLER_ACCEPTED', 'ACCEPTED', 'AUTO_ACCEPTED', 'PACKED', 'READY_FOR_PICKUP'].includes(s)) return 2;
+    if (['PLACED', 'PENDING_APPROVAL', 'CREATED'].includes(s)) return 1;
+    return 1;
+  };
+
   // Helper to resolve stage timestamp from checkpoints or deliverySession
   const getStageInfo = () => {
     const checkpoints = order?.trackingCheckpoints || [];
@@ -216,8 +231,28 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
     riderId: order.deliverySession.riderId,
     name: order.deliverySession.riderName || 'Assigned Delivery Partner',
     phone: order.deliverySession.riderPhone || '+91 98765 43210',
-    vehicle: order.deliverySession.riderVehicle || 'Electric Delivery Vehicle'
+    vehicle: order.deliverySession.riderVehicle || 'Electric Delivery Vehicle',
+    latitude: order.deliverySession?.telemetry?.latitude || order.deliverySession?.current_lat || null,
+    longitude: order.deliverySession?.telemetry?.longitude || order.deliverySession?.current_lng || null,
+    speedKmh: order.deliverySession?.telemetry?.speedKmh || order.deliverySession?.speed_kmh || null,
+    heading: order.deliverySession?.telemetry?.heading || order.deliverySession?.heading || null
   } : null);
+
+  const effectiveStatus = order?.orderStatus || order?.status || '';
+  const sessionStatus = order?.deliverySession?.status || order?.deliverySession?.state || '';
+  const currentRank = Math.max(
+    getStageRank(effectiveStatus),
+    getStageRank(sessionStatus),
+    (stages.delivered || effectiveStatus === 'DELIVERED') ? 7 : 0,
+    (stages.arrivedCustomer || sessionStatus === 'ARRIVED_CUSTOMER' || sessionStatus === 'HANDOFF_STARTED') ? 6 : 0,
+    (stages.pickedUp || sessionStatus === 'EN_ROUTE_CUSTOMER' || sessionStatus === 'PICKED_UP' || effectiveStatus === 'OUT_FOR_DELIVERY') ? 5 : 0,
+    (stages.arrivedStore || sessionStatus === 'ARRIVED_PICKUP' || sessionStatus === 'ARRIVED_STORE') ? 4 : 0,
+    (stages.riderAssigned || rider || order?.riderId || sessionStatus === 'ASSIGNED') ? 3 : 0,
+    (stages.sellerAccepted || order?.sellerApprovalStatus === 'ACCEPTED' || order?.sellerApprovalStatus === 'AUTO_ACCEPTED') ? 2 : 0,
+    1 // Placed is always complete
+  );
+
+  const isStageDone = (stageNum: number) => currentRank >= stageNum;
 
   return (
     <SellerAuthGuard>
@@ -302,10 +337,14 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   </span>
                 </div>
 
-                <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-border-default">
+                <div className="relative pl-6 space-y-6">
                   {/* Step 1: Order Placed */}
                   <div className="relative flex items-start space-x-3">
-                    <span className="absolute -left-6 top-0.5 w-5 h-5 rounded-full bg-action-primaryBg text-white flex items-center justify-center text-xs font-bold shadow-sm">
+                    {/* Connecting line to Step 2 */}
+                    <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
+                      isStageDone(2) ? 'bg-action-primaryBg' : 'bg-border-default'
+                    }`} />
+                    <span className="absolute -left-6 top-0.5 w-5 h-5 rounded-full bg-action-primaryBg text-white flex items-center justify-center text-xs font-bold shadow-sm z-10">
                       ✓
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
@@ -325,12 +364,18 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
                   {/* Step 2: Merchant Acceptance */}
                   <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
-                      stages.sellerAccepted || order.sellerApprovalStatus === 'ACCEPTED' || order.sellerApprovalStatus === 'AUTO_ACCEPTED'
+                    {/* Connecting line to Step 3 */}
+                    <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
+                      isStageDone(3) ? 'bg-action-primaryBg' : 'bg-border-default'
+                    }`} />
+                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                      isStageDone(2)
                         ? 'bg-action-primaryBg text-white'
-                        : 'bg-surface-warning text-white'
+                        : order.sellerApprovalStatus === 'PENDING'
+                        ? 'bg-surface-warning text-white animate-pulse'
+                        : 'bg-surface-muted text-content-muted'
                     }`}>
-                      {stages.sellerAccepted || order.sellerApprovalStatus === 'ACCEPTED' || order.sellerApprovalStatus === 'AUTO_ACCEPTED' ? '✓' : '•'}
+                      {isStageDone(2) ? '✓' : order.sellerApprovalStatus === 'PENDING' ? '•' : '2'}
                     </span>
                     <div className={`flex-1 p-3.5 rounded-xl border ${
                       order.sellerApprovalStatus === 'PENDING'
@@ -349,7 +394,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.sellerAccepted ? new Date(stages.sellerAccepted).toLocaleTimeString() : (order.sellerApprovalStatus === 'PENDING' ? 'Action Needed' : '—')}
+                          {stages.sellerAccepted ? new Date(stages.sellerAccepted).toLocaleTimeString() : (isStageDone(2) ? '✓ Completed' : (order.sellerApprovalStatus === 'PENDING' ? 'Action Needed' : '—'))}
                         </span>
                       </div>
 
@@ -371,10 +416,10 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                         </div>
                       )}
 
-                      {(order.sellerApprovalStatus === 'ACCEPTED' || order.status === 'SELLER_ACCEPTED' || order.status === 'READY_FOR_PICKUP') && !order.riderId && order.orderStatus !== 'RIDER_ASSIGNED' && (
+                      {(isStageDone(2) && !rider && !isStageDone(3)) && (
                         <div className="mt-3 flex items-center gap-2 pt-2 border-t border-border-default">
                           <button
-                            onClick={() => handleDomainTransition('accept')}
+                            onClick={() => setShowRebroadcastModal(true)}
                             className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
                             title="Re-broadcast alert to all active riders without changing order ID"
                           >
@@ -388,12 +433,16 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
                   {/* Step 3: Rider Assigned / Accepted Job */}
                   <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
-                      stages.riderAssigned || rider
+                    {/* Connecting line to Step 4 */}
+                    <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
+                      isStageDone(4) ? 'bg-action-primaryBg' : 'bg-border-default'
+                    }`} />
+                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                      isStageDone(3)
                         ? 'bg-action-primaryBg text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
-                      {stages.riderAssigned || rider ? '✓' : '3'}
+                      {isStageDone(3) ? '✓' : '3'}
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
                       <div className="flex justify-between items-start">
@@ -416,7 +465,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           )}
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.riderAssigned ? new Date(stages.riderAssigned).toLocaleTimeString() : 'Pending'}
+                          {stages.riderAssigned ? new Date(stages.riderAssigned).toLocaleTimeString() : (isStageDone(3) ? '✓ Assigned' : 'Pending')}
                         </span>
                       </div>
                     </div>
@@ -424,25 +473,29 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
                   {/* Step 4: Rider Arrived at Store */}
                   <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
-                      stages.arrivedStore
+                    {/* Connecting line to Step 5 */}
+                    <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
+                      isStageDone(5) ? 'bg-action-primaryBg' : 'bg-border-default'
+                    }`} />
+                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                      isStageDone(4)
                         ? 'bg-action-primaryBg text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
-                      {stages.arrivedStore ? '✓' : '4'}
+                      {isStageDone(4) ? '✓' : '4'}
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-extrabold text-xs text-content-primary">4. Rider Arrived at Store (Pickup Point)</p>
                           <p className="text-2xs text-content-secondary mt-0.5">
-                            {stages.arrivedStore
+                            {isStageDone(4)
                               ? `Rider reached ${order.merchantAddress || 'Central Hub'} for package pickup`
                               : 'Rider is en route to merchant store'}
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.arrivedStore ? new Date(stages.arrivedStore).toLocaleTimeString() : '—'}
+                          {stages.arrivedStore ? new Date(stages.arrivedStore).toLocaleTimeString() : (isStageDone(4) ? '✓ Arrived' : '—')}
                         </span>
                       </div>
                     </div>
@@ -450,25 +503,29 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
                   {/* Step 5: Order Picked Up / Dispatched */}
                   <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
-                      stages.pickedUp
+                    {/* Connecting line to Step 6 */}
+                    <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
+                      isStageDone(6) ? 'bg-action-primaryBg' : 'bg-border-default'
+                    }`} />
+                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                      isStageDone(5)
                         ? 'bg-action-primaryBg text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
-                      {stages.pickedUp ? '✓' : '5'}
+                      {isStageDone(5) ? '✓' : '5'}
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-extrabold text-xs text-content-primary">5. Package Picked Up &amp; Dispatched</p>
                           <p className="text-2xs text-content-secondary mt-0.5">
-                            {stages.pickedUp
+                            {isStageDone(5)
                               ? 'Package handed over to rider • Out for delivery to customer'
                               : 'Waiting for merchant handoff'}
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.pickedUp ? new Date(stages.pickedUp).toLocaleTimeString() : '—'}
+                          {stages.pickedUp ? new Date(stages.pickedUp).toLocaleTimeString() : (isStageDone(5) ? '✓ Dispatched' : '—')}
                         </span>
                       </div>
                     </div>
@@ -476,25 +533,29 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
                   {/* Step 6: Rider Arrived at Customer */}
                   <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
-                      stages.arrivedCustomer
+                    {/* Connecting line to Step 7 */}
+                    <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
+                      isStageDone(7) ? 'bg-action-primaryBg' : 'bg-border-default'
+                    }`} />
+                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                      isStageDone(6)
                         ? 'bg-action-primaryBg text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
-                      {stages.arrivedCustomer ? '✓' : '6'}
+                      {isStageDone(6) ? '✓' : '6'}
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-extrabold text-xs text-content-primary">6. Rider Arrived at Customer Doorstep</p>
                           <p className="text-2xs text-content-secondary mt-0.5">
-                            {stages.arrivedCustomer
+                            {isStageDone(6)
                               ? 'Rider is at customer doorstep • Verifying OTP handoff'
                               : 'Rider is travelling to delivery address'}
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.arrivedCustomer ? new Date(stages.arrivedCustomer).toLocaleTimeString() : '—'}
+                          {stages.arrivedCustomer ? new Date(stages.arrivedCustomer).toLocaleTimeString() : (isStageDone(6) ? '✓ At Doorstep' : '—')}
                         </span>
                       </div>
                     </div>
@@ -502,25 +563,25 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
                   {/* Step 7: Delivered */}
                   <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
-                      stages.delivered || order.orderStatus === 'DELIVERED'
+                    <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                      isStageDone(7)
                         ? 'bg-action-primaryBg text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
-                      {stages.delivered || order.orderStatus === 'DELIVERED' ? '✓' : '7'}
+                      {isStageDone(7) ? '✓' : '7'}
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-extrabold text-xs text-content-primary">7. Delivered &amp; Verified with OTP</p>
                           <p className="text-2xs text-content-secondary mt-0.5">
-                            {stages.delivered || order.orderStatus === 'DELIVERED'
+                            {isStageDone(7)
                               ? '✓ Order successfully delivered and verified with Secure OTP'
                               : 'Pending final OTP delivery handoff'}
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.delivered ? new Date(stages.delivered).toLocaleTimeString() : '—'}
+                          {stages.delivered ? new Date(stages.delivered).toLocaleTimeString() : (isStageDone(7) ? '✓ Delivered' : '—')}
                         </span>
                       </div>
                     </div>
@@ -726,6 +787,44 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
               <div className="flex justify-end space-x-2">
                 <button onClick={() => setCancelModal(false)} className="px-4 py-2 border rounded-xl text-xs font-bold cursor-pointer">Close</button>
                 <button onClick={handleExecuteCancel} className="px-5 py-2 bg-action-dangerBg text-white rounded-xl font-bold text-xs cursor-pointer">Execute Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Re-Broadcast Confirmation Modal */}
+        {showRebroadcastModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-border-default max-w-md w-full p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 font-bold">
+                  <Bike className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-content-primary">Re-Broadcast Order</h3>
+                  <p className="text-xs text-content-secondary font-mono">{orderId}</p>
+                </div>
+              </div>
+              <p className="text-sm text-content-primary">
+                Do you want to re-broadcast this order to all available fleet riders?
+              </p>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  onClick={() => setShowRebroadcastModal(false)}
+                  className="px-4 py-2 border border-border-default hover:bg-surface-subtle rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowRebroadcastModal(false);
+                    await handleDomainTransition('accept');
+                  }}
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <Bike className="w-4 h-4" />
+                  <span>Confirm Re-Broadcast</span>
+                </button>
               </div>
             </div>
           </div>

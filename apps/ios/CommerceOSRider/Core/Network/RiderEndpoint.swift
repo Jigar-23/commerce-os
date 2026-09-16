@@ -11,6 +11,8 @@ public enum RiderEndpoint {
     case deliverWithOtp(deliveryId: String)
     case getTripsHistory
     case streamTelemetry
+    case streamDeliveryTelemetry(deliveryId: String)
+    case updatePresence
     case toggleShift(online: Bool)
     case registerDeviceToken
     case getProfile
@@ -39,6 +41,10 @@ public enum RiderEndpoint {
             return "api/v1/delivery/rider/trips"
         case .streamTelemetry:
             return "api/v1/delivery/rider/telemetry"
+        case .streamDeliveryTelemetry(let deliveryId):
+            return "api/v1/delivery/\(deliveryId)/telemetry"
+        case .updatePresence:
+            return "api/v1/delivery/rider/presence"
         case .toggleShift:
             return "api/v1/delivery/rider/shift-status"
         case .registerDeviceToken:
@@ -54,7 +60,7 @@ public enum RiderEndpoint {
 
     public var method: String {
         switch self {
-        case .sendOtp, .verifyOtp, .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .toggleShift, .registerDeviceToken:
+        case .sendOtp, .verifyOtp, .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .streamDeliveryTelemetry, .updatePresence, .toggleShift, .registerDeviceToken:
             return "POST"
         case .getTripsHistory, .getProfile, .activeSession, .getActiveOffers:
             return "GET"

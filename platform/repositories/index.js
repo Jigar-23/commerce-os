@@ -2338,10 +2338,10 @@ class TransactionalOfferRepository {
       }
 
       const session = sessionRes.rows[0];
-      if (session.state === 'ACCEPTED' && session.rider_id !== riderId) {
+      if (session.rider_id && session.rider_id !== riderId) {
         await client.query(`UPDATE offers SET status = 'CLAIMED_BY_OTHER' WHERE (offer_id = $1 OR id = $1)`, [offerId]);
         await client.query('COMMIT');
-        return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job was claimed by another rider.' };
+        return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been accepted by another rider.' };
       }
 
       // 5. Authoritative Profile Precondition Validation (Graceful vehicle fallback)
@@ -2578,10 +2578,10 @@ class LocalDevelopmentOfferRepository {
       return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been claimed or declined.' };
     }
 
-    if (session && session.state === 'ACCEPTED' && session.riderId !== riderId) {
+    if (session && session.riderId && session.riderId !== riderId) {
       offer.status = 'CLAIMED_BY_OTHER';
       this.saveDb();
-      return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job was claimed by another rider.' };
+      return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been accepted by another rider.' };
     }
 
     if (!riderProfile || !riderProfile.realName || !riderProfile.realPhone) {

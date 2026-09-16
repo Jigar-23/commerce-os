@@ -27,9 +27,12 @@ public struct ActiveDeliveryScreen: View {
         ZStack(alignment: .bottom) {
             // Live Turn-by-Turn Map
             RiderLiveNavigationView(
+                merchantCoordinate: sessionManager.activeSession.map { CLLocationCoordinate2D(latitude: $0.merchantLat, longitude: $0.merchantLng) },
+                customerCoordinate: sessionManager.activeSession.map { CLLocationCoordinate2D(latitude: $0.customerLat, longitude: $0.customerLng) },
                 riderCoordinate: locationManager.lastLocation?.coordinate ?? currentWaypointCoordinate,
                 destinationCoordinate: currentWaypointCoordinate,
-                riderBearing: locationManager.currentBearing
+                riderBearing: locationManager.currentBearing,
+                speedKmh: locationManager.currentSpeed
             )
             .edgesIgnoringSafeArea(.all)
             

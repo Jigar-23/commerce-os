@@ -610,13 +610,15 @@ fun RiderMainScreen(
                                             session = it
                                         }.onFailure { err ->
                                             val msg = err.message ?: "Failed to accept job"
-                                            if (msg.contains("already", ignoreCase = true) || msg.contains("CLAIMED", ignoreCase = true) || msg.contains("409")) {
+                                            if (msg.contains("already", ignoreCase = true) || msg.contains("CLAIMED", ignoreCase = true) || msg.contains("409") || msg.contains("taken", ignoreCase = true)) {
                                                 jobAlreadyAssignedDialogMessage = "This delivery job has already been accepted by another rider."
                                             } else {
                                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                             }
                                             activeOffer = null
-                                            notificationsList = notificationsList.filter { it.offerId != offId }
+                                            notificationsList = notificationsList.map {
+                                                if (it.offerId == offId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
+                                            }
                                         }
                                         actionLoading = false
                                     }
@@ -767,6 +769,12 @@ fun RiderMainScreen(
                                     return@launch
                                 }
 
+                                // 0. If marked as unavailable/claimed, immediately notify rider
+                                if (notif.isAvailable == false || notif.offerStatus in listOf("ACCEPTED", "CLAIMED_BY_OTHER")) {
+                                    jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
+                                    return@launch
+                                }
+
                                 // 1. Check if offer notification -> show RiderOrderDetailDialog pop-up
                                 val targetOfferId = notif.offerId
                                 if (!targetOfferId.isNullOrBlank()) {
@@ -776,7 +784,20 @@ fun RiderMainScreen(
                                     }
                                     val offerRes = repository.fetchOfferById(targetOfferId)
                                     if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
+                                        if (offerRes.offer.status in listOf("ACCEPTED", "CLAIMED_BY_OTHER", "EXPIRED", "CANCELLED")) {
+                                            jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
+                                            notificationsList = notificationsList.map {
+                                                if (it.notificationId == notif.notificationId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
+                                            }
+                                            return@launch
+                                        }
                                         selectedOfferForDetail = offerRes.offer
+                                        return@launch
+                                    } else {
+                                        jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
+                                        notificationsList = notificationsList.map {
+                                            if (it.notificationId == notif.notificationId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
+                                        }
                                         return@launch
                                     }
                                 }
@@ -916,13 +937,15 @@ fun RiderMainScreen(
                         selectedTab = 0
                     }.onFailure { err ->
                         val msg = err.message ?: "Failed to accept job"
-                        if (msg.contains("already", ignoreCase = true) || msg.contains("CLAIMED", ignoreCase = true) || msg.contains("409")) {
+                        if (msg.contains("already", ignoreCase = true) || msg.contains("CLAIMED", ignoreCase = true) || msg.contains("409") || msg.contains("taken", ignoreCase = true)) {
                             jobAlreadyAssignedDialogMessage = "This delivery job has already been accepted by another rider."
                         } else {
                             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         }
                         activeOffer = null
-                        notificationsList = notificationsList.filter { it.offerId != off.offerId }
+                        notificationsList = notificationsList.map {
+                            if (it.offerId == off.offerId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
+                        }
                     }
                     actionLoading = false
                 }

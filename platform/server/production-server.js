@@ -3027,6 +3027,71 @@ const server = http.createServer(async (req, res) => {
         updated_at: order.updated_at || order.updatedAt
       };
 
+      let deliverySession = null;
+      let rider = null;
+      let telemetry = null;
+      if (pool && !isLocalMode) {
+        try {
+          const dsRes = await pool.query(
+            `SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1 ORDER BY created_at DESC LIMIT 1`,
+            [orderId]
+          );
+          deliverySession = dsRes.rows[0] || null;
+          if (deliverySession) {
+            const rId = deliverySession.rider_id;
+            if (rId) {
+              const rRes = await pool.query(
+                `SELECT rider_id, name, phone, vehicle_number as vehicle, latitude, longitude, status FROM riders WHERE rider_id = $1 OR id = $1`,
+                [rId]
+              );
+              if (rRes.rows.length > 0) {
+                rider = {
+                  riderId: rRes.rows[0].rider_id,
+                  name: rRes.rows[0].name || deliverySession.rider_name || 'Assigned Delivery Partner',
+                  phone: rRes.rows[0].phone || deliverySession.rider_phone || '',
+                  vehicle: rRes.rows[0].vehicle || deliverySession.rider_vehicle || 'Delivery Vehicle'
+                };
+              }
+            }
+            if (appRepositories && appRepositories.telemetryRepo) {
+              telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliverySession.delivery_id);
+            }
+            if (!telemetry && deliverySession.rider_id && appRepositories && appRepositories.presenceRepo) {
+              telemetry = await appRepositories.presenceRepo.getPresence(deliverySession.rider_id);
+            }
+          }
+        } catch (_) {}
+      }
+
+      singleOrderDto.riderId = deliverySession?.rider_id || order.rider_id || order.riderId || null;
+      singleOrderDto.deliverySession = deliverySession ? {
+        deliveryId: deliverySession.delivery_id,
+        orderId: deliverySession.order_id,
+        status: deliverySession.state,
+        state: deliverySession.state,
+        riderId: deliverySession.rider_id,
+        riderName: deliverySession.rider_name,
+        riderPhone: deliverySession.rider_phone,
+        riderVehicle: deliverySession.rider_vehicle,
+        history: typeof deliverySession.history === 'string' ? JSON.parse(deliverySession.history) : (deliverySession.history || []),
+        waypoints: typeof deliverySession.waypoints === 'string' ? JSON.parse(deliverySession.waypoints) : (deliverySession.waypoints || []),
+        telemetry: telemetry || (deliverySession.current_lat ? {
+          latitude: Number(deliverySession.current_lat),
+          longitude: Number(deliverySession.current_lng),
+          speedKmh: Number(deliverySession.speed_kmh || 0),
+          heading: Number(deliverySession.heading || 0)
+        } : null)
+      } : null;
+      if (rider) {
+        singleOrderDto.rider = {
+          ...rider,
+          latitude: telemetry?.latitude ?? null,
+          longitude: telemetry?.longitude ?? null,
+          speedKmh: telemetry?.speedKmh ?? null,
+          heading: telemetry?.heading ?? null
+        };
+      }
+
       return sendJson(res, 200, singleOrderDto);
     }
 
@@ -3402,11 +3467,19 @@ const server = http.createServer(async (req, res) => {
         orderId: o.order_id || o.id,
         storeId: o.store_id,
         customerId: o.customer_id,
+        customerName: o.customer_name || null,
+        customerPhone: o.customer_phone || (o.delivery_address && (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address)?.phone) || null,
+        deliveryAddress: typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address,
         status: o.status,
+        orderStatus: o.status,
         sellerApprovalStatus: o.seller_approval_status,
         totalAmount: Number(o.total_amount),
+        paymentMethod: o.payment_method || (o.is_cod ? 'COD' : 'ONLINE'),
+        paymentStatus: o.payment_status || (o.is_cod ? 'COD_PENDING' : 'PAID'),
         isCod: Boolean(o.is_cod),
-        items: o.items || [],
+        riderId: o.rider_id || null,
+        riderName: o.rider_name || null,
+        items: typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []),
         createdAt: o.created_at
       }));
 
@@ -4284,14 +4357,32 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           const nRes = await pool.query(
-            `SELECT id as "notificationId", event_id as "eventId", type, category, priority, rider_id as "riderId",
-                    order_id as "orderId", delivery_id as "deliveryId", offer_id as "offerId", title, body, deep_link as "deepLink",
-                    created_at as "createdAt", expires_at as "expiresAt", read_at as "readAt"
-             FROM notifications WHERE rider_id = $1 ORDER BY created_at DESC LIMIT 50`,
+            `SELECT n.id as "notificationId", n.event_id as "eventId", n.type, n.category, n.priority, n.rider_id as "riderId",
+                    n.order_id as "orderId", n.delivery_id as "deliveryId", n.offer_id as "offerId", n.title, n.body, n.deep_link as "deepLink",
+                    n.created_at as "createdAt", n.expires_at as "expiresAt", n.read_at as "readAt",
+                    off.status as "offerStatus",
+                    ord.status as "orderStatus",
+                    ord.rider_id as "orderRiderId"
+             FROM notifications n
+             LEFT JOIN offers off ON (off.offer_id = n.offer_id OR off.id = n.offer_id)
+             LEFT JOIN orders ord ON (ord.order_id = n.order_id OR ord.id = n.order_id)
+             WHERE n.rider_id = $1 OR n.rider_id = 'all'
+             ORDER BY n.created_at DESC LIMIT 50`,
             [authClaims.sub]
           );
           notifs = nRes.rows;
-        } catch {}
+        } catch (err) {
+          try {
+            const fallback = await pool.query(
+              `SELECT id as "notificationId", event_id as "eventId", type, category, priority, rider_id as "riderId",
+                      order_id as "orderId", delivery_id as "deliveryId", offer_id as "offerId", title, body, deep_link as "deepLink",
+                      created_at as "createdAt", expires_at as "expiresAt", read_at as "readAt"
+               FROM notifications WHERE rider_id = $1 OR rider_id = 'all' ORDER BY created_at DESC LIMIT 50`,
+              [authClaims.sub]
+            );
+            notifs = fallback.rows;
+          } catch {}
+        }
       }
       return sendJson(res, 200, { ok: true, count: notifs.length, notifications: notifs });
     }

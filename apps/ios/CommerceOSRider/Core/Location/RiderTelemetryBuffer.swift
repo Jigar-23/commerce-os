@@ -9,6 +9,7 @@ public struct BufferedTelemetryRecord: Codable {
     public let accuracyMeters: Double
     public let batteryPct: Int
     public let deliveryId: String
+    public let sequenceNumber: Int
     public let timestamp: Date
 }
 
@@ -19,6 +20,7 @@ public final class RiderTelemetryBuffer {
     private let queue = DispatchQueue(label: "com.commerceos.rider.telemetrybuffer", qos: .utility)
     private var flushTimer: Timer?
     private let apiClient: RiderAPIClient
+    private var sequenceCounter: Int = 0
 
     public init(apiClient: RiderAPIClient = .shared) {
         self.apiClient = apiClient
@@ -41,6 +43,7 @@ public final class RiderTelemetryBuffer {
         batteryPct: Int
     ) {
         queue.async {
+            self.sequenceCounter += 1
             let record = BufferedTelemetryRecord(
                 latitude: location.coordinate.latitude,
                 longitude: location.coordinate.longitude,
@@ -49,6 +52,7 @@ public final class RiderTelemetryBuffer {
                 accuracyMeters: location.horizontalAccuracy,
                 batteryPct: batteryPct,
                 deliveryId: deliveryId,
+                sequenceNumber: self.sequenceCounter,
                 timestamp: Date()
             )
             self.buffer.append(record)
@@ -71,13 +75,39 @@ public final class RiderTelemetryBuffer {
         buffer.removeAll()
 
         Task {
-            let payload: [String: AnyEncodable] = [
-                "records": AnyEncodable(batch)
-            ]
-            let _: [String: String]? = try? await apiClient.post(
-                endpoint: .streamTelemetry,
-                body: payload
-            )
+            // Stream each telemetry packet with monotonic sequenceNumber to POST /api/v1/delivery/:deliveryId/telemetry
+            for record in batch {
+                let payload: [String: AnyEncodable] = [
+                    "latitude": AnyEncodable(record.latitude),
+                    "longitude": AnyEncodable(record.longitude),
+                    "speedKmh": AnyEncodable(record.speedKmh),
+                    "speed": AnyEncodable(record.speedKmh),
+                    "heading": AnyEncodable(record.bearing),
+                    "bearing": AnyEncodable(record.bearing),
+                    "accuracyMeters": AnyEncodable(record.accuracyMeters),
+                    "sequenceNumber": AnyEncodable(record.sequenceNumber)
+                ]
+                let _: [String: String]? = try? await apiClient.post(
+                    endpoint: .streamDeliveryTelemetry(deliveryId: record.deliveryId),
+                    body: payload
+                )
+            }
+
+            // Also keep rider presence updated on server for seller live visibility
+            if let latest = batch.last {
+                let presencePayload: [String: AnyEncodable] = [
+                    "latitude": AnyEncodable(latest.latitude),
+                    "longitude": AnyEncodable(latest.longitude),
+                    "speedKmh": AnyEncodable(latest.speedKmh),
+                    "heading": AnyEncodable(latest.bearing),
+                    "accuracyMeters": AnyEncodable(latest.accuracyMeters),
+                    "isOnline": AnyEncodable(true)
+                ]
+                let _: [String: String]? = try? await apiClient.post(
+                    endpoint: .updatePresence,
+                    body: presencePayload
+                )
+            }
         }
     }
 
