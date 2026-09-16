@@ -3,6 +3,17 @@ import WebKit
 import MapKit
 import CoreLocation
 
+/**
+ * Zepto/Blinkit-Grade Native Google Maps Live Order Tracking View for iOS.
+ * Powered by official Google Maps JavaScript API (Console Cloud Key: AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c).
+ * Features:
+ * - Clean light Zepto/Blinkit palette (off-white land, pastel sky blue water, white roads, zero clutter)
+ * - 3D elevated fulfillment hub beacon with blue gradient pill
+ * - 3D elevated customer delivery beacon with orange gradient pill
+ * - 3D rotating scooter marker with real heading angle, glowing emerald radar wave, and forward headlight beam
+ * - Turn-by-turn Google road route polyline in emerald green
+ * - Dynamic bounds framing and smooth camera recentering
+ */
 public struct ZomatoDarkMapView: View {
     public var riderCoordinate: CLLocationCoordinate2D?
     public var merchantCoordinate: CLLocationCoordinate2D?
@@ -12,7 +23,7 @@ public struct ZomatoDarkMapView: View {
     public var speedKmh: Double = 0.0
     public var merchantTitle: String = "Fulfillment Hub"
 
-    @State private var coordinator: ZomatoDarkMapCoordinator?
+    @State private var coordinator: GoogleOrderTrackingCoordinator?
 
     public init(
         riderCoordinate: CLLocationCoordinate2D? = nil,
@@ -34,7 +45,7 @@ public struct ZomatoDarkMapView: View {
 
     public var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            ZomatoDarkMapWebView(
+            GoogleOrderTrackingWebView(
                 merchantCoordinate: merchantCoordinate,
                 customerCoordinate: customerCoordinate,
                 riderCoordinate: riderCoordinate,
@@ -45,22 +56,22 @@ public struct ZomatoDarkMapView: View {
                     self.coordinator = coord
                 }
             )
-            .background(Color(red: 5/255, green: 8/255, blue: 17/255))
+            .background(Color(hex: "F8F9FA"))
 
-            // Floating Recenter Action Button
+            // Floating Recenter Action Button (Clean Light Zepto Style)
             Button(action: {
                 coordinator?.recenter()
             }) {
                 Image(systemName: "location.fill")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(red: 16/255, green: 185/255, blue: 129/255))
-                    .frame(width: 38, height: 38)
-                    .background(Color(red: 22/255, green: 24/255, blue: 31/255, opacity: 0.95))
+                    .foregroundColor(Color(hex: "059669"))
+                    .frame(width: 40, height: 40)
+                    .background(Color.white.opacity(0.96))
                     .clipShape(Circle())
                     .overlay(
-                        Circle().stroke(Color(red: 38/255, green: 41/255, blue: 51/255), lineWidth: 1)
+                        Circle().stroke(Color(hex: "E2E8F0"), lineWidth: 1)
                     )
-                    .shadow(color: Color.black.opacity(0.4), radius: 4, x: 0, y: 2)
+                    .shadow(color: Color.black.opacity(0.12), radius: 4, x: 0, y: 2)
             }
             .padding(.trailing, 14)
             .padding(.bottom, 14)
@@ -69,14 +80,14 @@ public struct ZomatoDarkMapView: View {
 }
 
 // MARK: - WKWebView Representable Bridge
-struct ZomatoDarkMapWebView: UIViewRepresentable {
+struct GoogleOrderTrackingWebView: UIViewRepresentable {
     let merchantCoordinate: CLLocationCoordinate2D?
     let customerCoordinate: CLLocationCoordinate2D?
     let riderCoordinate: CLLocationCoordinate2D?
     let routeCoordinates: [CLLocationCoordinate2D]
     let riderBearing: Double
     let speedKmh: Double
-    let onCoordinatorCreated: (ZomatoDarkMapCoordinator) -> Void
+    let onCoordinatorCreated: (GoogleOrderTrackingCoordinator) -> Void
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -89,15 +100,15 @@ struct ZomatoDarkMapWebView: UIViewRepresentable {
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.isOpaque = false
-        webView.backgroundColor = UIColor(red: 5/255, green: 8/255, blue: 17/255, alpha: 1.0)
+        webView.backgroundColor = UIColor(red: 248/255, green: 249/255, blue: 250/255, alpha: 1.0)
 
         context.coordinator.webView = webView
         onCoordinatorCreated(context.coordinator)
 
         let initialLat = riderCoordinate?.latitude ?? merchantCoordinate?.latitude ?? 28.2022
         let initialLng = riderCoordinate?.longitude ?? merchantCoordinate?.longitude ?? 76.6154
-        let html = generateCustomerDarkMapHtml(initLat: initialLat, initLng: initialLng)
-        webView.loadHTMLString(html, baseURL: URL(string: "https://commerceos.local"))
+        let html = generateGoogleMapsLiveTrackingHtml(initLat: initialLat, initLng: initialLng)
+        webView.loadHTMLString(html, baseURL: URL(string: "https://maps.googleapis.com"))
 
         return webView
     }
@@ -113,13 +124,13 @@ struct ZomatoDarkMapWebView: UIViewRepresentable {
         )
     }
 
-    func makeCoordinator() -> ZomatoDarkMapCoordinator {
-        ZomatoDarkMapCoordinator()
+    func makeCoordinator() -> GoogleOrderTrackingCoordinator {
+        GoogleOrderTrackingCoordinator()
     }
 }
 
-// MARK: - Dark Map Coordinator
-final class ZomatoDarkMapCoordinator: NSObject, WKNavigationDelegate {
+// MARK: - Google Maps Coordinator
+final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
     weak var webView: WKWebView?
     private var isLoaded: Bool = false
     private var pendingJs: String? = nil
@@ -148,7 +159,6 @@ final class ZomatoDarkMapCoordinator: NSObject, WKNavigationDelegate {
         riderBearing: Double,
         speedKmh: Double
     ) {
-        // Resolve waypoints: Use provided routeCoordinates if present, otherwise compute via MKDirections
         let waypointsJson: String
         if !routeCoordinates.isEmpty {
             let pts = routeCoordinates.map { "[\($0.latitude),\($0.longitude)]" }.joined(separator: ",")
@@ -181,7 +191,7 @@ final class ZomatoDarkMapCoordinator: NSObject, WKNavigationDelegate {
             riderJson = "null"
         }
 
-        let js = "updateMapData(\(mLatStr), \(mLngStr), \(cLatStr), \(cLngStr), \(riderJson), \(waypointsJson));"
+        let js = "if (window.updateMapData) { window.updateMapData(\(mLatStr), \(mLngStr), \(cLatStr), \(cLngStr), \(riderJson), \(waypointsJson)); }"
 
         if isLoaded {
             webView?.evaluateJavaScript(js, completionHandler: nil)
@@ -214,52 +224,44 @@ final class ZomatoDarkMapCoordinator: NSObject, WKNavigationDelegate {
     }
 }
 
-// MARK: - Dark Obsidian HTML Template Matching Android
-private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> String {
+// MARK: - Zepto/Blinkit Light Google Maps HTML Template
+private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double) -> String {
     return #"""
 <!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         html, body, #map {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
-            background: #050811;
+            background: #f8f9fa;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             overflow: hidden;
             -webkit-user-select: none;
             user-select: none;
         }
-        .leaflet-container {
-            background: #050811;
-        }
-        
-        /* Zomato-Grade Dark Obsidian Tile Contrast Filter */
-        .leaflet-tile-pane {
-            filter: brightness(0.85) contrast(1.25) saturate(1.2) hue-rotate(210deg);
-        }
 
-        /* 3D Elevated Store Marker */
+        /* 3D Elevated Store Hub Beacon */
         .store-marker-3d {
-            position: relative;
+            position: absolute;
             width: 44px;
             height: 44px;
+            transform: translate(-50%, -50%);
             display: flex;
             align-items: center;
             justify-content: center;
+            pointer-events: none;
         }
         .store-beacon {
             position: absolute;
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            background: rgba(2, 132, 199, 0.25);
-            border: 1px solid rgba(2, 132, 199, 0.8);
+            background: rgba(2, 132, 199, 0.22);
+            border: 1.5px solid rgba(2, 132, 199, 0.7);
             animation: pulseBeacon 2.5s infinite ease-out;
         }
         .store-pill {
@@ -267,31 +269,33 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
             width: 32px;
             height: 32px;
             background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);
-            border: 2px solid #FFFFFF;
+            border: 2.5px solid #FFFFFF;
             border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(2, 132, 199, 0.7);
+            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4), 0 2px 6px rgba(0, 0, 0, 0.15);
         }
         .store-pill svg { width: 17px; height: 17px; fill: #FFFFFF; }
 
-        /* 3D Elevated Customer Destination Marker */
+        /* 3D Elevated Customer Destination Beacon */
         .customer-marker-3d {
-            position: relative;
+            position: absolute;
             width: 44px;
             height: 44px;
+            transform: translate(-50%, -50%);
             display: flex;
             align-items: center;
             justify-content: center;
+            pointer-events: none;
         }
         .customer-beacon {
             position: absolute;
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            background: rgba(249, 115, 22, 0.25);
-            border: 1px solid rgba(249, 115, 22, 0.8);
+            background: rgba(249, 115, 22, 0.22);
+            border: 1.5px solid rgba(249, 115, 22, 0.7);
             animation: pulseBeacon 2.5s infinite ease-out 0.5s;
         }
         .customer-pill {
@@ -299,20 +303,21 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
             width: 32px;
             height: 32px;
             background: linear-gradient(135deg, #F97316 0%, #C2410C 100%);
-            border: 2px solid #FFFFFF;
+            border: 2.5px solid #FFFFFF;
             border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(249, 115, 22, 0.7);
+            box-shadow: 0 4px 14px rgba(249, 115, 22, 0.4), 0 2px 6px rgba(0, 0, 0, 0.15);
         }
         .customer-pill svg { width: 17px; height: 17px; fill: #FFFFFF; }
 
-        /* Zomato 3D Isometric Scooter with Headlight Projection Beam */
+        /* 3D Animated Scooter Puck with Headlight Beam and Radar Wave */
         .biker-anchor {
-            position: relative;
+            position: absolute;
             width: 60px;
             height: 60px;
+            transform: translate(-50%, -50%);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -332,9 +337,9 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
             top: -24px;
             left: 50%;
             transform: translateX(-50%);
-            width: 44px;
+            width: 46px;
             height: 34px;
-            background: radial-gradient(ellipse at 50% 100%, rgba(56, 189, 248, 0.55) 0%, rgba(56, 189, 248, 0.2) 50%, rgba(56, 189, 248, 0) 80%);
+            background: radial-gradient(ellipse at 50% 100%, rgba(16, 185, 129, 0.5) 0%, rgba(16, 185, 129, 0.15) 50%, rgba(16, 185, 129, 0) 80%);
             clip-path: polygon(35% 100%, 65% 100%, 100% 0%, 0% 0%);
             pointer-events: none;
         }
@@ -343,8 +348,8 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
             width: 48px;
             height: 48px;
             border-radius: 50%;
-            background: rgba(0, 245, 212, 0.2);
-            border: 1.5px solid rgba(0, 245, 212, 0.8);
+            background: rgba(16, 185, 129, 0.2);
+            border: 1.5px solid rgba(16, 185, 129, 0.8);
             animation: radarWave 2s cubic-bezier(0.1, 0.7, 0.1, 1) infinite;
         }
         .biker-pulse-secondary {
@@ -352,26 +357,26 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
             width: 48px;
             height: 48px;
             border-radius: 50%;
-            background: rgba(0, 187, 249, 0.15);
+            background: rgba(16, 185, 129, 0.12);
             animation: radarWave 2s cubic-bezier(0.1, 0.7, 0.1, 1) infinite 0.7s;
         }
         .biker-core-puck {
             position: relative;
-            width: 34px;
-            height: 34px;
-            background: linear-gradient(135deg, #00F5D4 0%, #00BBF9 100%);
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
             border: 2.5px solid #FFFFFF;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 6px 18px rgba(0, 245, 212, 0.7), 0 2px 6px rgba(0, 0, 0, 0.9);
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.6), 0 2px 6px rgba(0, 0, 0, 0.2);
         }
         .biker-core-puck svg {
-            width: 19px;
-            height: 19px;
-            fill: #050811;
-            filter: drop-shadow(0 1px 2px rgba(255,255,255,0.4));
+            width: 20px;
+            height: 20px;
+            fill: #FFFFFF;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
         }
 
         @keyframes radarWave {
@@ -383,65 +388,153 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
             0% { transform: scale(0.8); opacity: 0.8; }
             100% { transform: scale(1.5); opacity: 0; }
         }
-
-        /* SVG Multi-Layer Glowing Neon Polyline Shader */
-        .neon-glow-outer {
-            stroke: #00F5D4;
-            stroke-opacity: 0.35;
-            filter: drop-shadow(0 0 8px #00F5D4);
-        }
-        .neon-track-core {
-            stroke: #00BBF9;
-            stroke-opacity: 0.95;
-        }
-        .neon-spine-inner {
-            stroke: #FFFFFF;
-            stroke-opacity: 0.95;
-        }
     </style>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c&libraries=geometry"></script>
 </head>
 <body>
 <div id="map"></div>
 <script>
-    var map = L.map('map', {
-        zoomControl: false,
-        attributionControl: false
-    }).setView([INIT_LAT, INIT_LNG], 14);
+    var ZEPTO_LIGHT_STYLE = [
+        { "elementType": "geometry", "stylers": [{ "color": "#f8f9fa" }] },
+        { "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
+        { "elementType": "labels.text.fill", "stylers": [{ "color": "#616161" }] },
+        { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
+        { "featureType": "administrative.land_parcel", "elementType": "labels.text.fill", "stylers": [{ "color": "#bdbdbd" }] },
+        { "featureType": "poi", "elementType": "geometry", "stylers": [{ "color": "#eeeeee" }] },
+        { "featureType": "poi", "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] },
+        { "featureType": "poi.park", "elementType": "geometry", "stylers": [{ "color": "#e8f5e9" }] },
+        { "featureType": "poi.park", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] },
+        { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
+        { "featureType": "road.arterial", "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] },
+        { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#dadada" }] },
+        { "featureType": "road.highway", "elementType": "labels.text.fill", "stylers": [{ "color": "#616161" }] },
+        { "featureType": "road.local", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] },
+        { "featureType": "transit.line", "elementType": "geometry", "stylers": [{ "color": "#e5e5e5" }] },
+        { "featureType": "transit.station", "elementType": "geometry", "stylers": [{ "color": "#eeeeee" }] },
+        { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c8e0f4" }] },
+        { "featureType": "water", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] }
+    ];
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd',
-        attribution: ''
-    }).addTo(map);
+    var map = null;
+    var directionsService = null;
+    var routePolyline = null;
+    var routeGlowPolyline = null;
+    var storeOverlay = null;
+    var customerOverlay = null;
+    var riderOverlay = null;
+
+    var storePos = null;
+    var customerPos = null;
+    var riderPos = null;
+    var lastAcceptedTimestamp = 0;
+    var autoFollow = true;
 
     var storeSvg = '<svg viewBox="0 0 24 24"><path d="M4 4h16v3H4zm0 5h16v11H4zm3 2v7h10v-7z"/></svg>';
     var customerSvg = '<svg viewBox="0 0 24 24"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm0 4.7l4 3.6V18h-8v-6.7l4-3.6z"/></svg>';
     var scooterSvg = '<svg viewBox="0 0 24 24"><path d="M19 7c0-1.1-.9-2-2-2h-3v2h3v2.65L13.52 14H10V9H6c-2.21 0-4 1.79-4 4v3h2c0 1.66 1.34 3 3 3s3-1.34 3-3h4.18c.41 1.16 1.51 2 2.82 2 1.66 0 3-1.34 3-3h1v-4.5L19 7zM7 17c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1zm11 0c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1z"/></svg>';
 
-    var storeIcon = L.divIcon({ className: '', html: '<div class="store-marker-3d"><div class="store-beacon"></div><div class="store-pill">' + storeSvg + '</div></div>', iconSize: [44, 44], iconAnchor: [22, 22] });
-    var customerIcon = L.divIcon({ className: '', html: '<div class="customer-marker-3d"><div class="customer-beacon"></div><div class="customer-pill">' + customerSvg + '</div></div>', iconSize: [44, 44], iconAnchor: [22, 22] });
+    function initMap() {
+        var initialCenter = { lat: INIT_LAT, lng: INIT_LNG };
+        map = new google.maps.Map(document.getElementById('map'), {
+            center: initialCenter,
+            zoom: 15,
+            styles: ZEPTO_LIGHT_STYLE,
+            disableDefaultUI: true,
+            zoomControl: false,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false,
+            gestureHandling: 'greedy'
+        });
 
-    var storeMarker = null;
-    var customerMarker = null;
-    var riderMarker = null;
-    var glowOuterPolyline = null;
-    var corePolyline = null;
-    var spinePolyline = null;
-    var boundsGroup = [];
-    var lastAcceptedTimestamp = 0;
-    var autoFollow = true;
+        directionsService = new google.maps.DirectionsService();
 
+        routeGlowPolyline = new google.maps.Polyline({
+            path: [],
+            geodesic: true,
+            strokeColor: '#059669',
+            strokeOpacity: 0.25,
+            strokeWeight: 10,
+            map: map
+        });
+
+        routePolyline = new google.maps.Polyline({
+            path: [],
+            geodesic: true,
+            strokeColor: '#10B981',
+            strokeOpacity: 0.95,
+            strokeWeight: 6,
+            map: map
+        });
+
+        map.addListener('dragstart', function() { autoFollow = false; });
+    }
+
+    // Google Maps Custom HTML Overlay
+    function CustomHtmlOverlay(lat, lng, html) {
+        this.lat = lat;
+        this.lng = lng;
+        this.html = html;
+        this.div = null;
+        this.setMap(map);
+    }
+    CustomHtmlOverlay.prototype = new google.maps.OverlayView();
+
+    CustomHtmlOverlay.prototype.onAdd = function() {
+        var div = document.createElement('div');
+        div.style.position = 'absolute';
+        div.style.cursor = 'default';
+        div.innerHTML = this.html;
+        this.div = div;
+        var panes = this.getPanes();
+        panes.overlayMouseTarget.appendChild(div);
+    };
+
+    CustomHtmlOverlay.prototype.draw = function() {
+        var overlayProjection = this.getProjection();
+        if (!overlayProjection || !this.div) return;
+        var position = new google.maps.LatLng(this.lat, this.lng);
+        var point = overlayProjection.fromLatLngToDivPixel(position);
+        if (point) {
+            this.div.style.left = point.x + 'px';
+            this.div.style.top = point.y + 'px';
+        }
+    };
+
+    CustomHtmlOverlay.prototype.onRemove = function() {
+        if (this.div && this.div.parentNode) {
+            this.div.parentNode.removeChild(this.div);
+            this.div = null;
+        }
+    };
+
+    CustomHtmlOverlay.prototype.setPosition = function(lat, lng) {
+        this.lat = lat;
+        this.lng = lng;
+        this.draw();
+    };
+
+    CustomHtmlOverlay.prototype.setHtml = function(html) {
+        this.html = html;
+        if (this.div) {
+            this.div.innerHTML = html;
+        }
+    };
+
+    // Smooth Marker Interpolation
     var animFrame = null;
-    function interpolateMarker(marker, startPos, endPos, durationMs) {
+    function interpolateRiderPosition(startLat, startLng, endLat, endLng, durationMs) {
         if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
         var startTime = performance.now();
         function step(now) {
             var elapsed = now - startTime;
             var t = Math.min(1, elapsed / durationMs);
             var ease = 1 - Math.pow(1 - t, 3);
-            var curLat = startPos[0] + (endPos[0] - startPos[0]) * ease;
-            var curLng = startPos[1] + (endPos[1] - startPos[1]) * ease;
-            marker.setLatLng([curLat, curLng]);
+            var curLat = startLat + (endLat - startLat) * ease;
+            var curLng = startLng + (endLng - startLng) * ease;
+            if (riderOverlay) {
+                riderOverlay.setPosition(curLat, curLng);
+            }
             if (t < 1) {
                 animFrame = requestAnimationFrame(step);
             } else {
@@ -451,94 +544,133 @@ private func generateCustomerDarkMapHtml(initLat: Double, initLng: Double) -> St
         animFrame = requestAnimationFrame(step);
     }
 
-    map.on('dragstart', function() { autoFollow = false; });
-    map.on('zoomstart', function(e) { if (e && e.originalEvent) autoFollow = false; });
+    function buildRiderHtml(heading) {
+        var rot = heading != null ? heading : 0;
+        return '<div class="biker-anchor">' +
+               '<div class="biker-rotator" style="transform: rotate(' + rot + 'deg);">' +
+               '<div class="biker-headlight"></div>' +
+               '<div class="biker-pulse-primary"></div><div class="biker-pulse-secondary"></div>' +
+               '<div class="biker-core-puck">' + scooterSvg + '</div>' +
+               '</div></div>';
+    }
 
     function renderWaypoints(waypoints) {
+        if (!routePolyline) return;
         if (waypoints && waypoints.length > 1) {
-            var latLngs = waypoints.map(function(pt) { return [pt[0] || pt.lat, pt[1] || pt.lng]; });
-            if (!glowOuterPolyline) {
-                glowOuterPolyline = L.polyline(latLngs, { color: '#00F5D4', weight: 12, opacity: 0.35, lineCap: 'round', lineJoin: 'round', className: 'neon-glow-outer' }).addTo(map);
-            } else {
-                glowOuterPolyline.setLatLngs(latLngs);
-            }
-            if (!corePolyline) {
-                corePolyline = L.polyline(latLngs, { color: '#00BBF9', weight: 5, opacity: 0.95, lineCap: 'round', lineJoin: 'round', className: 'neon-track-core' }).addTo(map);
-            } else {
-                corePolyline.setLatLngs(latLngs);
-            }
-            if (!spinePolyline) {
-                spinePolyline = L.polyline(latLngs, { color: '#FFFFFF', weight: 2, opacity: 0.95, lineCap: 'round', lineJoin: 'round', className: 'neon-spine-inner' }).addTo(map);
-            } else {
-                spinePolyline.setLatLngs(latLngs);
-            }
-        } else {
-            if (glowOuterPolyline) { map.removeLayer(glowOuterPolyline); glowOuterPolyline = null; }
-            if (corePolyline) { map.removeLayer(corePolyline); corePolyline = null; }
-            if (spinePolyline) { map.removeLayer(spinePolyline); spinePolyline = null; }
+            var path = waypoints.map(function(pt) {
+                return new google.maps.LatLng(pt[0] || pt.lat, pt[1] || pt.lng);
+            });
+            routePolyline.setPath(path);
+            routeGlowPolyline.setPath(path);
+        } else if (storePos && customerPos && directionsService) {
+            var origin = riderPos || storePos;
+            directionsService.route({
+                origin: origin,
+                destination: customerPos,
+                travelMode: google.maps.TravelMode.DRIVING
+            }, function(response, status) {
+                if (status === 'OK' && response && response.routes && response.routes[0]) {
+                    var routePath = response.routes[0].overview_path;
+                    routePolyline.setPath(routePath);
+                    routeGlowPolyline.setPath(routePath);
+                }
+            });
         }
     }
     window.updateWaypoints = renderWaypoints;
 
+    function fitBoundsIfAppropriate() {
+        if (!map) return;
+        var bounds = new google.maps.LatLngBounds();
+        var count = 0;
+        if (storePos) { bounds.extend(new google.maps.LatLng(storePos.lat, storePos.lng)); count++; }
+        if (customerPos) { bounds.extend(new google.maps.LatLng(customerPos.lat, customerPos.lng)); count++; }
+        if (riderPos) { bounds.extend(new google.maps.LatLng(riderPos.lat, riderPos.lng)); count++; }
+        if (count >= 2) {
+            map.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 });
+        } else if (count === 1) {
+            var target = riderPos || customerPos || storePos;
+            map.setCenter(new google.maps.LatLng(target.lat, target.lng));
+            map.setZoom(16);
+        }
+    }
+
     function updateMapData(mLat, mLng, cLat, cLng, rider, waypoints) {
-        boundsGroup = [];
+        if (!map) {
+            initMap();
+        }
 
+        // Store Hub
         if (mLat && mLng && mLat !== 0) {
-            if (!storeMarker) {
-                storeMarker = L.marker([mLat, mLng], { icon: storeIcon }).addTo(map);
+            storePos = { lat: mLat, lng: mLng };
+            var storeHtml = '<div class="store-marker-3d"><div class="store-beacon"></div><div class="store-pill">' + storeSvg + '</div></div>';
+            if (!storeOverlay) {
+                storeOverlay = new CustomHtmlOverlay(mLat, mLng, storeHtml);
             } else {
-                storeMarker.setLatLng([mLat, mLng]);
+                storeOverlay.setPosition(mLat, mLng);
             }
-            boundsGroup.push([mLat, mLng]);
         }
 
+        // Customer Location
         if (cLat && cLng && cLat !== 0) {
-            if (!customerMarker) {
-                customerMarker = L.marker([cLat, cLng], { icon: customerIcon }).addTo(map);
+            customerPos = { lat: cLat, lng: cLng };
+            var custHtml = '<div class="customer-marker-3d"><div class="customer-beacon"></div><div class="customer-pill">' + customerSvg + '</div></div>';
+            if (!customerOverlay) {
+                customerOverlay = new CustomHtmlOverlay(cLat, cLng, custHtml);
             } else {
-                customerMarker.setLatLng([cLat, cLng]);
+                customerOverlay.setPosition(cLat, cLng);
             }
-            boundsGroup.push([cLat, cLng]);
         }
 
+        // Live Rider Puck
         if (rider && rider.lat && rider.lng) {
             var ts = rider.timestamp || Date.now();
             if (ts >= lastAcceptedTimestamp) {
                 lastAcceptedTimestamp = ts;
+                var prevPos = riderPos;
+                riderPos = { lat: rider.lat, lng: rider.lng };
                 var rot = (rider.heading != null) ? rider.heading : 0;
-                var markerHtml = '<div class="biker-anchor">' +
-                                 '<div class="biker-rotator" style="transform: rotate(' + rot + 'deg);">' +
-                                 '<div class="biker-headlight"></div>' +
-                                 '<div class="biker-pulse-primary"></div><div class="biker-pulse-secondary"></div>' +
-                                 '<div class="biker-core-puck">' + scooterSvg + '</div>' +
-                                 '</div></div>';
-                var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [60, 60], iconAnchor: [30, 30] });
+                var bikerHtml = buildRiderHtml(rot);
 
-                if (!riderMarker) {
-                    riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
+                if (!riderOverlay) {
+                    riderOverlay = new CustomHtmlOverlay(rider.lat, rider.lng, bikerHtml);
+                    fitBoundsIfAppropriate();
                 } else {
-                    var prevLatLng = riderMarker.getLatLng();
-                    riderMarker.setIcon(bikerIcon);
-                    interpolateMarker(riderMarker, [prevLatLng.lat, prevLatLng.lng], [rider.lat, rider.lng], 900);
+                    riderOverlay.setHtml(bikerHtml);
+                    if (prevPos) {
+                        interpolateRiderPosition(prevPos.lat, prevPos.lng, rider.lat, rider.lng, 900);
+                    } else {
+                        riderOverlay.setPosition(rider.lat, rider.lng);
+                    }
                 }
-                boundsGroup.push([rider.lat, rider.lng]);
 
-                if (autoFollow) {
-                    map.panTo([rider.lat, rider.lng], { animate: true, duration: 0.8 });
+                if (autoFollow && map) {
+                    map.panTo(new google.maps.LatLng(rider.lat, rider.lng));
                 }
             }
         }
 
         renderWaypoints(waypoints);
     }
+    window.updateMapData = updateMapData;
 
     function recenterMap() {
         autoFollow = true;
-        if (riderMarker) {
-            map.panTo(riderMarker.getLatLng(), { animate: true, duration: 0.8 });
-        } else if (boundsGroup.length > 0) {
-            map.fitBounds(L.latLngBounds(boundsGroup), { padding: [40, 40], maxZoom: 16 });
+        if (!map) return;
+        if (riderPos) {
+            map.panTo(new google.maps.LatLng(riderPos.lat, riderPos.lng));
+            map.setZoom(16);
+        } else {
+            fitBoundsIfAppropriate();
         }
+    }
+    window.recenterMap = recenterMap;
+
+    // Launch map on load
+    if (typeof google !== 'undefined' && google.maps) {
+        initMap();
+    } else {
+        window.addEventListener('load', initMap);
     }
 </script>
 </body>

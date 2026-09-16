@@ -592,8 +592,8 @@ public class OrderRepository: ObservableObject {
         return try await apiClient.get(endpoint: "/api/v1/orders/\(orderId)")
     }
 
-    public func fetchOrderDetail(orderId: String) async -> ServerOrderResponse? {
-        if let existing = customerOrders.first(where: { $0.id == orderId || $0.orderId == orderId }) {
+    public func fetchOrderDetail(orderId: String, forceRefresh: Bool = true) async -> ServerOrderResponse? {
+        if !forceRefresh, let existing = customerOrders.first(where: { $0.id == orderId || $0.orderId == orderId }) {
             return existing
         }
         struct SingleOrderWrapper: Decodable {
@@ -602,7 +602,9 @@ public class OrderRepository: ObservableObject {
         }
         if let direct: ServerOrderResponse = try? await apiClient.get(endpoint: "/api/v1/orders/\(orderId)") {
             await MainActor.run {
-                if !self.customerOrders.contains(where: { $0.id == direct.id }) {
+                if let idx = self.customerOrders.firstIndex(where: { $0.id == direct.id || $0.orderId == direct.id }) {
+                    self.customerOrders[idx] = direct
+                } else {
                     self.customerOrders.insert(direct, at: 0)
                 }
             }
@@ -610,12 +612,14 @@ public class OrderRepository: ObservableObject {
         }
         if let wrapped: SingleOrderWrapper = try? await apiClient.get(endpoint: "/api/v1/orders/\(orderId)"), let ord = wrapped.order {
             await MainActor.run {
-                if !self.customerOrders.contains(where: { $0.id == ord.id }) {
+                if let idx = self.customerOrders.firstIndex(where: { $0.id == ord.id || $0.orderId == ord.id }) {
+                    self.customerOrders[idx] = ord
+                } else {
                     self.customerOrders.insert(ord, at: 0)
                 }
             }
             return ord
         }
-        return nil
+        return customerOrders.first(where: { $0.id == orderId || $0.orderId == orderId })
     }
 }

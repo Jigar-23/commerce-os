@@ -203,6 +203,58 @@ public struct LiveTrackingPayload: Codable {
             ?? (try? container.decode(String.self, forKey: .routePolylineCamel))
     }
 
+    public init(dictionary: [String: Any]) {
+        self.orderId = (dictionary["orderId"] as? String)
+            ?? (dictionary["order_id"] as? String)
+            ?? (dictionary["id"] as? String)
+            ?? ""
+        self.status = (dictionary["status"] as? String)
+            ?? (dictionary["state"] as? String)
+            ?? (dictionary["stage"] as? String)
+            ?? "PLACED"
+        self.etaMinutes = (dictionary["etaMinutes"] as? Int)
+            ?? (dictionary["eta_minutes"] as? Int)
+            ?? (dictionary["estimatedArrivalMins"] as? Int)
+            ?? (dictionary["estimatedMinutes"] as? Int)
+        self.riderName = (dictionary["riderName"] as? String)
+            ?? (dictionary["rider_name"] as? String)
+        self.riderPhone = (dictionary["riderPhone"] as? String)
+            ?? (dictionary["rider_phone"] as? String)
+        
+        var lat = (dictionary["riderLat"] as? Double) ?? (dictionary["rider_lat"] as? Double)
+        var lng = (dictionary["riderLng"] as? Double) ?? (dictionary["rider_lng"] as? Double)
+        var bearing = (dictionary["riderBearing"] as? Double)
+            ?? (dictionary["rider_bearing"] as? Double)
+            ?? (dictionary["riderHeading"] as? Double)
+            ?? (dictionary["rider_heading"] as? Double)
+            ?? (dictionary["heading"] as? Double)
+        var spd = (dictionary["speedKmh"] as? Double)
+            ?? (dictionary["speed_kmh"] as? Double)
+            ?? (dictionary["speed"] as? Double)
+
+        if let telem = (dictionary["liveRiderTelemetry"] as? [String: Any]) ?? (dictionary["live_rider_telemetry"] as? [String: Any]) {
+            if lat == nil { lat = (telem["latitude"] as? Double) ?? (telem["lat"] as? Double) }
+            if lng == nil { lng = (telem["longitude"] as? Double) ?? (telem["lng"] as? Double) }
+            if bearing == nil { bearing = (telem["heading"] as? Double) ?? (telem["bearing"] as? Double) }
+            if spd == nil { spd = (telem["speedKmh"] as? Double) ?? (telem["speed_kmh"] as? Double) ?? (telem["speed"] as? Double) }
+        }
+
+        self.riderLat = lat
+        self.riderLng = lng
+        self.riderBearing = bearing
+        self.speedKmh = spd
+
+        self.merchantLat = (dictionary["merchantLat"] as? Double) ?? (dictionary["merchant_lat"] as? Double)
+        self.merchantLng = (dictionary["merchantLng"] as? Double) ?? (dictionary["merchant_lng"] as? Double)
+        self.customerLat = (dictionary["customerLat"] as? Double) ?? (dictionary["customer_lat"] as? Double)
+        self.customerLng = (dictionary["customerLng"] as? Double) ?? (dictionary["customer_lng"] as? Double)
+        self.deliveryOtp = (dictionary["deliveryOtp"] as? String) ?? (dictionary["delivery_otp"] as? String)
+        self.isCod = (dictionary["isCod"] as? Bool) ?? (dictionary["is_cod"] as? Bool)
+        self.totalAmount = (dictionary["totalAmount"] as? Double) ?? (dictionary["total_amount"] as? Double)
+        self.isLiveTelemetryAvailable = (dictionary["isLiveTelemetryAvailable"] as? Bool) ?? (dictionary["is_live_telemetry_available"] as? Bool)
+        self.routePolyline = (dictionary["routePolyline"] as? String) ?? (dictionary["route_polyline"] as? String)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(orderId, forKey: .orderId)
@@ -242,6 +294,38 @@ public class TrackingRepository: ObservableObject {
         self.apiClient = apiClient
     }
 
+    private func mergeWithExisting(_ incoming: LiveTrackingPayload) -> LiveTrackingPayload {
+        guard let prev = self.activeTracking else { return incoming }
+        let resolvedOrderId = incoming.orderId.isEmpty ? prev.orderId : incoming.orderId
+        let resolvedStatus: String = {
+            if !incoming.status.isEmpty && incoming.status != "PLACED" && incoming.status != "NO_ACTIVE_ORDER" {
+                return incoming.status
+            }
+            return prev.status
+        }()
+
+        return LiveTrackingPayload(
+            orderId: resolvedOrderId,
+            status: resolvedStatus,
+            etaMinutes: incoming.etaMinutes ?? prev.etaMinutes,
+            riderName: incoming.riderName ?? prev.riderName,
+            riderPhone: incoming.riderPhone ?? prev.riderPhone,
+            riderLat: incoming.riderLat ?? prev.riderLat,
+            riderLng: incoming.riderLng ?? prev.riderLng,
+            riderBearing: incoming.riderBearing ?? prev.riderBearing,
+            speedKmh: incoming.speedKmh ?? prev.speedKmh,
+            merchantLat: incoming.merchantLat ?? prev.merchantLat,
+            merchantLng: incoming.merchantLng ?? prev.merchantLng,
+            customerLat: incoming.customerLat ?? prev.customerLat,
+            customerLng: incoming.customerLng ?? prev.customerLng,
+            deliveryOtp: incoming.deliveryOtp ?? prev.deliveryOtp,
+            isCod: incoming.isCod ?? prev.isCod,
+            totalAmount: incoming.totalAmount ?? prev.totalAmount,
+            isLiveTelemetryAvailable: incoming.isLiveTelemetryAvailable ?? prev.isLiveTelemetryAvailable,
+            routePolyline: incoming.routePolyline ?? prev.routePolyline
+        )
+    }
+
     public func fetchActiveDelivery(orderId: String? = nil) async {
         do {
             let endpoint: String
@@ -253,9 +337,12 @@ public class TrackingRepository: ObservableObject {
             let tracking: LiveTrackingPayload = try await apiClient.get(endpoint: endpoint)
             await MainActor.run {
                 if tracking.orderId.isEmpty || tracking.status == "NO_ACTIVE_ORDER" {
-                    self.activeTracking = nil
+                    // Do not wipe out activeTracking if we already have one
+                    if self.activeTracking == nil {
+                        self.activeTracking = nil
+                    }
                 } else {
-                    self.activeTracking = tracking
+                    self.activeTracking = self.mergeWithExisting(tracking)
                 }
                 self.streamError = nil
             }
@@ -265,24 +352,27 @@ public class TrackingRepository: ObservableObject {
                 do {
                     let order: ServerOrderResponse = try await apiClient.get(endpoint: "/api/v1/orders/\(orderId)")
                     await MainActor.run {
-                        self.activeTracking = LiveTrackingPayload(
+                        let fallbackPayload = LiveTrackingPayload(
                             orderId: order.id,
-                            status: order.status,
-                            etaMinutes: 12,
-                            riderName: "Express Fleet",
-                            riderPhone: nil,
-                            riderLat: nil,
-                            riderLng: nil,
+                            status: order.orderStatus ?? order.status,
+                            etaMinutes: order.effectiveSlaMins,
+                            riderName: order.riderName,
+                            riderPhone: order.riderPhone,
+                            riderLat: self.activeTracking?.riderLat,
+                            riderLng: self.activeTracking?.riderLng,
+                            riderBearing: self.activeTracking?.riderBearing,
+                            speedKmh: self.activeTracking?.speedKmh,
                             merchantLat: 28.202224,
                             merchantLng: 76.615418,
-                            customerLat: 28.191828,
-                            customerLng: 76.608148,
+                            customerLat: order.deliveryAddress?.latitude ?? 28.191828,
+                            customerLng: order.deliveryAddress?.longitude ?? 76.608148,
                             deliveryOtp: order.deliveryOtp,
                             isCod: order.paymentMethod == "COD",
                             totalAmount: order.totalAmount,
                             isLiveTelemetryAvailable: false,
-                            routePolyline: nil
+                            routePolyline: self.activeTracking?.routePolyline
                         )
+                        self.activeTracking = self.mergeWithExisting(fallbackPayload)
                         self.streamError = nil
                     }
                     return
@@ -353,13 +443,26 @@ public class TrackingRepository: ObservableObject {
                         if line.hasPrefix("data:") {
                             let jsonString = String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
                             if let data = jsonString.data(using: .utf8) {
+                                var parsedPayload: LiveTrackingPayload? = nil
+
+                                // 1. Try standard JSONDecoder (without convertFromSnakeCase, matching CodingKeys)
                                 let decoder = JSONDecoder()
-                                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                                if let update = try? decoder.decode(LiveTrackingPayload.self, from: data) {
+                                if let decoded = try? decoder.decode(LiveTrackingPayload.self, from: data) {
+                                    parsedPayload = decoded
+                                } else if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                                    // 2. Dictionary fallback for raw broadcast structures
+                                    parsedPayload = LiveTrackingPayload(dictionary: dict)
+                                }
+
+                                if let update = parsedPayload {
                                     await MainActor.run {
-                                        self.activeTracking = update
+                                        self.activeTracking = self.mergeWithExisting(update)
                                         self.streamError = nil
                                         self.isStreamReconnecting = false
+                                    }
+                                    let s = update.status.uppercased()
+                                    if s == "DELIVERED" || s == "CANCELLED" {
+                                        break
                                     }
                                 }
                             }
@@ -379,10 +482,13 @@ public class TrackingRepository: ObservableObject {
             }
         }
 
-        // 3. Periodic reconciliation fallback loop (15 seconds)
-        reconciliationTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+        // 3. High-frequency 2-second live telemetry polling (matching Android parity)
+        reconciliationTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task {
                 await self?.fetchActiveDelivery(orderId: orderId)
+                if let status = self?.activeTracking?.status.uppercased(), status == "DELIVERED" || status == "CANCELLED" {
+                    self?.stopLiveTracking()
+                }
             }
         }
     }

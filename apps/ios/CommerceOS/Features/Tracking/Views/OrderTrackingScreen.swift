@@ -23,6 +23,7 @@ public struct OrderTrackingScreen: View {
     @State private var pulseScale: CGFloat = 0.85
     @State private var pulseAlpha: Double = 0.5
     @State private var toastMessage: String? = nil
+    @State private var pollingTask: Task<Void, Never>? = nil
     
     public init(orderId: String? = nil, onBack: (() -> Void)? = nil) {
         self.orderId = orderId
@@ -39,7 +40,28 @@ public struct OrderTrackingScreen: View {
     }
     
     private var effectiveStatus: String {
-        orderDetail?.orderStatus ?? orderDetail?.status ?? trackingData?.status ?? "PLACED"
+        let track = trackingData?.status.uppercased() ?? ""
+        let detailStatus = (orderDetail?.orderStatus ?? orderDetail?.status ?? "").uppercased()
+        
+        if track == "DELIVERED" || detailStatus == "DELIVERED" {
+            return "DELIVERED"
+        }
+        if track == "CANCELLED" || detailStatus == "CANCELLED" {
+            return "CANCELLED"
+        }
+        if !track.isEmpty && track != "PLACED" && track != "NO_ACTIVE_ORDER" {
+            return track
+        }
+        if !detailStatus.isEmpty {
+            return detailStatus
+        }
+        return "PLACED"
+    }
+
+    private var hasAssignedRider: Bool {
+        let name = trackingData?.riderName ?? orderDetail?.riderName
+        guard let n = name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty else { return false }
+        return n != "null" && n != "unassigned" && n != "Partner Assigning"
     }
     
     private var isDelivered: Bool {
@@ -145,7 +167,9 @@ public struct OrderTrackingScreen: View {
                                 deliveredSuccessHeroCard
                             } else {
                                 activeStatusSlaCard
-                                assignedPartnerCard
+                                if hasAssignedRider {
+                                    assignedPartnerCard
+                                }
                             }
                             
                             // Ordered Items Card
@@ -210,6 +234,8 @@ public struct OrderTrackingScreen: View {
             initializeScreen()
         }
         .onDisappear {
+            pollingTask?.cancel()
+            pollingTask = nil
             container.trackingRepository.stopLiveTracking()
             Task {
                 await DeliveryActivityManager.shared.endLiveActivity()
@@ -220,28 +246,29 @@ public struct OrderTrackingScreen: View {
             let stage = stageForStatus(update.status)
             let rawEta = update.etaMinutes ?? self.orderDetail?.effectiveSlaMins ?? 10
             let effEta = max(rawEta > 0 ? rawEta : 10, 8)
+            let resolvedId = update.orderId.isEmpty ? self.effectiveOrderId : update.orderId
             
             let updatedDto = CustomerOrderTrackingDto(
-                orderId: update.orderId,
-                deliveryId: "DEL-\(update.orderId.suffix(4))",
+                orderId: resolvedId,
+                deliveryId: "DEL-\(resolvedId.suffix(4))",
                 status: update.status,
                 currentStage: stage,
                 estimatedMinutes: effEta,
                 merchantName: self.storeDisplayName,
                 merchantAddress: nil,
-                merchantLat: update.merchantLat,
-                merchantLng: update.merchantLng,
+                merchantLat: update.merchantLat ?? self.trackingData?.merchantLat,
+                merchantLng: update.merchantLng ?? self.trackingData?.merchantLng,
                 customerAddress: self.orderDetail?.deliveryAddress?.addressLine ?? "Delivery Address",
-                customerLat: update.customerLat,
-                customerLng: update.customerLng,
-                riderName: update.riderName ?? self.orderDetail?.riderName,
-                riderPhone: update.riderPhone ?? self.orderDetail?.riderPhone,
-                riderLat: update.riderLat,
-                riderLng: update.riderLng,
-                riderBearing: update.riderBearing,
-                speedKmh: update.speedKmh,
-                routePolyline: update.routePolyline,
-                deliveryOtp: update.deliveryOtp ?? self.orderDetail?.deliveryOtp
+                customerLat: update.customerLat ?? self.trackingData?.customerLat ?? self.orderDetail?.deliveryAddress?.latitude,
+                customerLng: update.customerLng ?? self.trackingData?.customerLng ?? self.orderDetail?.deliveryAddress?.longitude,
+                riderName: update.riderName ?? self.trackingData?.riderName ?? self.orderDetail?.riderName,
+                riderPhone: update.riderPhone ?? self.trackingData?.riderPhone ?? self.orderDetail?.riderPhone,
+                riderLat: update.riderLat ?? self.trackingData?.riderLat,
+                riderLng: update.riderLng ?? self.trackingData?.riderLng,
+                riderBearing: update.riderBearing ?? self.trackingData?.riderBearing,
+                speedKmh: update.speedKmh ?? self.trackingData?.speedKmh,
+                routePolyline: update.routePolyline ?? self.trackingData?.routePolyline,
+                deliveryOtp: update.deliveryOtp ?? self.trackingData?.deliveryOtp ?? self.orderDetail?.deliveryOtp
             )
             self.trackingData = updatedDto
             self.updateLiveActivity(with: updatedDto)
@@ -1190,7 +1217,7 @@ public struct OrderTrackingScreen: View {
             }
             
             Task {
-                if let fresh = await container.orderRepository.fetchOrderDetail(orderId: id) {
+                if let fresh = await container.orderRepository.fetchOrderDetail(orderId: id, forceRefresh: true) {
                     await MainActor.run {
                         self.orderDetail = fresh
                     }
@@ -1198,6 +1225,26 @@ public struct OrderTrackingScreen: View {
             }
             
             container.trackingRepository.startLiveTracking(orderId: id)
+            startOrderDetailPolling(orderId: id)
+        }
+    }
+
+    private func startOrderDetailPolling(orderId: String) {
+        pollingTask?.cancel()
+        pollingTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if Task.isCancelled { break }
+                if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: true) {
+                    await MainActor.run {
+                        self.orderDetail = fresh
+                    }
+                    let s = fresh.status.uppercased()
+                    if s == "DELIVERED" || s == "CANCELLED" {
+                        break
+                    }
+                }
+            }
         }
     }
     
