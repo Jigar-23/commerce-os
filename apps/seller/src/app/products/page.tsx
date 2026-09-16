@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
@@ -32,6 +32,20 @@ interface ProductItem {
   manufacturing_date?: string;
 }
 
+const STANDARD_CATEGORIES = [
+  'Pharmacy & OTC',
+  'Vitamins & Daily Wellness',
+  'Pain Relief & Fever',
+  'Cold, Cough & Immunity',
+  'Personal Care',
+  'Skin Care',
+  'Baby & Mother Care',
+  'Ayurveda & Herbal',
+  'Diabetes Care',
+  'Cardiac Care',
+  'Medical Devices & First Aid',
+];
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,6 +58,7 @@ export default function ProductsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState(false);
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
 
   // Form Fields
   const [newSku, setNewSku] = useState('');
@@ -118,6 +133,11 @@ export default function ProductsPage() {
       return;
     }
 
+    if (!newCategory.trim()) {
+      setFormError('Category is required. Please select or enter a category.');
+      return;
+    }
+
     const priceNum = parseFloat(newPrice);
     const mrpNum = newMrp.trim() ? parseFloat(newMrp) : priceNum;
     const stockNum = parseInt(newStock, 10) || 0;
@@ -136,7 +156,7 @@ export default function ProductsPage() {
         sku: newSku.trim(),
         name: newName.trim(),
         packSize: newPackSize.trim() || '1 Unit',
-        category: newCategory,
+        category: newCategory.trim(),
         price: priceNum,
         mrp: mrpNum,
         initialStock: stockNum,
@@ -160,6 +180,8 @@ export default function ProductsPage() {
           setNewSku('');
           setNewName('');
           setNewPackSize('');
+          setNewCategory(existingProductCategories[0] || 'Pharmacy & OTC');
+          setIsCustomCategory(false);
           setNewPrice('');
           setNewMrp('');
           setNewStock('50');
@@ -178,6 +200,23 @@ export default function ProductsPage() {
       setIsSubmitting(false);
     }
   };
+
+  const existingProductCategories = useMemo(() => {
+    return Array.from(
+      new Set(
+        products
+          .map(p => p.category?.trim())
+          .filter((c): c is string => Boolean(c))
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    existingProductCategories.forEach(c => set.add(c));
+    STANDARD_CATEGORIES.forEach(c => set.add(c));
+    return Array.from(set);
+  }, [existingProductCategories]);
 
   const categories = ['ALL', ...Array.from(new Set(products.map(p => p.category).filter(Boolean)))];
 
@@ -453,14 +492,66 @@ export default function ProductsPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Category</label>
-                    <input
-                      type="text"
-                      placeholder="Pharmacy & OTC"
-                      value={newCategory}
-                      onChange={e => setNewCategory(e.target.value)}
-                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-2xs font-bold uppercase text-content-muted">Category *</label>
+                      {isCustomCategory ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomCategory(false);
+                            setNewCategory(existingProductCategories[0] || availableCategories[0] || 'Pharmacy & OTC');
+                          }}
+                          className="text-3xs text-content-brand hover:underline font-semibold"
+                        >
+                          Pick Existing
+                        </button>
+                      ) : null}
+                    </div>
+                    {!isCustomCategory ? (
+                      <select
+                        value={newCategory}
+                        onChange={e => {
+                          if (e.target.value === '__CUSTOM__') {
+                            setIsCustomCategory(true);
+                            setNewCategory('');
+                          } else {
+                            setNewCategory(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                      >
+                        {existingProductCategories.length > 0 && (
+                          <optgroup label="Existing Store Categories">
+                            {existingProductCategories.map(cat => (
+                              <option key={`existing-${cat}`} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label={existingProductCategories.length > 0 ? "Standard Categories" : "Catalog Categories"}>
+                          {STANDARD_CATEGORIES.filter(cat => !existingProductCategories.includes(cat)).map(cat => (
+                            <option key={`std-${cat}`} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <option value="__CUSTOM__">+ Add New Category...</option>
+                      </select>
+                    ) : (
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          required
+                          autoFocus
+                          placeholder="e.g. Skin Care, Ayurvedic Powders..."
+                          value={newCategory}
+                          onChange={e => setNewCategory(e.target.value)}
+                          className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                        />
+                        <p className="text-3xs text-content-muted">Type custom category name or click &apos;Pick Existing&apos; above.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
