@@ -4865,6 +4865,9 @@ const server = http.createServer(async (req, res) => {
       activeTrackingDto.estimatedMinutes = activeTrackingDto.estimatedArrivalMins || 0;
       activeTrackingDto.riderLat = activeTrackingDto.liveRiderTelemetry?.latitude ?? delivery.rider_lat ?? null;
       activeTrackingDto.riderLng = activeTrackingDto.liveRiderTelemetry?.longitude ?? delivery.rider_lng ?? null;
+      activeTrackingDto.riderBearing = activeTrackingDto.liveRiderTelemetry?.heading ?? delivery.rider_heading ?? delivery.heading ?? 0;
+      activeTrackingDto.riderHeading = activeTrackingDto.riderBearing;
+      activeTrackingDto.speedKmh = activeTrackingDto.liveRiderTelemetry?.speedKmh ?? delivery.speed_kmh ?? 0;
       activeTrackingDto.deliveryOtp = delivery.delivery_otp || delivery.rawDeliveryPin || null;
       activeTrackingDto.isCod = Boolean(delivery.is_cod);
       activeTrackingDto.totalAmount = Number(delivery.total_amount || delivery.cod_amount || 0);

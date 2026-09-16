@@ -280,6 +280,11 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     merchantLng: mLng,
     customerLat: cLat,
     customerLng: cLng,
+    riderLat: riderCurrentLat,
+    riderLng: riderCurrentLng,
+    riderHeading: telemetry ? Number(telemetry.heading || telemetry.bearing || 0) : 0,
+    riderBearing: telemetry ? Number(telemetry.heading || telemetry.bearing || 0) : 0,
+    speedKmh: telemetry ? Number(telemetry.speedKmh || telemetry.speed || 0) : 0,
     telemetrySource,
     liveRiderTelemetry: (isAssigned && telemetry) ? {
       latitude: mapMatched.snappedLat, // Snapped road latitude

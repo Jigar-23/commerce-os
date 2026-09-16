@@ -99,7 +99,10 @@ public struct OrderTrackingScreen: View {
                         riderCoordinate: resolvedRiderCoordinate,
                         merchantCoordinate: resolvedMerchantCoordinate,
                         customerCoordinate: resolvedCustomerCoordinate,
-                        routeCoordinates: buildRouteCoordinates(trackingData)
+                        routeCoordinates: buildRouteCoordinates(trackingData),
+                        riderBearing: trackingData?.riderBearing ?? 0.0,
+                        speedKmh: trackingData?.speedKmh ?? 0.0,
+                        merchantTitle: storeDisplayName
                     )
                     .edgesIgnoringSafeArea(.all)
                     
@@ -235,6 +238,8 @@ public struct OrderTrackingScreen: View {
                 riderPhone: update.riderPhone ?? self.orderDetail?.riderPhone,
                 riderLat: update.riderLat,
                 riderLng: update.riderLng,
+                riderBearing: update.riderBearing,
+                speedKmh: update.speedKmh,
                 routePolyline: update.routePolyline,
                 deliveryOtp: update.deliveryOtp ?? self.orderDetail?.deliveryOtp
             )
@@ -286,7 +291,10 @@ public struct OrderTrackingScreen: View {
                 riderCoordinate: resolvedRiderCoordinate,
                 merchantCoordinate: resolvedMerchantCoordinate,
                 customerCoordinate: resolvedCustomerCoordinate,
-                routeCoordinates: buildRouteCoordinates(trackingData)
+                routeCoordinates: buildRouteCoordinates(trackingData),
+                riderBearing: trackingData?.riderBearing ?? 0.0,
+                speedKmh: trackingData?.speedKmh ?? 0.0,
+                merchantTitle: storeDisplayName
             )
             .frame(height: 300)
             

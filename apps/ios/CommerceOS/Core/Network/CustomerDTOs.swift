@@ -450,6 +450,53 @@ public struct CustomerOrderTrackingDto: Codable {
     public let riderPhone: String?
     public let riderLat: Double?
     public let riderLng: Double?
+    public let riderBearing: Double?
+    public let speedKmh: Double?
     public let routePolyline: String?
     public let deliveryOtp: String? // Authoritative sanitized 4-digit OTP shown to customer
+
+    public init(
+        orderId: String,
+        deliveryId: String? = nil,
+        status: String,
+        currentStage: Int,
+        estimatedMinutes: Int,
+        merchantName: String? = nil,
+        merchantAddress: String? = nil,
+        merchantLat: Double? = nil,
+        merchantLng: Double? = nil,
+        customerAddress: String? = nil,
+        customerLat: Double? = nil,
+        customerLng: Double? = nil,
+        riderName: String? = nil,
+        riderPhone: String? = nil,
+        riderLat: Double? = nil,
+        riderLng: Double? = nil,
+        riderBearing: Double? = nil,
+        speedKmh: Double? = nil,
+        routePolyline: String? = nil,
+        deliveryOtp: String? = nil
+    ) {
+        self.orderId = orderId
+        self.deliveryId = deliveryId
+        self.status = status
+        self.currentStage = currentStage
+        self.estimatedMinutes = estimatedMinutes
+        self.merchantName = merchantName
+        self.merchantAddress = merchantAddress
+        self.merchantLat = merchantLat
+        self.merchantLng = merchantLng
+        self.customerAddress = customerAddress
+        self.customerLat = customerLat
+        self.customerLng = customerLng
+        self.riderName = riderName
+        self.riderPhone = riderPhone
+        self.riderLat = riderLat
+        self.riderLng = riderLng
+        self.riderBearing = riderBearing
+        self.speedKmh = speedKmh
+        self.routePolyline = routePolyline
+        self.deliveryOtp = deliveryOtp
+    }
 }
+

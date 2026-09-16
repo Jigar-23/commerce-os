@@ -2,6 +2,48 @@ import Foundation
 import CoreLocation
 import Combine
 
+public struct LiveRiderTelemetryPayload: Codable {
+    public let latitude: Double?
+    public let longitude: Double?
+    public let speedKmh: Double?
+    public let heading: Double?
+    public let sequenceNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case latitude
+        case longitude
+        case speedKmh = "speed_kmh"
+        case speedKmhCamel = "speedKmh"
+        case speed
+        case heading
+        case bearing
+        case sequenceNumber = "sequence_number"
+        case sequenceNumberCamel = "sequenceNumber"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.latitude = try? c.decode(Double.self, forKey: .latitude)
+        self.longitude = try? c.decode(Double.self, forKey: .longitude)
+        self.speedKmh = (try? c.decode(Double.self, forKey: .speedKmh))
+            ?? (try? c.decode(Double.self, forKey: .speedKmhCamel))
+            ?? (try? c.decode(Double.self, forKey: .speed))
+        self.heading = (try? c.decode(Double.self, forKey: .heading))
+            ?? (try? c.decode(Double.self, forKey: .bearing))
+        self.sequenceNumber = (try? c.decode(Int.self, forKey: .sequenceNumber))
+            ?? (try? c.decode(Int.self, forKey: .sequenceNumberCamel))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(latitude, forKey: .latitude)
+        try c.encodeIfPresent(longitude, forKey: .longitude)
+        try c.encodeIfPresent(speedKmh, forKey: .speedKmh)
+        try c.encodeIfPresent(heading, forKey: .heading)
+        try c.encodeIfPresent(sequenceNumber, forKey: .sequenceNumber)
+    }
+}
+
 public struct LiveTrackingPayload: Codable {
     public let orderId: String
     public let status: String
@@ -10,6 +52,8 @@ public struct LiveTrackingPayload: Codable {
     public let riderPhone: String?
     public let riderLat: Double?
     public let riderLng: Double?
+    public let riderBearing: Double?
+    public let speedKmh: Double?
     public let merchantLat: Double?
     public let merchantLng: Double?
     public let customerLat: Double?
@@ -36,6 +80,13 @@ public struct LiveTrackingPayload: Codable {
         case riderLatCamel = "riderLat"
         case riderLng = "rider_lng"
         case riderLngCamel = "riderLng"
+        case riderBearing = "rider_bearing"
+        case riderBearingCamel = "riderBearing"
+        case riderHeading = "rider_heading"
+        case riderHeadingCamel = "riderHeading"
+        case speedKmh = "speed_kmh"
+        case speedKmhCamel = "speedKmh"
+        case speed
         case merchantLat = "merchant_lat"
         case merchantLatCamel = "merchantLat"
         case merchantLng = "merchant_lng"
@@ -54,6 +105,8 @@ public struct LiveTrackingPayload: Codable {
         case isLiveTelemetryAvailableCamel = "isLiveTelemetryAvailable"
         case routePolyline = "route_polyline"
         case routePolylineCamel = "routePolyline"
+        case liveRiderTelemetry = "live_rider_telemetry"
+        case liveRiderTelemetryCamel = "liveRiderTelemetry"
         case active
     }
 
@@ -65,6 +118,8 @@ public struct LiveTrackingPayload: Codable {
         riderPhone: String? = nil,
         riderLat: Double? = nil,
         riderLng: Double? = nil,
+        riderBearing: Double? = nil,
+        speedKmh: Double? = nil,
         merchantLat: Double? = nil,
         merchantLng: Double? = nil,
         customerLat: Double? = nil,
@@ -82,6 +137,8 @@ public struct LiveTrackingPayload: Codable {
         self.riderPhone = riderPhone
         self.riderLat = riderLat
         self.riderLng = riderLng
+        self.riderBearing = riderBearing
+        self.speedKmh = speedKmh
         self.merchantLat = merchantLat
         self.merchantLng = merchantLng
         self.customerLat = customerLat
@@ -95,6 +152,9 @@ public struct LiveTrackingPayload: Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let telem = (try? container.decode(LiveRiderTelemetryPayload.self, forKey: .liveRiderTelemetry))
+            ?? (try? container.decode(LiveRiderTelemetryPayload.self, forKey: .liveRiderTelemetryCamel))
+
         self.orderId = (try? container.decode(String.self, forKey: .orderId))
             ?? (try? container.decode(String.self, forKey: .orderIdCamel))
             ?? ""
@@ -110,8 +170,19 @@ public struct LiveTrackingPayload: Codable {
             ?? (try? container.decode(String.self, forKey: .riderPhoneCamel))
         self.riderLat = (try? container.decode(Double.self, forKey: .riderLat))
             ?? (try? container.decode(Double.self, forKey: .riderLatCamel))
+            ?? telem?.latitude
         self.riderLng = (try? container.decode(Double.self, forKey: .riderLng))
             ?? (try? container.decode(Double.self, forKey: .riderLngCamel))
+            ?? telem?.longitude
+        self.riderBearing = (try? container.decode(Double.self, forKey: .riderBearing))
+            ?? (try? container.decode(Double.self, forKey: .riderBearingCamel))
+            ?? (try? container.decode(Double.self, forKey: .riderHeading))
+            ?? (try? container.decode(Double.self, forKey: .riderHeadingCamel))
+            ?? telem?.heading
+        self.speedKmh = (try? container.decode(Double.self, forKey: .speedKmh))
+            ?? (try? container.decode(Double.self, forKey: .speedKmhCamel))
+            ?? (try? container.decode(Double.self, forKey: .speed))
+            ?? telem?.speedKmh
         self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat))
             ?? (try? container.decode(Double.self, forKey: .merchantLatCamel))
         self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng))
@@ -141,6 +212,8 @@ public struct LiveTrackingPayload: Codable {
         try container.encodeIfPresent(riderPhone, forKey: .riderPhone)
         try container.encodeIfPresent(riderLat, forKey: .riderLat)
         try container.encodeIfPresent(riderLng, forKey: .riderLng)
+        try container.encodeIfPresent(riderBearing, forKey: .riderBearing)
+        try container.encodeIfPresent(speedKmh, forKey: .speedKmh)
         try container.encodeIfPresent(merchantLat, forKey: .merchantLat)
         try container.encodeIfPresent(merchantLng, forKey: .merchantLng)
         try container.encodeIfPresent(customerLat, forKey: .customerLat)
