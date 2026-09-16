@@ -54,7 +54,7 @@ android {
             buildConfigField("boolean", "ALLOW_BASE_URL_OVERRIDE", "false")
         }
         debug {
-            val debugUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
+            val debugUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "http://127.0.0.1:8080"
             buildConfigField("String", "API_BASE_URL", "\"$debugUrl\"")
             buildConfigField("boolean", "CLEARTEXT_ENABLED", "true")
             buildConfigField("boolean", "ALLOW_BASE_URL_OVERRIDE", "true")
