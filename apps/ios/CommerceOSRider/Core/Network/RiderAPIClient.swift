@@ -48,6 +48,10 @@ public final class RiderKeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
     }
+
+    public func clear(key: String) {
+        delete(key: key)
+    }
 }
 
 public enum RiderAPIError: LocalizedError {
