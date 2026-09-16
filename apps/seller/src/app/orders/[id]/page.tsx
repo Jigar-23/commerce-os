@@ -36,9 +36,16 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
   };
 
   const fetchOrderDetails = async (showSpinner = false) => {
-    if (!session?.token) return;
-    if (showSpinner) setIsLoading(true);
     try {
+      let s = session || sellerApi.getSession();
+      if (!s?.token) {
+        s = await sellerApi.ensureSession();
+      }
+      if (!s?.token) {
+        if (showSpinner) setIsLoading(false);
+        return;
+      }
+      if (showSpinner) setIsLoading(true);
       const res = await sellerApi.get(`/api/v1/orders/${orderId}`);
       if (res.ok && res.data) {
         const raw = res.data;
@@ -56,6 +63,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
           customerName: raw.customerName || raw.customer_name,
           createdAt: raw.createdAt || raw.created_at,
           sellerApprovalStatus: raw.sellerApprovalStatus || raw.seller_approval_status,
+          riderId: raw.riderId || raw.rider_id,
         };
         setOrder(normalized);
       } else {
@@ -69,7 +77,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
   };
 
   useEffect(() => {
-    if (orderId && session?.token) {
+    if (orderId) {
       fetchOrderDetails(true);
 
       // Realtime SSE Stream Connection
@@ -362,6 +370,19 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </button>
                         </div>
                       )}
+
+                      {(order.sellerApprovalStatus === 'ACCEPTED' || order.status === 'SELLER_ACCEPTED' || order.status === 'READY_FOR_PICKUP') && !order.riderId && order.orderStatus !== 'RIDER_ASSIGNED' && (
+                        <div className="mt-3 flex items-center gap-2 pt-2 border-t border-border-default">
+                          <button
+                            onClick={() => handleDomainTransition('accept')}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
+                            title="Re-broadcast alert to all active riders without changing order ID"
+                          >
+                            <Bike className="w-3.5 h-3.5" />
+                            <span>📢 Re-Broadcast to Riders</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -635,6 +656,17 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                         <span>Reject Order</span>
                       </button>
                     </>
+                  )}
+
+                  {(order.sellerApprovalStatus === 'ACCEPTED' || order.orderStatus === 'SELLER_ACCEPTED' || order.orderStatus === 'READY_FOR_PICKUP') && !order.riderId && order.orderStatus !== 'RIDER_ASSIGNED' && (
+                    <button
+                      onClick={() => handleDomainTransition('accept')}
+                      className="px-5 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer"
+                      title="Re-broadcast notification to all active riders"
+                    >
+                      <Bike className="w-4 h-4" />
+                      <span>📢 Re-Broadcast to Riders</span>
+                    </button>
                   )}
 
                   {order.paymentMethod === 'COD' && order.paymentStatus === 'COD_PENDING_COLLECTION' && (

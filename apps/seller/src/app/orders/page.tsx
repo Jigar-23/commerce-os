@@ -69,10 +69,16 @@ export default function OrdersPage() {
   };
 
   const fetchOrders = async (showSpinner = true) => {
-    const s = session || sellerApi.getSession();
-    if (!s?.token) return;
-    if (showSpinner) setIsLoading(true);
     try {
+      let s = session || sellerApi.getSession();
+      if (!s?.token) {
+        s = await sellerApi.ensureSession();
+      }
+      if (!s?.token) {
+        if (showSpinner) setIsLoading(false);
+        return;
+      }
+      if (showSpinner) setIsLoading(true);
       const res = await sellerApi.get('/api/v1/orders/seller');
       if (res.ok && res.data) {
         setFetchError(null);
@@ -91,6 +97,8 @@ export default function OrdersPage() {
           customerName: o.customerName || o.customer_name,
           createdAt: o.createdAt || o.created_at,
           sellerApprovalStatus: o.sellerApprovalStatus || o.seller_approval_status,
+          riderId: o.riderId || o.rider_id,
+          riderName: o.riderName || o.rider_name,
         }));
         setOrders(normalized);
       } else {
@@ -280,11 +288,29 @@ export default function OrdersPage() {
                             ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
                             : order.orderStatus === 'CANCELLED'
                             ? 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
-                            : order.sellerApprovalStatus === 'PENDING'
+                            : order.sellerApprovalStatus === 'PENDING' || order.orderStatus === 'PLACED'
                             ? 'bg-surface-warningSubtle text-content-warning border border-border-warning animate-pulse'
+                            : order.orderStatus === 'RIDER_ASSIGNED'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : order.orderStatus === 'ARRIVED_STORE' || order.orderStatus === 'ARRIVED_PICKUP'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : order.orderStatus === 'OUT_FOR_DELIVERY' || order.orderStatus === 'PICKED_UP'
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
                             : 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
                         }`}>
-                          {order.sellerApprovalStatus === 'PENDING' ? '⏳ PENDING SELLER ACCEPTANCE' : `Status: ${order.orderStatus || order.status}`}
+                          {order.sellerApprovalStatus === 'PENDING' || order.orderStatus === 'PLACED'
+                            ? '⏳ PENDING SELLER ACCEPTANCE'
+                            : order.orderStatus === 'SELLER_ACCEPTED' || order.orderStatus === 'READY_FOR_PICKUP'
+                            ? '📡 BROADCASTED TO RIDERS'
+                            : order.orderStatus === 'RIDER_ASSIGNED'
+                            ? `🚴 RIDER ASSIGNED${order.riderName ? ` (${order.riderName})` : ''}`
+                            : order.orderStatus === 'ARRIVED_STORE' || order.orderStatus === 'ARRIVED_PICKUP'
+                            ? '🏪 RIDER AT STORE'
+                            : order.orderStatus === 'OUT_FOR_DELIVERY' || order.orderStatus === 'PICKED_UP'
+                            ? '🚚 OUT FOR DELIVERY'
+                            : order.orderStatus === 'DELIVERED'
+                            ? '✅ DELIVERED'
+                            : `Status: ${order.orderStatus || order.status}`}
                         </span>
 
                         <span className="px-2.5 py-0.5 rounded-full text-2xs font-bold bg-surface-subtle text-content-secondary border border-border-default">
@@ -313,7 +339,7 @@ export default function OrdersPage() {
                     </div>
 
                     <div className="shrink-0 flex items-center space-x-2.5">
-                      {/* 1. Direct Accept Order Button (Triggers Rider Notification) */}
+                      {/* 1. Direct Accept Order Button (Triggers Initial Rider Broadcast) */}
                       {(order.sellerApprovalStatus === 'PENDING' || order.status === 'PLACED' || order.status === 'PENDING_APPROVAL') && (
                         <button
                           type="button"
@@ -330,6 +356,29 @@ export default function OrdersPage() {
                             <>
                               <CheckCircle2 className="w-4 h-4" />
                               <span>Accept &amp; Broadcast to Riders</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {/* 1b. Re-Broadcast to Riders Button (Seller can re-broadcast any number of times) */}
+                      {(order.status === 'SELLER_ACCEPTED' || order.status === 'READY_FOR_PICKUP' || order.status === 'PACKED') && !order.riderId && order.orderStatus !== 'RIDER_ASSIGNED' && order.orderStatus !== 'OUT_FOR_DELIVERY' && order.orderStatus !== 'DELIVERED' && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleAcceptOrder(e, order.id)}
+                          disabled={actionLoadingId === order.id}
+                          className="px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                          title="Re-broadcast alert to all active riders without changing order ID"
+                        >
+                          {actionLoadingId === order.id ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Re-broadcasting…</span>
+                            </>
+                          ) : (
+                            <>
+                              <Bike className="w-3.5 h-3.5" />
+                              <span>📢 Re-Broadcast to Riders</span>
                             </>
                           )}
                         </button>
@@ -353,10 +402,18 @@ export default function OrdersPage() {
                       )}
 
                       {/* 3. Rider Broadcast Status Badge */}
-                      {order.status === 'READY_FOR_PICKUP' && (
+                      {order.status === 'READY_FOR_PICKUP' && !order.riderId && (
                         <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-surface-brandSubtle text-content-brand text-xs font-bold border border-border-brandSubtle">
                           <Bike className="w-4 h-4 text-content-brand" />
-                          <span>Broadcasted to Riders</span>
+                          <span>Broadcast Active</span>
+                        </div>
+                      )}
+
+                      {/* 3b. Rider Assigned Badge */}
+                      {(order.riderId || order.orderStatus === 'RIDER_ASSIGNED') && order.orderStatus !== 'DELIVERED' && (
+                        <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
+                          <Bike className="w-4 h-4 text-blue-600" />
+                          <span>Rider Assigned</span>
                         </div>
                       )}
 

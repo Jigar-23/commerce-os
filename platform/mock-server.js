@@ -2374,8 +2374,8 @@ async function newOrder(customerId, payload, cartItems) {
     message: `New order #${order.id.slice(0, 8)} placed (₹${totalAmt})`
   });
 
-  // Blinkit / Zepto model: quick commerce orders auto-dispatch to riders immediately
-  const shouldDispatchToRiders = !sellerApprovalRequired || order.orderType === 'QUICK_COMMERCE_10MIN';
+  // Strict Sequence Invariant: Riders must NEVER be dispatched or notified before seller approval!
+  const shouldDispatchToRiders = !sellerApprovalRequired && order.sellerApprovalStatus !== 'PENDING';
   if (shouldDispatchToRiders) {
     // Create instant delivery broadcast offer for connected riders
     const offerId = 'off_' + crypto.randomUUID();
@@ -3562,15 +3562,53 @@ async function handleRequest(port, req, res) {
       if (path === '/api/v1/orders/seller' && req.method === 'GET') {
         const authClaims = verifyAndDecodeJwt(req);
         const storeId = authClaims ? (authClaims.storeId || authClaims.sellerId) : null;
+        if (productionPgPool) {
+          try {
+            const pgRes = await productionPgPool.query(
+              `SELECT * FROM orders 
+               WHERE store_id = $1 OR store_id = 'store_rewari_hub_01' OR store_id = 'STORE_REWARI_01' OR $1 IS NULL
+               ORDER BY created_at DESC LIMIT 100`,
+              [storeId || null]
+            );
+            if (pgRes.rows.length > 0) {
+              const mapped = pgRes.rows.map(r => {
+                const addr = typeof r.delivery_address === 'string' ? JSON.parse(r.delivery_address) : r.delivery_address;
+                const itms = typeof r.items === 'string' ? JSON.parse(r.items) : r.items;
+                return {
+                  ...r,
+                  id: r.order_id || r.id,
+                  orderId: r.order_id || r.id,
+                  orderStatus: r.status,
+                  status: r.status,
+                  sellerApprovalStatus: r.seller_approval_status,
+                  requiresSellerAcceptance: r.requires_seller_acceptance,
+                  totalAmount: r.total_amount,
+                  paymentMethod: r.payment_method,
+                  paymentStatus: r.payment_status,
+                  deliveryAddress: addr,
+                  items: itms,
+                  deliveryOtp: r.delivery_otp_hash ? '123456' : null,
+                  createdAt: r.created_at,
+                  updatedAt: r.updated_at
+                };
+              });
+              return json(res, 200, mapped);
+            }
+          } catch (pgErr) {
+            console.warn('[MockServer] /api/v1/orders/seller pg query error:', pgErr.message);
+          }
+        }
         if (appRepositories && appRepositories.orderRepo) {
           try {
-            const orders = await appRepositories.orderRepo.getOrdersByStore(storeId || 'STORE_REWARI_01');
-            return json(res, 200, orders);
+            const orders = await appRepositories.orderRepo.getOrdersByStore(storeId || 'store_rewari_hub_01');
+            if (orders && orders.length > 0) {
+              return json(res, 200, orders);
+            }
           } catch (e) {
             // fallback
           }
         }
-        const orders = (db.orders || []).filter(o => !storeId || o.storeId === storeId || o.fulfillmentStoreId === storeId || o.sellerId === storeId || !o.storeId || storeId === 'STORE_REWARI_01' || storeId === 'seller_rewari_01' || storeId === 'seller_demo_001' || storeId === 'STORE_MASTER_001');
+        const orders = (db.orders || []).filter(o => !storeId || o.storeId === storeId || o.fulfillmentStoreId === storeId || o.sellerId === storeId || !o.storeId || storeId === 'STORE_REWARI_01' || storeId === 'store_rewari_hub_01' || storeId === 'seller_rewari_01' || storeId === 'seller_demo_001' || storeId === 'STORE_MASTER_001');
         return json(res, 200, orders);
       }
 
@@ -4716,103 +4754,185 @@ async function handleRequest(port, req, res) {
       // POST /api/v1/orders/:id/accept-by-seller
       const sellerAcceptMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/accept-by-seller$/);
       if (sellerAcceptMatch && req.method === 'POST') {
-        const authClaims = verifyAndDecodeJwt(req) || { sub: 'sel_rewari_01', storeId: 'STORE_REWARI_01', roles: ['ROLE_SELLER'] };
+        const authClaims = verifyAndDecodeJwt(req) || { sub: 'sel_rewari_01', storeId: 'store_rewari_hub_01', roles: ['ROLE_SELLER'] };
         const orderId = sellerAcceptMatch[1];
-        const storeId = authClaims.storeId || 'STORE_REWARI_01';
-        if (appRepositories && appRepositories.orderRepo) {
-          const resDomain = await appRepositories.orderRepo.acceptOrderBySeller(orderId, storeId, authClaims.sub);
-          if (!resDomain.ok) return json(res, resDomain.httpStatus || 400, { error: resDomain.error, message: resDomain.message });
-          
-          if (resDomain.offer) {
-            broadcastToRiderStream(resDomain.offer.riderId, 'OFFER_DISPATCHED', resDomain.offer);
-            broadcastToRiderStream('ALL', 'NEW_DISPATCH_OFFER', resDomain.offer);
-            broadcastToRiderStream('ALL', 'NEW_OFFER', resDomain.offer);
-            dispatchNotificationEvent(resDomain.offer.riderId, {
-              notificationId: resDomain.offer.notificationId,
-              eventId: resDomain.offer.eventId,
-              type: 'NEW_OFFER',
-              category: 'ORDERS',
-              priority: 'HIGH',
-              title: '🚀 New Delivery Job Offer!',
-              body: `New order #${orderId.slice(0, 8)} ready for pickup. Earn ₹${resDomain.offer.earningsAmount}.`,
-              offerId: resDomain.offer.offerId,
-              orderId: orderId,
-              expiresAt: resDomain.offer.offerExpiresAt
-            }).catch(() => {});
-          } else if (productionPgPool) {
-            try {
-              const freshOff = await productionPgPool.query(
-                `SELECT * FROM offers WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        const storeId = authClaims.storeId || 'store_rewari_hub_01';
+
+        // 1. Authoritative PostgreSQL synchronization
+        let canonicalOffer = null;
+        if (productionPgPool) {
+          try {
+            await productionPgPool.query(
+              `UPDATE orders 
+               SET status = 'SELLER_ACCEPTED', seller_approval_status = 'ACCEPTED', updated_at = NOW() 
+               WHERE (order_id = $1 OR id = $1)`,
+              [orderId]
+            );
+
+            const existingOfferRes = await productionPgPool.query(
+              `SELECT * FROM offers WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1`,
+              [orderId]
+            );
+            const expMs = Date.now() + 1800000; // 30 minutes from now
+
+            if (existingOfferRes.rows.length > 0) {
+              // Re-broadcast existing canonical offer with stable ID
+              canonicalOffer = existingOfferRes.rows[0];
+              await productionPgPool.query(
+                `UPDATE offers 
+                 SET status = 'CREATED', rider_id = 'all', offer_expires_at = $1, updated_at = NOW() 
+                 WHERE (offer_id = $2 OR id = $2)`,
+                [expMs, canonicalOffer.offer_id]
+              );
+              canonicalOffer.status = 'CREATED';
+              canonicalOffer.offer_expires_at = expMs;
+            } else {
+              // Create new canonical offer in PostgreSQL
+              const orderRes = await productionPgPool.query(
+                `SELECT * FROM orders WHERE (order_id = $1 OR id = $1) LIMIT 1`,
                 [orderId]
               );
-              if (freshOff.rows.length > 0) {
-                const offObj = freshOff.rows[0];
-                broadcastToRiderStream('ALL', 'NEW_DISPATCH_OFFER', offObj);
-                broadcastToRiderStream('ALL', 'NEW_OFFER', offObj);
-                broadcastToRiderStream('rdr_9817916180', 'NEW_DISPATCH_OFFER', offObj);
-                broadcastToRiderStream('rdr_9817916180', 'NEW_OFFER', offObj);
+              const dbOrd = orderRes.rows[0] || {};
+              const delSessionRes = await productionPgPool.query(
+                `SELECT * FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) LIMIT 1`,
+                [orderId]
+              );
+              const dbSession = delSessionRes.rows[0] || {};
+              const newOfferId = 'off_' + crypto.randomUUID();
+              const newDeliveryId = dbSession.delivery_id || ('del_' + crypto.randomUUID());
+              const totalAmt = Number(dbOrd.total_amount || 172);
+              const estimatedEarn = Math.max(35, Math.round(totalAmt * 0.15));
+
+              if (!dbSession.delivery_id) {
+                await productionPgPool.query(
+                  `INSERT INTO delivery_sessions (
+                     delivery_id, order_id, store_id, state, merchant_name, merchant_address,
+                     merchant_lat, merchant_lng, customer_name, customer_phone, customer_address,
+                     customer_lat, customer_lng, is_cod, cod_amount, created_at, updated_at
+                   ) VALUES ($1, $2, $3, 'READY_FOR_PICKUP', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+                   ON CONFLICT DO NOTHING`,
+                  [
+                    newDeliveryId, orderId, dbOrd.store_id || 'store_rewari_hub_01',
+                    'Rewari Central Fulfillment Hub', 'Circular Road, Rewari, Haryana',
+                    28.202224, 76.615418, 'Customer', '+919817916180',
+                    typeof dbOrd.delivery_address === 'object' ? (dbOrd.delivery_address.addressLine || 'Rewari') : (dbOrd.delivery_address || 'Company Bagh, Rewari'),
+                    28.1918, 76.6081, Boolean(dbOrd.is_cod), totalAmt
+                  ]
+                );
               }
-            } catch (_) {}
+
+              await productionPgPool.query(
+                `INSERT INTO offers (
+                   offer_id, event_id, notification_id, delivery_id, order_id, rider_id, status,
+                   offer_created_at, offer_expires_at, earnings_amount, delivery_distance_km, total_distance_km,
+                   estimated_duration_mins, created_at, updated_at
+                 ) VALUES ($1, $2, $3, $4, $5, 'all', 'CREATED', $6, $7, $8, 2.1, 2.1, 8, NOW(), NOW())`,
+                [
+                  newOfferId, 'evt_' + newOfferId, 'notif_' + newOfferId, newDeliveryId, orderId,
+                  Date.now(), expMs, estimatedEarn
+                ]
+              );
+              canonicalOffer = {
+                offer_id: newOfferId,
+                offerId: newOfferId,
+                delivery_id: newDeliveryId,
+                deliveryId: newDeliveryId,
+                order_id: orderId,
+                orderId: orderId,
+                status: 'CREATED',
+                earnings_amount: estimatedEarn,
+                offer_expires_at: expMs
+              };
+            }
+          } catch (err) {
+            console.error('[MockServer] PostgreSQL canonical offer setup error in accept-by-seller:', err.message);
           }
-          return json(res, 200, resDomain.order);
-        } else if (appRepositories && appRepositories.isProduction) {
-          return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
         }
-        const order = findOrder(orderId);
-        if (!order) return json(res, 404, { error: 'Order not found' });
-        setOrderStatus(order, 'SELLER_ACCEPTED', authClaims.sub, 'Order accepted by merchant');
+
+        if (appRepositories && appRepositories.orderRepo) {
+          try {
+            await appRepositories.orderRepo.acceptOrderBySeller(orderId, storeId, authClaims.sub);
+          } catch (_) {}
+        }
+
+        // 2. Memory State Synchronization
+        const order = findOrder(orderId) || { id: orderId, orderId };
+        setOrderStatus(order, 'SELLER_ACCEPTED', authClaims.sub, 'Order accepted & broadcasted by merchant');
         order.sellerApprovalStatus = 'ACCEPTED';
         order.sellerApprovedAt = Date.now();
         order.sellerApprovedBy = authClaims.sub;
 
-        // Auto-create/dispatch delivery offer immediately on seller acceptance
-        const deliverySession = findDeliverySession(orderId) || {
-          deliveryId: 'del_' + order.id,
-          orderId: order.id,
-          state: 'LOOKING_FOR_RIDER',
-          assignedRiderId: null,
-          merchantAddress: order.merchantAddress || '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
-          merchantLat: order.merchantLat || 28.202218,
-          merchantLng: order.merchantLng || 76.615403,
-          customerAddress: order.deliveryAddress || order.shippingAddress?.addressLine || 'Customer Location, Rewari',
-          customerLat: order.deliveryLat || order.shippingAddress?.latitude || 28.1970,
-          customerLng: order.deliveryLng || order.shippingAddress?.longitude || 76.6190,
-          createdAt: Date.now(),
-        };
-        deliverySession.state = 'LOOKING_FOR_RIDER';
-        db.deliverySessions = db.deliverySessions || {};
-        db.deliverySessions[deliverySession.deliveryId] = deliverySession;
-        db.deliverySessions[order.id] = deliverySession;
-
-        const offerId = 'off_' + crypto.randomUUID();
+        let offerRecord = Object.values(db.offers || {}).find(o => o.orderId === orderId);
         const totalAmt = Number(order.totalAmount || order.payableAmount || 150);
         const estimatedEarn = Math.max(35, Math.round(totalAmt * 0.15));
-        const offerRecord = {
-          offerId,
-          orderId: order.id,
-          deliveryId: deliverySession.deliveryId,
-          riderId: null,
-          broadcast: true,
-          status: 'CREATED',
-          pickupAddress: deliverySession.merchantAddress,
-          pickupLatitude: deliverySession.merchantLat,
-          pickupLongitude: deliverySession.merchantLng,
-          deliveryAddress: deliverySession.customerAddress,
-          deliveryLatitude: deliverySession.customerLat,
-          deliveryLongitude: deliverySession.customerLng,
-          estimatedEarnings: estimatedEarn,
-          estimatedEarningsFormatted: '₹' + estimatedEarn,
-          distanceKm: 2.2,
-          durationMins: 8,
-          isCod: order.paymentMethod === 'COD',
-          codAmountToCollect: order.paymentMethod === 'COD' ? totalAmt : 0,
-          offerCreatedAt: Date.now(),
-          offerExpiresAt: Date.now() + 180000,
-        };
-        db.offers = db.offers || {};
-        db.offers[offerId] = offerRecord;
+        const expMs = Date.now() + 1800000;
+
+        if (offerRecord) {
+          // Re-use canonical IDs for stable re-broadcast
+          offerRecord.status = 'CREATED';
+          offerRecord.offerExpiresAt = expMs;
+          offerRecord.broadcast = true;
+          offerRecord.riderId = null;
+        } else {
+          const offerId = canonicalOffer?.offer_id || canonicalOffer?.offerId || ('off_' + crypto.randomUUID());
+          const deliveryId = canonicalOffer?.delivery_id || canonicalOffer?.deliveryId || ('del_' + order.id);
+          const deliverySession = findDeliverySession(orderId) || {
+            deliveryId,
+            orderId: order.id,
+            state: 'LOOKING_FOR_RIDER',
+            merchantAddress: order.merchantAddress || '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
+            merchantLat: order.merchantLat || 28.202218,
+            merchantLng: order.merchantLng || 76.615403,
+            customerAddress: order.deliveryAddress || 'Company Bagh, Rewari',
+            customerLat: order.deliveryLat || 28.1970,
+            customerLng: order.deliveryLng || 76.6190,
+            createdAt: Date.now(),
+          };
+          db.deliverySessions = db.deliverySessions || {};
+          db.deliverySessions[deliverySession.deliveryId] = deliverySession;
+          db.deliverySessions[order.id] = deliverySession;
+
+          offerRecord = {
+            offerId,
+            id: offerId,
+            orderId: order.id,
+            deliveryId: deliverySession.deliveryId,
+            riderId: null,
+            broadcast: true,
+            status: 'CREATED',
+            pickupAddress: deliverySession.merchantAddress,
+            pickupLatitude: deliverySession.merchantLat,
+            pickupLongitude: deliverySession.merchantLng,
+            merchantName: 'Rewari Central Fulfillment Hub',
+            merchantAddress: deliverySession.merchantAddress,
+            merchantLat: deliverySession.merchantLat,
+            merchantLng: deliverySession.merchantLng,
+            deliveryAddress: deliverySession.customerAddress,
+            customerAddress: deliverySession.customerAddress,
+            customerName: order.customerName || 'Customer',
+            customerLat: deliverySession.customerLat,
+            customerLng: deliverySession.customerLng,
+            payout: estimatedEarn,
+            payoutAmount: estimatedEarn,
+            earningsAmount: estimatedEarn,
+            estimatedEarnings: estimatedEarn,
+            estimatedEarningsFormatted: '₹' + estimatedEarn,
+            distanceKm: 2.2,
+            totalDistanceKm: 2.2,
+            durationMins: 8,
+            estimatedTimeMins: 8,
+            isCod: order.paymentMethod === 'COD',
+            codAmountToCollect: order.paymentMethod === 'COD' ? totalAmt : 0,
+            offerCreatedAt: Date.now(),
+            offerExpiresAt: expMs,
+            expiresAt: expMs,
+          };
+          db.offers = db.offers || {};
+          db.offers[offerId] = offerRecord;
+        }
         saveDb();
 
+        // 3. Realtime Broadcast to All Connected Riders and Targeted Fleet
         try {
           const targetRiders = new Set();
           if (global.riderSSEConnections) {
@@ -4825,29 +4945,34 @@ async function handleRequest(port, req, res) {
           targetRiders.add('rdr_9817916180');
 
           broadcastToRiderStream('ALL', 'NEW_OFFER', offerRecord);
-          const uniqueNotifId = 'notif_' + crypto.createHash('sha256').update(`${order.id}_${offerId}`).digest('hex').slice(0, 16);
+          broadcastToRiderStream('ALL', 'NEW_DISPATCH_OFFER', offerRecord);
+          broadcastToRiderStream('ALL', 'OFFER_DISPATCHED', offerRecord);
+
+          const uniqueNotifId = 'notif_' + crypto.createHash('sha256').update(`${order.id}_${offerRecord.offerId}_${Date.now()}`).digest('hex').slice(0, 16);
           const itemsCount = (order.items && order.items.length > 0) ? order.items.length : 1;
           for (const rId of targetRiders) {
+            broadcastToRiderStream(rId, 'NEW_OFFER', offerRecord);
+            broadcastToRiderStream(rId, 'NEW_DISPATCH_OFFER', offerRecord);
             dispatchNotificationEvent(rId, {
               notificationId: `${uniqueNotifId}_${rId}`,
-              eventId: offerId,
-              type: 'ORDER_OFFER',
+              eventId: offerRecord.offerId,
+              type: 'NEW_OFFER',
               category: 'ORDERS',
               priority: 'HIGH',
               riderId: rId,
               orderId: order.id,
-              deliveryId: deliverySession.deliveryId,
-              offerId: offerId,
-              title: `⚡ Order #${order.id.slice(-8).toUpperCase()} · ₹${estimatedEarn}`,
-              body: `Pickup: ${order.storeName || order.merchantName || 'Rewari Central Hub'} (${itemsCount} items) • Earn ₹${estimatedEarn}`,
-              deepLink: `commerceos://rider/offer/${offerId}`,
+              deliveryId: offerRecord.deliveryId,
+              offerId: offerRecord.offerId,
+              title: `⚡ Order #${order.id.slice(-8).toUpperCase()} · ₹${offerRecord.estimatedEarnings || estimatedEarn}`,
+              body: `Pickup: ${order.storeName || order.merchantName || 'Rewari Central Hub'} (${itemsCount} items) • Earn ₹${offerRecord.estimatedEarnings || estimatedEarn}`,
+              deepLink: `commerceos://rider/offer/${offerRecord.offerId}`,
               createdAt: nowIso(),
               expiresAt: offerRecord.offerExpiresAt,
             }).catch(() => {});
           }
         } catch (_) {}
 
-        return json(res, 200, order);
+        return json(res, 200, { ok: true, message: 'Broadcast dispatched to riders', offer: offerRecord, order });
       }
 
       // POST /api/v1/orders/:id/reject-by-seller
@@ -5467,9 +5592,11 @@ async function handleRequest(port, req, res) {
             let offRes = await productionPgPool.query(
               `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
                FROM offers o
-               LEFT JOIN orders ord ON ord.order_id = o.order_id
+               JOIN orders ord ON ord.order_id = o.order_id
                WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all')
                  AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                 AND (ord.seller_approval_status = 'ACCEPTED' OR ord.seller_approval_status = 'AUTO_ACCEPTED')
+                 AND ord.status IN ('SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED')
                  AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
                ORDER BY o.created_at DESC LIMIT 5`,
               [riderId]
@@ -5478,8 +5605,10 @@ async function handleRequest(port, req, res) {
               offRes = await productionPgPool.query(
                 `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
                  FROM offers o
-                 LEFT JOIN orders ord ON ord.order_id = o.order_id
+                 JOIN orders ord ON ord.order_id = o.order_id
                  WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                   AND (ord.seller_approval_status = 'ACCEPTED' OR ord.seller_approval_status = 'AUTO_ACCEPTED')
+                   AND ord.status IN ('SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED')
                    AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
                  ORDER BY o.created_at DESC LIMIT 5`
               );
@@ -5591,9 +5720,15 @@ async function handleRequest(port, req, res) {
         }
 
         const activeOffers = Object.values(db.offers || {}).filter(
-          (o) => (o.riderId === riderId || o.riderId === 'rdr_9817916180' || !o.riderId || o.broadcast === true) &&
-                 ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status) &&
-                 (!o.offerExpiresAt || o.offerExpiresAt > now)
+          (o) => {
+            const ord = findOrder(o.orderId);
+            const isApproved = !ord || ord.sellerApprovalStatus === 'ACCEPTED' || ord.sellerApprovalStatus === 'AUTO_ACCEPTED';
+            const isValidStatus = !ord || ['SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED'].includes(ord.status || ord.orderStatus);
+            return (o.riderId === riderId || o.riderId === 'rdr_9817916180' || !o.riderId || o.broadcast === true) &&
+                   ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status) &&
+                   (!o.offerExpiresAt || o.offerExpiresAt > now) &&
+                   isApproved && isValidStatus;
+          }
         );
         const activeOffer = activeOffers.sort((a, b) => (b.offerCreatedAt || 0) - (a.offerCreatedAt || 0))[0];
         if (activeOffer) {
