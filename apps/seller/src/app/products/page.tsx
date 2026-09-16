@@ -8,6 +8,30 @@ import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X, I
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
+import DatePickerDDMMYYYY from '../../components/DatePickerDDMMYYYY';
+
+function formatDateToDDMMYYYY(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  const trimmed = dateStr.trim();
+  // If already DD/MM/YYYY or DD-MM-YYYY
+  if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(trimmed)) {
+    return trimmed.replace(/-/g, '/');
+  }
+  // If YYYY-MM-DD or YYYY/MM/DD
+  const matchYMD = trimmed.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (matchYMD) {
+    const [, y, m, d] = matchYMD;
+    return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+  }
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+  return trimmed;
+}
 
 interface ProductItem {
   id: string;
@@ -404,13 +428,13 @@ export default function ProductsPage() {
                           {(p.manufacturingDate || p.manufacturing_date) && (
                             <div className="text-3xs text-content-muted mt-1 flex items-center space-x-1">
                               <span className="font-medium">Mfg:</span>
-                              <span className="font-mono">{p.manufacturingDate || p.manufacturing_date}</span>
+                              <span className="font-mono">{formatDateToDDMMYYYY(p.manufacturingDate || p.manufacturing_date)}</span>
                             </div>
                           )}
                           {(p.expiryDate || p.expiry_date) && (
                             <div className="text-3xs text-content-warning font-semibold flex items-center space-x-1">
                               <span>Exp:</span>
-                              <span className="font-mono">{p.expiryDate || p.expiry_date}</span>
+                              <span className="font-mono">{formatDateToDDMMYYYY(p.expiryDate || p.expiry_date)}</span>
                             </div>
                           )}
                         </td>
@@ -647,27 +671,31 @@ export default function ProductsPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center space-x-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-content-muted" />
-                      <span>Manufacturing Date</span>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center justify-between">
+                      <span className="flex items-center space-x-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-content-muted" />
+                        <span>Manufacturing Date</span>
+                      </span>
+                      <span className="text-3xs text-content-brand font-mono lowercase">dd/mm/yyyy</span>
                     </label>
-                    <input
-                      type="date"
+                    <DatePickerDDMMYYYY
                       value={newMfgDate}
-                      onChange={e => setNewMfgDate(e.target.value)}
-                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                      onChange={setNewMfgDate}
+                      placeholder="DD/MM/YYYY"
                     />
                   </div>
                   <div>
-                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center space-x-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-content-muted" />
-                      <span>Expiry Date</span>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center justify-between">
+                      <span className="flex items-center space-x-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-content-muted" />
+                        <span>Expiry Date</span>
+                      </span>
+                      <span className="text-3xs text-content-brand font-mono lowercase">dd/mm/yyyy</span>
                     </label>
-                    <input
-                      type="date"
+                    <DatePickerDDMMYYYY
                       value={newExpiryDate}
-                      onChange={e => setNewExpiryDate(e.target.value)}
-                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                      onChange={setNewExpiryDate}
+                      placeholder="DD/MM/YYYY"
                     />
                   </div>
                 </div>
