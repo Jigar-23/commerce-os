@@ -5304,7 +5304,7 @@ const server = http.createServer(async (req, res) => {
       };
 
       const ledgerRow = await pool.query(
-        `SELECT * FROM inventory_ledger WHERE (id = $1 OR adjustment_id = $1) AND store_id = $2 LIMIT 1`,
+        `SELECT * FROM inventory_ledger WHERE id = $1 AND store_id = $2 LIMIT 1`,
         [adjustmentId, authorizedStoreId]
       );
       if (ledgerRow.rows.length === 0) {
@@ -5318,7 +5318,7 @@ const server = http.createServer(async (req, res) => {
         orig.product_id,
         orig.sku,
         reverseDelta,
-        `UNDO_ADJUSTMENT_${adjustmentId}`,
+        'SELLER_ADJUSTMENT',
         actor
       );
 

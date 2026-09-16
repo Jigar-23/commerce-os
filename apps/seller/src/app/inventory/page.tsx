@@ -11,6 +11,7 @@ import SellerAuthGuard from '../../components/SellerAuthGuard';
 interface InventoryItem {
   id: string;
   sku: string;
+  productId: string;
   name: string;
   category?: string;
   packSize?: string;
@@ -51,8 +52,9 @@ export default function DedicatedInventoryPage() {
       if (res.ok && res.data) {
         const items = Array.isArray(res.data) ? res.data : (res.data.items || res.data.content || []);
         const normalized = items.map((i: any) => ({
-          id: i.id || i.sku,
+          id: i.id || i.sku || i.productId,
           sku: i.sku || i.id,
+          productId: i.productId || i.product_id || i.id || i.sku,
           name: i.name || 'Product',
           category: i.category || 'General',
           packSize: i.packSize || '1 Unit',
@@ -84,12 +86,56 @@ export default function DedicatedInventoryPage() {
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
-  // Transactional Ledger Stock Adjustment
-  const handleAdjustStock = async (item: InventoryItem, delta: number, reason: string = 'SELLER_RESTOCK') => {
-    if (delta === 0) return;
+  // Stage quick quantity (+10, +50) into the input field without immediately mutating stock
+  const handleAddQuickQty = (itemId: string, amount: number) => {
+    setCustomAddInputs(prev => {
+      const raw = prev[itemId] || '';
+      const current = parseInt(raw, 10);
+      const next = (isNaN(current) ? 0 : current) + amount;
+      return { ...prev, [itemId]: String(next) };
+    });
+  };
 
+  // Transactional Ledger Stock Adjustment on "Apply"
+  const handleApplyAdjustment = async (item: InventoryItem) => {
+    const raw = customAddInputs[item.id];
+    if (!raw || raw.trim() === '') {
+      showToast('Enter or select a quantity first using +10, +50 or the input field.', 'error');
+      return;
+    }
+    const delta = parseInt(raw, 10);
+    if (isNaN(delta) || delta === 0) {
+      showToast('Enter a valid non-zero adjustment delta.', 'error');
+      return;
+    }
+
+    const previousInventory = [...inventory];
+    const reason = delta > 0 ? 'SELLER_RESTOCK' : 'SELLER_ADJUSTMENT';
+
+    // 1. INSTANT OPTIMISTIC UI UPDATE (0ms latency)
+    setInventory(prev =>
+      prev.map(p =>
+        (p.id === item.id || p.sku === item.sku)
+          ? {
+              ...p,
+              onHand: Math.max(0, p.onHand + delta),
+              available: Math.max(0, p.onHand + delta - p.reserved),
+              stockCount: Math.max(0, p.stockCount + delta),
+            }
+          : p
+      )
+    );
+
+    // 2. Clear staged input immediately
+    setCustomAddInputs(prev => ({ ...prev, [item.id]: '' }));
+
+    // 3. Show instant feedback toast
+    showToast(`Adjusting stock for ${item.name} (${delta > 0 ? '+' : ''}${delta} units)…`, 'success');
+
+    // 4. Asynchronous backend persistence
     try {
       const res = await sellerApi.post('/api/v1/catalog/inventory/adjust', {
+        productId: item.productId,
         sku: item.sku,
         delta,
         reason,
@@ -106,40 +152,19 @@ export default function DedicatedInventoryPage() {
           reason,
           timestamp: new Date().toLocaleTimeString(),
         });
-
-        // Optimistic UI Update
-        setInventory(prev =>
-          prev.map(p =>
-            p.sku === item.sku
-              ? {
-                  ...p,
-                  onHand: p.onHand + delta,
-                  available: Math.max(0, p.onHand + delta - p.reserved),
-                  stockCount: p.stockCount + delta,
-                }
-              : p
-          )
-        );
-
         showToast(`Stock for ${item.name} adjusted by ${delta > 0 ? '+' : ''}${delta}`, 'success');
       } else {
-        showToast(res.error || 'Failed to apply inventory mutation.', 'error');
+        // Rollback optimistic update on error
+        setInventory(previousInventory);
+        setCustomAddInputs(prev => ({ ...prev, [item.id]: String(delta) }));
+        showToast(res.error || (res as any).message || 'Failed to apply inventory mutation.', 'error');
       }
     } catch (e: any) {
+      // Rollback optimistic update on network exception
+      setInventory(previousInventory);
+      setCustomAddInputs(prev => ({ ...prev, [item.id]: String(delta) }));
       showToast(e.message || 'Network error adjusting stock.', 'error');
     }
-  };
-
-  const handleManualInputSubmit = (item: InventoryItem) => {
-    const raw = customAddInputs[item.id];
-    if (!raw) return;
-    const delta = parseInt(raw, 10);
-    if (isNaN(delta) || delta === 0) {
-      showToast('Enter a valid non-zero adjustment delta.', 'error');
-      return;
-    }
-    handleAdjustStock(item, delta, delta > 0 ? 'SELLER_RESTOCK' : 'SELLER_ADJUSTMENT');
-    setCustomAddInputs({ ...customAddInputs, [item.id]: '' });
   };
 
   const handleUndoAdjustment = async () => {
@@ -149,22 +174,37 @@ export default function DedicatedInventoryPage() {
       const targetItem = inventory.find(i => i.sku === lastAdjustment.sku);
       if (!targetItem) {
         showToast('SKU not found for undo action.', 'error');
+        setIsUndoing(false);
         return;
       }
 
       const reverseDelta = -lastAdjustment.delta;
-      const res = await sellerApi.post('/api/v1/catalog/inventory/adjust', {
-        sku: lastAdjustment.sku,
-        delta: reverseDelta,
-        reason: 'SELLER_ADJUSTMENT',
-        storeId: session?.storeId || 'store_rewari_hub_01',
+      const previousInventory = [...inventory];
+
+      // Instant optimistic UI update for undo rollback
+      setInventory(prev =>
+        prev.map(p =>
+          p.sku === lastAdjustment.sku
+            ? {
+                ...p,
+                onHand: Math.max(0, p.onHand + reverseDelta),
+                available: Math.max(0, p.onHand + reverseDelta - p.reserved),
+                stockCount: Math.max(0, p.stockCount + reverseDelta),
+              }
+            : p
+        )
+      );
+
+      const res = await sellerApi.post('/api/v1/catalog/inventory/adjust/undo', {
+        adjustmentId: lastAdjustment.adjustmentId,
       });
 
       if (res.ok) {
         showToast(`Undid adjustment for ${lastAdjustment.name} (${reverseDelta > 0 ? '+' : ''}${reverseDelta})`, 'success');
         setLastAdjustment(null);
-        await fetchInventory();
       } else {
+        // Revert optimistic undo
+        setInventory(previousInventory);
         showToast(res.error || 'Failed to rollback ledger transaction.', 'error');
       }
     } catch (e: any) {
@@ -328,31 +368,59 @@ export default function DedicatedInventoryPage() {
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end space-x-2">
                             <button
-                              onClick={() => handleAdjustStock(item, 10, 'QUICK_REPLENISHMENT')}
-                              className="px-2.5 py-1 bg-surface-subtle hover:bg-surface-accentSubtle border border-border-default rounded-lg text-xs font-bold text-content-accent transition"
-                              title="Add 10 units"
+                              type="button"
+                              onClick={() => handleAddQuickQty(item.id, 10)}
+                              className="px-2.5 py-1 bg-surface-subtle hover:bg-surface-accentSubtle border border-border-default rounded-lg text-xs font-bold text-content-accent transition active:scale-95 shadow-2xs"
+                              title="Stage +10 units (Click Apply to save)"
                             >
                               +10
                             </button>
                             <button
-                              onClick={() => handleAdjustStock(item, 50, 'QUICK_REPLENISHMENT')}
-                              className="px-2.5 py-1 bg-surface-subtle hover:bg-surface-accentSubtle border border-border-default rounded-lg text-xs font-bold text-content-accent transition"
-                              title="Add 50 units"
+                              type="button"
+                              onClick={() => handleAddQuickQty(item.id, 50)}
+                              className="px-2.5 py-1 bg-surface-subtle hover:bg-surface-accentSubtle border border-border-default rounded-lg text-xs font-bold text-content-accent transition active:scale-95 shadow-2xs"
+                              title="Stage +50 units (Click Apply to save)"
                             >
                               +50
                             </button>
 
                             <div className="flex items-center space-x-1.5">
-                              <input
-                                type="number"
-                                placeholder="±Qty"
-                                value={customAddInputs[item.id] || ''}
-                                onChange={e => setCustomAddInputs({ ...customAddInputs, [item.id]: e.target.value })}
-                                className="w-16 bg-white border border-border-default rounded-lg px-2 py-1 text-xs text-center text-content-primary focus:outline-none focus:border-border-accent font-mono shadow-sm"
-                              />
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  placeholder="±Qty"
+                                  value={customAddInputs[item.id] || ''}
+                                  onChange={e => setCustomAddInputs({ ...customAddInputs, [item.id]: e.target.value })}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                      handleApplyAdjustment(item);
+                                    }
+                                  }}
+                                  className={`w-18 bg-white border rounded-lg px-2 py-1 text-xs text-center font-mono shadow-sm transition ${
+                                    customAddInputs[item.id]
+                                      ? 'border-border-accent ring-1 ring-border-accent text-content-primary font-bold'
+                                      : 'border-border-default text-content-primary'
+                                  }`}
+                                />
+                                {customAddInputs[item.id] && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCustomAddInputs(prev => ({ ...prev, [item.id]: '' }))}
+                                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-surface-subtle border border-border-default text-content-muted hover:text-content-danger flex items-center justify-center text-3xs font-bold shadow"
+                                    title="Clear staged quantity"
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
                               <button
-                                onClick={() => handleManualInputSubmit(item)}
-                                className="px-2.5 py-1 bg-action-speedBg hover:bg-action-speedHover text-white rounded-lg text-xs font-bold transition shadow-sm"
+                                type="button"
+                                onClick={() => handleApplyAdjustment(item)}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold transition shadow-sm ${
+                                  customAddInputs[item.id] && parseInt(customAddInputs[item.id] || '0', 10) !== 0
+                                    ? 'bg-action-speedBg hover:bg-action-speedHover text-white shadow-md'
+                                    : 'bg-surface-subtle text-content-muted border border-border-default hover:bg-surface-subtle/80'
+                                }`}
                               >
                                 Apply
                               </button>
