@@ -215,10 +215,18 @@ class TransactionalCatalogRepository {
       const res = await this.pool.query(
         `UPDATE products SET is_active = FALSE, updated_at = NOW()
          WHERE (id = $1 OR sku = $1)
-         RETURNING *`,
+         RETURNING id, sku`,
         [productId]
       );
-      return res.rowCount > 0;
+      if (res.rowCount > 0) {
+        const row = res.rows[0];
+        await this.pool.query(
+          `DELETE FROM inventory WHERE product_id = $1 OR sku = $2`,
+          [row.id, row.sku]
+        );
+        return true;
+      }
+      return false;
     }
     // Legacy store-scoped path is intentionally opaque: it must NEVER be reached from a seller
     // route. If invoked it refuses rather than risk cross-merchant global deactivation.

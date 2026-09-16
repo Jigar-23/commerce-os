@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
-import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X, Image as ImageIcon, ExternalLink, Calendar, Trash2, FileText } from 'lucide-react';
+import { Package, Plus, Search, RefreshCw, AlertCircle, AlertTriangle, CheckCircle, Store, X, Image as ImageIcon, ExternalLink, Calendar, Trash2, FileText } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
@@ -77,12 +77,20 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
-  // Modal State
+  // Add Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState(false);
   const [isCustomCategory, setIsCustomCategory] = useState(false);
+
+  // Delete SKU Modal State (Double Confirmation)
+  const [deletingProduct, setDeletingProduct] = useState<ProductItem | null>(null);
+  const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('');
+  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState(false);
 
   // Form Fields
   const [newSku, setNewSku] = useState('');
@@ -225,6 +233,53 @@ export default function ProductsPage() {
     }
   };
 
+  const openDeleteModal = (item: ProductItem) => {
+    setDeletingProduct(item);
+    setDeleteConfirmationInput('');
+    setIsDeleteConfirmed(false);
+    setDeleteError(null);
+    setDeleteSuccess(false);
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeleting) return;
+    setDeletingProduct(null);
+    setDeleteConfirmationInput('');
+    setIsDeleteConfirmed(false);
+    setDeleteError(null);
+    setDeleteSuccess(false);
+  };
+
+  const canExecuteDelete =
+    !!deletingProduct &&
+    isDeleteConfirmed &&
+    deleteConfirmationInput.trim().toLowerCase() === deletingProduct.sku.trim().toLowerCase();
+
+  const handleDeleteProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletingProduct || !canExecuteDelete || isDeleting) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const targetIdentifier = deletingProduct.id || deletingProduct.sku;
+      const res = await sellerApi.delete(`/api/v1/catalog/products/${encodeURIComponent(targetIdentifier)}`);
+      if (res.ok) {
+        setDeleteSuccess(true);
+        setTimeout(() => {
+          closeDeleteModal();
+          loadProducts();
+        }, 1200);
+      } else {
+        setDeleteError(res.error || 'Failed to delete SKU from catalog.');
+      }
+    } catch (err: any) {
+      setDeleteError(err.message || 'An unexpected error occurred while deleting SKU.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const existingProductCategories = useMemo(() => {
     return Array.from(
       new Set(
@@ -342,19 +397,20 @@ export default function ProductsPage() {
                     <th className="px-6 py-4">Stock</th>
                     <th className="px-6 py-4">Rx Required</th>
                     <th className="px-6 py-4 text-right">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-default">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
+                      <td colSpan={8} className="px-6 py-12 text-center text-content-muted">
                         <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-content-accent" />
                         <span>Loading products from repository…</span>
                       </td>
                     </tr>
                   ) : filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-content-muted">
+                      <td colSpan={8} className="px-6 py-12 text-center text-content-muted">
                         <Package className="w-8 h-8 mx-auto mb-2 text-content-secondary" />
                         <span>No products found matching your filter criteria.</span>
                       </td>
@@ -465,6 +521,16 @@ export default function ProductsPage() {
                           }`}>
                             {(p.stockCount ?? 0) > 0 ? 'AVAILABLE' : 'OUT OF STOCK'}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => openDeleteModal(p)}
+                            className="p-1.5 text-content-muted hover:text-content-danger hover:bg-surface-dangerSubtle rounded-xl transition inline-flex items-center space-x-1 border border-transparent hover:border-border-danger"
+                            title={`Delete SKU ${p.sku}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -766,6 +832,121 @@ export default function ProductsPage() {
                     className="px-5 py-2 bg-action-speedBg hover:bg-action-speedHover rounded-xl text-xs font-bold text-white shadow-md transition disabled:opacity-50"
                   >
                     {isSubmitting ? 'Registering SKU…' : 'Save Product'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Delete SKU Double Confirmation Modal */}
+        {deletingProduct && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white border border-border-default rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
+              <div className="px-6 py-4 border-b border-border-default flex items-center justify-between bg-surface-subtle/50">
+                <div className="flex items-center space-x-2 text-content-danger">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <h3 className="font-bold text-sm">Confirm SKU Deletion</h3>
+                </div>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={closeDeleteModal}
+                  className="text-content-muted hover:text-content-primary p-1 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleDeleteProduct} className="p-6 space-y-4">
+                {deleteError && (
+                  <div className="p-3 bg-surface-dangerSubtle border border-border-danger rounded-xl text-content-danger text-xs flex items-center space-x-2 font-semibold">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{deleteError}</span>
+                  </div>
+                )}
+                {deleteSuccess && (
+                  <div className="p-3 bg-surface-brandSubtle border border-border-brand rounded-xl text-content-brand text-xs flex items-center space-x-2 font-semibold">
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                    <span>SKU successfully deleted from catalog!</span>
+                  </div>
+                )}
+
+                {/* SKU Info Card */}
+                <div className="p-3.5 bg-surface-subtle border border-border-default rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-black text-content-danger">{deletingProduct.sku}</span>
+                    <span className="text-3xs font-bold px-2 py-0.5 rounded-full bg-surface-dangerSubtle text-content-danger border border-border-danger">
+                      {deletingProduct.category || 'General'}
+                    </span>
+                  </div>
+                  <div className="font-bold text-xs text-content-primary truncate">{deletingProduct.name}</div>
+                  <div className="text-2xs text-content-muted">
+                    Pack: {deletingProduct.packSize || '1 Unit'} • Price: ₹{Number(deletingProduct.price).toFixed(2)} • Stock: {deletingProduct.stockCount ?? 0} units
+                  </div>
+                </div>
+
+                <div className="p-3 bg-surface-dangerSubtle/60 border border-border-danger/60 rounded-xl text-2xs text-content-danger leading-relaxed">
+                  <strong>Warning:</strong> This will immediately deactivate this SKU and permanently remove its stock records from the store catalog.
+                </div>
+
+                {/* Double Confirmation Steps */}
+                <div className="space-y-3 pt-1">
+                  {/* Step 1: Checkbox confirmation */}
+                  <label className="flex items-start space-x-2.5 p-3 rounded-xl border border-border-default hover:bg-surface-subtle cursor-pointer transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={isDeleteConfirmed}
+                      onChange={e => setIsDeleteConfirmed(e.target.checked)}
+                      disabled={isDeleting}
+                      className="mt-0.5 w-4 h-4 rounded text-action-speedBg focus:ring-border-danger cursor-pointer"
+                    />
+                    <span className="text-xs text-content-primary font-medium">
+                      <span className="font-bold text-content-danger">Confirmation 1:</span> I understand this action permanently removes this SKU and all associated store inventory.
+                    </span>
+                  </label>
+
+                  {/* Step 2: Type SKU code */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-2xs text-content-muted">
+                      <label className="font-bold uppercase">
+                        <span className="text-content-danger">Confirmation 2:</span> Type <span className="font-mono font-bold text-content-danger select-all bg-surface-subtle px-1.5 py-0.5 rounded border border-border-default">{deletingProduct.sku}</span> to verify:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmationInput(deletingProduct.sku)}
+                        className="text-3xs font-semibold text-content-brand hover:underline"
+                      >
+                        (auto-fill)
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      disabled={isDeleting}
+                      placeholder={`Type "${deletingProduct.sku}" to confirm`}
+                      value={deleteConfirmationInput}
+                      onChange={e => setDeleteConfirmationInput(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs font-mono text-content-primary focus:outline-none focus:border-border-danger"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-3 flex items-center justify-end space-x-3 border-t border-border-default">
+                  <button
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={closeDeleteModal}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-content-muted hover:bg-surface-subtle transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!canExecuteDelete || isDeleting}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isDeleting ? 'Deleting SKU…' : 'Permanently Delete SKU'}</span>
                   </button>
                 </div>
               </form>
