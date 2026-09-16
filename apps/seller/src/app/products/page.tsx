@@ -116,30 +116,54 @@ export default function ProductsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await sellerApi.get<any>('/api/v1/catalog/products');
-      if (res.ok && res.data) {
-        const list = Array.isArray(res.data)
-          ? res.data
-          : (Array.isArray(res.data.content)
-              ? res.data.content
-              : (Array.isArray(res.data.products)
-                  ? res.data.products
-                  : (Array.isArray(res.data.items) ? res.data.items : [])));
-        const normalized = list.map((item: any) => {
-          const sc = Number(item.stockCount ?? item.stock_count ?? item.availableCount ?? item.available_count ?? 0);
-          return {
-            ...item,
-            stockCount: sc,
-            stock_count: sc,
-            availableCount: sc,
-            available_count: sc,
-            inStock: sc > 0 || item.inStock === true
-          };
-        });
-        setProducts(normalized);
-      } else {
-        setError(res.error || 'Failed to retrieve catalog products.');
+      const [prodRes, invRes] = await Promise.allSettled([
+        sellerApi.get<any>('/api/v1/catalog/products'),
+        sellerApi.get<any>('/api/v1/catalog/seller/inventory')
+      ]);
+
+      let list: any[] = [];
+      if (prodRes.status === 'fulfilled' && prodRes.value.ok && prodRes.value.data) {
+        const data = prodRes.value.data;
+        list = Array.isArray(data)
+          ? data
+          : (Array.isArray(data.content)
+              ? data.content
+              : (Array.isArray(data.products)
+                  ? data.products
+                  : (Array.isArray(data.items) ? data.items : [])));
       }
+
+      // Map stock by SKU / productId from authoritative seller inventory
+      const invStockMap = new Map<string, number>();
+      if (invRes.status === 'fulfilled' && invRes.value.ok && invRes.value.data) {
+        const invData = invRes.value.data;
+        const invList = Array.isArray(invData) ? invData : (invData.items || invData.content || []);
+        invList.forEach((invItem: any) => {
+          const count = Number(invItem.available ?? invItem.onHand ?? invItem.stockCount ?? 0);
+          if (invItem.sku) invStockMap.set(String(invItem.sku).toLowerCase(), count);
+          if (invItem.productId) invStockMap.set(String(invItem.productId).toLowerCase(), count);
+          if (invItem.id) invStockMap.set(String(invItem.id).toLowerCase(), count);
+        });
+      }
+
+      const normalized = list.map((item: any) => {
+        const skuKey = String(item.sku || '').toLowerCase();
+        const prodKey = String(item.id || item.productId || '').toLowerCase();
+        const invStock = invStockMap.get(skuKey) ?? invStockMap.get(prodKey);
+        const directStock = item.stockCount ?? item.stock_count ?? item.availableCount ?? item.available_count;
+        const finalStock = Number(invStock != null ? invStock : (directStock ?? 0));
+
+        return {
+          ...item,
+          stockCount: finalStock,
+          stock_count: finalStock,
+          availableCount: finalStock,
+          available_count: finalStock,
+          inStock: finalStock > 0 || item.inStock === true
+        };
+      });
+
+      setProducts(normalized);
     } catch (err: any) {
       setError(err.message || 'Network error fetching catalog.');
     } finally {
