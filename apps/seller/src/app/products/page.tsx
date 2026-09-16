@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
-import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X } from 'lucide-react';
+import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X, Image as ImageIcon, ExternalLink } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
@@ -22,6 +22,8 @@ interface ProductItem {
   inStock?: boolean;
   rxRequirement?: string;
   coldChainRequired?: boolean;
+  imageUrl?: string;
+  image_url?: string;
 }
 
 export default function ProductsPage() {
@@ -46,6 +48,7 @@ export default function ProductsPage() {
   const [newMrp, setNewMrp] = useState('');
   const [newStock, setNewStock] = useState('50');
   const [newRx, setNewRx] = useState('OTC');
+  const [newImageUrl, setNewImageUrl] = useState('');
 
   const { session, storeName } = useSellerSession();
 
@@ -112,6 +115,7 @@ export default function ProductsPage() {
         stockCount: stockNum,
         reason: 'Initial seller catalog registration',
         rxRequirement: newRx,
+        imageUrl: newImageUrl.trim() || undefined,
         storeId: session?.storeId || 'store_rewari_hub_01',
       };
 
@@ -127,6 +131,7 @@ export default function ProductsPage() {
           setNewPrice('');
           setNewMrp('');
           setNewStock('50');
+          setNewImageUrl('');
           loadProducts();
         }, 1200);
       } else {
@@ -260,8 +265,38 @@ export default function ProductsPage() {
                     filteredProducts.map(p => (
                       <tr key={p.id || p.sku} className="hover:bg-surface-subtle/50 transition">
                         <td className="px-6 py-4">
-                          <div className="font-mono text-xs font-bold text-content-accent">{p.sku}</div>
-                          <div className="font-bold text-content-primary text-sm">{p.name}</div>
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-xl bg-surface-subtle border border-border-default flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                              {(p.imageUrl || p.image_url) ? (
+                                <img
+                                  src={p.imageUrl || p.image_url}
+                                  alt={p.name}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <Package className="w-5 h-5 text-content-muted" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-mono text-xs font-bold text-content-accent truncate">{p.sku}</div>
+                              <div className="font-bold text-content-primary text-sm truncate">{p.name}</div>
+                              {(p.imageUrl || p.image_url) && (
+                                <a
+                                  href={p.imageUrl || p.image_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center space-x-1 text-2xs text-content-brand hover:underline mt-0.5 truncate max-w-[180px]"
+                                  title={p.imageUrl || p.image_url}
+                                >
+                                  <span>Image Link</span>
+                                  <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-xs text-content-muted">{p.category || 'General'}</td>
                         <td className="px-6 py-4 text-xs text-content-muted">{p.packSize || '1 Unit'}</td>
@@ -423,6 +458,37 @@ export default function ProductsPage() {
                       <option value="RX_REQUIRED">Rx Required (Pharmacist approval)</option>
                       <option value="SCHEDULE_H">Schedule H (Strict Rx)</option>
                     </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center justify-between">
+                    <span className="flex items-center space-x-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-content-brand" />
+                      <span>Product Image Link / URL</span>
+                    </span>
+                    <span className="text-2xs font-normal text-content-muted lowercase">(optional)</span>
+                  </label>
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="url"
+                      placeholder="e.g. https://images.unsplash.com/... or /images/medicine.png"
+                      value={newImageUrl}
+                      onChange={e => setNewImageUrl(e.target.value)}
+                      className="flex-1 bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
+                    {newImageUrl.trim() && (
+                      <div className="w-9 h-9 rounded-xl border border-border-default overflow-hidden bg-surface-subtle shrink-0 flex items-center justify-center shadow-sm">
+                        <img
+                          src={newImageUrl.trim()}
+                          alt="Preview"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 

@@ -5365,6 +5365,7 @@ const server = http.createServer(async (req, res) => {
         discountedPrice: Number(p.discounted_price ?? p.discountedPrice ?? p.price ?? 0),
         rxRequirement: p.rx_requirement || p.rxRequirement || 'OTC',
         category: p.category || null,
+        imageUrl: p.image_url || p.imageUrl || null,
         isActive: Boolean(p.is_active ?? p.isActive ?? true),
         stockCount: p.stock_count != null ? Number(p.stock_count) : undefined,
         availableCount: p.available_count != null ? Number(p.available_count) : undefined
@@ -5485,6 +5486,7 @@ const server = http.createServer(async (req, res) => {
           discountedPrice: Number(p.discounted_price ?? p.discountedPrice ?? p.price ?? 0),
           rxRequirement: p.rx_requirement || p.rxRequirement || 'OTC',
           category: p.category || null,
+          imageUrl: p.image_url || p.imageUrl || null,
           isActive: Boolean(p.is_active ?? p.isActive ?? true)
         });
 
