@@ -86,7 +86,8 @@ class TransactionalCatalogRepository {
     // Store-scoped sellable availability is represented by inventory, never by products.store_id.
     const res = await this.pool.query(
       `SELECT id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
-              rx_requirement, cold_chain_required, category, image_url, is_active,
+              rx_requirement, cold_chain_required, category, image_url, images,
+              description, expiry_date, manufacturing_date, is_active,
               created_at, updated_at
        FROM products
        WHERE (sku = $1 OR id = $1) AND is_active = TRUE
@@ -112,7 +113,7 @@ class TransactionalCatalogRepository {
         `SELECT DISTINCT
            p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price,
            p.discounted_price, p.rx_requirement, p.cold_chain_required,
-           p.category, p.image_url, p.is_active,
+           p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active,
            i.store_id AS inventory_store_id,
            i.stock_count,
            i.reserved_count,
@@ -154,11 +155,19 @@ class TransactionalCatalogRepository {
     // products.sku UNIQUE enforces "no duplicate global SKU" at the database boundary.
     // NOTE: saveProductTransactionally is a GLOBAL CATALOG authority mutation. Sellers must route
     // store-level changes through inventory, never through this method.
+    const imagesVal = Array.isArray(product.images)
+      ? JSON.stringify(product.images)
+      : (product.images ? JSON.stringify([product.images]) : (product.imageUrl ? JSON.stringify([product.imageUrl]) : '[]'));
+    const primaryImg = (Array.isArray(product.images) && product.images.length > 0)
+      ? product.images[0]
+      : (product.imageUrl || product.image_url || product.image || null);
+
     const res = await this.pool.query(
       `INSERT INTO products (
         id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
-        rx_requirement, category, image_url, is_active, store_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE, NULL, NOW(), NOW())
+        rx_requirement, category, image_url, images, description, expiry_date, manufacturing_date,
+        is_active, store_id, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, TRUE, NULL, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         brand_name = EXCLUDED.brand_name,
@@ -169,6 +178,10 @@ class TransactionalCatalogRepository {
         rx_requirement = EXCLUDED.rx_requirement,
         category = EXCLUDED.category,
         image_url = COALESCE(EXCLUDED.image_url, products.image_url),
+        images = COALESCE(EXCLUDED.images, products.images),
+        description = COALESCE(EXCLUDED.description, products.description),
+        expiry_date = COALESCE(EXCLUDED.expiry_date, products.expiry_date),
+        manufacturing_date = COALESCE(EXCLUDED.manufacturing_date, products.manufacturing_date),
         store_id = NULL,
         updated_at = NOW()
       RETURNING *`,
@@ -183,7 +196,11 @@ class TransactionalCatalogRepository {
         Number(product.discountedPrice || product.discounted_price || product.price || 0),
         (product.rxRequirement || product.rx_requirement || 'OTC').toUpperCase(),
         product.category ? String(product.category) : null,
-        product.imageUrl || product.image_url || product.image || null
+        primaryImg,
+        imagesVal,
+        product.description || product.details || null,
+        product.expiryDate || product.expiry_date || null,
+        product.manufacturingDate || product.manufacturing_date || product.mfgDate || product.mfg_date || null
       ]
     );
     return res.rows[0] || null;

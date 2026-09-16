@@ -5365,7 +5365,11 @@ const server = http.createServer(async (req, res) => {
         discountedPrice: Number(p.discounted_price ?? p.discountedPrice ?? p.price ?? 0),
         rxRequirement: p.rx_requirement || p.rxRequirement || 'OTC',
         category: p.category || null,
-        imageUrl: p.image_url || p.imageUrl || null,
+        imageUrl: p.image_url || p.imageUrl || (Array.isArray(p.images) && p.images[0]) || null,
+        images: Array.isArray(p.images) ? p.images : (typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.image_url ? [p.image_url] : [])),
+        description: p.description || null,
+        expiryDate: p.expiry_date || p.expiryDate || null,
+        manufacturingDate: p.manufacturing_date || p.manufacturingDate || null,
         isActive: Boolean(p.is_active ?? p.isActive ?? true),
         stockCount: p.stock_count != null ? Number(p.stock_count) : undefined,
         availableCount: p.available_count != null ? Number(p.available_count) : undefined
@@ -5442,7 +5446,11 @@ const server = http.createServer(async (req, res) => {
             discountedPrice: body.discountedPrice,
             rxRequirement: body.rxRequirement,
             category: body.category,
-            imageUrl: body.imageUrl || body.image_url || body.image
+            imageUrl: body.imageUrl || body.image_url || body.image,
+            images: body.images || (body.imageUrls ? body.imageUrls : (body.imageUrl ? [body.imageUrl] : [])),
+            description: body.description || body.details || body.productDetails,
+            expiryDate: body.expiryDate || body.expiry_date,
+            manufacturingDate: body.manufacturingDate || body.manufacturing_date || body.mfgDate || body.mfg_date
           });
         } catch (err) {
           if (err.code === '23505' && String(err.constraint || err.message || '').includes('products_sku')) {
@@ -5486,7 +5494,11 @@ const server = http.createServer(async (req, res) => {
           discountedPrice: Number(p.discounted_price ?? p.discountedPrice ?? p.price ?? 0),
           rxRequirement: p.rx_requirement || p.rxRequirement || 'OTC',
           category: p.category || null,
-          imageUrl: p.image_url || p.imageUrl || null,
+          imageUrl: p.image_url || p.imageUrl || (Array.isArray(p.images) && p.images[0]) || null,
+          images: Array.isArray(p.images) ? p.images : (typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.image_url ? [p.image_url] : [])),
+          description: p.description || null,
+          expiryDate: p.expiry_date || p.expiryDate || null,
+          manufacturingDate: p.manufacturing_date || p.manufacturingDate || null,
           isActive: Boolean(p.is_active ?? p.isActive ?? true)
         });
 

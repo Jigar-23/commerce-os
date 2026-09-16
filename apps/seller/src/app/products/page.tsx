@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
-import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X, Image as ImageIcon, ExternalLink } from 'lucide-react';
+import { Package, Plus, Search, RefreshCw, AlertCircle, CheckCircle, Store, X, Image as ImageIcon, ExternalLink, Calendar, Trash2, FileText } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
@@ -24,6 +24,12 @@ interface ProductItem {
   coldChainRequired?: boolean;
   imageUrl?: string;
   image_url?: string;
+  images?: string[];
+  description?: string;
+  expiryDate?: string;
+  expiry_date?: string;
+  manufacturingDate?: string;
+  manufacturing_date?: string;
 }
 
 export default function ProductsPage() {
@@ -48,7 +54,10 @@ export default function ProductsPage() {
   const [newMrp, setNewMrp] = useState('');
   const [newStock, setNewStock] = useState('50');
   const [newRx, setNewRx] = useState('OTC');
-  const [newImageUrl, setNewImageUrl] = useState('');
+  const [newImages, setNewImages] = useState<string[]>(['']);
+  const [newDescription, setNewDescription] = useState('');
+  const [newMfgDate, setNewMfgDate] = useState('');
+  const [newExpiryDate, setNewExpiryDate] = useState('');
 
   const { session, storeName } = useSellerSession();
 
@@ -83,6 +92,22 @@ export default function ProductsPage() {
     }
   }, [session?.token]);
 
+  const handleImageChange = (index: number, val: string) => {
+    setNewImages(prev => {
+      const copy = [...prev];
+      copy[index] = val;
+      return copy;
+    });
+  };
+
+  const handleAddImage = () => {
+    setNewImages(prev => [...prev, '']);
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setNewImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -102,6 +127,9 @@ export default function ProductsPage() {
       return;
     }
 
+    const cleanedImages = newImages.map(s => s.trim()).filter(Boolean);
+    const primaryImg = cleanedImages.length > 0 ? cleanedImages[0] : undefined;
+
     setIsSubmitting(true);
     try {
       const payload = {
@@ -115,7 +143,11 @@ export default function ProductsPage() {
         stockCount: stockNum,
         reason: 'Initial seller catalog registration',
         rxRequirement: newRx,
-        imageUrl: newImageUrl.trim() || undefined,
+        imageUrl: primaryImg,
+        images: cleanedImages,
+        description: newDescription.trim() || undefined,
+        manufacturingDate: newMfgDate.trim() || undefined,
+        expiryDate: newExpiryDate.trim() || undefined,
         storeId: session?.storeId || 'store_rewari_hub_01',
       };
 
@@ -131,7 +163,10 @@ export default function ProductsPage() {
           setNewPrice('');
           setNewMrp('');
           setNewStock('50');
-          setNewImageUrl('');
+          setNewImages(['']);
+          setNewDescription('');
+          setNewMfgDate('');
+          setNewExpiryDate('');
           loadProducts();
         }, 1200);
       } else {
@@ -265,11 +300,11 @@ export default function ProductsPage() {
                     filteredProducts.map(p => (
                       <tr key={p.id || p.sku} className="hover:bg-surface-subtle/50 transition">
                         <td className="px-6 py-4">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 rounded-xl bg-surface-subtle border border-border-default flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
-                              {(p.imageUrl || p.image_url) ? (
+                          <div className="flex items-start space-x-3">
+                            <div className="relative w-11 h-11 rounded-xl bg-surface-subtle border border-border-default flex items-center justify-center overflow-hidden shrink-0 shadow-sm mt-0.5">
+                              {(p.imageUrl || p.image_url || (Array.isArray(p.images) && p.images[0])) ? (
                                 <img
-                                  src={p.imageUrl || p.image_url}
+                                  src={p.imageUrl || p.image_url || (Array.isArray(p.images) ? p.images[0] : '')}
                                   alt={p.name}
                                   className="w-full h-full object-cover"
                                   onError={(e) => {
@@ -279,26 +314,67 @@ export default function ProductsPage() {
                               ) : (
                                 <Package className="w-5 h-5 text-content-muted" />
                               )}
+                              {Array.isArray(p.images) && p.images.length > 1 && (
+                                <span className="absolute bottom-0 right-0 bg-black/75 text-white font-mono text-3xs font-bold px-1 rounded-tl-md">
+                                  +{p.images.length - 1}
+                                </span>
+                              )}
                             </div>
                             <div className="min-w-0">
                               <div className="font-mono text-xs font-bold text-content-accent truncate">{p.sku}</div>
                               <div className="font-bold text-content-primary text-sm truncate">{p.name}</div>
-                              {(p.imageUrl || p.image_url) && (
-                                <a
-                                  href={p.imageUrl || p.image_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center space-x-1 text-2xs text-content-brand hover:underline mt-0.5 truncate max-w-[180px]"
-                                  title={p.imageUrl || p.image_url}
-                                >
-                                  <span>Image Link</span>
-                                  <ExternalLink className="w-2.5 h-2.5 shrink-0" />
-                                </a>
+                              {p.description && (
+                                <p className="text-2xs text-content-muted line-clamp-1 max-w-[220px] mt-0.5" title={p.description}>
+                                  {p.description}
+                                </p>
+                              )}
+                              {((p.images && p.images.length > 0) || p.imageUrl || p.image_url) && (
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                  {Array.isArray(p.images) && p.images.length > 0 ? (
+                                    p.images.slice(0, 3).map((img, i) => (
+                                      <a
+                                        key={i}
+                                        href={img}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center space-x-0.5 text-3xs text-content-brand hover:underline bg-surface-brandSubtle px-1.5 py-0.5 rounded border border-border-brandSubtle"
+                                        title={img}
+                                      >
+                                        <span>Img {i + 1}</span>
+                                        <ExternalLink className="w-2 h-2" />
+                                      </a>
+                                    ))
+                                  ) : (
+                                    <a
+                                      href={p.imageUrl || p.image_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center space-x-1 text-2xs text-content-brand hover:underline"
+                                    >
+                                      <span>Image Link</span>
+                                      <ExternalLink className="w-2.5 h-2.5" />
+                                    </a>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-xs text-content-muted">{p.category || 'General'}</td>
+                        <td className="px-6 py-4 text-xs">
+                          <div className="font-semibold text-content-primary">{p.category || 'General'}</div>
+                          {(p.manufacturingDate || p.manufacturing_date) && (
+                            <div className="text-3xs text-content-muted mt-1 flex items-center space-x-1">
+                              <span className="font-medium">Mfg:</span>
+                              <span className="font-mono">{p.manufacturingDate || p.manufacturing_date}</span>
+                            </div>
+                          )}
+                          {(p.expiryDate || p.expiry_date) && (
+                            <div className="text-3xs text-content-warning font-semibold flex items-center space-x-1">
+                              <span>Exp:</span>
+                              <span className="font-mono">{p.expiryDate || p.expiry_date}</span>
+                            </div>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-xs text-content-muted">{p.packSize || '1 Unit'}</td>
                         <td className="px-6 py-4">
                           <div className="font-bold text-content-primary">₹{Number(p.discountedPrice ?? p.price ?? 0).toFixed(2)}</div>
@@ -339,8 +415,8 @@ export default function ProductsPage() {
         {/* Add Product Modal */}
         {isAddModalOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white border border-border-default rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
-              <div className="px-6 py-4 border-b border-border-default flex items-center justify-between">
+            <div className="bg-white border border-border-default rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
+              <div className="px-6 py-4 border-b border-border-default flex items-center justify-between shrink-0">
                 <h3 className="font-bold text-content-primary text-base">Add New Product to Catalog</h3>
                 <button
                   onClick={() => setIsAddModalOpen(false)}
@@ -350,7 +426,7 @@ export default function ProductsPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleCreateProduct} className="p-6 space-y-4">
+              <form onSubmit={handleCreateProduct} className="p-6 space-y-4 overflow-y-auto flex-1">
                 {formError && (
                   <div className="p-3 bg-surface-dangerSubtle border border-border-danger rounded-xl text-content-danger text-xs flex items-center space-x-2 font-semibold">
                     <AlertCircle className="w-4 h-4 shrink-0" />
@@ -397,6 +473,23 @@ export default function ProductsPage() {
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
                     className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center justify-between">
+                    <span className="flex items-center space-x-1.5">
+                      <FileText className="w-3.5 h-3.5 text-content-muted" />
+                      <span>Product Details / Description</span>
+                    </span>
+                    <span className="text-2xs font-normal text-content-muted lowercase">(optional)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Composition, indications, therapeutic usage, dosage instructions..."
+                    value={newDescription}
+                    onChange={e => setNewDescription(e.target.value)}
+                    className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent resize-none"
                   />
                 </div>
 
@@ -461,38 +554,86 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center justify-between">
-                    <span className="flex items-center space-x-1.5">
-                      <ImageIcon className="w-3.5 h-3.5 text-content-brand" />
-                      <span>Product Image Link / URL</span>
-                    </span>
-                    <span className="text-2xs font-normal text-content-muted lowercase">(optional)</span>
-                  </label>
-                  <div className="flex items-center space-x-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-content-muted" />
+                      <span>Manufacturing Date</span>
+                    </label>
                     <input
-                      type="url"
-                      placeholder="e.g. https://images.unsplash.com/... or /images/medicine.png"
-                      value={newImageUrl}
-                      onChange={e => setNewImageUrl(e.target.value)}
-                      className="flex-1 bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                      type="date"
+                      value={newMfgDate}
+                      onChange={e => setNewMfgDate(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
                     />
-                    {newImageUrl.trim() && (
-                      <div className="w-9 h-9 rounded-xl border border-border-default overflow-hidden bg-surface-subtle shrink-0 flex items-center justify-center shadow-sm">
-                        <img
-                          src={newImageUrl.trim()}
-                          alt="Preview"
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    )}
+                  </div>
+                  <div>
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1 flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-content-muted" />
+                      <span>Expiry Date</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={newExpiryDate}
+                      onChange={e => setNewExpiryDate(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
                   </div>
                 </div>
 
-                <div className="pt-4 flex items-center justify-end space-x-3 border-t border-border-default">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-2xs font-bold uppercase text-content-muted flex items-center space-x-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-content-brand" />
+                      <span>Product Images (Multiple Supported)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAddImage}
+                      className="inline-flex items-center space-x-1 text-2xs font-bold text-content-brand hover:underline"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Another Image</span>
+                    </button>
+                  </div>
+                  <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                    {newImages.map((imgUrl, idx) => (
+                      <div key={idx} className="flex items-center space-x-2">
+                        <input
+                          type="url"
+                          placeholder={idx === 0 ? "Primary image URL (e.g. https://...)" : `Image #${idx + 1} URL`}
+                          value={imgUrl}
+                          onChange={e => handleImageChange(idx, e.target.value)}
+                          className="flex-1 bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                        />
+                        {imgUrl.trim() && (
+                          <div className="w-9 h-9 rounded-xl border border-border-default overflow-hidden bg-surface-subtle shrink-0 flex items-center justify-center shadow-sm">
+                            <img
+                              src={imgUrl.trim()}
+                              alt={`Preview ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        )}
+                        {newImages.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveImage(idx)}
+                            className="p-1.5 text-content-muted hover:text-content-danger rounded-lg transition"
+                            title="Remove image"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-4 flex items-center justify-end space-x-3 border-t border-border-default shrink-0">
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(false)}
