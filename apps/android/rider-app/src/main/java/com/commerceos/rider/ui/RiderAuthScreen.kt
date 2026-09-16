@@ -225,11 +225,12 @@ fun RiderAuthScreen(
 
                         OutlinedButton(
                             onClick = {
+                                val cleanPhone = if (phone.length == 10) phone else "9817916180"
                                 val demoProfile = RiderProfile(
-                                    riderId = "rdr_${if (phone.length == 10) phone else "9817916180"}",
-                                    name = if (phone == "9817916180" || phone.isEmpty()) "abcd" else "Delivery Partner",
-                                    phone = if (phone.length == 10) "+91 $phone" else "+91 98179 16180",
-                                    vehicleNumber = if (phone == "9817916180" || phone.isEmpty()) "ABCD" else "Electric Scooter",
+                                    riderId = "rdr_$cleanPhone",
+                                    name = riderName.ifBlank { "Delivery Partner" },
+                                    phone = "+91 $cleanPhone",
+                                    vehicleNumber = vehicleNumber.ifBlank { "Electric Scooter" },
                                     rating = 4.95,
                                     completedToday = 0,
                                     earningsTodayFormatted = "₹0",
@@ -374,11 +375,12 @@ fun RiderAuthScreen(
                                         onLoginSuccess(profile)
                                     }.onFailure { err ->
                                         if (cleanOtp == "123456" || cleanOtp == "000000") {
+                                            val cleanPhone = if (phone.length == 10) phone else "9817916180"
                                             val fallbackProfile = RiderProfile(
-                                                riderId = "rdr_${if (phone.length == 10) phone else "9817916180"}",
-                                                name = riderName.ifBlank { "abcd" },
-                                                phone = "+91 ${if (phone.length == 10) phone else "9817916180"}",
-                                                vehicleNumber = vehicleNumber.ifBlank { "ABCD" },
+                                                riderId = "rdr_$cleanPhone",
+                                                name = riderName.ifBlank { "Delivery Partner" },
+                                                phone = "+91 $cleanPhone",
+                                                vehicleNumber = vehicleNumber.ifBlank { "Electric Scooter" },
                                                 rating = 4.9,
                                                 completedToday = 0,
                                                 earningsTodayFormatted = "₹0",

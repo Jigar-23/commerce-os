@@ -199,15 +199,8 @@ class RiderDeliveryRepository(
     }
 
     private fun getCandidateUrls(): List<String> {
-        val list = mutableListOf<String>()
         val primary = baseUrlProvider().trimEnd('/')
-        if (primary.isNotBlank() && !primary.contains("127.0.0.1") && !primary.contains("localhost")) {
-            list.add(primary)
-        }
-        if (!list.contains("https://commerce-os-api.onrender.com")) {
-            list.add("https://commerce-os-api.onrender.com")
-        }
-        return list
+        return if (primary.isNotBlank()) listOf(primary) else listOf("https://commerce-os-api.onrender.com")
     }
 
     private fun openCandidateConnection(base: String, path: String, method: String): HttpURLConnection {
@@ -481,45 +474,6 @@ class RiderDeliveryRepository(
                 }
             }
 
-            // Fail-soft for 429 Cloudflare Bot Mitigation or server outage:
-            if (fallbackOffer != null) {
-                val synthesizedSession = ServerDeliverySession(
-                    deliveryId = fallbackOffer.deliveryId,
-                    orderId = fallbackOffer.orderId,
-                    riderId = fallbackOffer.riderId ?: "rdr_9817916180",
-                    riderName = "Partner 6180",
-                    riderPhone = "+919817916180",
-                    riderVehicle = "Electric Scooter",
-                    customerId = "cust_" + fallbackOffer.orderId,
-                    customerName = fallbackOffer.customerName,
-                    customerPhone = "+919876543210",
-                    customerAddress = fallbackOffer.customerAddress,
-                    customerLat = fallbackOffer.customerLat,
-                    customerLng = fallbackOffer.customerLng,
-                    merchantName = fallbackOffer.merchantName,
-                    merchantAddress = fallbackOffer.merchantAddress,
-                    merchantLat = fallbackOffer.merchantLat,
-                    merchantLng = fallbackOffer.merchantLng,
-                    merchantPhone = "+918023456789",
-                    payoutFormatted = "₹${fallbackOffer.earningsAmount.toInt()}",
-                    distanceKm = fallbackOffer.totalDistanceKm,
-                    estimatedTimeMins = fallbackOffer.estimatedDurationMins,
-                    state = "ACCEPTED",
-                    otpAttemptsLeft = 3,
-                    otpVerified = false,
-                    isCod = fallbackOffer.isCod,
-                    codAmount = fallbackOffer.codAmount,
-                    codCollectedAmount = null,
-                    codReconciled = false,
-                    orderTotal = fallbackOffer.orderTotal,
-                    items = fallbackOffer.items,
-                    telemetry = null,
-                    history = emptyList()
-                )
-                activeLocalSession = synthesizedSession
-                return@withContext Result.success(synthesizedSession)
-            }
-
             val errObj = try { JSONObject(lastErrStr) } catch (e: Exception) { null }
             val errMsg = errObj?.optString("message", "Offer expired or claimed by another rider") ?: "Offer acceptance failed"
             return@withContext Result.failure(Exception(errMsg))
@@ -732,11 +686,6 @@ class RiderDeliveryRepository(
             }
         }
 
-        // Resilient fallback for dev / offline / bot challenge:
-        if (cleanOtp.length in 4..6) {
-            activeLocalSession = null
-            return@withContext Result.success(true)
-        }
         return@withContext Result.failure(Exception(lastErr))
     }
 
@@ -887,11 +836,6 @@ class RiderDeliveryRepository(
             }
         }
 
-        if (activeLocalSession != null) {
-            val finished = activeLocalSession!!.copy(state = "DELIVERED")
-            activeLocalSession = null
-            return@withContext Result.success(finished)
-        }
         return@withContext Result.failure(Exception("Completion failed: $lastErr"))
     }
 
@@ -918,12 +862,6 @@ class RiderDeliveryRepository(
             }
         }
 
-        // Resilient fail-soft when remote server has ephemeral 404 or 429 bot challenge
-        if (activeLocalSession != null) {
-            val updated = activeLocalSession!!.copy(state = "ARRIVED_PICKUP")
-            activeLocalSession = updated
-            return@withContext Result.success(updated)
-        }
         return@withContext Result.failure(Exception("Arrive store failed: $lastErr"))
     }
 
@@ -950,11 +888,6 @@ class RiderDeliveryRepository(
             }
         }
 
-        if (activeLocalSession != null) {
-            val updated = activeLocalSession!!.copy(state = "OUT_FOR_DELIVERY")
-            activeLocalSession = updated
-            return@withContext Result.success(updated)
-        }
         return@withContext Result.failure(Exception("Pickup confirmation failed: $lastErr"))
     }
 
@@ -981,11 +914,6 @@ class RiderDeliveryRepository(
             }
         }
 
-        if (activeLocalSession != null) {
-            val updated = activeLocalSession!!.copy(state = "ARRIVED_CUSTOMER")
-            activeLocalSession = updated
-            return@withContext Result.success(updated)
-        }
         return@withContext Result.failure(Exception("Arrive customer failed: $lastErr"))
     }
 
