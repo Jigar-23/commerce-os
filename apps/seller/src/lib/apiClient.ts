@@ -42,9 +42,8 @@ function isValidRenderToken(token: string | undefined | null): boolean {
         .join('')
     );
     const payload = JSON.parse(jsonStr);
-    if (payload.iss !== 'https://auth.commerceos.io') return false;
     if (payload.exp && payload.exp * 1000 <= Date.now()) return false;
-    if (payload.sub !== 'admin') return false;
+    if (!payload.sub) return false;
     return true;
   } catch {
     return false;

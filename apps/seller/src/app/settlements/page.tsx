@@ -51,9 +51,9 @@ export default function SettlementsPage() {
                   <tr key={s.id} className="hover:bg-surface-inverse/30 transition">
                     <td className="px-6 py-4 font-mono text-xs text-content-accent font-bold">{s.id}</td>
                     <td className="px-6 py-4">{s.date}</td>
-                    <td className="px-6 py-4 font-mono">₹{s.grossSales.toFixed(2)}</td>
-                    <td className="px-6 py-4 font-mono text-content-muted">-₹{s.commission.toFixed(2)}</td>
-                    <td className="px-6 py-4 font-black text-content-brand">₹{s.netPayout.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono">₹{Number(s.grossSales || 0).toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono text-content-muted">-₹{Number(s.commission || 0).toFixed(2)}</td>
+                    <td className="px-6 py-4 font-black text-content-brand">₹{Number(s.netPayout || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-2xs font-black ${
                         s.status === 'PAID' ? 'bg-surface-brandSubtle text-content-brand border border-border-brand' : 'bg-surface-warningSubtle text-content-warning border border-border-warning'

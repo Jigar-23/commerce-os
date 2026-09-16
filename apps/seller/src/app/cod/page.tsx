@@ -49,18 +49,18 @@ export default function CodPage() {
   const pendingCodAmount = useMemo(() => {
     return codOrders
       .filter(o => o.paymentStatus === 'COD_PENDING_COLLECTION' && o.orderStatus !== 'CANCELLED')
-      .reduce((acc, o) => acc + (o.cod?.amountToCollect || o.totalAmount || 0), 0);
+      .reduce((acc, o) => acc + Number(o.cod?.amountToCollect || o.totalAmount || 0), 0);
   }, [codOrders]);
   const collectedCodAmount = useMemo(() => {
     return codOrders
       .filter(o => o.paymentStatus === 'COD_COLLECTED')
-      .reduce((acc, o) => acc + (o.cod?.collectedAmount || o.totalAmount || 0), 0);
+      .reduce((acc, o) => acc + Number(o.cod?.collectedAmount || o.totalAmount || 0), 0);
   }, [codOrders]);
 
   const handleConfirmCodCollection = async () => {
     if (!codModalOrder) return;
     try {
-      const amount = parseFloat(collectedCashInput) || codModalOrder.totalAmount;
+      const amount = parseFloat(collectedCashInput) || Number(codModalOrder.totalAmount || 0);
       const res = await sellerApi.post(`/api/v1/orders/${codModalOrder.id}/collect-cod`, {
         collectedAmount: amount,
         shortageAmount: 0,
@@ -114,12 +114,12 @@ export default function CodPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm">
               <p className="text-xs font-bold text-content-muted">Pending Cash Collection (Rider Handoff)</p>
-              <h3 className="text-3xl font-black text-content-warning mt-2">₹{pendingCodAmount.toFixed(2)}</h3>
+              <h3 className="text-3xl font-black text-content-warning mt-2">₹{Number(pendingCodAmount || 0).toFixed(2)}</h3>
               <p className="text-2xs text-content-muted mt-1">Awaiting Doorstep Cash Reconciliation</p>
             </div>
             <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm">
               <p className="text-xs font-bold text-content-muted">Total COD Collected & Settled</p>
-              <h3 className="text-3xl font-black text-content-brand mt-2">₹{collectedCodAmount.toFixed(2)}</h3>
+              <h3 className="text-3xl font-black text-content-brand mt-2">₹{Number(collectedCodAmount || 0).toFixed(2)}</h3>
               <p className="text-2xs text-content-muted mt-1">Reconciled Cash In Hand</p>
             </div>
           </div>

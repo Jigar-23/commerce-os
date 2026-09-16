@@ -169,9 +169,9 @@ export default function SellerSidebar({
               <IndianRupee className="w-4 h-4" />
               <span>Cash on Delivery</span>
             </div>
-            {pendingCodAmount > 0 && (
+            {Number(pendingCodAmount || 0) > 0 && (
               <span className="px-2 py-0.5 text-2xs font-bold rounded-full bg-action-warningBg text-white">
-                ₹{pendingCodAmount.toFixed(0)}
+                ₹{Number(pendingCodAmount || 0).toFixed(0)}
               </span>
             )}
           </Link>

@@ -107,7 +107,7 @@ export default function DedicatedCancelledPage() {
                     <tr key={o.id} className="hover:bg-surface-subtle">
                       <td className="px-6 py-4 font-mono font-bold text-content-primary">#{o.id}</td>
                       <td className="px-6 py-4 text-content-secondary">{formatAddress(o.deliveryAddress)}</td>
-                      <td className="px-6 py-4 font-bold text-content-primary">₹{(o.totalAmount || 0).toFixed(2)}</td>
+                      <td className="px-6 py-4 font-bold text-content-primary">₹{Number(o.totalAmount || 0).toFixed(2)}</td>
                       <td className="px-6 py-4 text-content-danger font-medium">{o.cancellationReason || o.cancellation?.reason || 'Customer / Merchant Request'}</td>
                       <td className="px-6 py-4 text-right">
                         <span className="px-2.5 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-2xs font-bold border border-border-brandSubtle">

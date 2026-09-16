@@ -42,12 +42,12 @@ export default function PricingPage() {
                 <div key={r.id} className="flex items-center justify-between bg-surface-inverse/80 p-4 rounded-xl border border-border-strong">
                   <div>
                     <h3 className="font-bold text-white text-base">{r.product}</h3>
-                    <p className="text-xs text-content-muted">Base MSRP: ₹{r.basePrice.toFixed(2)} • Target Min Margin: {r.minMargin}</p>
+                    <p className="text-xs text-content-muted">Base MSRP: ₹{Number(r.basePrice || 0).toFixed(2)} • Target Min Margin: {r.minMargin}</p>
                   </div>
                   <div className="flex items-center space-x-6 text-right">
                     <div>
                       <p className="text-xs text-content-muted">Selling Price</p>
-                      <p className="font-black text-content-brand text-lg">₹{r.sellingPrice.toFixed(2)}</p>
+                      <p className="font-black text-content-brand text-lg">₹{Number(r.sellingPrice || 0).toFixed(2)}</p>
                     </div>
                     <span className="px-3 py-1 bg-surface-accentSubtle text-content-accent border border-border-accent rounded-full text-xs font-bold">
                       {r.dynamicPricing}

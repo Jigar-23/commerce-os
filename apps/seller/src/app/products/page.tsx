@@ -257,9 +257,9 @@ export default function ProductsPage() {
                         <td className="px-6 py-4 text-xs text-content-muted">{p.category || 'General'}</td>
                         <td className="px-6 py-4 text-xs text-content-muted">{p.packSize || '1 Unit'}</td>
                         <td className="px-6 py-4">
-                          <div className="font-bold text-content-primary">₹{(p.discountedPrice ?? p.price ?? 0).toFixed(2)}</div>
-                          {p.mrp && p.mrp > (p.discountedPrice ?? p.price) && (
-                            <div className="text-2xs text-content-muted line-through">₹{p.mrp.toFixed(2)}</div>
+                          <div className="font-bold text-content-primary">₹{Number(p.discountedPrice ?? p.price ?? 0).toFixed(2)}</div>
+                          {p.mrp && Number(p.mrp) > Number(p.discountedPrice ?? p.price ?? 0) && (
+                            <div className="text-2xs text-content-muted line-through">₹{Number(p.mrp || 0).toFixed(2)}</div>
                           )}
                         </td>
                         <td className="px-6 py-4 font-mono text-xs font-bold text-content-primary">

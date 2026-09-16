@@ -309,7 +309,7 @@ export default function DedicatedInventoryPage() {
                           <div className="text-2xs text-content-muted">{item.packSize}</div>
                         </td>
                         <td className="px-4 py-4 text-xs text-content-muted">{item.category}</td>
-                        <td className="px-4 py-4 font-bold text-content-primary">₹{item.price.toFixed(2)}</td>
+                        <td className="px-4 py-4 font-bold text-content-primary">₹{Number(item.price || 0).toFixed(2)}</td>
                         <td className="px-4 py-4 font-mono font-bold text-content-primary">{item.onHand}</td>
                         <td className="px-4 py-4 font-mono text-content-warning font-semibold">
                           {item.reserved > 0 ? `${item.reserved} held` : '0'}

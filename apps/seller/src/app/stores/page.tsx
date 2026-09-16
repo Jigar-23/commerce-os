@@ -629,7 +629,7 @@ export default function StoresManagementPage() {
                               <div className="space-y-1">
                                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-accentSubtle border border-border-accent text-content-accent font-mono text-2xs font-bold">
                                   <MapPin className="w-3 h-3 text-action-speedBg" />
-                                  {store.latitude.toFixed(6)}, {store.longitude.toFixed(6)}
+                                  {Number(store.latitude || 0).toFixed(6)}, {Number(store.longitude || 0).toFixed(6)}
                                 </div>
                                 <div>
                                   <a
