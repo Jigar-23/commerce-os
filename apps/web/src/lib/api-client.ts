@@ -244,13 +244,19 @@ export async function createOrder(payload: {
   paymentMethod: string;
   prescriptionId?: string;
   items: OrderLine[];
+  idempotencyKey?: string;
 }): Promise<OrderResponse> {
   const targetCustomerId = payload.customerId || getActiveCustomerId();
   if (!targetCustomerId) throw new Error('UNAUTHENTICATED: Active session required to place orders.');
 
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (payload.idempotencyKey) {
+    headers['Idempotency-Key'] = payload.idempotencyKey;
+  }
+
   const res = await fetch(`${API_CONFIG.ORDER}/api/v1/orders`, {
     method: 'POST',
-    headers: buildHeaders({ 'Content-Type': 'application/json' }),
+    headers: buildHeaders(headers),
     body: JSON.stringify({ ...payload, customerId: targetCustomerId }),
   });
   if (!res.ok) {
@@ -426,7 +432,7 @@ export function subscribeDeliveryRealtimeStream(
       let ticket: string | null = null;
       const token = getActiveAuthToken();
       if (token) {
-        const ticketRes = await fetch(`${API_CONFIG.ORDER}/api/v1/delivery/sse-ticket`, {
+        const ticketRes = await fetch(`${API_CONFIG.ORDER}/api/v1/realtime/ticket`, {
           method: 'POST',
           headers: buildHeaders({ 'Content-Type': 'application/json' }),
         }).catch(() => null);

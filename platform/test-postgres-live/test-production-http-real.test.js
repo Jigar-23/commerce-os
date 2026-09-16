@@ -241,6 +241,7 @@ async function runTest(pool) {
         OSRM_BASE_URL: 'http://router.project-osrm.org',
         FCM_SERVER_KEY: 'test_fcm_key_live_991',
         FCM_ENDPOINT_URL: 'https://fcm.googleapis.com/fcm/send',
+        MULTI_STORE_ENABLED: 'true',
         NODE_PATH: path.join(__dirname, '../../node_modules')
       },
       stdio: 'pipe'
@@ -889,10 +890,13 @@ if (require.main === module) {
   }
   const pool = new Pool({ connectionString: databaseUrl });
   runTest(pool)
-    .then(() => pool.end())
-    .catch(err => {
+    .then(async () => {
+      await pool.end();
+      process.exit(0);
+    })
+    .catch(async err => {
       console.error('❌ FAIL: Real HTTP PostgreSQL Test Error:', err);
-      pool.end();
+      await pool.end();
       process.exit(1);
     });
 }

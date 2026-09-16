@@ -43,6 +43,9 @@ interface ProductItem {
   mrp?: number;
   discountedPrice?: number;
   stockCount?: number;
+  stock_count?: number;
+  availableCount?: number;
+  available_count?: number;
   inStock?: boolean;
   rxRequirement?: string;
   coldChainRequired?: boolean;
@@ -122,7 +125,18 @@ export default function ProductsPage() {
               : (Array.isArray(res.data.products)
                   ? res.data.products
                   : (Array.isArray(res.data.items) ? res.data.items : [])));
-        setProducts(list);
+        const normalized = list.map((item: any) => {
+          const sc = Number(item.stockCount ?? item.stock_count ?? item.availableCount ?? item.available_count ?? 0);
+          return {
+            ...item,
+            stockCount: sc,
+            stock_count: sc,
+            availableCount: sc,
+            available_count: sc,
+            inStock: sc > 0 || item.inStock === true
+          };
+        });
+        setProducts(normalized);
       } else {
         setError(res.error || 'Failed to retrieve catalog products.');
       }
@@ -515,11 +529,11 @@ export default function ProductsPage() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <span className={`px-2.5 py-1 rounded-full text-2xs font-extrabold ${
-                            (p.stockCount ?? 0) > 0
+                            (p.stockCount ?? 0) > 0 || p.inStock
                               ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
                               : 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
                           }`}>
-                            {(p.stockCount ?? 0) > 0 ? 'AVAILABLE' : 'OUT OF STOCK'}
+                            {(p.stockCount ?? 0) > 0 || p.inStock ? 'AVAILABLE' : 'OUT OF STOCK'}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">

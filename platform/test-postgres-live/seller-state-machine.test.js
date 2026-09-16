@@ -38,12 +38,12 @@ async function runTest(pool) {
   const orderRepo = new TransactionalOrderRepository(pool, invRepo);
 
   try {
-    // 1. Seed Stores & Sellers
+    // 1. Seed Stores & Sellers (with seller_approval_required = TRUE to test seller state machine)
     await pool.query(
-      `INSERT INTO stores (id, store_name, address, latitude, longitude, is_active)
+      `INSERT INTO stores (id, store_name, address, latitude, longitude, is_active, seller_approval_required)
        VALUES 
-       ($1, 'SSM Hub A', 'Sector 14', 28.4700, 77.0300, TRUE),
-       ($2, 'SSM Hub B', 'Sector 48', 28.4200, 77.0400, TRUE)`,
+       ($1, 'SSM Hub A', 'Sector 14', 28.4700, 77.0300, TRUE, TRUE),
+       ($2, 'SSM Hub B', 'Sector 48', 28.4200, 77.0400, TRUE, TRUE)`,
       [storeAId, storeBId]
     );
 
@@ -98,12 +98,27 @@ async function runTest(pool) {
       storeId: storeAId,
       addressId,
       fulfillmentDecision: decision,
-      paymentMethod: 'UPI_INSTANT',
+      paymentMethod: 'COD',
       items: [{ sku, quantity: 1 }]
     });
 
     assert.strictEqual(placeRes.ok, true);
     const orderId = placeRes.order.order_id || placeRes.order.id;
+
+    // 2b. Test Precondition: Unpaid prepaid orders (PAYMENT_PENDING) must be rejected by seller accept
+    const prepaidPlaceRes = await orderRepo.placeOrderTransactionally(custId, {
+      customerId: custId,
+      storeId: storeAId,
+      addressId,
+      fulfillmentDecision: decision,
+      paymentMethod: 'UPI_INSTANT',
+      items: [{ sku, quantity: 1 }]
+    });
+    assert.strictEqual(prepaidPlaceRes.ok, true);
+    const prepaidOrderId = prepaidPlaceRes.order.order_id || prepaidPlaceRes.order.id;
+    const rejectPrepaidRes = await orderRepo.acceptOrderBySeller(prepaidOrderId, storeAId, sellerAId);
+    assert.strictEqual(rejectPrepaidRes.ok, false);
+    assert.strictEqual(rejectPrepaidRes.error, 'PAYMENT_PENDING');
 
     // 3. Test Invalid Transition: Direct PLACED -> PACKED without SELLER_ACCEPTED
     const invalidPackRes = await orderRepo.packOrderBySeller(orderId, storeAId, sellerAId);

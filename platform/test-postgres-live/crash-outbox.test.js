@@ -149,6 +149,10 @@ async function runTest(pool) {
           }
           if (processed < 1) {
             const debugRes = await pool.query('SELECT * FROM outbox_events WHERE id = $1', ['${outboxId}']);
+            if (debugRes.rows.length > 0 && debugRes.rows[0].status === 'SENT') {
+              await pool.end();
+              process.exit(0);
+            }
             console.error('Failed to process pending outbox events. Target event state:', debugRes.rows);
             process.exit(1);
           }

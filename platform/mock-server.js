@@ -1249,7 +1249,12 @@ function serverHomeFeed(customerId, rawProducts, orders, addressId) {
       mrp: fullPrice,
       discountedPrice: sellPrice,
       sellingPrice: sellPrice,
-      discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0
+      discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0,
+      stockCount: Number(p.stock_count ?? p.stockCount ?? 0),
+      stock_count: Number(p.stock_count ?? p.stockCount ?? 0),
+      availableCount: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)),
+      available_count: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)),
+      inStock: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)) > 0
     };
   });
 
@@ -2869,7 +2874,12 @@ async function handleRequest(port, req, res) {
           mrp: fullPrice,
           discountedPrice: sellPrice,
           sellingPrice: sellPrice,
-          discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0
+          discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0,
+          stockCount: Number(p.stock_count ?? p.stockCount ?? 0),
+          stock_count: Number(p.stock_count ?? p.stockCount ?? 0),
+          availableCount: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)),
+          available_count: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)),
+          inStock: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)) > 0
         };
       }
 
@@ -2940,9 +2950,27 @@ async function handleRequest(port, req, res) {
       }
 
       // Full catalog listing (the PLP default): paginated + price-filtered.
+      let targetStoreId = query.get('storeId') || null;
+      if (!targetStoreId) {
+        const authClaims = verifyAndDecodeJwt(req);
+        if (authClaims && authClaims.storeId) {
+          targetStoreId = authClaims.storeId;
+        } else if (authClaims && authClaims.sub && productionPgPool) {
+          try {
+            const sellerRes = await productionPgPool.query(
+              `SELECT store_id FROM sellers WHERE (seller_id = $1 OR id = $1) AND status = 'ACTIVE' LIMIT 1`,
+              [authClaims.sub]
+            );
+            if (sellerRes.rows.length > 0) {
+              targetStoreId = sellerRes.rows[0].store_id;
+            }
+          } catch (e) {}
+        }
+      }
+
       let all = [];
       if (appRepositories && appRepositories.catalogRepo) {
-        all = await appRepositories.catalogRepo.getActiveProducts();
+        all = await appRepositories.catalogRepo.getActiveProducts(targetStoreId);
       } else if (appRepositories && appRepositories.isProduction) {
         return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
       } else {

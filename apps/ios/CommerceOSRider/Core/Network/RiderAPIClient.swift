@@ -78,10 +78,9 @@ public final class RiderAPIClient: ObservableObject {
     
     private let session: URLSession
 
-    // Production Authoritative Seed Credentials for Jigar's Device
+    // Authoritative Production Rider API Client
     public static let defaultRiderId = "rdr_9817916180"
     public static let defaultRiderPhone = "+919817916180"
-    public static let defaultRiderToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJyZHJfOTgxNzkxNjE4MCIsInJvbGUiOiJST0xFX1JJREVSIiwicm9sZXMiOlsiUk9MRV9SSURFUiJdLCJpc3MiOiJodHRwczovL2F1dGguY29tbWVyY2Vvcy5pbyIsImF1ZCI6Imh0dHBzOi8vYXBpLmNvbW1lcmNlb3MuaW8iLCJpYXQiOjE3ODk0MTg0MjksImV4cCI6MTc4OTUwNDgyOSwicGhvbmUiOiIrOTE5ODE3OTE2MTgwIn0.seUG1eHS00q6-mwPp5k62HlflQTP22bn0U3WCutMhqY"
 
     public static func extractSubFromJwt(_ token: String) -> String? {
         let parts = token.components(separatedBy: ".")
@@ -105,20 +104,12 @@ public final class RiderAPIClient: ObservableObject {
         // Dual-layer Keychain + UserDefaults Loading
         var token = RiderKeychainHelper.shared.get(key: "rider_auth_token") ?? UserDefaults.standard.string(forKey: "rider_auth_token")
         var riderId = RiderKeychainHelper.shared.get(key: "rider_id") ?? UserDefaults.standard.string(forKey: "rider_id")
-        
-        // Auto-seed Jigar's authoritative rider partner session on first launch
-        if token == nil || token?.isEmpty == true {
-            token = RiderAPIClient.defaultRiderToken
-            riderId = RiderAPIClient.defaultRiderId
-            RiderKeychainHelper.shared.save(key: "rider_auth_token", data: token!)
-            RiderKeychainHelper.shared.save(key: "rider_id", data: riderId!)
-            UserDefaults.standard.set(token, forKey: "rider_auth_token")
-            UserDefaults.standard.set(riderId, forKey: "rider_id")
-            UserDefaults.standard.set(RiderAPIClient.defaultRiderPhone, forKey: "rider_phone")
-            UserDefaults.standard.set("Jigar (Partner)", forKey: "rider_name")
-            if UserDefaults.standard.object(forKey: "rider_shift_online") == nil {
-                UserDefaults.standard.set(true, forKey: "rider_shift_online")
-            }
+
+        // Cleanse legacy hardcoded test tokens if present in local device storage
+        if let currentToken = token, currentToken.contains("eyJzdWIiOiJyZHJfOTgxNzkxNjE4MCIsInJvbGUiOiJST0xFX1JJREVSIi") {
+            RiderKeychainHelper.shared.clear(key: "rider_auth_token")
+            UserDefaults.standard.removeObject(forKey: "rider_auth_token")
+            token = nil
         }
 
         if let token = token, !token.isEmpty {

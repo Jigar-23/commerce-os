@@ -115,9 +115,9 @@ class TransactionalCatalogRepository {
            p.discounted_price, p.rx_requirement, p.cold_chain_required,
            p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active,
            i.store_id AS inventory_store_id,
-           i.stock_count,
-           i.reserved_count,
-           (i.stock_count - i.reserved_count) AS available_count
+           COALESCE(i.stock_count, 0)::int AS stock_count,
+           COALESCE(i.reserved_count, 0)::int AS reserved_count,
+           COALESCE(i.stock_count - i.reserved_count, 0)::int AS available_count
          FROM inventory i
          JOIN products p ON i.product_id = p.id
          WHERE i.store_id = $1 AND p.is_active = TRUE
@@ -127,7 +127,20 @@ class TransactionalCatalogRepository {
       return res.rows;
     }
     const res = await this.pool.query(
-      `SELECT * FROM products WHERE is_active = TRUE ORDER BY name ASC`
+      `SELECT 
+         p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price,
+         p.discounted_price, p.rx_requirement, p.cold_chain_required,
+         p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active,
+         COALESCE(MAX(i.stock_count), 0)::int AS stock_count,
+         COALESCE(MAX(i.reserved_count), 0)::int AS reserved_count,
+         COALESCE(MAX(i.stock_count - i.reserved_count), 0)::int AS available_count
+       FROM products p
+       LEFT JOIN inventory i ON i.product_id = p.id
+       WHERE p.is_active = TRUE
+       GROUP BY p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price,
+                p.discounted_price, p.rx_requirement, p.cold_chain_required,
+                p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active
+       ORDER BY p.name ASC`
     );
     return res.rows;
   }
@@ -2493,7 +2506,7 @@ class TransactionalOfferRepository {
         `UPDATE offers 
          SET status = 'DECLINED', declined_at = $1, history = history || $2::jsonb
          WHERE offer_id = $3`,
-        [Date.now(), JSON.stringify([{ status: 'DECLINED', timestamp: nowIso, riderId }]), offerId]
+        [nowIso, JSON.stringify([{ status: 'DECLINED', timestamp: nowIso, riderId }]), offerId]
       );
       await client.query('COMMIT');
       return { ok: true, httpStatus: 200, status: 'DECLINED' };
@@ -2827,8 +2840,18 @@ class TransactionalDeliveryRepository {
 
   async findSessionById(deliveryId) {
     if (!this.pool) return null;
-    const res = await this.pool.query(`SELECT * FROM delivery_sessions WHERE delivery_id = $1 OR order_id = $1`, [deliveryId]);
+    const res = await this.pool.query(
+      `SELECT d.*, o.customer_id 
+       FROM delivery_sessions d
+       LEFT JOIN orders o ON d.order_id = o.order_id OR d.order_id = o.id
+       WHERE d.delivery_id = $1 OR d.order_id = $1 OR d.id = $1`,
+      [deliveryId]
+    );
     return res.rows[0] || null;
+  }
+
+  async getDeliveryByOrderId(orderId) {
+    return this.findSessionById(orderId);
   }
 
   async findActiveSessionForRider(riderId) {
@@ -2958,7 +2981,7 @@ class TransactionalDeliveryRepository {
 
       // 1. Lock Delivery Session
       const sessionRes = await client.query(
-        `SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1 FOR UPDATE`,
+        `SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1 OR id = $1 FOR UPDATE`,
         [orderId]
       );
       const session = sessionRes.rows[0];
@@ -3002,12 +3025,22 @@ class TransactionalDeliveryRepository {
 
       // 4. COD Collection & Reconciliation Check
       if (order.is_cod) {
-        if (options.codCollected || options.codAmount != null) {
+        const isCodCollected = Boolean(
+          options.codCollected ||
+          options.cashCollected != null ||
+          options.collectedAmount != null ||
+          options.codAmount != null
+        );
+        const resolvedAmount = options.codAmount != null ? Number(options.codAmount) :
+          (options.cashCollected != null ? Number(options.cashCollected) :
+          (options.collectedAmount != null ? Number(options.collectedAmount) : null));
+
+        if (isCodCollected) {
           await client.query(
             `UPDATE cod_ledger 
              SET status = 'COLLECTED_RECONCILED', amount_collected = COALESCE($2, amount_expected), collector_id = $3, reconciled = TRUE, updated_at = NOW()
              WHERE order_id = $1`,
-            [order.order_id || order.id, options.codAmount != null ? Number(options.codAmount) : null, riderId]
+            [order.order_id || order.id, resolvedAmount, riderId]
           );
         }
         const codCheckRes = await client.query(
@@ -3015,7 +3048,7 @@ class TransactionalDeliveryRepository {
           [order.order_id || order.id]
         );
         const codEntry = codCheckRes.rows[0];
-        if (codEntry && !['COLLECTED', 'COLLECTED_RECONCILED', 'COLLECTED_SHORTAGE'].includes(codEntry.status) && !options.codCollected) {
+        if (codEntry && !['COLLECTED', 'COLLECTED_RECONCILED', 'COLLECTED_SHORTAGE'].includes(codEntry.status) && !isCodCollected) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 409, error: 'COD_NOT_COLLECTED', message: 'Cash on delivery must be collected and confirmed before customer handoff.' };
         }
@@ -3233,8 +3266,8 @@ class TransactionalOrderRepository {
     }
     const authoritativeOrderType = requestedType;
 
-    // 5. Authoritative Payment Method & Status Normalization (Release Contract: COD Only)
-    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH'];
+    // 5. Authoritative Payment Method & Status Normalization
+    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'CARD', 'NET_BANKING'];
     const rawMethod = data.paymentMethod ? String(data.paymentMethod).toUpperCase() : 'COD';
     if (!ALLOWED_PAYMENT_METHODS.includes(rawMethod)) {
       return {
@@ -3242,11 +3275,11 @@ class TransactionalOrderRepository {
         httpStatus: 400,
         error: 'INVALID_PAYMENT_METHOD',
         code: 'PAYMENT_METHOD_NOT_SUPPORTED',
-        message: `Payment method '${data.paymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
+        message: `Payment method '${data.paymentMethod}' is not supported.`
       };
     }
-    const requestedMethod = 'COD';
-    const isCod = true;
+    const isCod = ['COD', 'CASH_ON_DELIVERY', 'CASH'].includes(rawMethod);
+    const requestedMethod = isCod ? 'COD' : rawMethod;
     const authoritativePaymentStatus = isCod ? 'COD_PENDING' : 'PAYMENT_PENDING';
 
     const client = await this.pool.connect();
@@ -3618,7 +3651,7 @@ class TransactionalOrderRepository {
             })
           ]
         );
-      } else if (isCod || paymentStatus === 'PAID') {
+      } else if (isCod || authoritativePaymentStatus === 'PAID') {
         // Dark store mode + (COD OR Captured Payment): Instant auto-dispatch to riders
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
@@ -3634,7 +3667,16 @@ class TransactionalOrderRepository {
               sellerApprovalStatus: 'NOT_REQUIRED',
               totalAmount,
               isCod,
-              paymentStatus: isCod ? 'COD_PENDING_COLLECTION' : 'PAID'
+              paymentStatus: isCod ? 'COD_PENDING_COLLECTION' : 'PAID',
+              customerLat: cLat,
+              customerLng: cLng,
+              merchantLat: mLat,
+              merchantLng: mLng,
+              customerAddress: resolvedAddress.address_line,
+              customerPhone: customer.phone,
+              customerName: customer.full_name,
+              merchantName: store.store_name,
+              merchantAddress: store.address
             })
           ]
         );
@@ -3787,8 +3829,13 @@ class TransactionalOrderRepository {
           return { ok: true, order, isIdempotent: true };
         }
 
-        // Precondition Check: Must be in PLACED, PAYMENT_PENDING, SELLER_PENDING, or CREATED
-        if (!['PLACED', 'PAYMENT_PENDING', 'SELLER_PENDING', 'CREATED'].includes(order.status)) {
+        // Precondition Check: Must be in PLACED, SELLER_PENDING, or CREATED (PAYMENT_PENDING must be rejected)
+        if (order.status === 'PAYMENT_PENDING' || (!order.is_cod && order.payment_status === 'PAYMENT_PENDING')) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 409, error: 'PAYMENT_PENDING', message: 'Cannot accept order while payment is pending.' };
+        }
+
+        if (!['PLACED', 'SELLER_PENDING', 'CREATED'].includes(order.status)) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'. Must be PLACED or SELLER_PENDING.` };
         }
@@ -4901,22 +4948,6 @@ class TransactionalPresenceRepository {
       );
     }
 
-    // Resilient Fallback 2: Any active fleet rider in the system (e.g. rdr_9817916180)
-    if (res.rows.length === 0) {
-      res = await this.pool.query(
-        `SELECT COALESCE(rp.rider_id, r.rider_id) as rider_id,
-                COALESCE(rp.status, 'ONLINE') as status,
-                COALESCE(rp.last_known_lat, 28.2022) as last_known_lat,
-                COALESCE(rp.last_known_lng, 76.6154) as last_known_lng,
-                COALESCE(rp.last_seen_at, NOW()) as last_seen_at,
-                r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier
-         FROM riders r
-         LEFT JOIN rider_presence rp ON rp.rider_id = r.rider_id
-         WHERE r.status = 'ACTIVE'
-         ORDER BY (CASE WHEN r.rider_id = 'rdr_9817916180' THEN 1 ELSE 2 END), COALESCE(rp.last_seen_at, r.created_at) DESC`
-      );
-    }
-
     return res.rows.map(r => {
       const lat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
       const lng = r.last_known_lng != null ? Number(r.last_known_lng) : null;
@@ -4964,12 +4995,62 @@ class TransactionalPresenceRepository {
   async updateShiftStatus(riderId, statusOrIsOnline, lat = null, lng = null) {
     return this.setShiftStatus(riderId, statusOrIsOnline, lat, lng);
   }
+
+  async updatePresence(riderId, data = {}) {
+    if (!this.pool) return null;
+    const lat = data.latitude != null ? Number(data.latitude) : (data.lastKnownLat != null ? Number(data.lastKnownLat) : null);
+    const lng = data.longitude != null ? Number(data.longitude) : (data.lastKnownLng != null ? Number(data.lastKnownLng) : null);
+    const status = data.status || 'ONLINE';
+
+    const res = await this.pool.query(
+      `INSERT INTO rider_presence (rider_id, status, last_known_lat, last_known_lng, last_seen_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (rider_id) 
+       DO UPDATE SET 
+         status = COALESCE(EXCLUDED.status, rider_presence.status),
+         last_known_lat = COALESCE(EXCLUDED.last_known_lat, rider_presence.last_known_lat),
+         last_known_lng = COALESCE(EXCLUDED.last_known_lng, rider_presence.last_known_lng),
+         last_seen_at = NOW()
+       RETURNING *;`,
+      [riderId, status, lat, lng]
+    );
+    const r = res.rows[0];
+    const rLat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
+    const rLng = r.last_known_lng != null ? Number(r.last_known_lng) : null;
+    return {
+      riderId: r.rider_id,
+      status: r.status,
+      lastKnownLat: rLat,
+      lastKnownLng: rLng,
+      latitude: rLat,
+      longitude: rLng,
+      lastSeenAt: r.last_seen_at
+    };
+  }
 }
 
 class LocalDevelopmentPresenceRepository {
   constructor(db, saveDbFn) {
     this.db = db;
     this.saveDb = saveDbFn || (() => {});
+  }
+
+  async updatePresence(riderId, data = {}) {
+    if (!this.db.riderPresence) this.db.riderPresence = {};
+    const lat = data.latitude != null ? Number(data.latitude) : 28.202224;
+    const lng = data.longitude != null ? Number(data.longitude) : 76.615418;
+    const updated = {
+      riderId,
+      status: data.status || 'ONLINE',
+      latitude: lat,
+      longitude: lng,
+      lastKnownLat: lat,
+      lastKnownLng: lng,
+      lastSeenAt: new Date().toISOString()
+    };
+    this.db.riderPresence[riderId] = updated;
+    this.saveDb();
+    return updated;
   }
 
   async getPresence(riderId) {
@@ -6590,10 +6671,21 @@ async function initApplicationRepositories(options = {}) {
         }
         const cLat = deliverySession.customerLat != null ? deliverySession.customerLat : deliverySession.customer_lat;
         const cLng = deliverySession.customerLng != null ? deliverySession.customerLng : deliverySession.customer_lng;
-        if ((cLat == null || cLng == null) && event.aggregate_id) {
-          const sRes = await pool.query('SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1', [event.aggregate_id]);
+        if ((cLat == null || cLng == null) && (event.aggregate_id || targetOrderId)) {
+          const sRes = await pool.query('SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1 OR order_id = $2 OR delivery_id = $2', [event.aggregate_id, targetOrderId]);
           if (sRes.rows.length > 0) {
-            deliverySession = sRes.rows[0];
+            const row = sRes.rows[0];
+            deliverySession = {
+              ...deliverySession,
+              ...row,
+              customerLat: row.customer_lat,
+              customerLng: row.customer_lng,
+              merchantLat: row.merchant_lat,
+              merchantLng: row.merchant_lng,
+              storeId: row.store_id || deliverySession.storeId,
+              deliveryId: row.delivery_id || deliverySession.deliveryId,
+              orderId: row.order_id || deliverySession.orderId
+            };
           } else {
             const oRes = oCheck.rows.length > 0 ? oCheck : await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [event.aggregate_id]);
             if (oRes.rows.length > 0) {

@@ -58,6 +58,7 @@ export default function ExpressCheckoutPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [orderResult, setOrderResult] = useState<any | null>(null);
+  const [checkoutAttemptId, setCheckoutAttemptId] = useState<string>(() => `web_chk_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [currentAddress, setCurrentAddress] = useState<SavedAddress | null>(null);
@@ -133,11 +134,13 @@ export default function ExpressCheckoutPage() {
           quantity: l.quantity,
           rxRequired: l.rxRequired,
         })),
+        idempotencyKey: checkoutAttemptId,
       };
 
       const res = await createOrder(orderPayload);
       if (res && (res.orderId || res.id)) {
         clearCart();
+        setCheckoutAttemptId(`web_chk_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
         setOrderResult({
           orderId: res.orderId || res.id,
           totalAmount: res.totalAmount || provisionalTotal,

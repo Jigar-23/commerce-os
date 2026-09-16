@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS riders (
     vehicle_type VARCHAR(32) NOT NULL DEFAULT 'TWO_WHEELER',
     tier VARCHAR(32) NOT NULL DEFAULT 'STANDARD', -- 'STANDARD', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM'
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'SUSPENDED', 'ONBOARDING'
+    aadhaar_number VARCHAR(32),
+    store_id VARCHAR(64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -427,6 +429,7 @@ CREATE TABLE IF NOT EXISTS offers (
     fcm_delivery_status VARCHAR(32) DEFAULT 'PENDING',
     rejection_reason TEXT,
     accepted_at TIMESTAMPTZ,
+    declined_at TIMESTAMPTZ,
     history JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

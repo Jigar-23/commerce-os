@@ -301,21 +301,6 @@ public struct RiderAuthView: View {
                             }
                             .disabled(isLoading || phone.count < 10)
                         }
-
-                        // Fast 1-Tap Partner Login
-                        Button(action: fastLoginJigar) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "bolt.fill")
-                                    .foregroundColor(Color(hex: "F59E0B"))
-                                Text("Instant Partner Login (Jigar)")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(Color(hex: "E2E8F0"))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .background(Color(hex: "1E293B"))
-                            .cornerRadius(10)
-                        }
                     }
                     .padding(20)
                     .background(Color(hex: "16181F"))
@@ -372,15 +357,5 @@ public struct RiderAuthView: View {
                 }
             }
         }
-    }
-
-    private func fastLoginJigar() {
-        apiClient.setAuth(
-            token: RiderAPIClient.defaultRiderToken,
-            riderId: RiderAPIClient.defaultRiderId,
-            phone: RiderAPIClient.defaultRiderPhone,
-            name: "Jigar (Partner)"
-        )
-        onLoginSuccess()
     }
 }

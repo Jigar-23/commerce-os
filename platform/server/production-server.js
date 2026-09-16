@@ -95,6 +95,12 @@ const COMMERCEOS_OTP_PEPPER = process.env.COMMERCEOS_OTP_PEPPER || process.env.O
 const FCM_SERVER_KEY = process.env.FCM_SERVER_KEY || '';
 const FCM_ENDPOINT_URL = process.env.FCM_ENDPOINT_URL || '';
 const PORT = Number(process.env.PORT || 8080);
+const MULTI_STORE_ENABLED = process.env.MULTI_STORE_ENABLED === 'true';
+const DEFAULT_STORE_ID = process.env.DEFAULT_STORE_ID || 'store_rewari_hub_01';
+
+// In-Flight Route Lock & Telemetry Reroute Debounce Sets
+const inFlightRouteCalculations = new Set();
+const lastRerouteTimes = new Map();
 
 // 2. Production PostgreSQL Connection Pool (Authoritative Supabase Cluster)
 let pool = null;
@@ -108,6 +114,11 @@ if (DATABASE_URL) {
     ssl: isLocalDb ? false : { rejectUnauthorized: false }
   });
   pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
+  pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;`).catch(() => {});
+  pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS aadhaar_number VARCHAR(32);`).catch(() => {});
+  pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS store_id VARCHAR(64);`).catch(() => {});
+  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS route_version INT NOT NULL DEFAULT 1;`).catch(() => {});
+  pool.query(`ALTER TABLE inventory_ledger ALTER COLUMN reason SET NOT NULL;`).catch(() => {});
 }
 
 // 3. Authoritative OSRM Route Resolver Adapter
@@ -602,25 +613,32 @@ getAppRepositories().catch(() => {});
 
 // Helper: Resolve Authorized Store ID for Sellers
 async function resolveAuthorizedSellerStoreId(authClaims) {
-  let authorizedStoreId = authClaims.storeId || authClaims.store_id || null;
+  if (!authClaims || !authClaims.sub) return null;
   const repos = await getAppRepositories();
   if (repos && repos.sellerRepo) {
     const seller = await repos.sellerRepo.getSellerById(authClaims.sub);
-    if (seller && (seller.status === 'ACTIVE' || !seller.status)) {
-      authorizedStoreId = seller.store_id || seller.storeId || authorizedStoreId;
-    } else if (pool) {
-      try {
-        const sellerRes = await pool.query(
-          `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
-          [authClaims.sub]
-        );
-        if (sellerRes.rows.length > 0 && sellerRes.rows[0].status === 'ACTIVE') {
-          authorizedStoreId = sellerRes.rows[0].store_id;
-        }
-      } catch {}
+    if (seller) {
+      if (seller.status && seller.status !== 'ACTIVE') {
+        return null;
+      }
+      return seller.store_id || seller.storeId || authClaims.storeId || authClaims.store_id || null;
     }
   }
-  return authorizedStoreId;
+  if (pool) {
+    try {
+      const sellerRes = await pool.query(
+        `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
+        [authClaims.sub]
+      );
+      if (sellerRes.rows.length > 0) {
+        if (sellerRes.rows[0].status && sellerRes.rows[0].status !== 'ACTIVE') {
+          return null;
+        }
+        return sellerRes.rows[0].store_id || authClaims.storeId || authClaims.store_id || null;
+      }
+    } catch {}
+  }
+  return authClaims.storeId || authClaims.store_id || null;
 }
 
 const sseTicketStore = new Map();
@@ -834,7 +852,7 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     // Realtime Short-Lived Scoped Ticket Generation
     // -------------------------------------------------------------
-    if (pathname === '/api/v1/realtime/ticket' && method === 'POST') {
+    if ((pathname === '/api/v1/realtime/ticket' || pathname === '/api/v1/delivery/sse-ticket') && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required to issue an SSE ticket.' });
@@ -932,6 +950,19 @@ const server = http.createServer(async (req, res) => {
     // Admin Live SSE Realtime Event Stream
     // -------------------------------------------------------------
     if (pathname === '/api/v1/admin/live-stream' && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for admin live stream.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -1379,7 +1410,7 @@ const server = http.createServer(async (req, res) => {
       );
 
       // Real SMS & Voice Call Dispatch via 2factor.in
-      const twoFactorKey = process.env.TWO_FACTOR_API_KEY || 'db970304-94a0-11f1-9cb1-0200cd936042';
+      const twoFactorKey = process.env.TWO_FACTOR_API_KEY;
       if (twoFactorKey && phoneDigits.length === 10) {
         const https = require('https');
         // 1. Dispatch SMS OTP
@@ -1407,14 +1438,17 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      return sendJson(res, 200, {
+      const responseDto = {
         ok: true,
         challengeId,
         phone: formattedPhone,
-        expiresAt: expiresAt.getTime(),
-        debugOtp: rawOtp,
-        masterOtp: '123456'
-      });
+        expiresAt: expiresAt.getTime()
+      };
+      if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEBUG_OTP === 'true') {
+        responseDto.debugOtp = rawOtp;
+      }
+
+      return sendJson(res, 200, responseDto);
     }
 
     if ((pathname === '/api/v1/auth/customer/otp/verify' || pathname === '/api/v1/auth/customer/verify-otp' || pathname === '/api/v1/auth/otp/verify') && method === 'POST') {
@@ -1424,7 +1458,7 @@ const server = http.createServer(async (req, res) => {
       const phoneDigits = rawPhone.replace(/\D/g, '').slice(-10);
       const otp = String(body.otpCode || body.otp_code || body.otp || body.code || '').trim();
 
-      const isMasterOtp = ['1234', '123456', '0000', '9999'].includes(otp);
+      const isMasterOtp = process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true' && ['1234', '123456', '0000', '9999'].includes(otp);
 
       if (phoneDigits.length !== 10 || !otp) {
         return sendJson(res, 400, { error: 'INVALID_REQUEST', message: 'Valid 10-digit phone and otp code are mandatory.' });
@@ -1581,7 +1615,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 429, { error: 'MAX_ATTEMPTS_EXCEEDED', message: 'Maximum OTP verification attempts exceeded.' });
       }
 
-      const isMasterOtp = otp === '123456';
+      const isMasterOtp = process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true' && otp === '123456';
       const otpResult = isMasterOtp ? { ok: true } : DeliveryOtpService.verifyOtp(otp, challenge.otp_hash);
       if (!otpResult || !otpResult.ok) {
         await pool.query(`UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = $1`, [challengeId]);
@@ -2523,7 +2557,7 @@ const server = http.createServer(async (req, res) => {
       const fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
         address: { latitude: lat, longitude: lng },
         items: body.items || [],
-        preferredStoreId: body.storeId || null,
+        preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || null) : DEFAULT_STORE_ID,
         pool
       });
 
@@ -2654,15 +2688,14 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseJsonBody(req);
 
-      // Release Contract: Only Cash on Delivery (COD) is supported for this release.
-      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH'];
+      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'CARD', 'NET_BANKING'];
       const rawPaymentMethod = body.paymentMethod || body.payment_method;
       const requestedMethod = rawPaymentMethod ? String(rawPaymentMethod).toUpperCase() : 'COD';
       if (!allowedPaymentMethods.includes(requestedMethod)) {
         return sendJson(res, 400, {
           code: 'PAYMENT_METHOD_NOT_SUPPORTED',
           error: 'PAYMENT_METHOD_NOT_SUPPORTED',
-          message: `Payment method '${rawPaymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
+          message: `Payment method '${rawPaymentMethod}' is not supported.`
         });
       }
 
@@ -2711,6 +2744,11 @@ const server = http.createServer(async (req, res) => {
         if (addrCheck.rows.length > 0) {
           customerAddr = addrCheck.rows[0];
           body.addressId = customerAddr.id;
+        } else {
+          return sendJson(res, 404, {
+            error: 'ADDRESS_NOT_FOUND',
+            message: `Address '${requestedAddrId}' does not exist or does not belong to the authenticated customer.`
+          });
         }
       }
 
@@ -2760,24 +2798,12 @@ const server = http.createServer(async (req, res) => {
       }));
 
       // Server-Authoritative Fulfillment Store Resolution via ServiceabilityService
-      let fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+      const fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
         address: customerAddr,
         items: orderItems,
-        preferredStoreId: body.storeId || body.store_id || null,
+        preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || body.store_id || null) : DEFAULT_STORE_ID,
         pool
       });
-
-      if (!fulfillmentDecision.ok && fulfillmentDecision.error === 'STORE_NOT_SERVICEABLE') {
-        // Dev/Testing/Demo Fallback: If customer is outside 20km serviceable radius (e.g. simulator or remote device testing),
-        // fallback to Rewari central hub coordinates so order placement is never blocked by distance gating.
-        console.warn('[Orders] Location outside 20km geofence. Applying fallback fulfillment store for testing.');
-        fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
-          address: { ...customerAddr, latitude: 28.202224, longitude: 76.615418 },
-          items: orderItems,
-          preferredStoreId: body.storeId || body.store_id || 'STORE_REWARI_01',
-          pool
-        });
-      }
 
       if (!fulfillmentDecision.ok) {
         return sendJson(res, 422, {
@@ -2816,10 +2842,13 @@ const server = http.createServer(async (req, res) => {
       // Explicit Customer Order DTO (Raw deliveryOtp is returned ONLY on initial order creation, NOT on replay)
       const orderIdVal = placeResult.order.order_id || placeResult.order.id;
       const rawOtp = placeResult.isIdempotentReplay ? undefined : (placeResult.order.deliveryOtp || placeResult.order.rawDeliveryPin);
+      const deliveryIdVal = placeResult.session ? (placeResult.session.delivery_id || placeResult.session.id) : undefined;
       const customerOrderDto = {
         id: orderIdVal,
         orderId: orderIdVal,
         order_id: orderIdVal,
+        deliveryId: deliveryIdVal,
+        delivery_id: deliveryIdVal,
         customerId: authenticatedCustomerId,
         customer_id: authenticatedCustomerId,
         status: placeResult.order.status,
@@ -3166,7 +3195,7 @@ const server = http.createServer(async (req, res) => {
       const fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
         address: customerAddr,
         items: rawCartItems,
-        preferredStoreId: body.storeId || null,
+        preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || null) : DEFAULT_STORE_ID,
         pool
       });
 
@@ -3313,8 +3342,13 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     if (pathname === '/api/v1/payments/webhook' && method === 'POST') {
       const rawBody = await parseRawBody(req);
-      const signatureHeader = req.headers['x-webhook-signature'] || req.headers['stripe-signature'] || req.headers['x-razorpay-signature'];
-      const webhookSecret = process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || 'whsec_commerceos_production_secret';
+      const webhookSecret = process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || (process.env.NODE_ENV !== 'production' ? 'whsec_commerceos_dev_secret' : null);
+      if (!webhookSecret) {
+        return sendJson(res, 500, {
+          error: 'WEBHOOK_SECRET_UNCONFIGURED',
+          message: 'Payment gateway webhook secret is unconfigured in production environment.'
+        });
+      }
 
       if (!signatureHeader) {
         return sendJson(res, 401, {
@@ -3483,7 +3517,7 @@ const server = http.createServer(async (req, res) => {
         createdAt: o.created_at
       }));
 
-      return sendJson(res, 200, { ok: true, storeId: authorizedStoreId, orders: sellerOrdersDto });
+      return sendJson(res, 200, sellerOrdersDto);
     }
 
     // -------------------------------------------------------------
@@ -3625,6 +3659,77 @@ const server = http.createServer(async (req, res) => {
       const orderId = readyPickupMatch[1];
       const result = await appRepositories.orderRepo.markReadyForPickup(orderId, authorizedStoreId, authClaims.sub);
       return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
+    }
+
+    // -------------------------------------------------------------
+    // Seller Direct COD Collection & Reconciliation: POST /api/v1/orders/:id/collect-cod
+    // -------------------------------------------------------------
+    const collectCodMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/collect-cod$/);
+    if (collectCodMatch && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+      }
+
+      const orderId = collectCodMatch[1];
+      const body = await parseJsonBody(req);
+      const collectedAmount = Number(body.collectedAmount ?? body.amount ?? 0);
+      const notes = String(body.notes || 'Cash verified and collected by Merchant');
+
+      if (pool && !isLocalMode) {
+        try {
+          const ordRes = await pool.query(
+            `SELECT order_id, store_id, is_cod, total_amount, cod_amount FROM orders WHERE (order_id = $1 OR id = $1)`,
+            [orderId]
+          );
+          if (ordRes.rows.length === 0) {
+            return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+          }
+          const ord = ordRes.rows[0];
+          if (authorizedStoreId && ord.store_id && ord.store_id !== authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
+          }
+          if (!ord.is_cod) {
+            return sendJson(res, 400, { error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
+          }
+
+          const finalAmount = collectedAmount > 0 ? collectedAmount : Number(ord.cod_amount || ord.total_amount || 0);
+          await pool.query(
+            `UPDATE cod_ledger
+             SET status = 'COLLECTED_RECONCILED',
+                 amount_collected = $2,
+                 collector_id = $3,
+                 notes = $4,
+                 reconciled = TRUE,
+                 updated_at = NOW()
+             WHERE order_id = $1`,
+            [ord.order_id, finalAmount, authClaims.sub, notes]
+          );
+
+          await pool.query(
+            `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
+            [ord.order_id]
+          );
+
+          return sendJson(res, 200, {
+            ok: true,
+            codReconciled: true,
+            orderId: ord.order_id,
+            amountCollected: finalAmount,
+            message: 'Cash on delivery collected and reconciled successfully.'
+          });
+        } catch (e) {
+          console.error('[ProductionServer] collect-cod error:', e);
+          return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: e.message });
+        }
+      }
+
+      return sendJson(res, 200, { ok: true, codReconciled: true, orderId, amountCollected: collectedAmount });
     }
 
     // -------------------------------------------------------------
@@ -4013,31 +4118,22 @@ const server = http.createServer(async (req, res) => {
       const now = Date.now();
 
       try {
-        let offRes = await pool.query(
-          `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
+        const offRes = await pool.query(
+          `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount, ord.is_cod, ord.store_id,
+                  s.store_name, s.address AS store_address, s.latitude AS store_lat, s.longitude AS store_lng
            FROM offers o
-           LEFT JOIN orders ord ON ord.order_id = o.order_id
-           WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all')
+           LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
+           LEFT JOIN stores s ON s.id = ord.store_id
+           WHERE (o.rider_id = $1 OR o.rider_id = 'all' OR o.rider_id IS NULL)
              AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
              AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
            ORDER BY o.created_at DESC LIMIT 5`,
           [riderId]
         );
 
-        if (offRes.rows.length === 0) {
-          offRes = await pool.query(
-            `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
-             FROM offers o
-             LEFT JOIN orders ord ON ord.order_id = o.order_id
-             WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
-               AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
-             ORDER BY o.created_at DESC LIMIT 5`
-          );
-        }
-
         const mappedOffers = offRes.rows.map(o => {
           const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
-          const customerAddrStr = addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Location, Rewari');
+          const customerAddrStr = addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Delivery Address');
           const expMs = Number(o.offer_expires_at) || (now + 1800000);
           const payoutVal = Number(o.earnings_amount || o.total_earnings || 35);
           return {
@@ -4052,21 +4148,21 @@ const server = http.createServer(async (req, res) => {
             payoutAmount: payoutVal,
             earningsAmount: payoutVal,
             payoutFormatted: `₹${payoutVal}`,
-            pickupAddress: 'Rewari Central Hub',
+            pickupAddress: o.store_name || 'Fulfillment Hub',
             deliveryAddress: customerAddrStr,
             customerName: addr.contactName || 'Customer',
             customerAddress: customerAddrStr,
-            customerLat: Number(addr.latitude || 28.1918),
-            customerLng: Number(addr.longitude || 76.6081),
-            merchantName: 'Rewari Central Fulfillment Hub',
-            merchantAddress: 'Circular Road, Rewari',
-            merchantLat: 28.2022,
-            merchantLng: 76.6154,
-            distanceKm: Number(o.total_distance_km || 2.1),
-            totalDistanceKm: Number(o.total_distance_km || 2.1),
-            estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 12),
-            isCod: true,
-            codAmountToCollect: Number(o.total_amount || 0),
+            customerLat: Number(addr.latitude) || null,
+            customerLng: Number(addr.longitude) || null,
+            merchantName: o.store_name || 'Commerce OS Fulfillment Hub',
+            merchantAddress: o.store_address || 'Fulfillment Hub Address',
+            merchantLat: Number(o.store_lat) || null,
+            merchantLng: Number(o.store_lng) || null,
+            distanceKm: Number(o.total_distance_km || 0),
+            totalDistanceKm: Number(o.total_distance_km || 0),
+            estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 15),
+            isCod: Boolean(o.is_cod),
+            codAmountToCollect: Boolean(o.is_cod) ? Number(o.total_amount || 0) : 0,
             waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
             offerCreatedAt: Number(o.offer_created_at || (o.created_at ? new Date(o.created_at).getTime() : now)),
             offerExpiresAt: expMs,
@@ -4096,6 +4192,19 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
       const offerId = ackOfferMatch[1];
+      const riderId = authClaims.riderId || authClaims.sub;
+      if (pool && !isLocalMode) {
+        try {
+          const offRes = await pool.query(`SELECT rider_id FROM offers WHERE offer_id = $1 OR id = $1`, [offerId]);
+          if (offRes.rows.length === 0) return sendJson(res, 404, { error: 'OFFER_NOT_FOUND', message: 'Offer not found.' });
+          const offer = offRes.rows[0];
+          if (offer.rider_id && offer.rider_id !== riderId && offer.rider_id !== 'all') {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to acknowledge this offer.' });
+          }
+        } catch (e) {
+          console.error('[ProductionServer] ack offer error:', e);
+        }
+      }
       if (appRepositories && appRepositories.offerRepo && appRepositories.offerRepo.updateDeliveryStatus) {
         await appRepositories.offerRepo.updateDeliveryStatus(offerId, 'DISPLAYED');
       }
@@ -4109,8 +4218,14 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
-      const offer = await appRepositories.offerRepo.findOfferById(singleOfferMatch[1]);
+      const offerId = singleOfferMatch[1];
+      const riderId = authClaims.riderId || authClaims.sub;
+      const offer = await appRepositories.offerRepo.findOfferById(offerId);
       if (!offer) return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Offer not found.' });
+      const assignedRider = offer.rider_id || offer.riderId;
+      if (assignedRider && assignedRider !== riderId && assignedRider !== 'all' && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view this offer.' });
+      }
       return sendJson(res, 200, offer);
     }
 
@@ -4149,14 +4264,7 @@ const server = http.createServer(async (req, res) => {
       const phoneDigits = String(authClaims.phone || authorizedRider?.phone || authClaims.sub || '').replace(/\D/g, '');
       const cleanPhone = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : (phoneDigits.length > 0 ? phoneDigits : '9817916180');
 
-      if (!authorizedRider && (authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER')) || String(authClaims.sub).startsWith('rdr_'))) {
-        authorizedRider = {
-          rider_id: authClaims.sub,
-          full_name: authClaims.name || ('Partner ' + cleanPhone.slice(-4)),
-          phone: authClaims.phone || ('+91' + cleanPhone),
-          vehicle_number: authClaims.vehicle || 'EV-BIKE-2026'
-        };
-      }
+
 
       if (!authorizedRider) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider profile not found. You are not authorized to accept delivery offers.' });
@@ -4357,27 +4465,33 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           const nRes = await pool.query(
-            `SELECT n.id as "notificationId", n.event_id as "eventId", n.type, n.category, n.priority, n.rider_id as "riderId",
-                    n.order_id as "orderId", n.delivery_id as "deliveryId", n.offer_id as "offerId", n.title, n.body, n.deep_link as "deepLink",
-                    n.created_at as "createdAt", n.expires_at as "expiresAt", n.read_at as "readAt",
-                    off.status as "offerStatus",
-                    ord.status as "orderStatus",
-                    ord.rider_id as "orderRiderId"
-             FROM notifications n
-             LEFT JOIN offers off ON (off.offer_id = n.offer_id OR off.id = n.offer_id)
-             LEFT JOIN orders ord ON (ord.order_id = n.order_id OR ord.id = n.order_id)
-             WHERE n.rider_id = $1 OR n.rider_id = 'all'
-             ORDER BY n.created_at DESC LIMIT 50`,
+            `SELECT rn.id as "notificationId",
+                    rn.notification_id as "id",
+                    rn.category,
+                    rn.rider_id as "riderId",
+                    rn.title,
+                    rn.body,
+                    rn.status,
+                    rn.metadata,
+                    COALESCE(rn.metadata->>'orderId', rn.metadata->>'order_id') as "orderId",
+                    COALESCE(rn.metadata->>'deliveryId', rn.metadata->>'delivery_id') as "deliveryId",
+                    COALESCE(rn.metadata->>'offerId', rn.metadata->>'offer_id') as "offerId",
+                    COALESCE(rn.metadata->>'deepLink', rn.metadata->>'deep_link') as "deepLink",
+                    rn.created_at as "createdAt",
+                    rn.read_at as "readAt"
+             FROM rider_notifications rn
+             WHERE rn.rider_id = $1 OR rn.rider_id = 'all'
+             ORDER BY rn.created_at DESC LIMIT 50`,
             [authClaims.sub]
           );
           notifs = nRes.rows;
         } catch (err) {
           try {
             const fallback = await pool.query(
-              `SELECT id as "notificationId", event_id as "eventId", type, category, priority, rider_id as "riderId",
-                      order_id as "orderId", delivery_id as "deliveryId", offer_id as "offerId", title, body, deep_link as "deepLink",
-                      created_at as "createdAt", expires_at as "expiresAt", read_at as "readAt"
-               FROM notifications WHERE rider_id = $1 OR rider_id = 'all' ORDER BY created_at DESC LIMIT 50`,
+              `SELECT id as "notificationId", notification_id as "id", category, rider_id as "riderId",
+                      title, body, status, metadata,
+                      created_at as "createdAt", read_at as "readAt"
+               FROM rider_notifications WHERE rider_id = $1 OR rider_id = 'all' ORDER BY created_at DESC LIMIT 50`,
               [authClaims.sub]
             );
             notifs = fallback.rows;
@@ -4398,7 +4512,7 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           await pool.query(
-            `UPDATE notifications SET read_at = NOW() WHERE (id = $1 OR notification_id = $1) AND rider_id = $2`,
+            `UPDATE rider_notifications SET read_at = NOW(), status = 'READ' WHERE (id = $1 OR notification_id = $1) AND rider_id = $2`,
             [notifId, authClaims.sub]
           );
         } catch {}
@@ -4415,7 +4529,7 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           await pool.query(
-            `UPDATE notifications SET read_at = NOW() WHERE rider_id = $1 AND read_at IS NULL`,
+            `UPDATE rider_notifications SET read_at = NOW(), status = 'READ' WHERE rider_id = $1 AND read_at IS NULL`,
             [authClaims.sub]
           );
         } catch {}
@@ -4524,8 +4638,8 @@ const server = http.createServer(async (req, res) => {
       let deviation = { isOffRoute: false, deviationMeters: 0 };
 
       // Initialize route if not already stored (atomic guard against duplicate concurrent calls)
-      if (waypoints.length === 0 && !delivery._initializingRoute) {
-        delivery._initializingRoute = true;
+      if (waypoints.length === 0 && !inFlightRouteCalculations.has(deliveryId)) {
+        inFlightRouteCalculations.add(deliveryId);
         const isPrePickup = ['ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'ASSIGNED'].includes(delivery.state);
         const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
         const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
@@ -4556,17 +4670,21 @@ const server = http.createServer(async (req, res) => {
           } catch (e) {
             console.warn(`[ProductionServer] Route initialization failed: ${e.message}`);
           } finally {
-            delivery._initializingRoute = false;
+            inFlightRouteCalculations.delete(deliveryId);
           }
+        } else {
+          inFlightRouteCalculations.delete(deliveryId);
         }
       }
 
       if (waypoints && waypoints.length >= 2) {
         deviation = detectRouteDeviation(lat, lng, waypoints, 85);
         const now = Date.now();
-        const lastReroute = delivery.last_reroute_time || 0;
-        // Debounce automatic reroutes with minimum 10-second cooldown
-        if (deviation.isOffRoute && (now - lastReroute > 10000)) {
+        const lastReroute = lastRerouteTimes.get(deliveryId) || delivery.last_reroute_time || 0;
+        // Debounce automatic reroutes with minimum 10-second cooldown and atomic in-flight guard
+        if (deviation.isOffRoute && (now - lastReroute > 10000) && !inFlightRouteCalculations.has(deliveryId)) {
+          inFlightRouteCalculations.add(deliveryId);
+          lastRerouteTimes.set(deliveryId, now);
           const isPrePickup = ['ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'ASSIGNED'].includes(delivery.state);
           const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
           const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
@@ -4608,7 +4726,11 @@ const server = http.createServer(async (req, res) => {
               }
             } catch (e) {
               console.warn(`[ProductionServer] Automatic reroute on deviation failed: ${e.message}`);
+            } finally {
+              inFlightRouteCalculations.delete(deliveryId);
             }
+          } else {
+            inFlightRouteCalculations.delete(deliveryId);
           }
         }
       }
@@ -4868,9 +4990,24 @@ const server = http.createServer(async (req, res) => {
       activeTrackingDto.riderBearing = activeTrackingDto.liveRiderTelemetry?.heading ?? delivery.rider_heading ?? delivery.heading ?? 0;
       activeTrackingDto.riderHeading = activeTrackingDto.riderBearing;
       activeTrackingDto.speedKmh = activeTrackingDto.liveRiderTelemetry?.speedKmh ?? delivery.speed_kmh ?? 0;
-      activeTrackingDto.deliveryOtp = delivery.delivery_otp || delivery.rawDeliveryPin || null;
+      delete activeTrackingDto.deliveryOtp;
+      delete activeTrackingDto.delivery_otp_hash;
+      delete activeTrackingDto.deliveryOtpHash;
+      delete activeTrackingDto.delivery_otp;
+      delete activeTrackingDto.deliveryPin;
+      delete activeTrackingDto.rawDeliveryPin;
       activeTrackingDto.isCod = Boolean(delivery.is_cod);
       activeTrackingDto.totalAmount = Number(delivery.total_amount || delivery.cod_amount || 0);
+      activeTrackingDto.delivery = {
+        deliveryId: activeTrackingDto.deliveryId,
+        orderId: activeTrackingDto.orderId,
+        status: activeTrackingDto.status,
+        state: activeTrackingDto.state,
+        stage: activeTrackingDto.stage,
+        riderName: activeTrackingDto.riderName,
+        riderPhone: activeTrackingDto.riderPhone,
+        riderVehicle: activeTrackingDto.riderVehicle
+      };
       return sendJson(res, 200, activeTrackingDto);
     }
 
@@ -4888,7 +5025,10 @@ const server = http.createServer(async (req, res) => {
             `SELECT rider_id, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
             [authClaims.sub]
           );
-          if (riderRes.rows.length > 0 && riderRes.rows[0].status === 'ACTIVE') {
+          if (riderRes.rows.length > 0) {
+            if (riderRes.rows[0].status === 'SUSPENDED' || riderRes.rows[0].status !== 'ACTIVE') {
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Rider account is suspended or inactive.' });
+            }
             authorizedRiderId = riderRes.rows[0].rider_id;
           }
         } catch {}
@@ -4897,9 +5037,100 @@ const server = http.createServer(async (req, res) => {
       const deliveryId = deliverMatch[1];
       const action = pathname.split('/').pop();
       const body = await parseJsonBody(req);
-      const otpToVerify = body.otp || body.submittedOtp;
+      const otpToVerify = body.otp ?? body.submittedOtp ?? body.enteredPin ?? body.pin ?? body.deliveryPin ?? body.deliveryOtp;
 
-      if ((action === 'verify-otp' || action === 'deliver-with-otp') && (!otpToVerify || String(otpToVerify).trim().length < 4)) {
+      // Verify delivery session existence and assigned rider ownership
+      if (pool && !isLocalMode) {
+        try {
+          const sessionRes = await pool.query(
+            `SELECT id, delivery_id, order_id, rider_id, state FROM delivery_sessions WHERE (id = $1 OR delivery_id = $1 OR order_id = $1)`,
+            [deliveryId]
+          );
+          if (sessionRes.rows.length === 0) {
+            const orderRes = await pool.query(
+              `SELECT order_id FROM orders WHERE (order_id = $1 OR id = $1)`,
+              [deliveryId]
+            );
+            if (orderRes.rows.length === 0) {
+              return sendJson(res, 404, { error: 'NOT_FOUND', message: `Delivery session or order ${deliveryId} not found.` });
+            }
+          } else {
+            const session = sessionRes.rows[0];
+            if (session.rider_id && session.rider_id !== authorizedRiderId) {
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider for this delivery can complete delivery.' });
+            }
+          }
+        } catch (e) {
+          console.error('[ProductionServer] delivery ownership check error:', e);
+        }
+      } else if (isLocalMode && appRepositories && appRepositories.deliveryRepo && appRepositories.deliveryRepo.findSessionById) {
+        const session = await appRepositories.deliveryRepo.findSessionById(deliveryId);
+        if (session && session.riderId && session.riderId !== authorizedRiderId) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider for this delivery can complete delivery.' });
+        }
+      }
+
+      if (action === 'complete-cod') {
+        const collectedAmount = Number(body.collectedAmount ?? body.codAmount ?? body.cashCollected ?? body.amount ?? 0);
+        let orderId = deliveryId;
+        if (pool && !isLocalMode) {
+          try {
+            const sessionRes = await pool.query(
+              `SELECT ds.id, ds.order_id, ds.rider_id, o.is_cod, o.total_amount, o.cod_amount
+               FROM delivery_sessions ds
+               JOIN orders o ON (o.order_id = ds.order_id OR o.id = ds.order_id)
+               WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)`,
+              [deliveryId]
+            );
+            if (sessionRes.rows.length === 0) {
+              return sendJson(res, 404, { ok: false, error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
+            }
+            const row = sessionRes.rows[0];
+            if (row.rider_id && row.rider_id !== authorizedRiderId) {
+              return sendJson(res, 403, { ok: false, error: 'FORBIDDEN', message: 'Only the assigned rider can complete COD.' });
+            }
+            if (!row.is_cod) {
+              return sendJson(res, 400, { ok: false, error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
+            }
+            orderId = row.order_id;
+            const finalAmount = collectedAmount > 0 ? collectedAmount : Number(row.cod_amount || row.total_amount || 0);
+            const updateRes = await pool.query(
+              `UPDATE cod_ledger
+               SET status = 'COLLECTED_RECONCILED',
+                   amount_collected = $2,
+                   collector_id = $3,
+                   reconciled = TRUE,
+                   updated_at = NOW()
+               WHERE (order_id = $1 OR id = $1)`,
+              [orderId, finalAmount, authorizedRiderId]
+            );
+            if (updateRes.rowCount === 0) {
+              return sendJson(res, 404, { ok: false, error: 'COD_LEDGER_NOT_FOUND', message: 'COD ledger entry not found for this order.' });
+            }
+            return sendJson(res, 200, {
+              ok: true,
+              codReconciled: true,
+              orderId,
+              deliveryId: row.id,
+              amountCollected: finalAmount,
+              message: 'Cash on delivery reconciled successfully.'
+            });
+          } catch (e) {
+            console.error('[ProductionServer] complete-cod error:', e);
+            return sendJson(res, 500, { ok: false, error: 'INTERNAL_ERROR', message: e.message });
+          }
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          codReconciled: true,
+          orderId,
+          deliveryId,
+          amountCollected: collectedAmount,
+          message: 'Cash on delivery reconciled successfully.'
+        });
+      }
+
+      if ((action === 'verify-otp' || action === 'deliver-with-otp' || action === 'complete') && (!otpToVerify || String(otpToVerify).trim().length < 4)) {
         return sendJson(res, 400, { ok: false, verified: false, error: 'INVALID_OTP', message: 'Delivery PIN must be at least 4 digits.' });
       }
 
@@ -4999,7 +5230,11 @@ const server = http.createServer(async (req, res) => {
         if (!delivery && pool && !isLocalMode) {
           try {
             const delRes = await pool.query(
-              `SELECT * FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1 OR id = $1) ORDER BY created_at DESC LIMIT 1`,
+              `SELECT d.*, o.customer_id 
+               FROM delivery_sessions d 
+               LEFT JOIN orders o ON d.order_id = o.order_id OR d.order_id = o.id 
+               WHERE (d.order_id = $1 OR d.delivery_id = $1 OR d.id = $1) 
+               ORDER BY d.created_at DESC LIMIT 1`,
               [targetId]
             );
             if (delRes.rows.length > 0) delivery = delRes.rows[0];
@@ -5024,45 +5259,63 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (order) {
+          // Ownership authorization check on order: Customer owner, Store seller, or Admin
+          const isCustomerOwner = (order.customer_id === authClaims.sub || order.customerId === authClaims.sub);
+          const isStoreSeller = Boolean(authClaims.storeId && (authClaims.storeId === order.store_id || authClaims.storeId === order.storeId));
+          const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
+          if (!isCustomerOwner && !isStoreSeller && !isAdmin) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to view tracking for this delivery.' });
+          }
+
+          let storeData = null;
+          const storeId = order.store_id || order.storeId;
+          if (storeId) {
+            if (pool) {
+              try {
+                const sRes = await pool.query('SELECT id, store_name, address, latitude, longitude FROM stores WHERE id = $1', [storeId]);
+                if (sRes.rows.length > 0) storeData = sRes.rows[0];
+              } catch (_) {}
+            }
+            if (!storeData && appRepositories.storeRepo && typeof appRepositories.storeRepo.getStoreById === 'function') {
+              try {
+                storeData = await appRepositories.storeRepo.getStoreById(storeId);
+              } catch (_) {}
+            }
+          }
+
           const addr = order.delivery_address || order.deliveryAddress || {};
-          const cLat = Number(addr.latitude || addr.lat || 28.202224);
-          const cLng = Number(addr.longitude || addr.lng || 76.615418);
-          const sLat = 28.202224;
-          const sLng = 76.615418;
-          const distKm = ServiceabilityService.calculateDistanceKm(sLat, sLng, cLat, cLng) || 1.5;
+          const cLat = addr.latitude != null ? Number(addr.latitude) : (addr.lat != null ? Number(addr.lat) : null);
+          const cLng = addr.longitude != null ? Number(addr.longitude) : (addr.lng != null ? Number(addr.lng) : null);
+          const sLat = storeData?.latitude != null ? Number(storeData.latitude) : null;
+          const sLng = storeData?.longitude != null ? Number(storeData.longitude) : null;
+          const distKm = (sLat != null && sLng != null && cLat != null && cLng != null)
+            ? ServiceabilityService.calculateDistanceKm(sLat, sLng, cLat, cLng)
+            : null;
 
           const preDeliveryDto = {
-            deliveryId: `del_prep_${order.id || order.order_id || targetId}`,
+            deliveryId: null,
             orderId: order.id || order.order_id || targetId,
             riderId: null,
-            riderName: 'Partner Assigning',
+            riderName: null,
             riderPhone: null,
-            riderVehicle: 'Electric Scooter',
-            state: order.order_status || order.orderStatus || 'PREPARING',
-            stage: 'ASSIGNING_PARTNER',
+            riderVehicle: null,
+            state: order.order_status || order.orderStatus || 'AWAITING_DISPATCH',
+            stage: 'AWAITING_DISPATCH',
             merchantLat: sLat,
             merchantLng: sLng,
-            merchantName: 'Commerce OS Rewari Central Store Hub',
-            merchantAddress: '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
+            merchantName: storeData?.store_name || storeData?.name || null,
+            merchantAddress: storeData?.address || null,
             customerLat: cLat,
             customerLng: cLng,
             customerName: order.customer_name || 'Customer',
-            customerAddress: addr.addressLine || addr.street || 'Rewari Delivery Location',
+            customerAddress: addr.addressLine || addr.street || null,
             distanceKm: distKm,
-            estimatedTimeMins: 8,
-            etaMinutes: 8,
-            waypoints: [
-              { lat: sLat, lng: sLng },
-              { lat: (sLat + cLat) / 2, lng: (sLng + cLng) / 2 },
-              { lat: cLat, lng: cLng }
-            ],
+            estimatedTimeMins: null,
+            etaMinutes: null,
+            waypoints: [],
             traversedWaypoints: [],
-            remainingWaypoints: [
-              { lat: sLat, lng: sLng },
-              { lat: (sLat + cLat) / 2, lng: (sLng + cLng) / 2 },
-              { lat: cLat, lng: cLng }
-            ],
-            routeProgressPct: 0.05,
+            remainingWaypoints: [],
+            routeProgressPct: 0,
             isStale: false,
             liveRiderTelemetry: null
           };
@@ -5073,7 +5326,14 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Ownership authorization: Customer owner, Assigned rider, Store seller, or Admin
-      const isCustomerOwner = delivery.customer_id === authClaims.sub || delivery.customerId === authClaims.sub;
+      let customerId = delivery.customer_id || delivery.customerId;
+      if (!customerId && delivery.order_id && pool) {
+        try {
+          const oRes = await pool.query('SELECT customer_id FROM orders WHERE order_id = $1 OR id = $1', [delivery.order_id]);
+          if (oRes.rows.length > 0) customerId = oRes.rows[0].customer_id;
+        } catch (_) {}
+      }
+      const isCustomerOwner = customerId === authClaims.sub;
       const isAssignedRider = delivery.rider_id === authClaims.sub || delivery.riderId === authClaims.sub || delivery.rider_id === authClaims.riderId;
       let isStoreSeller = Boolean(authClaims.storeId && (authClaims.storeId === delivery.store_id || authClaims.storeId === delivery.storeId));
       const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
@@ -5371,8 +5631,11 @@ const server = http.createServer(async (req, res) => {
         expiryDate: p.expiry_date || p.expiryDate || null,
         manufacturingDate: p.manufacturing_date || p.manufacturingDate || null,
         isActive: Boolean(p.is_active ?? p.isActive ?? true),
-        stockCount: p.stock_count != null ? Number(p.stock_count) : undefined,
-        availableCount: p.available_count != null ? Number(p.available_count) : undefined
+        stockCount: p.stock_count != null ? Number(p.stock_count) : (p.stockCount != null ? Number(p.stockCount) : 0),
+        stock_count: p.stock_count != null ? Number(p.stock_count) : (p.stockCount != null ? Number(p.stockCount) : 0),
+        availableCount: p.available_count != null ? Number(p.available_count) : (p.availableCount != null ? Number(p.availableCount) : Number(p.stock_count ?? p.stockCount ?? 0)),
+        available_count: p.available_count != null ? Number(p.available_count) : (p.availableCount != null ? Number(p.availableCount) : Number(p.stock_count ?? p.stockCount ?? 0)),
+        inStock: Number(p.available_count ?? p.availableCount ?? p.stock_count ?? p.stockCount ?? 0) > 0
       });
 
       return sendJson(res, 200, (products || []).map(productDto));

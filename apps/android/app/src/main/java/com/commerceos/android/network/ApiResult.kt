@@ -89,8 +89,9 @@ object Api {
     suspend fun <T> run(block: suspend () -> T): ApiResult<T> {
         val candidateBases = listOfNotNull(
             NetworkClient.baseUrl,
-            "http://127.0.0.1:8080",
+            "https://commerce-os-api.onrender.com",
             "http://10.0.2.2:8080",
+            "http://127.0.0.1:8080",
             "http://127.0.0.1:8090",
             "http://10.0.2.2:8090"
         ).distinct()
