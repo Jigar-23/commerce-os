@@ -5896,6 +5896,20 @@ async function handleRequest(port, req, res) {
                   dbOrder.orderStatus = 'RIDER_ASSIGNED';
                 }
               }
+              if (db.offers) {
+                if (db.offers[offerId]) {
+                  db.offers[offerId].status = 'ACCEPTED';
+                  db.offers[offerId].riderId = riderId;
+                }
+                for (const offKey in db.offers) {
+                  const off = db.offers[offKey];
+                  if (off && (off.orderId === normalizedSession.orderId || off.deliveryId === normalizedSession.deliveryId)) {
+                    if (offKey !== offerId) {
+                      off.status = 'CLAIMED_BY_OTHER';
+                    }
+                  }
+                }
+              }
               saveDb();
 
               return json(res, 200, {
