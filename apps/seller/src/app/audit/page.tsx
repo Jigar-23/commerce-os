@@ -19,7 +19,7 @@ export default function DedicatedAuditPage() {
     try {
       const res = await sellerApi.get('/api/v1/orders/audit');
       if (res.ok && res.data) {
-        setAuditLogs(Array.isArray(res.data) ? res.data : []);
+        setAuditLogs(Array.isArray(res.data) ? res.data : (res.data?.logs || []));
       }
     } catch (e) {
       console.error(e);

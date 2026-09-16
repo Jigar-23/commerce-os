@@ -54,9 +54,16 @@ export default function ProductsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await sellerApi.get<ProductItem[]>('/api/v1/catalog/products');
-      if (res.ok && Array.isArray(res.data)) {
-        setProducts(res.data);
+      const res = await sellerApi.get<any>('/api/v1/catalog/products');
+      if (res.ok && res.data) {
+        const list = Array.isArray(res.data)
+          ? res.data
+          : (Array.isArray(res.data.content)
+              ? res.data.content
+              : (Array.isArray(res.data.products)
+                  ? res.data.products
+                  : (Array.isArray(res.data.items) ? res.data.items : [])));
+        setProducts(list);
       } else {
         setError(res.error || 'Failed to retrieve catalog products.');
       }
@@ -102,11 +109,13 @@ export default function ProductsPage() {
         price: priceNum,
         mrp: mrpNum,
         initialStock: stockNum,
+        stockCount: stockNum,
+        reason: 'Initial seller catalog registration',
         rxRequirement: newRx,
         storeId: session?.storeId || 'store_rewari_hub_01',
       };
 
-      const res = await sellerApi.post('/api/v1/catalog/seller/products', payload);
+      const res = await sellerApi.post('/api/v1/catalog/products', payload);
       if (res.ok) {
         setFormSuccess(true);
         setTimeout(() => {
