@@ -27,6 +27,7 @@ public final class RiderTelemetryStreamer: ObservableObject {
     private var activeDeliveryId: String? = nil
     private var lastRecordedLocation: CLLocation? = nil
     private var lastTransmissionTime: Date = Date.distantPast
+    private var keepaliveTimer: Timer? = nil
     
     private let minStationaryJitterDistanceMeters: CLLocationDistance = 3.0
     private let stationarySpeedThresholdMs: CLLocationSpeed = 1.0 // 3.6 km/h
@@ -44,6 +45,18 @@ public final class RiderTelemetryStreamer: ObservableObject {
         self.lastRecordedLocation = nil
         self.lastTransmissionTime = Date.distantPast
 
+        keepaliveTimer?.invalidate()
+        DispatchQueue.main.async {
+            self.keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+                guard let self = self, self.isStreaming, let delId = self.activeDeliveryId else { return }
+                if Date().timeIntervalSince(self.lastTransmissionTime) >= 2.5 {
+                    if let loc = self.lastRecordedLocation ?? RiderBackgroundLocationManager.shared.lastLocation {
+                        self.transmitTelemetry(loc, deliveryId: delId, isDeadReckoned: false)
+                    }
+                }
+            }
+        }
+
         if let loc = RiderBackgroundLocationManager.shared.lastLocation {
             processLocationUpdate(loc)
         }
@@ -53,14 +66,21 @@ public final class RiderTelemetryStreamer: ObservableObject {
     public func processLocationUpdate(_ location: CLLocation) {
         guard isStreaming, let deliveryId = activeDeliveryId else { return }
         
-        // 1. Accuracy Filter (allow up to 120m for iPads and indoor Wi-Fi)
-        guard location.horizontalAccuracy > 0 && location.horizontalAccuracy <= 120.0 else {
-            // Apply dead-reckoning fallback if moving fast and have prior trajectory
-            if let prior = lastRecordedLocation, prior.speed > stationarySpeedThresholdMs {
-                let predicted = deadReckonLocation(from: prior, elapsedSeconds: Date().timeIntervalSince(prior.timestamp))
-                transmitTelemetry(predicted, deliveryId: deliveryId, isDeadReckoned: true)
-            }
-            return
+        // 1. Accuracy Filter (allow up to 500m for iPads, indoor Wi-Fi, and stationary desk testing)
+        let effectiveLocation: CLLocation
+        if location.horizontalAccuracy < 0 || location.horizontalAccuracy > 500.0 {
+            // Apply fallback with normalized accuracy so iPad Wi-Fi doesn't drop packets
+            effectiveLocation = CLLocation(
+                coordinate: location.coordinate,
+                altitude: location.altitude,
+                horizontalAccuracy: 25.0,
+                verticalAccuracy: location.verticalAccuracy,
+                course: location.course,
+                speed: location.speed,
+                timestamp: location.timestamp
+            )
+        } else {
+            effectiveLocation = location
         }
         
         let now = Date()
@@ -73,17 +93,17 @@ public final class RiderTelemetryStreamer: ObservableObject {
         
         let requiredIntervalSeconds: TimeInterval
         if isLowBattery {
-            requiredIntervalSeconds = 6.0
-        } else if location.speed > highSpeedThresholdMs {
-            requiredIntervalSeconds = 2.0  // High precision on highway / fast transit
+            requiredIntervalSeconds = 5.0
+        } else if effectiveLocation.speed > highSpeedThresholdMs {
+            requiredIntervalSeconds = 1.5  // High precision on highway / fast transit
         } else {
-            requiredIntervalSeconds = 2.5  // Responsive live tracking in city and at hubs
+            requiredIntervalSeconds = 2.0  // Responsive live tracking in city and at hubs
         }
         
         // 3. Rate-Limit Transmission
         guard timeSinceLastTransmission >= requiredIntervalSeconds else { return }
         
-        transmitTelemetry(location, deliveryId: deliveryId, isDeadReckoned: false)
+        transmitTelemetry(effectiveLocation, deliveryId: deliveryId, isDeadReckoned: false)
     }
     
     private func transmitTelemetry(_ location: CLLocation, deliveryId: String, isDeadReckoned: Bool) {
@@ -158,6 +178,8 @@ public final class RiderTelemetryStreamer: ObservableObject {
     }
     
     public func stopStreaming() {
+        keepaliveTimer?.invalidate()
+        keepaliveTimer = nil
         self.isStreaming = false
         self.activeDeliveryId = nil
         self.lastRecordedLocation = nil

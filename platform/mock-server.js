@@ -491,13 +491,15 @@ function broadcastDeliveryEvent(delId, eventType, payload) {
   if (!global.deliverySSEConnections) return;
   const clients = global.deliverySSEConnections.get(delId);
   if (!clients || clients.size === 0) return;
+  const customerDto = buildCustomerTrackingDTO(payload?.session || payload);
   const data = JSON.stringify({
     eventId: 'evt_' + Math.random().toString(36).substr(2, 9),
     eventType,
     sequenceNumber: payload?.sequenceNumber || Date.now(),
     serverTimestamp: Date.now(),
     deliveryState: payload?.state || payload?.deliveryState,
-    session: buildCustomerTrackingDTO(payload?.session || payload),
+    session: customerDto,
+    ...(customerDto || {})
   });
 
   for (const clientRes of clients) {
@@ -6082,6 +6084,7 @@ async function handleRequest(port, req, res) {
                     }
                   }
                 }
+              }
               if (productionPgPool) {
                 try {
                   await productionPgPool.query(

@@ -107,6 +107,9 @@ public struct LiveTrackingPayload: Codable {
         case routePolylineCamel = "routePolyline"
         case liveRiderTelemetry = "live_rider_telemetry"
         case liveRiderTelemetryCamel = "liveRiderTelemetry"
+        case session
+        case data
+        case payload
         case active
     }
 
@@ -152,87 +155,120 @@ public struct LiveTrackingPayload: Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // Support nested payloads (e.g. { eventId, session: { ... } } or { data: { ... } })
+        let nestedPayload: LiveTrackingPayload? = (try? container.decode(LiveTrackingPayload.self, forKey: .session))
+            ?? (try? container.decode(LiveTrackingPayload.self, forKey: .data))
+            ?? (try? container.decode(LiveTrackingPayload.self, forKey: .payload))
+
         let telem = (try? container.decode(LiveRiderTelemetryPayload.self, forKey: .liveRiderTelemetry))
             ?? (try? container.decode(LiveRiderTelemetryPayload.self, forKey: .liveRiderTelemetryCamel))
 
-        self.orderId = (try? container.decode(String.self, forKey: .orderId))
+        let resolvedOrderId = (try? container.decode(String.self, forKey: .orderId))
             ?? (try? container.decode(String.self, forKey: .orderIdCamel))
+            ?? nestedPayload?.orderId
             ?? ""
+        self.orderId = resolvedOrderId
+
         self.status = (try? container.decode(String.self, forKey: .status))
             ?? (try? container.decode(String.self, forKey: .state))
+            ?? nestedPayload?.status
             ?? "PLACED"
         self.etaMinutes = (try? container.decode(Int.self, forKey: .etaMinutes))
             ?? (try? container.decode(Int.self, forKey: .etaMinutesCamel))
             ?? (try? container.decode(Int.self, forKey: .estimatedArrivalMins))
+            ?? nestedPayload?.etaMinutes
         self.riderName = (try? container.decode(String.self, forKey: .riderName))
             ?? (try? container.decode(String.self, forKey: .riderNameCamel))
+            ?? nestedPayload?.riderName
         self.riderPhone = (try? container.decode(String.self, forKey: .riderPhone))
             ?? (try? container.decode(String.self, forKey: .riderPhoneCamel))
+            ?? nestedPayload?.riderPhone
         self.riderLat = (try? container.decode(Double.self, forKey: .riderLat))
             ?? (try? container.decode(Double.self, forKey: .riderLatCamel))
             ?? telem?.latitude
+            ?? nestedPayload?.riderLat
         self.riderLng = (try? container.decode(Double.self, forKey: .riderLng))
             ?? (try? container.decode(Double.self, forKey: .riderLngCamel))
             ?? telem?.longitude
+            ?? nestedPayload?.riderLng
         self.riderBearing = (try? container.decode(Double.self, forKey: .riderBearing))
             ?? (try? container.decode(Double.self, forKey: .riderBearingCamel))
             ?? (try? container.decode(Double.self, forKey: .riderHeading))
             ?? (try? container.decode(Double.self, forKey: .riderHeadingCamel))
             ?? telem?.heading
+            ?? nestedPayload?.riderBearing
         self.speedKmh = (try? container.decode(Double.self, forKey: .speedKmh))
             ?? (try? container.decode(Double.self, forKey: .speedKmhCamel))
             ?? (try? container.decode(Double.self, forKey: .speed))
             ?? telem?.speedKmh
+            ?? nestedPayload?.speedKmh
         self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat))
             ?? (try? container.decode(Double.self, forKey: .merchantLatCamel))
+            ?? nestedPayload?.merchantLat
         self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng))
             ?? (try? container.decode(Double.self, forKey: .merchantLngCamel))
+            ?? nestedPayload?.merchantLng
         self.customerLat = (try? container.decode(Double.self, forKey: .customerLat))
             ?? (try? container.decode(Double.self, forKey: .customerLatCamel))
+            ?? nestedPayload?.customerLat
         self.customerLng = (try? container.decode(Double.self, forKey: .customerLng))
             ?? (try? container.decode(Double.self, forKey: .customerLngCamel))
+            ?? nestedPayload?.customerLng
         self.deliveryOtp = (try? container.decode(String.self, forKey: .deliveryOtp))
             ?? (try? container.decode(String.self, forKey: .deliveryOtpCamel))
+            ?? nestedPayload?.deliveryOtp
         self.isCod = (try? container.decode(Bool.self, forKey: .isCod))
             ?? (try? container.decode(Bool.self, forKey: .isCodCamel))
+            ?? nestedPayload?.isCod
         self.totalAmount = (try? container.decode(Double.self, forKey: .totalAmount))
             ?? (try? container.decode(Double.self, forKey: .totalAmountCamel))
+            ?? nestedPayload?.totalAmount
         self.isLiveTelemetryAvailable = (try? container.decode(Bool.self, forKey: .isLiveTelemetryAvailable))
             ?? (try? container.decode(Bool.self, forKey: .isLiveTelemetryAvailableCamel))
+            ?? nestedPayload?.isLiveTelemetryAvailable
         self.routePolyline = (try? container.decode(String.self, forKey: .routePolyline))
             ?? (try? container.decode(String.self, forKey: .routePolylineCamel))
+            ?? nestedPayload?.routePolyline
     }
 
     public init(dictionary: [String: Any]) {
-        self.orderId = (dictionary["orderId"] as? String)
-            ?? (dictionary["order_id"] as? String)
-            ?? (dictionary["id"] as? String)
-            ?? ""
-        self.status = (dictionary["status"] as? String)
-            ?? (dictionary["state"] as? String)
-            ?? (dictionary["stage"] as? String)
-            ?? "PLACED"
-        self.etaMinutes = (dictionary["etaMinutes"] as? Int)
-            ?? (dictionary["eta_minutes"] as? Int)
-            ?? (dictionary["estimatedArrivalMins"] as? Int)
-            ?? (dictionary["estimatedMinutes"] as? Int)
-        self.riderName = (dictionary["riderName"] as? String)
-            ?? (dictionary["rider_name"] as? String)
-        self.riderPhone = (dictionary["riderPhone"] as? String)
-            ?? (dictionary["rider_phone"] as? String)
-        
-        var lat = (dictionary["riderLat"] as? Double) ?? (dictionary["rider_lat"] as? Double)
-        var lng = (dictionary["riderLng"] as? Double) ?? (dictionary["rider_lng"] as? Double)
-        var bearing = (dictionary["riderBearing"] as? Double)
-            ?? (dictionary["rider_bearing"] as? Double)
-            ?? (dictionary["riderHeading"] as? Double)
-            ?? (dictionary["rider_heading"] as? Double)
-            ?? (dictionary["heading"] as? Double)
-        var spd = (dictionary["speedKmh"] as? Double)
-            ?? (dictionary["speed_kmh"] as? Double)
-            ?? (dictionary["speed"] as? Double)
+        var dict = dictionary
+        if let nested = (dictionary["session"] as? [String: Any])
+            ?? (dictionary["data"] as? [String: Any])
+            ?? (dictionary["payload"] as? [String: Any]) {
+            dict = dictionary.merging(nested) { (cur, new) in new }
+        }
 
-        if let telem = (dictionary["liveRiderTelemetry"] as? [String: Any]) ?? (dictionary["live_rider_telemetry"] as? [String: Any]) {
+        self.orderId = (dict["orderId"] as? String)
+            ?? (dict["order_id"] as? String)
+            ?? (dict["id"] as? String)
+            ?? ""
+        self.status = (dict["status"] as? String)
+            ?? (dict["state"] as? String)
+            ?? (dict["stage"] as? String)
+            ?? "PLACED"
+        self.etaMinutes = (dict["etaMinutes"] as? Int)
+            ?? (dict["eta_minutes"] as? Int)
+            ?? (dict["estimatedArrivalMins"] as? Int)
+            ?? (dict["estimatedMinutes"] as? Int)
+        self.riderName = (dict["riderName"] as? String)
+            ?? (dict["rider_name"] as? String)
+        self.riderPhone = (dict["riderPhone"] as? String)
+            ?? (dict["rider_phone"] as? String)
+        
+        var lat = (dict["riderLat"] as? Double) ?? (dict["rider_lat"] as? Double)
+        var lng = (dict["riderLng"] as? Double) ?? (dict["rider_lng"] as? Double)
+        var bearing = (dict["riderBearing"] as? Double)
+            ?? (dict["rider_bearing"] as? Double)
+            ?? (dict["riderHeading"] as? Double)
+            ?? (dict["rider_heading"] as? Double)
+            ?? (dict["heading"] as? Double)
+        var spd = (dict["speedKmh"] as? Double)
+            ?? (dict["speed_kmh"] as? Double)
+            ?? (dict["speed"] as? Double)
+
+        if let telem = (dict["liveRiderTelemetry"] as? [String: Any]) ?? (dict["live_rider_telemetry"] as? [String: Any]) {
             if lat == nil { lat = (telem["latitude"] as? Double) ?? (telem["lat"] as? Double) }
             if lng == nil { lng = (telem["longitude"] as? Double) ?? (telem["lng"] as? Double) }
             if bearing == nil { bearing = (telem["heading"] as? Double) ?? (telem["bearing"] as? Double) }
@@ -244,15 +280,15 @@ public struct LiveTrackingPayload: Codable {
         self.riderBearing = bearing
         self.speedKmh = spd
 
-        self.merchantLat = (dictionary["merchantLat"] as? Double) ?? (dictionary["merchant_lat"] as? Double)
-        self.merchantLng = (dictionary["merchantLng"] as? Double) ?? (dictionary["merchant_lng"] as? Double)
-        self.customerLat = (dictionary["customerLat"] as? Double) ?? (dictionary["customer_lat"] as? Double)
-        self.customerLng = (dictionary["customerLng"] as? Double) ?? (dictionary["customer_lng"] as? Double)
-        self.deliveryOtp = (dictionary["deliveryOtp"] as? String) ?? (dictionary["delivery_otp"] as? String)
-        self.isCod = (dictionary["isCod"] as? Bool) ?? (dictionary["is_cod"] as? Bool)
-        self.totalAmount = (dictionary["totalAmount"] as? Double) ?? (dictionary["total_amount"] as? Double)
-        self.isLiveTelemetryAvailable = (dictionary["isLiveTelemetryAvailable"] as? Bool) ?? (dictionary["is_live_telemetry_available"] as? Bool)
-        self.routePolyline = (dictionary["routePolyline"] as? String) ?? (dictionary["route_polyline"] as? String)
+        self.merchantLat = (dict["merchantLat"] as? Double) ?? (dict["merchant_lat"] as? Double)
+        self.merchantLng = (dict["merchantLng"] as? Double) ?? (dict["merchant_lng"] as? Double)
+        self.customerLat = (dict["customerLat"] as? Double) ?? (dict["customer_lat"] as? Double)
+        self.customerLng = (dict["customerLng"] as? Double) ?? (dict["customer_lng"] as? Double)
+        self.deliveryOtp = (dict["deliveryOtp"] as? String) ?? (dict["delivery_otp"] as? String)
+        self.isCod = (dict["isCod"] as? Bool) ?? (dict["is_cod"] as? Bool)
+        self.totalAmount = (dict["totalAmount"] as? Double) ?? (dict["total_amount"] as? Double)
+        self.isLiveTelemetryAvailable = (dict["isLiveTelemetryAvailable"] as? Bool) ?? (dict["is_live_telemetry_available"] as? Bool)
+        self.routePolyline = (dict["routePolyline"] as? String) ?? (dict["route_polyline"] as? String)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -288,6 +324,7 @@ public class TrackingRepository: ObservableObject {
     @Published public var isStreamReconnecting: Bool = false
 
     private var streamTask: Task<Void, Never>? = nil
+    private var pollingTask: Task<Void, Never>? = nil
     private var reconciliationTimer: Timer? = nil
 
     public init(apiClient: APIClient = .shared) {
@@ -482,12 +519,19 @@ public class TrackingRepository: ObservableObject {
             }
         }
 
-        // 3. High-frequency 2-second live telemetry polling (matching Android parity)
-        reconciliationTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task {
-                await self?.fetchActiveDelivery(orderId: orderId)
-                if let status = self?.activeTracking?.status.uppercased(), status == "DELIVERED" || status == "CANCELLED" {
-                    self?.stopLiveTracking()
+        // 3. High-frequency 2-second live telemetry polling (RunLoop-independent Task loop)
+        pollingTask?.cancel()
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled { break }
+                guard let self = self else { break }
+                await self.fetchActiveDelivery(orderId: orderId)
+                if let status = self.activeTracking?.status.uppercased(), status == "DELIVERED" || status == "CANCELLED" {
+                    await MainActor.run {
+                        self.stopLiveTracking()
+                    }
+                    break
                 }
             }
         }
@@ -502,6 +546,8 @@ public class TrackingRepository: ObservableObject {
     }
 
     public func stopLiveTracking() {
+        pollingTask?.cancel()
+        pollingTask = nil
         reconciliationTimer?.invalidate()
         reconciliationTimer = nil
         streamTask?.cancel()

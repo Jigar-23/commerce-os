@@ -84,10 +84,14 @@ public final class RiderTelemetryBuffer {
                     "accuracyMeters": AnyEncodable(record.accuracyMeters),
                     "sequenceNumber": AnyEncodable(record.sequenceNumber)
                 ]
-                let _: [String: String]? = try? await apiClient.post(
-                    endpoint: .streamDeliveryTelemetry(deliveryId: record.deliveryId),
-                    body: payload
-                )
+                do {
+                    try await apiClient.postVoid(
+                        endpoint: .streamDeliveryTelemetry(deliveryId: record.deliveryId),
+                        body: payload
+                    )
+                } catch {
+                    print("[RiderTelemetryBuffer] Telemetry post failed for delivery \(record.deliveryId): \(error.localizedDescription)")
+                }
             }
 
             // Also keep rider presence updated on server for seller live visibility
@@ -100,10 +104,14 @@ public final class RiderTelemetryBuffer {
                     "accuracyMeters": AnyEncodable(latest.accuracyMeters),
                     "isOnline": AnyEncodable(true)
                 ]
-                let _: [String: String]? = try? await apiClient.post(
-                    endpoint: .updatePresence,
-                    body: presencePayload
-                )
+                do {
+                    try await apiClient.postVoid(
+                        endpoint: .updatePresence,
+                        body: presencePayload
+                    )
+                } catch {
+                    print("[RiderTelemetryBuffer] Presence post failed: \(error.localizedDescription)")
+                }
             }
         }
     }

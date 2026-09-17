@@ -65,7 +65,7 @@ public final class RiderSessionManager: ObservableObject {
             longitude: 76.615418
         )
 
-        let _: [String: String]? = try? await apiClient.post(
+        try? await apiClient.postVoid(
             endpoint: .toggleShift(online: true),
             body: body
         )
@@ -79,7 +79,7 @@ public final class RiderSessionManager: ObservableObject {
                 let platform: String
             }
             let tokenBody = TokenPayload(fcmToken: cachedToken, deviceToken: cachedToken, token: cachedToken, platform: "IOS")
-            let _: [String: String]? = try? await apiClient.post(endpoint: .registerDeviceToken, body: tokenBody)
+            try? await apiClient.postVoid(endpoint: .registerDeviceToken, body: tokenBody)
         }
 
         await refreshActiveSession()
@@ -111,7 +111,7 @@ public final class RiderSessionManager: ObservableObject {
             latitude: curLoc?.coordinate.latitude ?? 28.202224,
             longitude: curLoc?.coordinate.longitude ?? 76.615418
         )
-        let _: [String: String]? = try? await apiClient.post(
+        try? await apiClient.postVoid(
             endpoint: .toggleShift(online: newStatus),
             body: body
         )
@@ -150,7 +150,7 @@ public final class RiderSessionManager: ObservableObject {
                     latitude: 28.202224,
                     longitude: 76.615418
                 )
-                let _: [String: String]? = try? await self.apiClient.post(
+                try? await self.apiClient.postVoid(
                     endpoint: .toggleShift(online: true),
                     body: body
                 )

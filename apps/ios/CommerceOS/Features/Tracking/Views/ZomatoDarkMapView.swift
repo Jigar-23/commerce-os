@@ -606,6 +606,15 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
                 var prevPos = riderPos;
                 riderPos = { lat: rider.lat, lng: rider.lng };
                 var rot = (rider.heading != null) ? rider.heading : 0;
+                if ((!rot || rot === 0) && prevPos) {
+                    var dLat = rider.lat - prevPos.lat;
+                    var dLng = rider.lng - prevPos.lng;
+                    if (Math.abs(dLat) > 1e-6 || Math.abs(dLng) > 1e-6) {
+                        var angle = Math.atan2(dLng, dLat) * 180 / Math.PI;
+                        if (angle < 0) angle += 360;
+                        rot = Math.round(angle);
+                    }
+                }
                 var bikerHtml = buildRiderHtml(rot);
 
                 if (!riderOverlay) {

@@ -276,4 +276,53 @@ public final class RiderAPIClient: ObservableObject {
         let data = try encoder.encode(body)
         return try await request(endpoint: endpoint, body: data)
     }
+
+    public func requestVoid(
+        endpoint: RiderEndpoint,
+        body: Data? = nil
+    ) async throws {
+        let baseURL = RiderEnvironment.baseURL
+        let url = baseURL.appendingPathComponent(endpoint.path)
+        
+        var req = URLRequest(url: url)
+        req.httpMethod = endpoint.method
+        req.timeoutInterval = 45.0
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(RiderEnvironment.platform, forHTTPHeaderField: "X-Client-Platform")
+        req.setValue(RiderEnvironment.clientVersion, forHTTPHeaderField: "X-Client-Version")
+        
+        if let token = authToken, !token.isEmpty {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        req.httpBody = body
+        
+        let (data, response) = try await session.data(for: req)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RiderAPIError.networkError(NSError(domain: "RiderAPIClient", code: -1, userInfo: nil))
+        }
+        
+        if httpResponse.statusCode == 401 {
+            await MainActor.run { self.clearAuth() }
+            throw RiderAPIError.unauthenticated
+        }
+        
+        if httpResponse.statusCode >= 400 {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
+            throw RiderAPIError.serverError(httpResponse.statusCode, errorMsg)
+        }
+    }
+
+    public func postVoid<Req: Encodable>(
+        endpoint: RiderEndpoint,
+        body: Req
+    ) async throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let data = try encoder.encode(body)
+        try await requestVoid(endpoint: endpoint, body: data)
+    }
 }

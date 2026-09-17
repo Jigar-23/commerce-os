@@ -3076,17 +3076,25 @@ const server = http.createServer(async (req, res) => {
             const rId = deliverySession.rider_id;
             if (rId) {
               const rRes = await pool.query(
-                `SELECT rider_id, name, phone, vehicle_number as vehicle, latitude, longitude, status FROM riders WHERE rider_id = $1 OR id = $1`,
+                `SELECT rider_id, full_name, phone, vehicle_number as vehicle, status FROM riders WHERE rider_id = $1 OR id = $1`,
                 [rId]
               );
               if (rRes.rows.length > 0) {
                 rider = {
                   riderId: rRes.rows[0].rider_id,
-                  name: rRes.rows[0].name || deliverySession.rider_name || 'Assigned Delivery Partner',
+                  name: rRes.rows[0].full_name || deliverySession.rider_name || 'Assigned Delivery Partner',
                   phone: rRes.rows[0].phone || deliverySession.rider_phone || '',
                   vehicle: rRes.rows[0].vehicle || deliverySession.rider_vehicle || 'Delivery Vehicle'
                 };
               }
+            }
+            if (!rider && (deliverySession.rider_name || deliverySession.rider_id)) {
+              rider = {
+                riderId: deliverySession.rider_id || 'rdr_assigned',
+                name: deliverySession.rider_name || 'Assigned Delivery Partner',
+                phone: deliverySession.rider_phone || '',
+                vehicle: deliverySession.rider_vehicle || 'Delivery Vehicle'
+              };
             }
             if (appRepositories && appRepositories.telemetryRepo) {
               telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliverySession.delivery_id);
@@ -3098,16 +3106,35 @@ const server = http.createServer(async (req, res) => {
         } catch (_) {}
       }
 
+      const rName = deliverySession?.rider_name || (rider && rider.name) || null;
+      const rPhone = deliverySession?.rider_phone || (rider && rider.phone) || null;
+      const rVehicle = deliverySession?.rider_vehicle || (rider && rider.vehicle) || null;
+      const telemLat = telemetry?.latitude || (deliverySession?.current_lat ? Number(deliverySession.current_lat) : null);
+      const telemLng = telemetry?.longitude || (deliverySession?.current_lng ? Number(deliverySession.current_lng) : null);
+
       singleOrderDto.riderId = deliverySession?.rider_id || order.rider_id || order.riderId || null;
+      singleOrderDto.riderName = rName;
+      singleOrderDto.rider_name = rName;
+      singleOrderDto.riderPhone = rPhone;
+      singleOrderDto.rider_phone = rPhone;
+      singleOrderDto.riderVehicle = rVehicle;
+      singleOrderDto.rider_vehicle = rVehicle;
+      singleOrderDto.riderLat = telemLat;
+      singleOrderDto.rider_lat = telemLat;
+      singleOrderDto.riderLng = telemLng;
+      singleOrderDto.rider_lng = telemLng;
+      singleOrderDto.riderBearing = telemetry?.heading ?? 0;
+      singleOrderDto.speedKmh = telemetry?.speedKmh ?? 0;
+
       singleOrderDto.deliverySession = deliverySession ? {
         deliveryId: deliverySession.delivery_id,
         orderId: deliverySession.order_id,
         status: deliverySession.state,
         state: deliverySession.state,
         riderId: deliverySession.rider_id,
-        riderName: deliverySession.rider_name,
-        riderPhone: deliverySession.rider_phone,
-        riderVehicle: deliverySession.rider_vehicle,
+        riderName: rName,
+        riderPhone: rPhone,
+        riderVehicle: rVehicle,
         history: typeof deliverySession.history === 'string' ? JSON.parse(deliverySession.history) : (deliverySession.history || []),
         waypoints: typeof deliverySession.waypoints === 'string' ? JSON.parse(deliverySession.waypoints) : (deliverySession.waypoints || []),
         telemetry: telemetry || (deliverySession.current_lat ? {
@@ -3117,11 +3144,15 @@ const server = http.createServer(async (req, res) => {
           heading: Number(deliverySession.heading || 0)
         } : null)
       } : null;
-      if (rider) {
+
+      if (rider || deliverySession?.rider_id || rName) {
         singleOrderDto.rider = {
-          ...rider,
-          latitude: telemetry?.latitude ?? null,
-          longitude: telemetry?.longitude ?? null,
+          riderId: deliverySession?.rider_id || rider?.riderId || 'rdr_assigned',
+          name: rName || 'Assigned Delivery Partner',
+          phone: rPhone || '',
+          vehicle: rVehicle || 'Delivery Vehicle',
+          latitude: telemLat,
+          longitude: telemLng,
           speedKmh: telemetry?.speedKmh ?? null,
           heading: telemetry?.heading ?? null
         };
@@ -4611,9 +4642,13 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery session not found.' });
       }
       const isAssignedRider = (delivery.rider_id === authClaims.sub || delivery.rider_id === authClaims.riderId);
+      const isRiderRole = authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'));
       const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
-      if (!isAssignedRider && !isAdmin) {
+      if (!isAssignedRider && !isAdmin && !(isRiderRole && (!delivery.rider_id || delivery.rider_id === 'unassigned'))) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not the assigned rider for this delivery.' });
+      }
+      if (isRiderRole && (!delivery.rider_id || delivery.rider_id === 'unassigned')) {
+        delivery.rider_id = authClaims.sub;
       }
 
       const body = await parseJsonBody(req);
@@ -4802,6 +4837,16 @@ const server = http.createServer(async (req, res) => {
         waypoints
       );
       sseBroadcasterInstance.broadcast(delivery.order_id, 'TRACKING_UPDATE', enrichedDto);
+      sseBroadcasterInstance.broadcast(`order_${delivery.order_id}`, 'TRACKING_UPDATE', enrichedDto);
+      sseBroadcasterInstance.broadcast(delivery.delivery_id, 'TRACKING_UPDATE', enrichedDto);
+      sseBroadcasterInstance.broadcast(`delivery_${delivery.delivery_id}`, 'TRACKING_UPDATE', enrichedDto);
+      if (deliveryId !== delivery.delivery_id) {
+        sseBroadcasterInstance.broadcast(deliveryId, 'TRACKING_UPDATE', enrichedDto);
+        sseBroadcasterInstance.broadcast(`delivery_${deliveryId}`, 'TRACKING_UPDATE', enrichedDto);
+      }
+      if (delivery.customer_id) {
+        sseBroadcasterInstance.broadcast(`customer_${delivery.customer_id}`, 'TRACKING_UPDATE', enrichedDto);
+      }
 
       return sendJson(res, 200, {
         ok: true,

@@ -20,6 +20,8 @@ public struct ActiveDeliveryScreen: View {
     @State private var completedIsCod: Bool = false
     @State private var completedCodAmount: Double? = nil
     @State private var showCelebrationModal: Bool = false
+    @State private var isSimulatingRoute: Bool = false
+    @State private var simulationTask: Task<Void, Never>? = nil
     
     public init() {}
     
@@ -120,6 +122,20 @@ public struct ActiveDeliveryScreen: View {
                                 .foregroundColor(RiderTheme.Colors.safetyYellow)
                         }
                         Spacer()
+                        Button(action: {
+                            toggleRouteSimulation()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: isSimulatingRoute ? "pause.fill" : "play.fill")
+                                Text(isSimulatingRoute ? "Simulating..." : "Simulate Drive")
+                            }
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(isSimulatingRoute ? Color.orange.opacity(0.3) : Color.blue.opacity(0.25))
+                            .foregroundColor(isSimulatingRoute ? .orange : Color(red: 56/255, green: 189/255, blue: 248/255))
+                            .cornerRadius(6)
+                        }
                         Text("10-Min SLA")
                             .font(.system(size: 11, weight: .black))
                             .padding(.horizontal, 8)
@@ -276,6 +292,9 @@ public struct ActiveDeliveryScreen: View {
             }
         }
         .onDisappear {
+            isSimulatingRoute = false
+            simulationTask?.cancel()
+            simulationTask = nil
             geofence.stopMonitoring()
             streamer.stopStreaming()
         }
@@ -405,6 +424,59 @@ public struct ActiveDeliveryScreen: View {
             return false
         } catch {
             return false
+        }
+    }
+    
+    private func toggleRouteSimulation() {
+        if isSimulatingRoute {
+            isSimulatingRoute = false
+            simulationTask?.cancel()
+            simulationTask = nil
+        } else {
+            guard let session = sessionManager.activeSession else { return }
+            isSimulatingRoute = true
+            simulationTask?.cancel()
+            simulationTask = Task { @MainActor in
+                let isStore = isEnRouteToStore
+                let startLat = locationManager.lastLocation?.coordinate.latitude ?? (isStore ? (session.merchantLat + 0.005) : session.merchantLat)
+                let startLng = locationManager.lastLocation?.coordinate.longitude ?? (isStore ? (session.merchantLng + 0.005) : session.merchantLng)
+                let targetLat = isStore ? session.merchantLat : session.customerLat
+                let targetLng = isStore ? session.merchantLng : session.customerLng
+
+                var step = 0
+                let totalSteps = 30
+                while !Task.isCancelled && isSimulatingRoute && step <= totalSteps {
+                    let progress = Double(step) / Double(totalSteps)
+                    let currentLat = startLat + (targetLat - startLat) * progress
+                    let currentLng = startLng + (targetLng - startLng) * progress
+
+                    let dLat = targetLat - currentLat
+                    let dLng = targetLng - currentLng
+                    var bearing = atan2(dLng, dLat) * 180.0 / .pi
+                    if bearing < 0 { bearing += 360.0 }
+
+                    let simLoc = CLLocation(
+                        coordinate: CLLocationCoordinate2D(latitude: currentLat, longitude: currentLng),
+                        altitude: 10.0,
+                        horizontalAccuracy: 10.0,
+                        verticalAccuracy: 5.0,
+                        course: bearing,
+                        speed: 6.8,
+                        timestamp: Date()
+                    )
+
+                    locationManager.lastLocation = simLoc
+                    locationManager.currentSpeed = 24.5
+                    locationManager.currentBearing = bearing
+
+                    geofence.updateLocation(simLoc)
+                    streamer.processLocationUpdate(simLoc)
+
+                    step += 1
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                }
+                isSimulatingRoute = false
+            }
         }
     }
 }

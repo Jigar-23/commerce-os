@@ -60,8 +60,12 @@ public struct OrderTrackingScreen: View {
 
     private var hasAssignedRider: Bool {
         let name = trackingData?.riderName ?? orderDetail?.riderName
-        guard let n = name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty else { return false }
-        return n != "null" && n != "unassigned" && n != "Partner Assigning"
+        if let n = name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty,
+           n != "null" && n != "unassigned" && n != "Partner Assigning" {
+            return true
+        }
+        return (trackingData?.riderLat != nil && trackingData?.riderLat != 0.0) ||
+               (orderDetail?.riderLat != nil && orderDetail?.riderLat != 0.0)
     }
     
     private var isDelivered: Bool {
@@ -1180,6 +1184,9 @@ public struct OrderTrackingScreen: View {
             return nil
         }
         if let lat = trackingData?.riderLat, let lng = trackingData?.riderLng, lat != 0.0, lng != 0.0 {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        }
+        if let lat = orderDetail?.riderLat, let lng = orderDetail?.riderLng, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
         if hasAssignedRider, let mCoord = resolvedMerchantCoordinate {

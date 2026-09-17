@@ -216,6 +216,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
     public let riderName: String?
     public let riderPhone: String?
     public let riderVehicle: String?
+    public let riderLat: Double?
+    public let riderLng: Double?
+    public let riderBearing: Double?
+    public let speedKmh: Double?
     public let storeName: String?
 
     public var effectiveDeliveryPin: String? {
@@ -247,6 +251,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
         riderName: String? = nil,
         riderPhone: String? = nil,
         riderVehicle: String? = nil,
+        riderLat: Double? = nil,
+        riderLng: Double? = nil,
+        riderBearing: Double? = nil,
+        speedKmh: Double? = nil,
         storeName: String? = nil
     ) {
         self.id = id
@@ -266,6 +274,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
         self.riderName = riderName
         self.riderPhone = riderPhone
         self.riderVehicle = riderVehicle
+        self.riderLat = riderLat
+        self.riderLng = riderLng
+        self.riderBearing = riderBearing
+        self.speedKmh = speedKmh
         self.storeName = storeName
     }
 
@@ -301,6 +313,17 @@ public struct ServerOrderResponse: Identifiable, Codable {
         case riderPhoneCamel = "riderPhone"
         case riderVehicle = "rider_vehicle"
         case riderVehicleCamel = "riderVehicle"
+        case riderLat = "rider_lat"
+        case riderLatCamel = "riderLat"
+        case riderLng = "rider_lng"
+        case riderLngCamel = "riderLng"
+        case riderBearing = "rider_bearing"
+        case riderBearingCamel = "riderBearing"
+        case riderHeading = "rider_heading"
+        case riderHeadingCamel = "riderHeading"
+        case speedKmh = "speed_kmh"
+        case speedKmhCamel = "speedKmh"
+        case speed
         case storeName = "store_name"
         case storeNameCamel = "storeName"
         case rider
@@ -308,11 +331,22 @@ public struct ServerOrderResponse: Identifiable, Codable {
         case deliverySessionSnake = "delivery_session"
     }
 
+    private struct NestedTelemetry: Decodable {
+        let latitude: Double?
+        let longitude: Double?
+        let heading: Double?
+        let speedKmh: Double?
+    }
+
     private struct NestedRider: Decodable {
         let riderId: String?
         let name: String?
         let phone: String?
         let vehicle: String?
+        let latitude: Double?
+        let longitude: Double?
+        let heading: Double?
+        let speedKmh: Double?
     }
 
     private struct NestedDeliverySession: Decodable {
@@ -320,6 +354,7 @@ public struct ServerOrderResponse: Identifiable, Codable {
         let riderName: String?
         let riderPhone: String?
         let riderVehicle: String?
+        let telemetry: NestedTelemetry?
     }
 
     public init(from decoder: Decoder) throws {
@@ -418,6 +453,27 @@ public struct ServerOrderResponse: Identifiable, Codable {
             ?? (try? container.decode(String.self, forKey: .riderVehicleCamel))
             ?? nestedRider?.vehicle
             ?? nestedSession?.riderVehicle
+
+        self.riderLat = (try? container.decode(Double.self, forKey: .riderLat))
+            ?? (try? container.decode(Double.self, forKey: .riderLatCamel))
+            ?? nestedRider?.latitude
+            ?? nestedSession?.telemetry?.latitude
+        self.riderLng = (try? container.decode(Double.self, forKey: .riderLng))
+            ?? (try? container.decode(Double.self, forKey: .riderLngCamel))
+            ?? nestedRider?.longitude
+            ?? nestedSession?.telemetry?.longitude
+        self.riderBearing = (try? container.decode(Double.self, forKey: .riderBearing))
+            ?? (try? container.decode(Double.self, forKey: .riderBearingCamel))
+            ?? (try? container.decode(Double.self, forKey: .riderHeading))
+            ?? (try? container.decode(Double.self, forKey: .riderHeadingCamel))
+            ?? nestedRider?.heading
+            ?? nestedSession?.telemetry?.heading
+        self.speedKmh = (try? container.decode(Double.self, forKey: .speedKmh))
+            ?? (try? container.decode(Double.self, forKey: .speedKmhCamel))
+            ?? (try? container.decode(Double.self, forKey: .speed))
+            ?? nestedRider?.speedKmh
+            ?? nestedSession?.telemetry?.speedKmh
+
         self.storeName = (try? container.decode(String.self, forKey: .storeName))
             ?? (try? container.decode(String.self, forKey: .storeNameCamel))
     }
@@ -441,6 +497,10 @@ public struct ServerOrderResponse: Identifiable, Codable {
         try container.encodeIfPresent(riderName, forKey: .riderName)
         try container.encodeIfPresent(riderPhone, forKey: .riderPhone)
         try container.encodeIfPresent(riderVehicle, forKey: .riderVehicle)
+        try container.encodeIfPresent(riderLat, forKey: .riderLat)
+        try container.encodeIfPresent(riderLng, forKey: .riderLng)
+        try container.encodeIfPresent(riderBearing, forKey: .riderBearing)
+        try container.encodeIfPresent(speedKmh, forKey: .speedKmh)
         try container.encodeIfPresent(storeName, forKey: .storeName)
     }
 }
