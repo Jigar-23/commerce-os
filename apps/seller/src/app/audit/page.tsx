@@ -7,6 +7,7 @@ import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
 import { ShieldCheck, RefreshCw } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
+import { formatDateTime } from '@/lib/formatAddress';
 
 export default function DedicatedAuditPage() {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -81,7 +82,7 @@ export default function DedicatedAuditPage() {
                       <p className="text-content-secondary font-sans text-xs">{log.details || log.message || JSON.stringify(log.payload || '')}</p>
                     </div>
                     <div className="text-right text-2xs text-content-muted font-mono">
-                      {log.timestamp ? new Date(log.timestamp).toLocaleString() : new Date().toLocaleTimeString()}
+                      {log.timestamp ? formatDateTime(log.timestamp) : formatDateTime(new Date().toISOString())}
                     </div>
                   </div>
                 ))}

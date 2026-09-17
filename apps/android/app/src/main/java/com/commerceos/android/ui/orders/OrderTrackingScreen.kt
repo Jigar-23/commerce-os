@@ -306,7 +306,6 @@ fun OrderTrackingContent(
                     }
 
                     // Authoritative Order ID Badge with Copy
-                    val shortOrderId = order.id.takeLast(6).uppercase()
                     Surface(
                         color = Color(0xFFF1F5F9),
                         shape = RoundedCornerShape(8.dp),
@@ -321,7 +320,7 @@ fun OrderTrackingContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "ORDER #$shortOrderId",
+                                text = "ORDER #${order.id}",
                                 color = Color(0xFF0F172A),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -870,22 +869,51 @@ fun OrderTrackingContent(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     val addr = order.deliveryAddress
+                    val fullAddressText = buildString {
+                        val mainLine = addr?.addressLine?.takeIf { it.isNotBlank() }
+                        if (mainLine != null) {
+                            append(mainLine)
+                        } else {
+                            append("Delivery address registered on order")
+                        }
+                        if (!addr?.landmark.isNullOrBlank()) {
+                            append(", Near ")
+                            append(addr!!.landmark)
+                        }
+                        if (!addr?.city.isNullOrBlank()) {
+                            append(", ")
+                            append(addr!!.city)
+                        }
+                        if (!addr?.state.isNullOrBlank()) {
+                            append(", ")
+                            append(addr!!.state)
+                        }
+                        if (!addr?.postalCode.isNullOrBlank()) {
+                            append(" - ")
+                            append(addr!!.postalCode)
+                        }
+                    }
                     Text(
-                        text = buildString {
-                            append(addr?.addressLine ?: "Delivery address registered on order")
-                            if (!addr?.city.isNullOrBlank()) {
-                                append(", ")
-                                append(addr!!.city)
-                            }
-                            if (!addr?.postalCode.isNullOrBlank()) {
-                                append(" - ")
-                                append(addr!!.postalCode)
-                            }
-                        },
+                        text = fullAddressText,
                         fontSize = 13.sp,
                         color = Color(0xFF334155),
                         lineHeight = 18.sp
                     )
+                    if (!addr?.contactName.isNullOrBlank() || !addr?.contactPhone.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val contactParts = listOfNotNull(
+                            addr?.contactName?.takeIf { it.isNotBlank() },
+                            addr?.contactPhone?.takeIf { it.isNotBlank() }
+                        )
+                        if (contactParts.isNotEmpty()) {
+                            Text(
+                                text = "Contact: ${contactParts.joinToString(" • ")}",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
 

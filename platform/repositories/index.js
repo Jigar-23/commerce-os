@@ -2857,12 +2857,37 @@ class TransactionalDeliveryRepository {
   async findActiveSessionForRider(riderId) {
     if (!this.pool) return null;
     const res = await this.pool.query(
-      `SELECT * FROM delivery_sessions 
-       WHERE rider_id = $1 AND state NOT IN ('DELIVERED', 'CANCELLED', 'DECLINED', 'FAILED')
-       ORDER BY updated_at DESC LIMIT 1`,
+      `SELECT ds.*, ord.items as order_items, ord.total_amount, ord.is_cod as ord_is_cod, ord.cod_amount as ord_cod_amount, ord.delivery_address as ord_delivery_address
+       FROM delivery_sessions ds
+       LEFT JOIN orders ord ON (ord.order_id = ds.order_id OR ord.id = ds.order_id)
+       WHERE ds.rider_id = $1 AND ds.state NOT IN ('DELIVERED', 'CANCELLED', 'DECLINED', 'FAILED')
+       ORDER BY ds.updated_at DESC LIMIT 1`,
       [riderId]
     );
-    return res.rows[0] || null;
+    if (res.rows.length === 0) return null;
+    const row = res.rows[0];
+    let fullCustomerAddress = row.customer_address;
+    if (row.ord_delivery_address) {
+      try {
+        const da = typeof row.ord_delivery_address === 'string' ? JSON.parse(row.ord_delivery_address) : row.ord_delivery_address;
+        const parts = [
+          da.house_number || da.houseNumber || da.building,
+          da.address_line || da.addressLine || da.street,
+          da.landmark ? ('Near ' + da.landmark) : null,
+          da.city,
+          (da.postal_code || da.postalCode) ? ('PIN: ' + (da.postal_code || da.postalCode)) : null
+        ].filter(Boolean);
+        if (parts.length > 0) fullCustomerAddress = parts.join(', ');
+      } catch (_) {}
+    }
+    const ordTot = Number(row.total_amount || row.cod_amount || 0);
+    return {
+      ...row,
+      customer_address: fullCustomerAddress,
+      customerAddress: fullCustomerAddress,
+      orderTotal: ordTot,
+      totalAmount: ordTot
+    };
   }
 
   async findActiveDeliveryForRider(riderId) {
@@ -6736,7 +6761,14 @@ async function initApplicationRepositories(options = {}) {
             const addr = (typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : ord.delivery_address) || {};
             const cLat = addr.latitude || addr.lat || ord.delivery_lat || 28.1918;
             const cLng = addr.longitude || addr.lng || ord.delivery_lng || 76.6081;
-            const cAddress = addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : 'Delivery Address, Rewari');
+            const parts = [
+              addr.house_number || addr.houseNumber || addr.building,
+              addr.address_line || addr.addressLine || addr.street,
+              addr.landmark ? ('Near ' + addr.landmark) : null,
+              addr.city,
+              (addr.postal_code || addr.postalCode) ? ('PIN: ' + (addr.postal_code || addr.postalCode)) : null
+            ].filter(Boolean);
+            const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : 'Delivery Address, Rewari'));
             const cName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4));
             const cPhone = addr.contactPhone || addr.contact_phone || '+919991416180';
             const dId = 'del_' + (ord.order_id || ord.id);
@@ -6994,7 +7026,14 @@ function createProductionRepositories(pool, options = {}) {
           const addr = (typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : ord.delivery_address) || {};
           const cLat = addr.latitude || addr.lat || ord.delivery_lat || 28.1918;
           const cLng = addr.longitude || addr.lng || ord.delivery_lng || 76.6081;
-          const cAddress = addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : 'Delivery Address, Rewari');
+          const parts = [
+            addr.house_number || addr.houseNumber || addr.building,
+            addr.address_line || addr.addressLine || addr.street,
+            addr.landmark ? ('Near ' + addr.landmark) : null,
+            addr.city,
+            (addr.postal_code || addr.postalCode) ? ('PIN: ' + (addr.postal_code || addr.postalCode)) : null
+          ].filter(Boolean);
+          const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : 'Delivery Address, Rewari'));
           const cName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4));
           const cPhone = addr.contactPhone || addr.contact_phone || '+919991416180';
           const dId = 'del_' + (ord.order_id || ord.id);

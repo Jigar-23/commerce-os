@@ -33,8 +33,9 @@ public struct RiderLiveNavigationView: View {
         ZStack(alignment: .bottomTrailing) {
             RiderDarkMapWebView(
                 merchantCoordinate: merchantCoordinate,
-                customerCoordinate: customerCoordinate ?? destinationCoordinate,
+                customerCoordinate: customerCoordinate,
                 riderCoordinate: riderCoordinate,
+                destinationCoordinate: destinationCoordinate,
                 riderBearing: riderBearing,
                 speedKmh: speedKmh,
                 onCoordinatorCreated: { coord in
@@ -70,6 +71,7 @@ struct RiderDarkMapWebView: UIViewRepresentable {
     let merchantCoordinate: CLLocationCoordinate2D?
     let customerCoordinate: CLLocationCoordinate2D?
     let riderCoordinate: CLLocationCoordinate2D?
+    let destinationCoordinate: CLLocationCoordinate2D?
     let riderBearing: Double
     let speedKmh: Double
     let onCoordinatorCreated: (RiderDarkMapCoordinator) -> Void
@@ -103,6 +105,7 @@ struct RiderDarkMapWebView: UIViewRepresentable {
             merchantCoordinate: merchantCoordinate,
             customerCoordinate: customerCoordinate,
             riderCoordinate: riderCoordinate,
+            destinationCoordinate: destinationCoordinate,
             riderBearing: riderBearing,
             speedKmh: speedKmh
         )
@@ -139,11 +142,12 @@ final class RiderDarkMapCoordinator: NSObject, WKNavigationDelegate {
         merchantCoordinate: CLLocationCoordinate2D?,
         customerCoordinate: CLLocationCoordinate2D?,
         riderCoordinate: CLLocationCoordinate2D?,
+        destinationCoordinate: CLLocationCoordinate2D?,
         riderBearing: Double,
         speedKmh: Double
     ) {
         let origin = riderCoordinate ?? merchantCoordinate
-        let dest = customerCoordinate
+        let dest = destinationCoordinate ?? customerCoordinate ?? merchantCoordinate
 
         // Check if road routing needs recalculation via MKDirections
         if let orig = origin, let dst = dest {
@@ -403,12 +407,44 @@ private func generateDarkMapHtml(initLat: Double, initLng: Double) -> String {
         attribution: ''
     }).addTo(map);
 
-    var storeSvg = '<svg viewBox="0 0 24 24"><path d="M4 4h16v3H4zm0 5h16v11H4zm3 2v7h10v-7z"/></svg>';
-    var customerSvg = '<svg viewBox="0 0 24 24"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm0 4.7l4 3.6V18h-8v-6.7l4-3.6z"/></svg>';
-    var scooterSvg = '<svg viewBox="0 0 24 24"><path d="M19 7c0-1.1-.9-2-2-2h-3v2h3v2.65L13.52 14H10V9H6c-2.21 0-4 1.79-4 4v3h2c0 1.66 1.34 3 3 3s3-1.34 3-3h4.18c.41 1.16 1.51 2 2.82 2 1.66 0 3-1.34 3-3h1v-4.5L19 7zM7 17c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1zm11 0c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1z"/></svg>';
+    function buildStoreMarkerHtml() {
+        return '<div class="store-marker-pin" style="width:50px; height:65px; pointer-events:none;">' +
+            '<svg viewBox="0 0 100 130" width="50" height="65" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+            '<ellipse cx="50" cy="122" rx="18" ry="6" fill="rgba(0,0,0,0.22)" />' +
+            '<path d="M 50 118 C 42 104 16 76 16 52 A 34 34 0 1 1 84 52 C 84 76 58 104 50 118 Z" fill="#0284C7" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" />' +
+            '<circle cx="50" cy="52" r="24" fill="#FFFFFF" />' +
+            '<rect x="34" y="36" width="32" height="3" rx="1.5" fill="#0369A1" />' +
+            '<path d="M 34 39 L 66 39 L 68 48 L 32 48 Z" fill="#0369A1" />' +
+            '<line x1="41" y1="39" x2="41" y2="48" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" />' +
+            '<line x1="50" y1="39" x2="50" y2="48" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" />' +
+            '<line x1="59" y1="39" x2="59" y2="48" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" />' +
+            '<rect x="35" y="51" width="8" height="8" rx="1.5" fill="#0369A1" />' +
+            '<rect x="57" y="51" width="8" height="8" rx="1.5" fill="#0369A1" />' +
+            '<rect x="46" y="51" width="8" height="13" rx="2.5" fill="#0369A1" />' +
+            '<rect x="32" y="64" width="36" height="2.5" rx="1.2" fill="#0369A1" />' +
+            '<rect x="24" y="2" width="52" height="18" rx="9" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.5" />' +
+            '<text x="50" y="14.5" fill="#38BDF8" font-size="10" font-family="-apple-system, BlinkMacSystemFont, Roboto, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="0.5">SHOP</text>' +
+            '</svg></div>';
+    }
 
-    var storeIcon = L.divIcon({ className: '', html: '<div class="store-marker-3d"><div class="store-beacon"></div><div class="store-pill">' + storeSvg + '</div></div>', iconSize: [44, 44], iconAnchor: [22, 22] });
-    var customerIcon = L.divIcon({ className: '', html: '<div class="customer-marker-3d"><div class="customer-beacon"></div><div class="customer-pill">' + customerSvg + '</div></div>', iconSize: [44, 44], iconAnchor: [22, 22] });
+    function buildCustomerMarkerHtml() {
+        return '<div class="customer-marker-pin" style="width:50px; height:65px; pointer-events:none;">' +
+            '<svg viewBox="0 0 100 130" width="50" height="65" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+            '<ellipse cx="50" cy="122" rx="18" ry="6" fill="rgba(0,0,0,0.22)" />' +
+            '<path d="M 50 118 C 42 104 16 76 16 52 A 34 34 0 1 1 84 52 C 84 76 58 104 50 118 Z" fill="#EA580C" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" />' +
+            '<circle cx="50" cy="52" r="24" fill="#FFFFFF" />' +
+            '<rect x="57" y="36" width="4" height="8" rx="1" fill="#C2410C" />' +
+            '<path d="M 50 34 L 33 47 L 36 50 L 50 39 L 64 50 L 67 47 Z" fill="#C2410C" />' +
+            '<rect x="37" y="48" width="26" height="17" rx="2" fill="#C2410C" />' +
+            '<rect x="47" y="55" width="6" height="10" rx="2.5" fill="#FFFFFF" />' +
+            '<rect x="40" y="52" width="5" height="5" rx="1.5" fill="#FFFFFF" />' +
+            '<rect x="24" y="2" width="52" height="18" rx="9" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.5" />' +
+            '<text x="50" y="14.5" fill="#F59E0B" font-size="10" font-family="-apple-system, BlinkMacSystemFont, Roboto, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="0.5">HOME</text>' +
+            '</svg></div>';
+    }
+
+    var storeIcon = L.divIcon({ className: '', html: buildStoreMarkerHtml(), iconSize: [50, 65], iconAnchor: [25, 59] });
+    var customerIcon = L.divIcon({ className: '', html: buildCustomerMarkerHtml(), iconSize: [50, 65], iconAnchor: [25, 59] });
 
     var storeMarker = null;
     var customerMarker = null;

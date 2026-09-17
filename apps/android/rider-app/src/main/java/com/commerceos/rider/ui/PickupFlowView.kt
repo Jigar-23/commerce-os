@@ -60,15 +60,16 @@ fun PickupFlowView(
                 val itemsSummary = if (session.items.isNotEmpty()) {
                     session.items.joinToString(", ") { "${it.name} (x${it.quantity})" }
                 } else {
-                    "Paracetamol 500mg IP (x2)"
+                    "Order Items Verified"
                 }
                 Text("Contents: $itemsSummary", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                val cartVal = session.orderTotal ?: session.codAmount ?: 12.0
-                Text("Order #${session.orderId.takeLast(6)} • Bill Total ₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+                val cartVal = session.orderTotal ?: session.codAmount ?: 0.0
+                val billText = if (cartVal > 0.0) " • Bill Total ₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else ""
+                Text("Order #${session.orderId}$billText", fontSize = 12.sp, color = Color(0xFFCBD5E1))
             }
 
             Spacer(modifier = Modifier.height(4.dp))

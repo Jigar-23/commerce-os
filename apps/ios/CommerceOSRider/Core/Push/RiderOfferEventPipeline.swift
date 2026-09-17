@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Combine
 
 @MainActor
@@ -13,8 +14,24 @@ public final class RiderOfferEventPipeline: ObservableObject {
     private var pollingTimer: Timer?
     private var sseStreamTask: Task<Void, Never>?
     private var lastAlertedOfferId: String = ""
+    private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundPollingTask: Task<Void, Never>?
 
-    public init() {}
+    public init() {
+        setupBackgroundObservers()
+    }
+
+    private func setupBackgroundObservers() {
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.startBackgroundPolling()
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.stopBackgroundPolling()
+            Task { @MainActor in
+                await self?.pollActiveOffersOnce()
+            }
+        }
+    }
 
     public func startListening() {
         guard !isListening else { return }
@@ -43,10 +60,36 @@ public final class RiderOfferEventPipeline: ObservableObject {
         pollingTimer = nil
         sseStreamTask?.cancel()
         sseStreamTask = nil
+        stopBackgroundPolling()
     }
 
-    private func pollActiveOffersOnce() async {
+    private func startBackgroundPolling() {
         guard isListening else { return }
+        stopBackgroundPolling()
+
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "RiderOfferBackgroundPoll") { [weak self] in
+            self?.stopBackgroundPolling()
+        }
+
+        backgroundPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pollActiveOffersOnce()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
+    private func stopBackgroundPolling() {
+        backgroundPollingTask?.cancel()
+        backgroundPollingTask = nil
+        if backgroundTaskId != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+            backgroundTaskId = .invalid
+        }
+    }
+
+    public func pollActiveOffersOnce() async {
+        guard isListening || RiderAPIClient.shared.isAuthenticated else { return }
         guard RiderAPIClient.shared.isAuthenticated else { return }
 
         do {

@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.Typeface
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -173,8 +174,21 @@ fun NativeGoogleOrderTrackingMap(
         }
     }
 
-    // Stage 1 (Order Placed): Strictly NO polyline while rider is not active/assigned
-    val isOrderPlaced = !isPostPickup && !isHeadingToStore
+    // Active route origin and destination:
+    // 1. Heading to store: Rider -> Store (ONLY when rider is committed/assigned)
+    // 2. Out for delivery: Rider -> Customer Home (ONLY after pickup)
+    // 3. Order Placed / Preparing: NO ROUTE (Only Shop and Home pins visible, ZERO lines)
+    val shouldShowRoute = (isHeadingToStore && riderLatLng != null) || (isPostPickup && riderLatLng != null)
+    val routeOrigin: LatLng? = when {
+        isHeadingToStore && riderLatLng != null -> riderLatLng
+        isPostPickup && riderLatLng != null -> riderLatLng
+        else -> null
+    }
+    val routeDest: LatLng? = when {
+        isHeadingToStore && riderLatLng != null -> storeLatLng
+        isPostPickup && riderLatLng != null -> customerLatLng
+        else -> null
+    }
 
     var googleRouteWaypoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
     var routeDistanceText by remember { mutableStateOf("") }
@@ -183,15 +197,9 @@ fun NativeGoogleOrderTrackingMap(
     var lastRoutedDest by remember { mutableStateOf<LatLng?>(null) }
     var lastActiveStage by remember { mutableStateOf<String?>(null) }
 
-    val targetDest = when {
-        isHeadingToStore && riderLatLng != null -> storeLatLng
-        isPostPickup && riderLatLng != null -> customerLatLng
-        else -> null
-    }
-
-    // Fetch turn-by-turn road geometry dynamically depending on active delivery stage
-    LaunchedEffect(isOrderPlaced, isHeadingToStore, isPostPickup, riderLatLng, targetDest, activeStage) {
-        if (isOrderPlaced || riderLatLng == null || targetDest == null) {
+    // Fetch turn-by-turn road geometry dynamically ONLY when rider is actively navigating
+    LaunchedEffect(shouldShowRoute, routeOrigin, routeDest, activeStage) {
+        if (!shouldShowRoute || routeOrigin == null || routeDest == null) {
             googleRouteWaypoints = emptyList()
             routeDistanceText = ""
             routeDurationText = ""
@@ -204,22 +212,22 @@ fun NativeGoogleOrderTrackingMap(
         val lastOrig = lastRoutedOrigin
         val lastDst = lastRoutedDest
         val stageChanged = activeStage != lastActiveStage
-        val destChanged = lastDst != targetDest
-        val distMoved = if (lastOrig != null) SphericalUtil.computeDistanceBetween(lastOrig, riderLatLng) else 999.0
+        val destChanged = lastDst != routeDest
+        val distMoved = if (lastOrig != null) SphericalUtil.computeDistanceBetween(lastOrig, routeOrigin) else 999.0
 
-        if (googleRouteWaypoints.isEmpty() || stageChanged || destChanged || distMoved > 75.0) {
+        if (googleRouteWaypoints.isEmpty() || stageChanged || destChanged || distMoved > 60.0) {
             val result = routesProvider.getDrivingRoute(
-                originLat = riderLatLng.latitude,
-                originLng = riderLatLng.longitude,
-                destLat = targetDest.latitude,
-                destLng = targetDest.longitude
+                originLat = routeOrigin.latitude,
+                originLng = routeOrigin.longitude,
+                destLat = routeDest.latitude,
+                destLng = routeDest.longitude
             )
             if (result is ApiResult.Success) {
                 googleRouteWaypoints = result.data.waypoints
                 routeDistanceText = result.data.distanceText
                 routeDurationText = result.data.durationText
-                lastRoutedOrigin = riderLatLng
-                lastRoutedDest = targetDest
+                lastRoutedOrigin = routeOrigin
+                lastRoutedDest = routeDest
                 lastActiveStage = activeStage
             }
         }
@@ -283,19 +291,18 @@ fun NativeGoogleOrderTrackingMap(
     }
 
     // Full baseline route points (hugging real roads)
-    val fullRoutePoints = remember(googleRouteWaypoints, waypoints, isOrderPlaced) {
-        if (isOrderPlaced) {
-            emptyList()
-        } else when {
+    val fullRoutePoints = remember(shouldShowRoute, googleRouteWaypoints, waypoints, routeOrigin, routeDest) {
+        when {
+            !shouldShowRoute || routeOrigin == null || routeDest == null -> emptyList()
             googleRouteWaypoints.size >= 2 -> googleRouteWaypoints
             waypoints.size >= 2 -> waypoints.map { LatLng(it.lat, it.lng) }
-            else -> emptyList()
+            else -> listOf(routeOrigin, routeDest)
         }
     }
 
     // Two-Tone Path Filler Split: Traveled (Behind Rider) vs Remaining (Ahead of Rider)
-    val (traveledPath, remainingPath) = remember(fullRoutePoints, riderLatLng, isOrderPlaced) {
-        if (isOrderPlaced || riderLatLng == null || fullRoutePoints.size < 2) {
+    val (traveledPath, remainingPath) = remember(fullRoutePoints, riderLatLng) {
+        if (riderLatLng == null || fullRoutePoints.size < 2) {
             Pair(emptyList<LatLng>(), fullRoutePoints)
         } else {
             // Find closest index on route polyline
@@ -339,12 +346,12 @@ fun NativeGoogleOrderTrackingMap(
     }
 
     // Smooth Auto-Framing Bounds: Always include Store and Customer pins, plus Rider when active
-    LaunchedEffect(storeLatLng, customerLatLng, riderLatLng, isOrderPlaced) {
+    LaunchedEffect(storeLatLng, customerLatLng, riderLatLng) {
         try {
             val builder = LatLngBounds.builder()
             builder.include(storeLatLng)
             builder.include(customerLatLng)
-            if (!isOrderPlaced && riderLatLng != null) {
+            if (riderLatLng != null) {
                 builder.include(riderLatLng)
             }
             val bounds = builder.build()
@@ -367,20 +374,16 @@ fun NativeGoogleOrderTrackingMap(
         }
     }
 
-    // The single active delivery route line
-    // When order is placed: strictly emptyList()
+    // The active delivery route line
     // When heading to store: connects rider to store
     // When out for delivery: connects rider to customer
-    val activeDeliveryRoute = remember(remainingPath, fullRoutePoints, riderLatLng, targetDest, isOrderPlaced) {
-        if (isOrderPlaced) {
-            emptyList()
-        } else if (remainingPath.size >= 2) {
-            remainingPath
-        } else if (fullRoutePoints.size >= 2) {
-            fullRoutePoints
-        } else {
-            // Strictly road geometry only. Never draw a straight line between two far coordinates.
-            emptyList()
+    // When order is placed / preparing: strictly emptyList() (NO route)
+    val activeDeliveryRoute = remember(shouldShowRoute, remainingPath, fullRoutePoints, routeOrigin, routeDest) {
+        when {
+            !shouldShowRoute || routeOrigin == null || routeDest == null -> emptyList()
+            remainingPath.size >= 2 -> remainingPath
+            fullRoutePoints.size >= 2 -> fullRoutePoints
+            else -> listOf(routeOrigin, routeDest)
         }
     }
 
@@ -395,7 +398,7 @@ fun NativeGoogleOrderTrackingMap(
             Marker(
                 state = storeMarkerState,
                 icon = storeMarkerBitmap,
-                title = "Dark Store Hub",
+                title = "Shop / Dark Store Hub",
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
             )
 
@@ -403,15 +406,12 @@ fun NativeGoogleOrderTrackingMap(
             Marker(
                 state = customerMarkerState,
                 icon = customerMarkerBitmap,
-                title = "Delivery Location",
+                title = "Home / Delivery Location",
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
             )
 
-            // 3. Single High-Visibility Active Route Ribbon (Blinkit / Zepto Style)
-            // NO polyline when order is placed.
-            // When rider is en route to store: Polyline ONLY between Rider and Store.
-            // When rider confirms pickup: Polyline ONLY between Rider and Customer.
-            if (!isOrderPlaced && activeDeliveryRoute.size >= 2) {
+            // 3. Signature Zepto Purple Active Navigation Ribbon (ONLY when rider is actively navigating)
+            if (shouldShowRoute && activeDeliveryRoute.size >= 2) {
                 Polyline(
                     points = activeDeliveryRoute,
                     color = Color(0xFF7C3AED), // Signature Zepto Purple Navigation Ribbon
@@ -423,7 +423,7 @@ fun NativeGoogleOrderTrackingMap(
             }
 
             // 4. Native 3D Isometric Delivery Scooter (Real Turn-by-Turn Bearing)
-            if (!isOrderPlaced && riderLatLng != null) {
+            if (riderLatLng != null) {
                 Marker(
                     state = riderMarkerState,
                     icon = riderScooterBitmap,
@@ -470,24 +470,30 @@ fun NativeGoogleOrderTrackingMap(
 /**
  * Generates high-res industry-standard Teardrop Store Pin Bitmap Descriptor.
  */
+/**
+ * Generates high-res industry-standard Teardrop Store Pin Bitmap Descriptor with density scaling and SHOP badge.
+ */
 private fun createStoreMarkerBitmap(context: Context): BitmapDescriptor {
-    val width = 100
-    val height = 120
+    val density = context.resources.displayMetrics.density
+    val scale = (density / 2.2f).coerceIn(1.0f, 2.5f)
+    val width = (100 * scale).toInt()
+    val height = (130 * scale).toInt()
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
+    canvas.scale(scale, scale)
 
     // 1. Ground contact shadow
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x35000000
     }
-    canvas.drawOval(RectF(32f, 106f, 68f, 118f), shadowPaint)
+    canvas.drawOval(RectF(32f, 116f, 68f, 128f), shadowPaint)
 
-    // 2. Teardrop Pin Silhouette pointing down to (50, 108)
+    // 2. Teardrop Pin Silhouette pointing down to (50, 118)
     val pinPath = Path().apply {
-        moveTo(50f, 108f)
-        cubicTo(42f, 94f, 16f, 66f, 16f, 42f)
-        arcTo(RectF(16f, 8f, 84f, 76f), 180f, 180f, false)
-        cubicTo(84f, 66f, 58f, 94f, 50f, 108f)
+        moveTo(50f, 118f)
+        cubicTo(42f, 104f, 16f, 76f, 16f, 52f)
+        arcTo(RectF(16f, 18f, 84f, 86f), 180f, 180f, false)
+        cubicTo(84f, 76f, 58f, 104f, 50f, 118f)
         close()
     }
 
@@ -511,7 +517,7 @@ private fun createStoreMarkerBitmap(context: Context): BitmapDescriptor {
         color = 0xFFFFFFFF.toInt()
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(50f, 42f, 24f, discPaint)
+    canvas.drawCircle(50f, 52f, 24f, discPaint)
 
     // 4. Industry-Standard Storefront Vector Emblem
     val emblemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -520,14 +526,14 @@ private fun createStoreMarkerBitmap(context: Context): BitmapDescriptor {
     }
 
     // Store Pediment / Top Bar
-    canvas.drawRoundRect(RectF(34f, 26f, 66f, 29f), 1.5f, 1.5f, emblemPaint)
+    canvas.drawRoundRect(RectF(34f, 36f, 66f, 39f), 1.5f, 1.5f, emblemPaint)
 
     // Store Striped Awning Canopy
     val awningPath = Path().apply {
-        moveTo(34f, 29f)
-        lineTo(66f, 29f)
-        lineTo(68f, 38f)
-        lineTo(32f, 38f)
+        moveTo(34f, 39f)
+        lineTo(66f, 39f)
+        lineTo(68f, 48f)
+        lineTo(32f, 48f)
         close()
     }
     canvas.drawPath(awningPath, emblemPaint)
@@ -538,42 +544,66 @@ private fun createStoreMarkerBitmap(context: Context): BitmapDescriptor {
         style = Paint.Style.STROKE
         strokeWidth = 1.8f
     }
-    canvas.drawLine(41f, 29f, 41f, 38f, awningStripePaint)
-    canvas.drawLine(50f, 29f, 50f, 38f, awningStripePaint)
-    canvas.drawLine(59f, 29f, 59f, 38f, awningStripePaint)
+    canvas.drawLine(41f, 39f, 41f, 48f, awningStripePaint)
+    canvas.drawLine(50f, 39f, 50f, 48f, awningStripePaint)
+    canvas.drawLine(59f, 39f, 59f, 48f, awningStripePaint)
 
     // Store Windows & Entrance
-    canvas.drawRoundRect(RectF(35f, 41f, 43f, 49f), 1.5f, 1.5f, emblemPaint)
-    canvas.drawRoundRect(RectF(57f, 41f, 65f, 49f), 1.5f, 1.5f, emblemPaint)
-    canvas.drawRoundRect(RectF(46f, 41f, 54f, 54f), 2.5f, 2.5f, emblemPaint)
+    canvas.drawRoundRect(RectF(35f, 51f, 43f, 59f), 1.5f, 1.5f, emblemPaint)
+    canvas.drawRoundRect(RectF(57f, 51f, 65f, 59f), 1.5f, 1.5f, emblemPaint)
+    canvas.drawRoundRect(RectF(46f, 51f, 54f, 64f), 2.5f, 2.5f, emblemPaint)
 
     // Ground line
-    canvas.drawRoundRect(RectF(32f, 54f, 68f, 56.5f), 1.2f, 1.2f, emblemPaint)
+    canvas.drawRoundRect(RectF(32f, 64f, 68f, 66.5f), 1.2f, 1.2f, emblemPaint)
+
+    // 5. Crisp "SHOP" High-Contrast Pill Tag at Top
+    val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0F172A.toInt()
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(RectF(24f, 2f, 76f, 20f), 9f, 9f, pillPaint)
+    val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+    }
+    canvas.drawRoundRect(RectF(24f, 2f, 76f, 20f), 9f, 9f, pillBorder)
+
+    val tagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF38BDF8.toInt()
+        textSize = 10f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    canvas.drawText("SHOP", 50f, 15.5f, tagTextPaint)
 
     return BitmapDescriptorFactory.fromBitmap(bitmap)
 }
 
 /**
- * Generates high-res industry-standard Teardrop Customer Home Pin Bitmap Descriptor.
+ * Generates high-res industry-standard Teardrop Customer Home Pin Bitmap Descriptor with density scaling and HOME badge.
  */
 private fun createCustomerMarkerBitmap(context: Context): BitmapDescriptor {
-    val width = 100
-    val height = 120
+    val density = context.resources.displayMetrics.density
+    val scale = (density / 2.2f).coerceIn(1.0f, 2.5f)
+    val width = (100 * scale).toInt()
+    val height = (130 * scale).toInt()
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
+    canvas.scale(scale, scale)
 
     // 1. Ground contact shadow
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x35000000
     }
-    canvas.drawOval(RectF(32f, 106f, 68f, 118f), shadowPaint)
+    canvas.drawOval(RectF(32f, 116f, 68f, 128f), shadowPaint)
 
-    // 2. Teardrop Pin Silhouette pointing down to (50, 108)
+    // 2. Teardrop Pin Silhouette pointing down to (50, 118)
     val pinPath = Path().apply {
-        moveTo(50f, 108f)
-        cubicTo(42f, 94f, 16f, 66f, 16f, 42f)
-        arcTo(RectF(16f, 8f, 84f, 76f), 180f, 180f, false)
-        cubicTo(84f, 66f, 58f, 94f, 50f, 108f)
+        moveTo(50f, 118f)
+        cubicTo(42f, 104f, 16f, 76f, 16f, 52f)
+        arcTo(RectF(16f, 18f, 84f, 86f), 180f, 180f, false)
+        cubicTo(84f, 76f, 58f, 104f, 50f, 118f)
         close()
     }
 
@@ -597,7 +627,7 @@ private fun createCustomerMarkerBitmap(context: Context): BitmapDescriptor {
         color = 0xFFFFFFFF.toInt()
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(50f, 42f, 24f, discPaint)
+    canvas.drawCircle(50f, 52f, 24f, discPaint)
 
     // 4. Industry-Standard Home / House Vector Emblem
     val emblemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -606,43 +636,67 @@ private fun createCustomerMarkerBitmap(context: Context): BitmapDescriptor {
     }
 
     // Chimney
-    canvas.drawRoundRect(RectF(57f, 26f, 61f, 34f), 1f, 1f, emblemPaint)
+    canvas.drawRoundRect(RectF(57f, 36f, 61f, 44f), 1f, 1f, emblemPaint)
 
     // Pitched Gable Roof with overhanging eaves
     val roofPath = Path().apply {
-        moveTo(50f, 24f)
-        lineTo(33f, 37f)
-        lineTo(36f, 40f)
-        lineTo(50f, 29f)
-        lineTo(64f, 40f)
-        lineTo(67f, 37f)
+        moveTo(50f, 34f)
+        lineTo(33f, 47f)
+        lineTo(36f, 50f)
+        lineTo(50f, 39f)
+        lineTo(64f, 50f)
+        lineTo(67f, 47f)
         close()
     }
     canvas.drawPath(roofPath, emblemPaint)
 
     // House Walls
-    canvas.drawRoundRect(RectF(37f, 38f, 63f, 55f), 2f, 2f, emblemPaint)
+    canvas.drawRoundRect(RectF(37f, 48f, 63f, 65f), 2f, 2f, emblemPaint)
 
     // Front Door Cutout (White)
     val cutoutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFFFFFFF.toInt()
         style = Paint.Style.FILL
     }
-    canvas.drawRoundRect(RectF(47f, 45f, 53f, 55f), 2.5f, 2.5f, cutoutPaint)
+    canvas.drawRoundRect(RectF(47f, 55f, 53f, 65f), 2.5f, 2.5f, cutoutPaint)
 
     // Window Cutout (White)
-    canvas.drawRoundRect(RectF(40f, 42f, 45f, 47f), 1.5f, 1.5f, cutoutPaint)
+    canvas.drawRoundRect(RectF(40f, 52f, 45f, 57f), 1.5f, 1.5f, cutoutPaint)
+
+    // 5. Crisp "HOME" High-Contrast Pill Tag at Top
+    val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0F172A.toInt()
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(RectF(24f, 2f, 76f, 20f), 9f, 9f, pillPaint)
+    val pillBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+    }
+    canvas.drawRoundRect(RectF(24f, 2f, 76f, 20f), 9f, 9f, pillBorder)
+
+    val tagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFF59E0B.toInt()
+        textSize = 10f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    canvas.drawText("HOME", 50f, 15.5f, tagTextPaint)
 
     return BitmapDescriptorFactory.fromBitmap(bitmap)
 }
 
 /**
- * Generates industry-standard 2.5D Delivery Scooter Bitmap with Rider, Helmet, and Delivery Bag.
+ * Generates industry-standard 2.5D Delivery Scooter Bitmap with Rider, Helmet, and Delivery Bag with density scaling.
  */
 private fun createZeptoScooterBitmap(context: Context): BitmapDescriptor {
-    val size = 140
+    val density = context.resources.displayMetrics.density
+    val scale = (density / 2.2f).coerceIn(1.0f, 2.5f)
+    val size = (140 * scale).toInt()
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
+    canvas.scale(scale, scale)
 
     // 1. Forward Headlight Beam (Glowing cone projecting forward along vehicle heading)
     val beamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

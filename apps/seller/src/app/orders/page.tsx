@@ -11,7 +11,7 @@ import {
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
-import { formatAddress } from '../../lib/formatAddress';
+import { formatAddress, formatDateTime } from '../../lib/formatAddress';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 
 export default function OrdersPage() {
@@ -37,7 +37,7 @@ export default function OrdersPage() {
     try {
       const res = await sellerApi.post(`/api/v1/orders/${orderId}/accept-by-seller`);
       if (res.ok) {
-        showToast(`Order #${orderId.slice(-8)} Accepted! Rider broadcast dispatched to fleet.`, 'success');
+        showToast(`Order #${orderId} Accepted! Rider broadcast dispatched to fleet.`, 'success');
         playOrderChime();
         await fetchOrders(false);
       } else {
@@ -56,7 +56,7 @@ export default function OrdersPage() {
     try {
       const res = await sellerApi.post(`/api/v1/orders/${orderId}/ready-for-pickup`);
       if (res.ok) {
-        showToast(`Order #${orderId.slice(-8)} Marked Ready for Pickup!`, 'success');
+        showToast(`Order #${orderId} Marked Ready for Pickup!`, 'success');
         playOrderChime();
         await fetchOrders(false);
       } else {
@@ -94,7 +94,7 @@ export default function OrdersPage() {
           paymentStatus: o.paymentStatus || o.payment_status || 'PENDING',
           deliveryAddress: o.deliveryAddress || o.delivery_address,
           customerId: o.customerId || o.customer_id,
-          customerPhone: o.customerPhone || o.customer_phone || o.delivery_address?.contactPhone || o.delivery_address?.phone,
+          customerPhone: o.customerPhone || o.customer_phone || o.delivery_address?.contactPhone || o.delivery_address?.contact_phone || o.delivery_address?.phone,
           customerName: o.customerName || o.customer_name,
           createdAt: o.createdAt || o.created_at,
           sellerApprovalStatus: o.sellerApprovalStatus || o.seller_approval_status,
@@ -282,6 +282,10 @@ export default function OrdersPage() {
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="text-base font-black text-content-accent group-hover:text-content-brand font-mono underline flex items-center space-x-1">
                           <span>{order.id}</span>
+                        </span>
+
+                        <span className="text-2xs font-mono font-bold text-content-muted bg-surface-subtle px-2 py-0.5 rounded border border-border-default">
+                          {formatDateTime(order.createdAt)}
                         </span>
 
                         <span className={`px-3 py-1 rounded-full text-xs font-black ${

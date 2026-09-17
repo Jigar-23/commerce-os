@@ -7,6 +7,7 @@ import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
 import { Layers, Search, CheckCircle2, RefreshCw, RotateCcw, AlertCircle } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
+import { formatDateTime } from '@/lib/formatAddress';
 
 interface InventoryItem {
   id: string;
@@ -150,7 +151,7 @@ export default function DedicatedInventoryPage() {
           name: item.name,
           delta,
           reason,
-          timestamp: new Date().toLocaleTimeString(),
+          timestamp: formatDateTime(new Date().toISOString()),
         });
         showToast(`Stock for ${item.name} adjusted by ${delta > 0 ? '+' : ''}${delta}`, 'success');
       } else {

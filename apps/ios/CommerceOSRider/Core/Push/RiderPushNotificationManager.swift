@@ -31,6 +31,9 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
         content.subtitle = "Order #\(offer.orderId.suffix(8).uppercased())"
         content.body = "Pickup: \(offer.merchantName)\nDrop: \(offer.customerAddress)\nTap to accept within 30s."
         content.sound = UNNotificationSound.default
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
         content.userInfo = [
             "offerId": offer.offerId,
             "orderId": offer.orderId,
@@ -39,10 +42,11 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
             "customerName": offer.customerName
         ]
 
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
         let req = UNNotificationRequest(
             identifier: "offer_\(offer.offerId)",
             content: content,
-            trigger: nil // Immediate presentation
+            trigger: trigger
         )
 
         UNUserNotificationCenter.current().add(req) { error in
@@ -75,7 +79,7 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
         Task { @MainActor in
             RiderPushNotificationManager.shared.handleRemoteNotification(userInfo: info)
         }
-        completionHandler([.banner, .sound, .badge])
+        completionHandler([.banner, .sound, .badge, .list])
     }
 
     nonisolated public func userNotificationCenter(

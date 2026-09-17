@@ -9,7 +9,7 @@ import {
   Check, Navigation, Bike, RefreshCw, AlertCircle
 } from 'lucide-react';
 
-import { formatAddress } from '../../../lib/formatAddress';
+import { formatAddress, formatDateTime } from '../../../lib/formatAddress';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
 import SellerAuthGuard from '../../../components/SellerAuthGuard';
@@ -60,7 +60,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
           paymentStatus: raw.paymentStatus || raw.payment_status || 'PENDING',
           deliveryAddress: raw.deliveryAddress || raw.delivery_address,
           customerId: raw.customerId || raw.customer_id,
-          customerPhone: raw.customerPhone || raw.customer_phone || raw.delivery_address?.contactPhone || raw.delivery_address?.phone,
+          customerPhone: raw.customerPhone || raw.customer_phone || raw.delivery_address?.contactPhone || raw.delivery_address?.contact_phone || raw.delivery_address?.phone,
           customerName: raw.customerName || raw.customer_name,
           createdAt: raw.createdAt || raw.created_at,
           sellerApprovalStatus: raw.sellerApprovalStatus || raw.seller_approval_status,
@@ -306,7 +306,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                     Live Order Control &amp; Lifecycle Dispatch
                   </span>
                   <h1 className="text-2xl font-black text-content-primary font-mono mt-1">{order.id}</h1>
-                  <p className="text-xs text-content-muted">Placed: {new Date(order.createdAt || Date.now()).toLocaleString()}</p>
+                  <p className="text-xs text-content-muted">Placed: {formatDateTime(order.createdAt)}</p>
                 </div>
 
                 <div className="flex items-center space-x-3">
@@ -356,7 +356,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.placed ? new Date(stages.placed).toLocaleTimeString() : '—'}
+                          {stages.placed ? formatDateTime(stages.placed) : '—'}
                         </span>
                       </div>
                     </div>
@@ -394,7 +394,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.sellerAccepted ? new Date(stages.sellerAccepted).toLocaleTimeString() : (isStageDone(2) ? '✓ Completed' : (order.sellerApprovalStatus === 'PENDING' ? 'Action Needed' : '—'))}
+                          {stages.sellerAccepted ? formatDateTime(stages.sellerAccepted) : (isStageDone(2) ? '✓ Completed' : (order.sellerApprovalStatus === 'PENDING' ? 'Action Needed' : '—'))}
                         </span>
                       </div>
 
@@ -465,7 +465,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           )}
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.riderAssigned ? new Date(stages.riderAssigned).toLocaleTimeString() : (isStageDone(3) ? '✓ Assigned' : 'Pending')}
+                          {stages.riderAssigned ? formatDateTime(stages.riderAssigned) : (isStageDone(3) ? '✓ Assigned' : 'Pending')}
                         </span>
                       </div>
                     </div>
@@ -495,7 +495,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.arrivedStore ? new Date(stages.arrivedStore).toLocaleTimeString() : (isStageDone(4) ? '✓ Arrived' : '—')}
+                          {stages.arrivedStore ? formatDateTime(stages.arrivedStore) : (isStageDone(4) ? '✓ Arrived' : '—')}
                         </span>
                       </div>
                     </div>
@@ -525,7 +525,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.pickedUp ? new Date(stages.pickedUp).toLocaleTimeString() : (isStageDone(5) ? '✓ Dispatched' : '—')}
+                          {stages.pickedUp ? formatDateTime(stages.pickedUp) : (isStageDone(5) ? '✓ Dispatched' : '—')}
                         </span>
                       </div>
                     </div>
@@ -555,7 +555,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.arrivedCustomer ? new Date(stages.arrivedCustomer).toLocaleTimeString() : (isStageDone(6) ? '✓ At Doorstep' : '—')}
+                          {stages.arrivedCustomer ? formatDateTime(stages.arrivedCustomer) : (isStageDone(6) ? '✓ At Doorstep' : '—')}
                         </span>
                       </div>
                     </div>
@@ -581,7 +581,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           </p>
                         </div>
                         <span className="text-2xs font-mono font-bold text-content-muted">
-                          {stages.delivered ? new Date(stages.delivered).toLocaleTimeString() : (isStageDone(7) ? '✓ Delivered' : '—')}
+                          {stages.delivered ? formatDateTime(stages.delivered) : (isStageDone(7) ? '✓ Delivered' : '—')}
                         </span>
                       </div>
                     </div>

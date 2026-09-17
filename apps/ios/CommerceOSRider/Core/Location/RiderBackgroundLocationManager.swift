@@ -59,6 +59,10 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
         } else {
             self.currentSpeed = 0.0
         }
+
+        Task { @MainActor in
+            await RiderOfferEventPipeline.shared.pollActiveOffersOnce()
+        }
     }
 
     public func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {

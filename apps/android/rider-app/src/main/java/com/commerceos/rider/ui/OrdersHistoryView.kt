@@ -63,7 +63,7 @@ fun OrdersHistoryView(
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         val context = LocalContext.current
-                        val shortId = activeSession.orderId.takeLast(8).uppercase()
+                        val shortId = activeSession.orderId
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -205,7 +205,7 @@ fun OrdersHistoryView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val cContext = LocalContext.current
-                            val cShortId = itemSession.orderId.takeLast(8).uppercase()
+                            val cShortId = itemSession.orderId
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(10.dp))

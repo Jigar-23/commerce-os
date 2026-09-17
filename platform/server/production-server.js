@@ -3015,13 +3015,19 @@ const server = http.createServer(async (req, res) => {
 
       const orderIdVal = order.order_id || order.id;
       const rawItems = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
-      const rawAddr = typeof order.delivery_address === 'string' ? JSON.parse(order.delivery_address) : (order.delivery_address || {});
+      const rawAddr = typeof order.delivery_address === 'string' ? (() => { try { return JSON.parse(order.delivery_address); } catch(e) { return {}; } })() : (order.delivery_address || {});
+      const resolvedCustName = order.customer_name || (rawAddr && (rawAddr.contactName || rawAddr.contact_name || rawAddr.name)) || 'Customer';
+      const resolvedCustPhone = order.customer_phone || (rawAddr && (rawAddr.contactPhone || rawAddr.contact_phone || rawAddr.phone)) || null;
       const singleOrderDto = {
         id: orderIdVal,
         orderId: orderIdVal,
         order_id: orderIdVal,
         customerId: order.customer_id || order.customerId,
         customer_id: order.customer_id || order.customerId,
+        customerName: resolvedCustName,
+        customer_name: resolvedCustName,
+        customerPhone: resolvedCustPhone,
+        customer_phone: resolvedCustPhone,
         storeId: order.store_id || order.storeId,
         store_id: order.store_id || order.storeId,
         prescriptionId: order.prescription_id || order.prescriptionId || null,
@@ -3497,25 +3503,30 @@ const server = http.createServer(async (req, res) => {
       const orders = await appRepositories.orderRepo.getOrdersByStore(authorizedStoreId);
 
       // Sanitized Seller Order DTO (Zero delivery_otp_hash exposure to merchant)
-      const sellerOrdersDto = (orders || []).map(o => ({
-        orderId: o.order_id || o.id,
-        storeId: o.store_id,
-        customerId: o.customer_id,
-        customerName: o.customer_name || null,
-        customerPhone: o.customer_phone || (o.delivery_address && (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address)?.phone) || null,
-        deliveryAddress: typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address,
-        status: o.status,
-        orderStatus: o.status,
-        sellerApprovalStatus: o.seller_approval_status,
-        totalAmount: Number(o.total_amount),
-        paymentMethod: o.payment_method || (o.is_cod ? 'COD' : 'ONLINE'),
-        paymentStatus: o.payment_status || (o.is_cod ? 'COD_PENDING' : 'PAID'),
-        isCod: Boolean(o.is_cod),
-        riderId: o.rider_id || null,
-        riderName: o.rider_name || null,
-        items: typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []),
-        createdAt: o.created_at
-      }));
+      const sellerOrdersDto = (orders || []).map(o => {
+        const parsedAddr = typeof o.delivery_address === 'string' ? (() => { try { return JSON.parse(o.delivery_address); } catch(e) { return null; } })() : o.delivery_address;
+        const resolvedName = o.customer_name || (parsedAddr && (parsedAddr.contactName || parsedAddr.contact_name || parsedAddr.name)) || null;
+        const resolvedPhone = o.customer_phone || (parsedAddr && (parsedAddr.contactPhone || parsedAddr.contact_phone || parsedAddr.phone)) || null;
+        return {
+          orderId: o.order_id || o.id,
+          storeId: o.store_id,
+          customerId: o.customer_id,
+          customerName: resolvedName,
+          customerPhone: resolvedPhone,
+          deliveryAddress: parsedAddr,
+          status: o.status,
+          orderStatus: o.status,
+          sellerApprovalStatus: o.seller_approval_status,
+          totalAmount: Number(o.total_amount),
+          paymentMethod: o.payment_method || (o.is_cod ? 'COD' : 'ONLINE'),
+          paymentStatus: o.payment_status || (o.is_cod ? 'COD_PENDING' : 'PAID'),
+          isCod: Boolean(o.is_cod),
+          riderId: o.rider_id || null,
+          riderName: o.rider_name || null,
+          items: typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []),
+          createdAt: o.created_at
+        };
+      });
 
       return sendJson(res, 200, sellerOrdersDto);
     }

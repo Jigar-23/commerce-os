@@ -45,7 +45,7 @@ export default function MerchantOperationsPage() {
     try {
       const res = await sellerApi.post(`/api/v1/orders/${orderId}/accept-by-seller`);
       if (res.ok) {
-        setToastMessage(`Order #${orderId.slice(-8)} Accepted! Rider broadcast dispatched.`);
+        setToastMessage(`Order #${orderId} Accepted! Rider broadcast dispatched.`);
         setTimeout(() => setToastMessage(null), 4000);
         await fetchOverviewData(false);
       } else {
@@ -59,8 +59,14 @@ export default function MerchantOperationsPage() {
   };
 
   const fetchOverviewData = async (showSpinner = true) => {
-    const s = session || sellerApi.getSession();
-    if (!s?.token) return;
+    let s = session || sellerApi.getSession();
+    if (!s?.token) {
+      s = await sellerApi.ensureSession();
+    }
+    if (!s?.token) {
+      if (showSpinner) setIsLoading(false);
+      return;
+    }
     if (showSpinner) setIsLoading(true);
     try {
       const [ordRes, catRes, codRes, auditRes] = await Promise.all([

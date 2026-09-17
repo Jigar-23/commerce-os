@@ -57,7 +57,7 @@ fun DeliveryCompletionDialog(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Order #${session.orderId.takeLast(8).uppercase()} handoff confirmed",
+                        text = "Order #${session.orderId} handoff confirmed",
                         fontSize = 12.sp,
                         color = Color(0xFF94A3B8)
                     )

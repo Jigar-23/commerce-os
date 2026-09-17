@@ -322,7 +322,7 @@ private fun NotificationCardItem(
 
                 if (!item.orderId.isNullOrBlank()) {
                     val context = LocalContext.current
-                    val shortOrderId = item.orderId.takeLast(8).uppercase()
+                    val shortOrderId = item.orderId
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(
                         color = Color(0xFF0F172A),

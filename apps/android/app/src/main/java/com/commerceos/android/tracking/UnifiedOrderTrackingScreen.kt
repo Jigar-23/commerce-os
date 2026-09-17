@@ -39,7 +39,7 @@ fun UnifiedOrderTrackingScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Track Order #${session.orderId.takeLast(6)}", style = CommerceTypography.Title) },
+                title = { Text("Track Order #${session.orderId}", style = CommerceTypography.Title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

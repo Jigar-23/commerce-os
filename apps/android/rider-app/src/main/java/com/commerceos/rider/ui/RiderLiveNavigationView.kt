@@ -168,7 +168,7 @@ fun RiderLiveNavigationView(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ORDER #${session.orderId.takeLast(8).uppercase()}",
+                            text = "ORDER #${session.orderId}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF38BDF8)

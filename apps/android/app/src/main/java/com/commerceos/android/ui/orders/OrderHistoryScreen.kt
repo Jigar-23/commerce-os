@@ -219,7 +219,7 @@ private fun OrderHistoryCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Order #${order.id.takeLast(8).uppercase()}",
+                        text = "Order #${order.id}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)

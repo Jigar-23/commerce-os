@@ -164,7 +164,7 @@ object RiderNotificationManager {
 
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             val earningsText = "₹${offer.earningsAmount.toInt()}"
-            val orderTag = if (offer.orderId.isNotBlank()) " #${offer.orderId.takeLast(8).uppercase()}" else ""
+            val orderTag = if (offer.orderId.isNotBlank()) " #${offer.orderId}" else ""
 
             val appIconRes = context.applicationInfo.icon.takeIf { it != 0 }
                 ?: android.R.drawable.stat_notify_chat

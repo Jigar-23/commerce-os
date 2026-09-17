@@ -89,7 +89,6 @@ fun RiderOfferCard(
                         color = Color.White
                     )
                     if (offer.orderId.isNotBlank()) {
-                        val shortOrderId = offer.orderId.takeLast(8).uppercase()
                         Surface(
                             color = Color(0xFF0F172A),
                             shape = RoundedCornerShape(8.dp),
@@ -101,12 +100,12 @@ fun RiderOfferCard(
                                     .clickable {
                                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         cm.setPrimaryClip(ClipData.newPlainText("Order ID", offer.orderId))
-                                        Toast.makeText(context, "Copied Order ID: #$shortOrderId", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Copied Order ID: #${offer.orderId}", Toast.LENGTH_SHORT).show()
                                     }
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = "ORDER #$shortOrderId",
+                                    text = "ORDER #${offer.orderId}",
                                     color = Color(0xFF38BDF8),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -174,7 +173,7 @@ fun RiderOfferCard(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = if (cartVal > 0.0) "₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else "₹12",
+                                text = if (cartVal > 0.0) "₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else "₹0",
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color.White

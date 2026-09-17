@@ -163,19 +163,24 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
         if !routeCoordinates.isEmpty {
             let pts = routeCoordinates.map { "[\($0.latitude),\($0.longitude)]" }.joined(separator: ",")
             waypointsJson = "[\(pts)]"
-        } else {
-            let origin = riderCoordinate ?? merchantCoordinate
-            let dest = customerCoordinate
-            if let orig = origin, let dst = dest {
-                let origDelta = lastRouteOrigin.map { abs($0.latitude - orig.latitude) + abs($0.longitude - orig.longitude) } ?? 1.0
+        } else if let rider = riderCoordinate {
+            let dest = customerCoordinate ?? merchantCoordinate
+            if let dst = dest {
+                let origDelta = lastRouteOrigin.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? 1.0
                 let destDelta = lastRouteDest.map { abs($0.latitude - dst.latitude) + abs($0.longitude - dst.longitude) } ?? 1.0
                 if origDelta > 0.0008 || destDelta > 0.0001 {
-                    self.lastRouteOrigin = orig
+                    self.lastRouteOrigin = rider
                     self.lastRouteDest = dst
-                    computeRoadPolyline(from: orig, to: dst)
+                    computeRoadPolyline(from: rider, to: dst)
                 }
             }
             waypointsJson = fallbackWaypointsJson
+        } else {
+            // Rider not yet assigned: strictly zero waypoints, zero line on map
+            self.lastRouteOrigin = nil
+            self.lastRouteDest = nil
+            self.fallbackWaypointsJson = "[]"
+            waypointsJson = "[]"
         }
 
         let mLatStr = merchantCoordinate != nil ? "\(merchantCoordinate!.latitude)" : "null"
@@ -244,73 +249,15 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             user-select: none;
         }
 
-        /* 3D Elevated Store Hub Beacon */
-        .store-marker-3d {
+        /* High-Res Industry-Standard Teardrop Pin Badges matching Android */
+        .store-marker-pin, .customer-marker-pin {
             position: absolute;
-            width: 44px;
-            height: 44px;
-            transform: translate(-50%, -50%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            width: 50px;
+            height: 65px;
+            transform: translate(-50%, -90.77%);
             pointer-events: none;
+            filter: drop-shadow(0 3px 6px rgba(0,0,0,0.25));
         }
-        .store-beacon {
-            position: absolute;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            background: rgba(2, 132, 199, 0.22);
-            border: 1.5px solid rgba(2, 132, 199, 0.7);
-            animation: pulseBeacon 2.5s infinite ease-out;
-        }
-        .store-pill {
-            position: relative;
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);
-            border: 2.5px solid #FFFFFF;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4), 0 2px 6px rgba(0, 0, 0, 0.15);
-        }
-        .store-pill svg { width: 17px; height: 17px; fill: #FFFFFF; }
-
-        /* 3D Elevated Customer Destination Beacon */
-        .customer-marker-3d {
-            position: absolute;
-            width: 44px;
-            height: 44px;
-            transform: translate(-50%, -50%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
-        }
-        .customer-beacon {
-            position: absolute;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            background: rgba(249, 115, 22, 0.22);
-            border: 1.5px solid rgba(249, 115, 22, 0.7);
-            animation: pulseBeacon 2.5s infinite ease-out 0.5s;
-        }
-        .customer-pill {
-            position: relative;
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #F97316 0%, #C2410C 100%);
-            border: 2.5px solid #FFFFFF;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 14px rgba(249, 115, 22, 0.4), 0 2px 6px rgba(0, 0, 0, 0.15);
-        }
-        .customer-pill svg { width: 17px; height: 17px; fill: #FFFFFF; }
 
         /* 3D Animated Scooter Puck with Headlight Beam and Radar Wave */
         .biker-anchor {
@@ -452,7 +399,7 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
         routeGlowPolyline = new google.maps.Polyline({
             path: [],
             geodesic: true,
-            strokeColor: '#059669',
+            strokeColor: '#7C3AED',
             strokeOpacity: 0.25,
             strokeWeight: 10,
             map: map
@@ -461,7 +408,7 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
         routePolyline = new google.maps.Polyline({
             path: [],
             geodesic: true,
-            strokeColor: '#10B981',
+            strokeColor: '#7C3AED',
             strokeOpacity: 0.95,
             strokeWeight: 6,
             map: map
@@ -544,6 +491,44 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
         animFrame = requestAnimationFrame(step);
     }
 
+    // High-Res Android-Identical SVG Store Marker (SHOP Badge, Awning Emblem, Teardrop Pin)
+    function buildStoreMarkerHtml() {
+        return '<div class="store-marker-pin">' +
+            '<svg viewBox="0 0 100 130" width="50" height="65" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+            '<ellipse cx="50" cy="122" rx="18" ry="6" fill="rgba(0,0,0,0.22)" />' +
+            '<path d="M 50 118 C 42 104 16 76 16 52 A 34 34 0 1 1 84 52 C 84 76 58 104 50 118 Z" fill="#0284C7" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" />' +
+            '<circle cx="50" cy="52" r="24" fill="#FFFFFF" />' +
+            '<rect x="34" y="36" width="32" height="3" rx="1.5" fill="#0369A1" />' +
+            '<path d="M 34 39 L 66 39 L 68 48 L 32 48 Z" fill="#0369A1" />' +
+            '<line x1="41" y1="39" x2="41" y2="48" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" />' +
+            '<line x1="50" y1="39" x2="50" y2="48" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" />' +
+            '<line x1="59" y1="39" x2="59" y2="48" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" />' +
+            '<rect x="35" y="51" width="8" height="8" rx="1.5" fill="#0369A1" />' +
+            '<rect x="57" y="51" width="8" height="8" rx="1.5" fill="#0369A1" />' +
+            '<rect x="46" y="51" width="8" height="13" rx="2.5" fill="#0369A1" />' +
+            '<rect x="32" y="64" width="36" height="2.5" rx="1.2" fill="#0369A1" />' +
+            '<rect x="24" y="2" width="52" height="18" rx="9" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.5" />' +
+            '<text x="50" y="14.5" fill="#38BDF8" font-size="10" font-family="-apple-system, BlinkMacSystemFont, Roboto, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="0.5">SHOP</text>' +
+            '</svg></div>';
+    }
+
+    // High-Res Android-Identical SVG Customer Home Marker (HOME Badge, House Emblem, Teardrop Pin)
+    function buildCustomerMarkerHtml() {
+        return '<div class="customer-marker-pin">' +
+            '<svg viewBox="0 0 100 130" width="50" height="65" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+            '<ellipse cx="50" cy="122" rx="18" ry="6" fill="rgba(0,0,0,0.22)" />' +
+            '<path d="M 50 118 C 42 104 16 76 16 52 A 34 34 0 1 1 84 52 C 84 76 58 104 50 118 Z" fill="#EA580C" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" />' +
+            '<circle cx="50" cy="52" r="24" fill="#FFFFFF" />' +
+            '<rect x="57" y="36" width="4" height="8" rx="1" fill="#C2410C" />' +
+            '<path d="M 50 34 L 33 47 L 36 50 L 50 39 L 64 50 L 67 47 Z" fill="#C2410C" />' +
+            '<rect x="37" y="48" width="26" height="17" rx="2" fill="#C2410C" />' +
+            '<rect x="47" y="55" width="6" height="10" rx="2.5" fill="#FFFFFF" />' +
+            '<rect x="40" y="52" width="5" height="5" rx="1.5" fill="#FFFFFF" />' +
+            '<rect x="24" y="2" width="52" height="18" rx="9" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.5" />' +
+            '<text x="50" y="14.5" fill="#F59E0B" font-size="10" font-family="-apple-system, BlinkMacSystemFont, Roboto, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="0.5">HOME</text>' +
+            '</svg></div>';
+    }
+
     function buildRiderHtml(heading) {
         var rot = heading != null ? heading : 0;
         return '<div class="biker-anchor">' +
@@ -562,19 +547,10 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             });
             routePolyline.setPath(path);
             routeGlowPolyline.setPath(path);
-        } else if (storePos && customerPos && directionsService) {
-            var origin = riderPos || storePos;
-            directionsService.route({
-                origin: origin,
-                destination: customerPos,
-                travelMode: google.maps.TravelMode.DRIVING
-            }, function(response, status) {
-                if (status === 'OK' && response && response.routes && response.routes[0]) {
-                    var routePath = response.routes[0].overview_path;
-                    routePolyline.setPath(routePath);
-                    routeGlowPolyline.setPath(routePath);
-                }
-            });
+        } else {
+            // Strictly ZERO polyline when no active rider navigation
+            routePolyline.setPath([]);
+            routeGlowPolyline.setPath([]);
         }
     }
     window.updateWaypoints = renderWaypoints;
@@ -600,10 +576,10 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             initMap();
         }
 
-        // Store Hub
+        // 1. Store Hub Teardrop Pin (Matching Android Design)
         if (mLat && mLng && mLat !== 0) {
             storePos = { lat: mLat, lng: mLng };
-            var storeHtml = '<div class="store-marker-3d"><div class="store-beacon"></div><div class="store-pill">' + storeSvg + '</div></div>';
+            var storeHtml = buildStoreMarkerHtml();
             if (!storeOverlay) {
                 storeOverlay = new CustomHtmlOverlay(mLat, mLng, storeHtml);
             } else {
@@ -611,10 +587,10 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             }
         }
 
-        // Customer Location
+        // 2. Customer Home Teardrop Pin (Matching Android Design)
         if (cLat && cLng && cLat !== 0) {
             customerPos = { lat: cLat, lng: cLng };
-            var custHtml = '<div class="customer-marker-3d"><div class="customer-beacon"></div><div class="customer-pill">' + customerSvg + '</div></div>';
+            var custHtml = buildCustomerMarkerHtml();
             if (!customerOverlay) {
                 customerOverlay = new CustomHtmlOverlay(cLat, cLng, custHtml);
             } else {
@@ -622,7 +598,7 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             }
         }
 
-        // Live Rider Puck
+        // 3. Live Rider Puck (ONLY visible when rider is actively assigned)
         if (rider && rider.lat && rider.lng) {
             var ts = rider.timestamp || Date.now();
             if (ts >= lastAcceptedTimestamp) {
@@ -648,6 +624,13 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
                     map.panTo(new google.maps.LatLng(rider.lat, rider.lng));
                 }
             }
+        } else {
+            // Rider is NOT active: remove overlay
+            if (riderOverlay) {
+                riderOverlay.setMap(null);
+                riderOverlay = null;
+            }
+            riderPos = null;
         }
 
         renderWaypoints(waypoints);

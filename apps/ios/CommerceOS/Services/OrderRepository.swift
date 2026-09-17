@@ -303,6 +303,23 @@ public struct ServerOrderResponse: Identifiable, Codable {
         case riderVehicleCamel = "riderVehicle"
         case storeName = "store_name"
         case storeNameCamel = "storeName"
+        case rider
+        case deliverySession = "deliverySession"
+        case deliverySessionSnake = "delivery_session"
+    }
+
+    private struct NestedRider: Decodable {
+        let riderId: String?
+        let name: String?
+        let phone: String?
+        let vehicle: String?
+    }
+
+    private struct NestedDeliverySession: Decodable {
+        let riderId: String?
+        let riderName: String?
+        let riderPhone: String?
+        let riderVehicle: String?
     }
 
     public init(from decoder: Decoder) throws {
@@ -385,12 +402,22 @@ public struct ServerOrderResponse: Identifiable, Codable {
             self.items = nil
         }
 
+        let nestedRider = try? container.decode(NestedRider.self, forKey: .rider)
+        let nestedSession = (try? container.decode(NestedDeliverySession.self, forKey: .deliverySession))
+            ?? (try? container.decode(NestedDeliverySession.self, forKey: .deliverySessionSnake))
+
         self.riderName = (try? container.decode(String.self, forKey: .riderName))
             ?? (try? container.decode(String.self, forKey: .riderNameCamel))
+            ?? nestedRider?.name
+            ?? nestedSession?.riderName
         self.riderPhone = (try? container.decode(String.self, forKey: .riderPhone))
             ?? (try? container.decode(String.self, forKey: .riderPhoneCamel))
+            ?? nestedRider?.phone
+            ?? nestedSession?.riderPhone
         self.riderVehicle = (try? container.decode(String.self, forKey: .riderVehicle))
             ?? (try? container.decode(String.self, forKey: .riderVehicleCamel))
+            ?? nestedRider?.vehicle
+            ?? nestedSession?.riderVehicle
         self.storeName = (try? container.decode(String.self, forKey: .storeName))
             ?? (try? container.decode(String.self, forKey: .storeNameCamel))
     }

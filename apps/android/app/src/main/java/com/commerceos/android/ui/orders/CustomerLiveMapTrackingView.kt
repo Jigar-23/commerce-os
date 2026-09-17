@@ -89,30 +89,40 @@ fun CustomerLiveMapTrackingView(
     val effectiveRiderLng = realRiderLng ?: cachedRiderLng ?: if (isHeadingToCustomer) merchantLng else null
 
     LaunchedEffect(liveTracking?.waypoints, merchantLat, merchantLng, customerLat, customerLng, realRiderLat, realRiderLng, activeStage) {
-        // Stage 1 (Order Placed): Strictly NO polyline / route fetching between Store and Home while nothing is moving
-        if (isOrderPlaced) {
-            dynamicRoadPoints = emptyList()
-            lastRoutedStage = activeStage
-            return@LaunchedEffect
-        }
         if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
             dynamicRoadPoints = emptyList()
             return@LaunchedEffect
         }
         val effectiveRiderLat = realRiderLat ?: cachedRiderLat
         val effectiveRiderLng = realRiderLng ?: cachedRiderLng
-        if (effectiveRiderLat == null || effectiveRiderLng == null) {
+
+        // If order is placed / preparing (no committed rider yet), NO route is fetched or drawn
+        if (isOrderPlaced || effectiveRiderLat == null || effectiveRiderLng == null) {
             dynamicRoadPoints = emptyList()
+            lastRoutedOriginLat = null
+            lastRoutedOriginLng = null
+            lastRoutedStage = activeStage
             return@LaunchedEffect
         }
 
-        // Origin is always the moving rider; Destination depends on stage:
-        // Stage 2 (Heading to store): Rider -> Merchant Store
-        // Stage 3 (Heading to customer): Rider -> Customer Home
-        val originLat = effectiveRiderLat
-        val originLng = effectiveRiderLng
-        val destLat = if (isHeadingToStore) merchantLat else customerLat
-        val destLng = if (isHeadingToStore) merchantLng else customerLng
+        // Origin & Destination depending on active delivery stage:
+        // 1. Rider Assigned / Heading to Store: Rider -> Store Hub
+        // 2. Rider Out for Delivery: Rider -> Customer Home
+        val (originLat, originLng, destLat, destLng) = when {
+            isHeadingToStore -> {
+                listOf(effectiveRiderLat, effectiveRiderLng, merchantLat, merchantLng)
+            }
+            isHeadingToCustomer -> {
+                listOf(effectiveRiderLat, effectiveRiderLng, customerLat, customerLng)
+            }
+            else -> {
+                listOf(0.0, 0.0, 0.0, 0.0)
+            }
+        }
+
+        if (originLat == 0.0 || destLat == 0.0) {
+            return@LaunchedEffect
+        }
 
         // Throttle route queries if position displacement is minimal (< 40m)
         val prevLat = lastRoutedOriginLat
@@ -127,6 +137,7 @@ fun CustomerLiveMapTrackingView(
 
         if (originLat != destLat || originLng != destLng) {
             withContext(Dispatchers.IO) {
+                var routeFetched = false
                 // 1. Authoritative Backend Routing (Host Google Directions + OSRM)
                 try {
                     val backendBase = com.commerceos.android.network.NetworkClient.baseUrl.trimEnd('/')
@@ -155,55 +166,77 @@ fun CustomerLiveMapTrackingView(
                                     lastRoutedOriginLng = originLng
                                     lastRoutedStage = activeStage
                                 }
-                                return@withContext
+                                routeFetched = true
                             }
                         }
                     }
                 } catch (_: Exception) {}
 
-                // 2. Direct OSRM Fallback
-                try {
-                    val url = URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        requestMethod = "GET"
-                        connectTimeout = 4000
-                        readTimeout = 4000
-                        setRequestProperty("User-Agent", "CommerceOS-Customer/2.0")
-                    }
-                    if (conn.responseCode == 200) {
-                        val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                        val json = JSONObject(jsonStr)
-                        val routes = json.getJSONArray("routes")
-                        if (routes.length() > 0) {
-                            val geom = routes.getJSONObject(0).getJSONObject("geometry")
-                            val coords = geom.getJSONArray("coordinates")
-                            val pts = mutableListOf<MapRoutePoint>()
-                            for (i in 0 until coords.length()) {
-                                val c = coords.getJSONArray(i)
-                                pts.add(MapRoutePoint(lat = c.getDouble(1), lng = c.getDouble(0)))
-                            }
-                            if (pts.size >= 2) {
-                                withContext(Dispatchers.Main) {
-                                    dynamicRoadPoints = pts
-                                    lastRoutedOriginLat = originLat
-                                    lastRoutedOriginLng = originLng
-                                    lastRoutedStage = activeStage
+                if (!routeFetched) {
+                    // 2. Direct OSRM Fallback
+                    try {
+                        val url = URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
+                        val conn = (url.openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 4000
+                            readTimeout = 4000
+                            setRequestProperty("User-Agent", "CommerceOS-Customer/2.0")
+                        }
+                        if (conn.responseCode == 200) {
+                            val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                            val json = JSONObject(jsonStr)
+                            val routes = json.getJSONArray("routes")
+                            if (routes.length() > 0) {
+                                val geom = routes.getJSONObject(0).getJSONObject("geometry")
+                                val coords = geom.getJSONArray("coordinates")
+                                val pts = mutableListOf<MapRoutePoint>()
+                                for (i in 0 until coords.length()) {
+                                    val c = coords.getJSONArray(i)
+                                    pts.add(MapRoutePoint(lat = c.getDouble(1), lng = c.getDouble(0)))
+                                }
+                                if (pts.size >= 2) {
+                                    withContext(Dispatchers.Main) {
+                                        dynamicRoadPoints = pts
+                                        lastRoutedOriginLat = originLat
+                                        lastRoutedOriginLng = originLng
+                                        lastRoutedStage = activeStage
+                                    }
+                                    routeFetched = true
                                 }
                             }
                         }
+                    } catch (_: Exception) {}
+                }
+
+                // 3. Unbreakable geometric fallback corridor
+                if (!routeFetched && dynamicRoadPoints.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        dynamicRoadPoints = listOf(
+                            MapRoutePoint(originLat, originLng),
+                            MapRoutePoint(destLat, destLng)
+                        )
+                        lastRoutedOriginLat = originLat
+                        lastRoutedOriginLng = originLng
+                        lastRoutedStage = activeStage
                     }
-                } catch (_: Exception) {}
+                }
             }
         }
     }
 
-    val routePoints = remember(liveTracking?.waypoints, dynamicRoadPoints, isOrderPlaced) {
-        if (isOrderPlaced) {
+    val routePoints = remember(liveTracking?.waypoints, dynamicRoadPoints, merchantLat, merchantLng, customerLat, customerLng, effectiveRiderLat, effectiveRiderLng, isHeadingToStore, isHeadingToCustomer) {
+        if (!isHeadingToStore && !isHeadingToCustomer) {
+            emptyList()
+        } else if (effectiveRiderLat == null || effectiveRiderLng == null) {
             emptyList()
         } else if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
             liveTracking!!.waypoints.map { MapRoutePoint(it.lat, it.lng) }
-        } else if (dynamicRoadPoints.isNotEmpty()) {
+        } else if (dynamicRoadPoints.size >= 2) {
             dynamicRoadPoints
+        } else if (isHeadingToStore) {
+            listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(merchantLat, merchantLng))
+        } else if (isHeadingToCustomer) {
+            listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(customerLat, customerLng))
         } else {
             emptyList()
         }
@@ -331,7 +364,7 @@ fun CustomerLiveMapTrackingView(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ORDER #${order.id.takeLast(6).uppercase()} • FULLSCREEN MAP",
+                            text = "ORDER #${order.id} • FULLSCREEN MAP",
                             color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
@@ -421,7 +454,7 @@ fun CustomerLiveMapTrackingView(
                     border = BorderStroke(1.dp, Color(0xFF1E293B))
                 ) {
                     Text(
-                        text = "ORDER #${order.id.takeLast(6).uppercase()}",
+                        text = "ORDER #${order.id}",
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

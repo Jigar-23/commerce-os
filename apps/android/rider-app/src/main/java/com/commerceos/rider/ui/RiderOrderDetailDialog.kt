@@ -56,7 +56,7 @@ fun ActiveDeliveryDetailDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "ORDER #${session.orderId.takeLast(8).uppercase()}",
+                            text = "ORDER #${session.orderId}",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.White
@@ -238,7 +238,7 @@ fun ActiveDeliveryDetailDialog(
                             Text("Order / Cart Value:", fontSize = 12.sp, color = Color(0xFF94A3B8))
                             val valText = session.orderTotal?.let { "₹${if (it % 1.0 == 0.0) it.toInt() else "%.2f".format(it)}" }
                                 ?: session.codAmount?.let { "₹${it.toInt()}" }
-                                ?: "₹12"
+                                ?: "—"
                             Text(valText, fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color.White)
                         }
                     }
@@ -484,7 +484,7 @@ fun RiderOrderDetailDialog(
                 ) {
                     Column {
                         Text(
-                            text = "ORDER #${offer.orderId.takeLast(8).uppercase()}",
+                            text = "ORDER #${offer.orderId}",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
