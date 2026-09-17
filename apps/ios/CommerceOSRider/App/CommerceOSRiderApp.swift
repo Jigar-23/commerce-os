@@ -25,8 +25,11 @@ struct CommerceOSRiderApp: App {
                 Task {
                     await container.sessionManager.refreshActiveSession()
                 }
+                if container.sessionManager.isShiftOnline || container.sessionManager.activeSession != nil {
+                    container.locationManager.startBackgroundTracking()
+                }
             case .background:
-                if container.sessionManager.isShiftOnline {
+                if container.sessionManager.isShiftOnline || container.sessionManager.activeSession != nil {
                     container.locationManager.startBackgroundTracking()
                 }
             case .inactive:

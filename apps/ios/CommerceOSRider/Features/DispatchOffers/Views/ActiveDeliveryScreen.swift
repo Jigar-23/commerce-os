@@ -249,7 +249,9 @@ public struct ActiveDeliveryScreen: View {
             }
         }
         .onAppear {
+            locationManager.startBackgroundTracking()
             if let s = sessionManager.activeSession {
+                locationManager.activeDeliveryId = s.deliveryId
                 let mCoord = CLLocationCoordinate2D(latitude: s.merchantLat, longitude: s.merchantLng)
                 let cCoord = CLLocationCoordinate2D(latitude: s.customerLat, longitude: s.customerLng)
                 geofence.startMonitoring(merchantCoord: mCoord, customerCoord: cCoord, initialStage: s.status)

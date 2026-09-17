@@ -43,14 +43,18 @@ public final class RiderTelemetryStreamer: ObservableObject {
         self.streamCount = 0
         self.lastRecordedLocation = nil
         self.lastTransmissionTime = Date.distantPast
+
+        if let loc = RiderBackgroundLocationManager.shared.lastLocation {
+            processLocationUpdate(loc)
+        }
     }
     
     /// Evaluates and streams incoming GPS fixes using adaptive thresholds & dead-reckoning
     public func processLocationUpdate(_ location: CLLocation) {
         guard isStreaming, let deliveryId = activeDeliveryId else { return }
         
-        // 1. Accuracy Filter (discard fixes worse than 35m)
-        guard location.horizontalAccuracy > 0 && location.horizontalAccuracy <= 35.0 else {
+        // 1. Accuracy Filter (allow up to 120m for iPads and indoor Wi-Fi)
+        guard location.horizontalAccuracy > 0 && location.horizontalAccuracy <= 120.0 else {
             // Apply dead-reckoning fallback if moving fast and have prior trajectory
             if let prior = lastRecordedLocation, prior.speed > stationarySpeedThresholdMs {
                 let predicted = deadReckonLocation(from: prior, elapsedSeconds: Date().timeIntervalSince(prior.timestamp))
@@ -69,27 +73,14 @@ public final class RiderTelemetryStreamer: ObservableObject {
         
         let requiredIntervalSeconds: TimeInterval
         if isLowBattery {
-            requiredIntervalSeconds = 10.0 // Conservative power saving
+            requiredIntervalSeconds = 6.0
         } else if location.speed > highSpeedThresholdMs {
-            requiredIntervalSeconds = 2.5  // High precision on highway / fast transit
-        } else if location.speed > stationarySpeedThresholdMs {
-            requiredIntervalSeconds = 4.5  // City street transit
+            requiredIntervalSeconds = 2.0  // High precision on highway / fast transit
         } else {
-            requiredIntervalSeconds = 15.0 // Stationary at merchant or customer door
+            requiredIntervalSeconds = 2.5  // Responsive live tracking in city and at hubs
         }
         
-        // 3. Stationary Jitter Suppression
-        if let prior = lastRecordedLocation {
-            let distance = location.distance(from: prior)
-            if location.speed < stationarySpeedThresholdMs && distance < minStationaryJitterDistanceMeters {
-                // If stationary, only transmit heartbeat every 15s
-                if timeSinceLastTransmission < 15.0 {
-                    return
-                }
-            }
-        }
-        
-        // 4. Rate-Limit Transmission
+        // 3. Rate-Limit Transmission
         guard timeSinceLastTransmission >= requiredIntervalSeconds else { return }
         
         transmitTelemetry(location, deliveryId: deliveryId, isDeadReckoned: false)

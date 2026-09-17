@@ -85,6 +85,7 @@ public final class RiderSessionManager: ObservableObject {
         await refreshActiveSession()
         RiderOfferEventPipeline.shared.startListening()
         startHeartbeat()
+        RiderBackgroundLocationManager.shared.startBackgroundTracking()
     }
 
     public func toggleShift(forcedOnline: Bool? = nil) async throws {
@@ -101,13 +102,14 @@ public final class RiderSessionManager: ObservableObject {
             let longitude: Double
         }
 
+        let curLoc = RiderBackgroundLocationManager.shared.lastLocation
         let body = ShiftPayload(
             online: newStatus,
             isOnline: newStatus,
             shiftStatus: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
             status: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
-            latitude: 28.202224,
-            longitude: 76.615418
+            latitude: curLoc?.coordinate.latitude ?? 28.202224,
+            longitude: curLoc?.coordinate.longitude ?? 76.615418
         )
         let _: [String: String]? = try? await apiClient.post(
             endpoint: .toggleShift(online: newStatus),
@@ -115,6 +117,7 @@ public final class RiderSessionManager: ObservableObject {
         )
 
         if newStatus {
+            RiderBackgroundLocationManager.shared.startBackgroundTracking()
             await refreshActiveSession()
             RiderOfferEventPipeline.shared.startListening()
             startHeartbeat()
@@ -122,6 +125,7 @@ public final class RiderSessionManager: ObservableObject {
             activeSession = nil
             RiderOfferEventPipeline.shared.stopListening()
             stopHeartbeat()
+            RiderBackgroundLocationManager.shared.stopBackgroundTracking()
         }
     }
 

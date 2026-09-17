@@ -324,6 +324,31 @@ async function getOrFetchDeliverySession(idOrOrderId) {
           history: row.history || [],
           items: items
         };
+
+        try {
+          const tRes = await productionPgPool.query(
+            `SELECT rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at
+             FROM rider_telemetry
+             WHERE delivery_id = $1 OR delivery_id = $2 OR (rider_id = $3 AND $3 IS NOT NULL)
+             ORDER BY recorded_at DESC, sequence_number DESC LIMIT 1`,
+            [session.deliveryId, session.orderId, session.riderId || null]
+          );
+          if (tRes.rows.length > 0) {
+            const t = tRes.rows[0];
+            session.telemetry = {
+              latitude: Number(t.latitude),
+              longitude: Number(t.longitude),
+              speedKmh: Number(t.speed || 0),
+              heading: Number(t.heading || 0),
+              accuracyMeters: Number(t.accuracy || 10),
+              sequenceNumber: Number(t.sequence_number || 1),
+              serverTimestamp: new Date(t.recorded_at).getTime(),
+              riderId: t.rider_id || session.riderId,
+              isStale: (Date.now() - new Date(t.recorded_at).getTime()) > 30000
+            };
+          }
+        } catch (_) {}
+
         db.deliverySessions = db.deliverySessions || {};
         db.deliverySessions[session.deliveryId] = session;
         if (session.orderId) db.deliverySessions[session.orderId] = session;
@@ -342,7 +367,31 @@ function buildCustomerTrackingDTO(session) {
   if (!session) return null;
   const presence = (session.riderId && db.riderPresence) ? db.riderPresence[session.riderId] : null;
   const waypoints = session.waypoints || [];
-  return buildEnrichedTrackingDTO(session, session.telemetry, presence, waypoints);
+  let telemetry = session.telemetry;
+  if (!telemetry && presence) {
+    telemetry = {
+      latitude: Number(presence.latitude || 0),
+      longitude: Number(presence.longitude || 0),
+      speedKmh: Number(presence.speedKmh || presence.speed || 0),
+      heading: Number(presence.heading || 0),
+      sequenceNumber: Number(presence.sequenceNumber || 1),
+      serverTimestamp: presence.serverTimestamp || Date.now(),
+      isStale: false
+    };
+  }
+  const dto = buildEnrichedTrackingDTO(session, telemetry, presence, waypoints) || {};
+  const otp = session.otp || session.deliveryOtp || getOrderDeliveryOtp({ orderId: session.orderId, deliveryId: session.deliveryId });
+  const isLive = Boolean(telemetry && (telemetry.latitude != null || telemetry.lat != null));
+  return {
+    ...dto,
+    status: session.state || session.status || dto.state,
+    orderStatus: session.state || session.status || dto.state,
+    deliveryOtp: otp,
+    isLiveTelemetryAvailable: isLive,
+    is_live_telemetry_available: isLive,
+    riderLat: dto.riderLat || (telemetry ? Number(telemetry.latitude || telemetry.lat) : null),
+    riderLng: dto.riderLng || (telemetry ? Number(telemetry.longitude || telemetry.lng) : null)
+  };
 }
 
 function buildRiderDeliveryDTO(session) {
@@ -6989,7 +7038,7 @@ async function handleRequest(port, req, res) {
         const authenticatedRiderId = authClaims.sub || authClaims.subject;
         const delId = telemetryMatch[1];
         const body = await parseBody(req);
-        const session = findDeliverySession(delId);
+        const session = await getOrFetchDeliverySession(delId);
 
         if (session && session.riderId && session.riderId !== authenticatedRiderId) {
           return json(res, 403, { error: 'FORBIDDEN', message: 'Subject mismatch. You are not assigned to this delivery session.' });
@@ -7006,8 +7055,8 @@ async function handleRequest(port, req, res) {
           return json(res, 400, { error: 'INVALID_LOCATION', message: 'Latitude and longitude coordinates are strictly required.' });
         }
 
-        if (accuracy > 50.0) {
-          return json(res, 400, { error: 'LOW_ACCURACY_REJECTED', message: 'Accuracy > 50m rejected' });
+        if (accuracy > 150.0) {
+          return json(res, 400, { error: 'LOW_ACCURACY_REJECTED', message: 'Accuracy > 150m rejected' });
         }
 
         const riderId = authenticatedRiderId;
@@ -7042,14 +7091,30 @@ async function handleRequest(port, req, res) {
             session.merchantLat = 28.1989;
             session.merchantLng = 76.6186;
           }
+          if (session.deliveryId) db.deliverySessions[session.deliveryId] = session;
+          if (session.orderId) db.deliverySessions[session.orderId] = session;
         }
         saveDb();
+
+        if (productionPgPool) {
+          try {
+            await productionPgPool.query(
+              `INSERT INTO rider_telemetry (rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+               ON CONFLICT (delivery_id, sequence_number)
+               DO UPDATE SET latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude, heading = EXCLUDED.heading, speed = EXCLUDED.speed, accuracy = EXCLUDED.accuracy, recorded_at = NOW()`,
+              [riderId, session?.deliveryId || delId, seq, lat, lng, heading, speed, accuracy]
+            );
+          } catch (pgTelemErr) {
+            console.warn('[TelemetryIngest] Postgres telemetry insert warn:', pgTelemErr.message);
+          }
+        }
 
         if (appRepositories && appRepositories.telemetryRepo) {
           try {
             await appRepositories.telemetryRepo.recordTelemetry({
               riderId,
-              deliveryId: delId,
+              deliveryId: session?.deliveryId || delId,
               latitude: lat,
               longitude: lng,
               speed,
@@ -7062,6 +7127,13 @@ async function handleRequest(port, req, res) {
             console.warn('[TelemetryRepo] Error recording telemetry:', e.message);
           }
         }
+
+        if (session) {
+          const customerDto = buildCustomerTrackingDTO(session);
+          if (session.deliveryId) broadcastDeliveryEvent(session.deliveryId, 'TELEMETRY_UPDATED', customerDto);
+          if (session.orderId) broadcastDeliveryEvent(session.orderId, 'TELEMETRY_UPDATED', customerDto);
+        }
+
         return json(res, 200, { ok: true, ackSequenceNumber: seq, riderId, latitude: lat, longitude: lng });
       }
 
@@ -7154,7 +7226,9 @@ async function handleRequest(port, req, res) {
           }
 
           saveDb('TELEMETRY_INGESTION');
-          broadcastDeliveryEvent(delId, 'LOCATION_UPDATE', session);
+          const customerDto = buildCustomerTrackingDTO(session);
+          if (session.deliveryId) broadcastDeliveryEvent(session.deliveryId, 'TELEMETRY_UPDATED', customerDto);
+          if (session.orderId) broadcastDeliveryEvent(session.orderId, 'TELEMETRY_UPDATED', customerDto);
         }
 
         return json(res, 200, { ok: true, ackSequenceNumber: seq, telemetry: telemetryRecord });

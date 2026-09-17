@@ -56,10 +56,7 @@ public final class RiderTelemetryBuffer {
                 timestamp: Date()
             )
             self.buffer.append(record)
-
-            if self.buffer.count >= RiderEnvironment.maxTelemetryBatchSize {
-                self.flushSynchronously()
-            }
+            self.flushSynchronously()
         }
     }
 

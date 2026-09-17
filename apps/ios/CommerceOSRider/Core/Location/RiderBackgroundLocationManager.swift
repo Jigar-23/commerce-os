@@ -24,7 +24,7 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
     }
 
     public func startBackgroundTracking() {
-        guard !isTracking else { return }
+        locationManager.requestWhenInUseAuthorization()
         locationManager.requestAlwaysAuthorization()
         #if !targetEnvironment(simulator)
         locationManager.allowsBackgroundLocationUpdates = true
@@ -33,6 +33,11 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
         locationManager.startUpdatingLocation()
         locationManager.startUpdatingHeading()
         isTracking = true
+        if let current = locationManager.location {
+            self.lastLocation = current
+            RiderTelemetryStreamer.shared.processLocationUpdate(current)
+            RiderGeofenceDetector.shared.updateLocation(current)
+        }
     }
 
     public func stopBackgroundTracking() {
@@ -60,6 +65,13 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
             self.currentSpeed = 0.0
         }
 
+        // 1. Immediately forward GPS fix to active telemetry streamer
+        RiderTelemetryStreamer.shared.processLocationUpdate(location)
+
+        // 2. Immediately forward GPS fix to geofence detector
+        RiderGeofenceDetector.shared.updateLocation(location)
+
+        // 3. Trigger dispatch poll check
         Task { @MainActor in
             await RiderOfferEventPipeline.shared.pollActiveOffersOnce()
         }
