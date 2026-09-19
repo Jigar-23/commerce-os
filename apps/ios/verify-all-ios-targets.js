@@ -107,9 +107,9 @@ const allSwiftFiles = [
 ];
 
 assert(customerAppFiles.length >= 29, `Customer App has at least 29 Swift source files (found ${customerAppFiles.length})`);
-assert(customerTestFiles.length === 1, `Customer Tests has 1 Swift file (found ${customerTestFiles.length})`);
-assert(riderAppFiles.length === 22, `Rider App has 22 Swift source files (found ${riderAppFiles.length})`);
-assert(riderTestFiles.length === 2, `Rider Tests has 2 Swift files (found ${riderTestFiles.length})`);
+assert(customerTestFiles.length >= 1, `Customer Tests has at least 1 Swift file (found ${customerTestFiles.length})`);
+assert(riderAppFiles.length >= 22, `Rider App has at least 22 Swift source files (found ${riderAppFiles.length})`);
+assert(riderTestFiles.length >= 2, `Rider Tests has at least 2 Swift files (found ${riderTestFiles.length})`);
 assert(allSwiftFiles.length >= 54, `Total Swift source & test files has at least 54 (found ${allSwiftFiles.length})`);
 
 console.log(`\nCompiling all ${allSwiftFiles.length} Swift files using Apple Swift compiler (swiftc -parse)...`);

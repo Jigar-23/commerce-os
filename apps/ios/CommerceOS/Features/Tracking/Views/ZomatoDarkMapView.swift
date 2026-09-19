@@ -164,7 +164,9 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
             let pts = routeCoordinates.map { "[\($0.latitude),\($0.longitude)]" }.joined(separator: ",")
             waypointsJson = "[\(pts)]"
         } else if let rider = riderCoordinate {
-            let dest = customerCoordinate ?? merchantCoordinate
+            let distToMerchant = merchantCoordinate.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? Double.infinity
+            let distToCustomer = customerCoordinate.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? Double.infinity
+            let dest = (distToMerchant < distToCustomer) ? (merchantCoordinate ?? customerCoordinate) : (customerCoordinate ?? merchantCoordinate)
             if let dst = dest {
                 let origDelta = lastRouteOrigin.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? 1.0
                 let destDelta = lastRouteDest.map { abs($0.latitude - dst.latitude) + abs($0.longitude - dst.longitude) } ?? 1.0
@@ -271,13 +273,16 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             pointer-events: none;
         }
         .biker-rotator {
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 60px;
             height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            pointer-events: none;
         }
         .biker-headlight {
             position: absolute;
@@ -318,6 +323,7 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 14px rgba(16, 185, 129, 0.6), 0 2px 6px rgba(0, 0, 0, 0.2);
+            z-index: 2;
         }
         .biker-core-puck svg {
             width: 20px;
@@ -534,9 +540,10 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
         return '<div class="biker-anchor">' +
                '<div class="biker-rotator" style="transform: rotate(' + rot + 'deg);">' +
                '<div class="biker-headlight"></div>' +
+               '</div>' +
                '<div class="biker-pulse-primary"></div><div class="biker-pulse-secondary"></div>' +
                '<div class="biker-core-puck">' + scooterSvg + '</div>' +
-               '</div></div>';
+               '</div>';
     }
 
     function renderWaypoints(waypoints) {

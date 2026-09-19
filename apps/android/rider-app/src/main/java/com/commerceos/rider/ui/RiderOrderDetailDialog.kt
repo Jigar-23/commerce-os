@@ -31,7 +31,7 @@ fun ActiveDeliveryDetailDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val earningsText = session.payoutFormatted ?: "₹35"
+    val earningsText = session.payoutFormatted ?: (session.codAmount?.let { "₹${it.toInt()}" } ?: "₹60")
     val isCompleted = session.state in listOf("DELIVERED", "COMPLETED", "CANCELLED")
     val statusLabel = if (isCompleted) "ORDER COMPLETED • ${session.state}" else "ACTIVE DELIVERY • ${session.state}"
     val statusColor = if (session.state == "CANCELLED") Color(0xFFEF4444) else Color(0xFF10B981)

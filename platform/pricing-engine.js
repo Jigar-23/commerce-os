@@ -90,18 +90,23 @@ function calculateAuthoritativeEarnings({
 function calculateCustomerOrderPricing({
   itemsSubtotal,
   distanceKm = 1.0,
-  isCod = false
+  isCod = false,
+  tip = 0
 }) {
   const subtotal = Math.round(Number(itemsSubtotal || 0) * 100) / 100;
-  const deliveryFee = subtotal >= 199.0 ? 0.0 : 2.0;
+  const deliveryFee = subtotal > 300.0 ? 0.0 : 25.0;
+  const handlingFee = 5.0;
   const taxAmount = 0.0;
+  const tipAmount = Math.max(0, Number(tip) || 0);
   const codFee = 0.0;
-  const totalAmount = Math.round((subtotal + deliveryFee + taxAmount + codFee) * 100) / 100;
+  const totalAmount = Math.round((subtotal + deliveryFee + handlingFee + taxAmount + tipAmount + codFee) * 100) / 100;
 
   return {
     itemsSubtotal: subtotal,
     deliveryFee,
+    handlingFee,
     taxAmount,
+    tipAmount,
     codFee,
     totalAmount
   };

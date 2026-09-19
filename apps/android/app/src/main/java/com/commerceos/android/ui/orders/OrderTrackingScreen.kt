@@ -950,9 +950,10 @@ fun OrderTrackingContent(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     val itemSubtotal = items.sumOf { (it.unitPrice.toDouble() * it.quantity) }
-                    val effectiveTotal = order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 } ?: (itemSubtotal + (if (itemSubtotal >= 199.0) 0.0 else 2.0))
-                    val effectiveDeliveryFee = order.deliveryFee?.toDouble() ?: order.delivery_fee?.toDouble() ?: (if (itemSubtotal >= 199.0) 0.0 else 2.0)
+                    val effectiveDeliveryFee = order.deliveryFee?.toDouble() ?: order.delivery_fee?.toDouble() ?: (if (itemSubtotal > 300.0) 0.0 else 25.0)
                     val isFreeDelivery = effectiveDeliveryFee <= 0.0
+                    val handlingFee = 5.0
+                    val effectiveTotal = order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 } ?: (itemSubtotal + (if (isFreeDelivery) 0.0 else effectiveDeliveryFee) + handlingFee)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -973,7 +974,7 @@ fun OrderTrackingContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Delivery Partner Fee", fontSize = 13.sp, color = Color(0xFF64748B))
+                        Text("10-Min Express Delivery Fee", fontSize = 13.sp, color = Color(0xFF64748B))
                         Text(
                             text = if (isFreeDelivery) "FREE" else (if (effectiveDeliveryFee % 1.0 == 0.0) "₹${effectiveDeliveryFee.toInt()}" else "₹${"%.2f".format(effectiveDeliveryFee)}"),
                             fontSize = 13.sp,
@@ -988,8 +989,8 @@ fun OrderTrackingContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Govt. Healthcare Cess & Handling", fontSize = 13.sp, color = Color(0xFF64748B))
-                        Text("FREE", fontSize = 13.sp, color = Color(0xFF059669), fontWeight = FontWeight.Bold)
+                        Text("Handling & Packaging Fee", fontSize = 13.sp, color = Color(0xFF64748B))
+                        Text("₹5.00", fontSize = 13.sp, color = Color(0xFF0F172A), fontWeight = FontWeight.Medium)
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))

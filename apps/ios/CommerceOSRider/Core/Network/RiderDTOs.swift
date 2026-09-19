@@ -5,6 +5,8 @@ public struct DispatchOfferDto: Identifiable, Codable {
     public let offerId: String
     public let orderId: String
     public let payoutAmount: Double
+    public let orderBillAmount: Double?
+    public let orderCreatedAt: String?
     public let merchantName: String
     public let merchantAddress: String
     public let merchantLat: Double
@@ -20,6 +22,8 @@ public struct DispatchOfferDto: Identifiable, Codable {
         offerId: String,
         orderId: String,
         payoutAmount: Double,
+        orderBillAmount: Double? = nil,
+        orderCreatedAt: String? = nil,
         merchantName: String,
         merchantAddress: String,
         merchantLat: Double,
@@ -34,6 +38,8 @@ public struct DispatchOfferDto: Identifiable, Codable {
         self.offerId = offerId
         self.orderId = orderId
         self.payoutAmount = payoutAmount
+        self.orderBillAmount = orderBillAmount
+        self.orderCreatedAt = orderCreatedAt
         self.merchantName = merchantName
         self.merchantAddress = merchantAddress
         self.merchantLat = merchantLat
@@ -58,6 +64,12 @@ public struct DispatchOfferDto: Identifiable, Codable {
         case earningsAmount
         case earnings_amount
         case totalEarnings
+        case orderBillAmount = "order_bill_amount"
+        case orderBillAmountCamel = "orderBillAmount"
+        case orderTotal = "order_total"
+        case totalAmount = "total_amount"
+        case orderCreatedAt = "order_created_at"
+        case createdAt = "created_at"
         case merchantName
         case merchant_name
         case merchantAddress
@@ -109,7 +121,17 @@ public struct DispatchOfferDto: Identifiable, Codable {
         if resolvedPayout == nil, let s = try? container.decode(String.self, forKey: .payout) { resolvedPayout = Double(s) }
         if resolvedPayout == nil, let s = try? container.decode(String.self, forKey: .payoutAmount) { resolvedPayout = Double(s) }
         if resolvedPayout == nil, let s = try? container.decode(String.self, forKey: .earnings_amount) { resolvedPayout = Double(s) }
-        self.payoutAmount = resolvedPayout ?? 35.0
+
+        var resolvedBill: Double? = try? container.decode(Double.self, forKey: .orderBillAmount)
+        if resolvedBill == nil { resolvedBill = try? container.decode(Double.self, forKey: .orderBillAmountCamel) }
+        if resolvedBill == nil { resolvedBill = try? container.decode(Double.self, forKey: .orderTotal) }
+        if resolvedBill == nil { resolvedBill = try? container.decode(Double.self, forKey: .totalAmount) }
+        if resolvedBill == nil { resolvedBill = resolvedPayout }
+        self.orderBillAmount = resolvedBill
+        self.payoutAmount = resolvedBill ?? resolvedPayout ?? 0.0
+
+        self.orderCreatedAt = (try? container.decode(String.self, forKey: .orderCreatedAt))
+            ?? (try? container.decode(String.self, forKey: .createdAt))
 
         self.merchantName = (try? container.decode(String.self, forKey: .merchantName))
             ?? (try? container.decode(String.self, forKey: .merchant_name))
@@ -260,6 +282,8 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
     public var codReconciled: Bool
     public var codCollectedAmount: Double?
     public var payoutAmount: Double?
+    public var orderBillAmount: Double?
+    public var orderCreatedAt: String?
 
     public init(
         deliveryId: String,
@@ -280,7 +304,9 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
         routePolyline: String? = nil,
         codReconciled: Bool = false,
         codCollectedAmount: Double? = nil,
-        payoutAmount: Double? = nil
+        payoutAmount: Double? = nil,
+        orderBillAmount: Double? = nil,
+        orderCreatedAt: String? = nil
     ) {
         self.deliveryId = deliveryId
         self.orderId = orderId
@@ -301,6 +327,8 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
         self.codReconciled = codReconciled
         self.codCollectedAmount = codCollectedAmount
         self.payoutAmount = payoutAmount
+        self.orderBillAmount = orderBillAmount
+        self.orderCreatedAt = orderCreatedAt
     }
 
     enum SessionCodingKeys: String, CodingKey {
@@ -336,6 +364,12 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
         case codCollectedAmount = "cod_collected_amount"
         case payoutAmount = "payout_amount"
         case payout
+        case orderBillAmount = "order_bill_amount"
+        case orderBillAmountCamel = "orderBillAmount"
+        case orderTotal = "order_total"
+        case totalAmount = "total_amount"
+        case orderCreatedAt = "order_created_at"
+        case createdAt = "created_at"
     }
 
     public init(from decoder: Decoder) throws {
@@ -394,10 +428,19 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
         self.codReconciled = (try? container.decode(Bool.self, forKey: .codReconciled)) ?? false
         self.codCollectedAmount = try? container.decode(Double.self, forKey: .codCollectedAmount)
 
+        var resolvedBill: Double? = try? container.decode(Double.self, forKey: .totalAmount)
+        if resolvedBill == nil { resolvedBill = try? container.decode(Double.self, forKey: .orderTotal) }
+        if resolvedBill == nil { resolvedBill = try? container.decode(Double.self, forKey: .orderBillAmount) }
+        if resolvedBill == nil { resolvedBill = try? container.decode(Double.self, forKey: .orderBillAmountCamel) }
+        self.orderBillAmount = resolvedBill ?? codAmt
+
+        self.orderCreatedAt = (try? container.decode(String.self, forKey: .orderCreatedAt))
+            ?? (try? container.decode(String.self, forKey: .createdAt))
+
         var payout: Double? = try? container.decode(Double.self, forKey: .payoutAmount)
         if payout == nil { payout = try? container.decode(Double.self, forKey: .payout) }
         if payout == nil, let s = try? container.decode(String.self, forKey: .payout) { payout = Double(s) }
-        self.payoutAmount = payout ?? 35.0
+        self.payoutAmount = payout ?? self.orderBillAmount ?? 0.0
     }
 
     public func encode(to encoder: Encoder) throws {

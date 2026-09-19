@@ -3045,6 +3045,8 @@ const server = http.createServer(async (req, res) => {
         tax_amount: Number(order.tax_amount || order.taxAmount || 0),
         deliveryFee: Number(order.delivery_fee || order.deliveryFee || 0),
         delivery_fee: Number(order.delivery_fee || order.deliveryFee || 0),
+        handlingFee: 5.0,
+        handling_fee: 5.0,
         paymentMethod: order.payment_method || order.paymentMethod || 'COD',
         payment_method: order.payment_method || order.paymentMethod || 'COD',
         paymentStatus: order.payment_status || order.paymentStatus || 'COD_PENDING',
@@ -3065,45 +3067,60 @@ const server = http.createServer(async (req, res) => {
       let deliverySession = null;
       let rider = null;
       let telemetry = null;
-      if (pool && !isLocalMode) {
+      if (appRepositories && appRepositories.deliveryRepo) {
+        try {
+          if (appRepositories.deliveryRepo.findSessionById) {
+            deliverySession = await appRepositories.deliveryRepo.findSessionById(orderId);
+          } else if (appRepositories.deliveryRepo.getDeliveryByOrderId) {
+            deliverySession = await appRepositories.deliveryRepo.getDeliveryByOrderId(orderId);
+          }
+        } catch (_) {}
+      }
+      if (!deliverySession && pool && !isLocalMode) {
         try {
           const dsRes = await pool.query(
             `SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1 ORDER BY created_at DESC LIMIT 1`,
             [orderId]
           );
           deliverySession = dsRes.rows[0] || null;
-          if (deliverySession) {
-            const rId = deliverySession.rider_id;
-            if (rId) {
-              const rRes = await pool.query(
-                `SELECT rider_id, full_name, phone, vehicle_number as vehicle, status FROM riders WHERE rider_id = $1 OR id = $1`,
-                [rId]
-              );
-              if (rRes.rows.length > 0) {
-                rider = {
-                  riderId: rRes.rows[0].rider_id,
-                  name: rRes.rows[0].full_name || deliverySession.rider_name || 'Assigned Delivery Partner',
-                  phone: rRes.rows[0].phone || deliverySession.rider_phone || '',
-                  vehicle: rRes.rows[0].vehicle || deliverySession.rider_vehicle || 'Delivery Vehicle'
-                };
-              }
-            }
-            if (!rider && (deliverySession.rider_name || deliverySession.rider_id)) {
+        } catch (_) {}
+      }
+      if (deliverySession) {
+        const rId = deliverySession.rider_id || deliverySession.riderId;
+        if (rId && pool && !isLocalMode) {
+          try {
+            const rRes = await pool.query(
+              `SELECT rider_id, full_name, phone, vehicle_number as vehicle, status FROM riders WHERE rider_id = $1 OR id = $1`,
+              [rId]
+            );
+            if (rRes.rows.length > 0) {
               rider = {
-                riderId: deliverySession.rider_id || 'rdr_assigned',
-                name: deliverySession.rider_name || 'Assigned Delivery Partner',
-                phone: deliverySession.rider_phone || '',
-                vehicle: deliverySession.rider_vehicle || 'Delivery Vehicle'
+                riderId: rRes.rows[0].rider_id,
+                name: rRes.rows[0].full_name || deliverySession.rider_name || deliverySession.riderName || 'Assigned Delivery Partner',
+                phone: rRes.rows[0].phone || deliverySession.rider_phone || deliverySession.riderPhone || '',
+                vehicle: rRes.rows[0].vehicle || deliverySession.rider_vehicle || deliverySession.riderVehicle || 'Delivery Vehicle'
               };
             }
-            if (appRepositories && appRepositories.telemetryRepo) {
-              telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliverySession.delivery_id);
-            }
-            if (!telemetry && deliverySession.rider_id && appRepositories && appRepositories.presenceRepo) {
-              telemetry = await appRepositories.presenceRepo.getPresence(deliverySession.rider_id);
-            }
+          } catch (_) {}
+        }
+        if (!rider && (deliverySession.rider_name || deliverySession.riderName || deliverySession.rider_id || deliverySession.riderId)) {
+          rider = {
+            riderId: deliverySession.rider_id || deliverySession.riderId || 'rdr_assigned',
+            name: deliverySession.rider_name || deliverySession.riderName || 'Assigned Delivery Partner',
+            phone: deliverySession.rider_phone || deliverySession.riderPhone || '',
+            vehicle: deliverySession.rider_vehicle || deliverySession.riderVehicle || 'Delivery Vehicle'
+          };
+        }
+        const delId = deliverySession.delivery_id || deliverySession.deliveryId || orderId;
+        if (appRepositories && appRepositories.telemetryRepo) {
+          telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(delId);
+          if (!telemetry && rId && appRepositories.telemetryRepo.getLatestTelemetryForRider) {
+            telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForRider(rId);
           }
-        } catch (_) {}
+        }
+        if (!telemetry && rId && appRepositories && appRepositories.presenceRepo) {
+          telemetry = await appRepositories.presenceRepo.getPresence(rId);
+        }
       }
 
       const rName = deliverySession?.rider_name || (rider && rider.name) || null;
@@ -4161,7 +4178,7 @@ const server = http.createServer(async (req, res) => {
 
       try {
         const offRes = await pool.query(
-          `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount, ord.is_cod, ord.store_id,
+          `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount, ord.is_cod, ord.store_id, ord.created_at AS order_created_at,
                   s.store_name, s.address AS store_address, s.latitude AS store_lat, s.longitude AS store_lng
            FROM offers o
            LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
@@ -4177,7 +4194,8 @@ const server = http.createServer(async (req, res) => {
           const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
           const customerAddrStr = addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Delivery Address');
           const expMs = Number(o.offer_expires_at) || (now + 1800000);
-          const payoutVal = Number(o.earnings_amount || o.total_earnings || 35);
+          const ordTotal = Number(o.total_amount || 0);
+          const billVal = ordTotal > 0 ? ordTotal : Number(o.earnings_amount || o.total_earnings || 0);
           return {
             id: o.offer_id || o.id,
             offerId: o.offer_id || o.id,
@@ -4186,10 +4204,14 @@ const server = http.createServer(async (req, res) => {
             riderId: o.rider_id || riderId,
             status: o.status,
             orderStatus: o.order_status || 'READY_FOR_PICKUP',
-            payout: payoutVal,
-            payoutAmount: payoutVal,
-            earningsAmount: payoutVal,
-            payoutFormatted: `₹${payoutVal}`,
+            orderTotal: ordTotal,
+            totalAmount: ordTotal,
+            orderBillAmount: ordTotal,
+            orderCreatedAt: o.order_created_at || o.created_at,
+            payout: billVal,
+            payoutAmount: billVal,
+            earningsAmount: billVal,
+            payoutFormatted: `₹${billVal.toFixed(2)}`,
             pickupAddress: o.store_name || 'Fulfillment Hub',
             deliveryAddress: customerAddrStr,
             customerName: addr.contactName || 'Customer',
@@ -5008,11 +5030,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to view tracking for this delivery.' });
       }
 
-      const deliveryId = delivery.delivery_id || delivery.id;
-      const telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
+      const deliveryId = delivery.delivery_id || delivery.deliveryId || delivery.id;
+      const rId = delivery.rider_id || delivery.riderId;
+      let telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
+      if (!telemetry && rId && appRepositories.telemetryRepo.getLatestTelemetryForRider) {
+        telemetry = await appRepositories.telemetryRepo.getLatestTelemetryForRider(rId);
+      }
       let fallbackPresence = null;
-      if (!telemetry && delivery.rider_id && appRepositories.presenceRepo) {
-        fallbackPresence = await appRepositories.presenceRepo.getPresence(delivery.rider_id);
+      if (!telemetry && rId && appRepositories.presenceRepo) {
+        fallbackPresence = await appRepositories.presenceRepo.getPresence(rId);
       }
 
       let waypoints = delivery.waypoints ? (typeof delivery.waypoints === 'string' ? JSON.parse(delivery.waypoints) : delivery.waypoints) : [];
@@ -5041,8 +5067,10 @@ const server = http.createServer(async (req, res) => {
       activeTrackingDto.orderId = delivery.order_id || delivery.id;
       activeTrackingDto.etaMinutes = activeTrackingDto.estimatedArrivalMins;
       activeTrackingDto.estimatedMinutes = activeTrackingDto.estimatedArrivalMins || 0;
-      activeTrackingDto.riderLat = activeTrackingDto.liveRiderTelemetry?.latitude ?? delivery.rider_lat ?? null;
-      activeTrackingDto.riderLng = activeTrackingDto.liveRiderTelemetry?.longitude ?? delivery.rider_lng ?? null;
+      const fallbackLat = delivery.rider_lat ?? delivery.current_lat ?? delivery.riderLat ?? delivery.currentLat ?? null;
+      const fallbackLng = delivery.rider_lng ?? delivery.current_lng ?? delivery.riderLng ?? delivery.currentLng ?? null;
+      activeTrackingDto.riderLat = activeTrackingDto.liveRiderTelemetry?.latitude ?? fallbackLat;
+      activeTrackingDto.riderLng = activeTrackingDto.liveRiderTelemetry?.longitude ?? fallbackLng;
       activeTrackingDto.riderBearing = activeTrackingDto.liveRiderTelemetry?.heading ?? delivery.rider_heading ?? delivery.heading ?? 0;
       activeTrackingDto.riderHeading = activeTrackingDto.riderBearing;
       activeTrackingDto.speedKmh = activeTrackingDto.liveRiderTelemetry?.speedKmh ?? delivery.speed_kmh ?? 0;

@@ -97,8 +97,8 @@ public final class TurnByTurnVoiceNotifier: NSObject, ObservableObject, AVSpeech
         speak(text: text, priority: .urgent)
     }
     
-    public func announceDeliveryCompleted(earnings: Double) {
-        let text = "Delivery successfully confirmed. \(Int(earnings)) rupees credited to your wallet. Ready for next ride."
+    public func announceDeliveryCompleted(earnings: Double = 0) {
+        let text = "Delivery successfully confirmed. Ready for next ride."
         speak(text: text, priority: .normal)
     }
     

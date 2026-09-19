@@ -172,33 +172,42 @@ public struct ActiveDeliveryScreen: View {
                     }
                     .padding(.horizontal)
                     
-                    if !isEnRouteToStore && (session.isCod || (session.codAmountToCollect ?? 0) > 0) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "banknote.fill")
-                                .font(.system(size: 20))
-                                .foregroundColor(RiderTheme.Colors.safetyYellow)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("CASH TO COLLECT (COD)")
+                    // Order Bill Summary & Payment Mode Card
+                    HStack(spacing: 10) {
+                        let isCodOrder = session.isCod || (session.codAmountToCollect ?? 0) > 0
+                        let billTotal = session.orderBillAmount ?? session.codAmountToCollect ?? session.payoutAmount ?? 60.0
+                        Image(systemName: isCodOrder ? "banknote.fill" : "checkmark.seal.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(isCodOrder ? RiderTheme.Colors.safetyYellow : RiderTheme.Colors.safetyGreen)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(isCodOrder ? "CASH ON DELIVERY (COLLECT)" : "PAID ONLINE (DO NOT COLLECT)")
                                     .font(.system(size: 11, weight: .black))
-                                    .foregroundColor(RiderTheme.Colors.safetyYellow)
-                                Text("₹\(String(format: "%.2f", session.codAmountToCollect ?? 0))")
+                                    .foregroundColor(isCodOrder ? RiderTheme.Colors.safetyYellow : RiderTheme.Colors.safetyGreen)
+                                Spacer()
+                                Text("BILL TOTAL")
+                                    .font(.system(size: 9, weight: .black))
+                                    .foregroundColor(Color(hex: "94A3B8"))
+                            }
+                            
+                            HStack {
+                                Text("₹\(String(format: "%.2f", billTotal))")
                                     .font(.system(size: 18, weight: .black))
                                     .foregroundColor(.white)
+                                Spacer()
+                                if let time = session.orderCreatedAt {
+                                    Text(String(time.prefix(19)).replacingOccurrences(of: "T", with: " "))
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(Color(hex: "94A3B8"))
+                                }
                             }
-                            Spacer()
-                            Text("COLLECT CASH")
-                                .font(.system(size: 9, weight: .black))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(RiderTheme.Colors.safetyYellow.opacity(0.2))
-                                .foregroundColor(RiderTheme.Colors.safetyYellow)
-                                .cornerRadius(4)
                         }
-                        .padding(12)
-                        .background(Color(hex: "1E293B"))
-                        .cornerRadius(10)
-                        .padding(.horizontal)
                     }
+                    .padding(12)
+                    .background(Color(hex: "1E293B"))
+                    .cornerRadius(10)
+                    .padding(.horizontal)
                     
                     // Action Trigger Button based on stage
                     Button(action: handleStageAction) {
@@ -223,7 +232,7 @@ public struct ActiveDeliveryScreen: View {
                 DeliveryCompletionCelebrationView(
                     orderId: orderId,
                     customerName: completedCustomerName,
-                    payoutFormatted: "₹65.00",
+                    payoutFormatted: (completedCodAmount != nil && (completedCodAmount ?? 0) > 0) ? "₹\(String(format: "%.2f", completedCodAmount!))" : "₹60.00",
                     isCod: completedIsCod,
                     codAmount: completedCodAmount,
                     onDismiss: {

@@ -46,18 +46,18 @@ public final class RiderTelemetryStreamer: ObservableObject {
         self.lastTransmissionTime = Date.distantPast
 
         keepaliveTimer?.invalidate()
-        DispatchQueue.main.async {
-            self.keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+        DispatchQueue.main.async { [weak self] in
+            self?.keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
                 guard let self = self, self.isStreaming, let delId = self.activeDeliveryId else { return }
                 if Date().timeIntervalSince(self.lastTransmissionTime) >= 2.5 {
-                    if let loc = self.lastRecordedLocation ?? RiderBackgroundLocationManager.shared.lastLocation {
+                    if let loc = self.lastRecordedLocation ?? RiderBackgroundLocationManager.shared.currentLocation {
                         self.transmitTelemetry(loc, deliveryId: delId, isDeadReckoned: false)
                     }
                 }
             }
         }
 
-        if let loc = RiderBackgroundLocationManager.shared.lastLocation {
+        if let loc = RiderBackgroundLocationManager.shared.currentLocation {
             processLocationUpdate(loc)
         }
     }
@@ -110,17 +110,6 @@ public final class RiderTelemetryStreamer: ObservableObject {
         let speedKmh = max(0, location.speed * 3.6)
         let bearing = location.course >= 0 ? location.course : 0.0
         let battery = UIDevice.current.batteryLevel
-        
-        let point = StreamedTelemetryPoint(
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            speedKmh: speedKmh,
-            bearing: bearing,
-            accuracyMeters: location.horizontalAccuracy,
-            batteryLevel: battery,
-            timestamp: Date(),
-            isDeadReckoned: isDeadReckoned
-        )
         
         // Push into telemetry buffer for resilient batch delivery
         RiderTelemetryBuffer.shared.record(

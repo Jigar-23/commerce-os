@@ -24,6 +24,7 @@ public struct OrderTrackingScreen: View {
     @State private var pulseAlpha: Double = 0.5
     @State private var toastMessage: String? = nil
     @State private var pollingTask: Task<Void, Never>? = nil
+    @State private var lastKnownRiderCoordinate: CLLocationCoordinate2D? = nil
     
     public init(orderId: String? = nil, onBack: (() -> Void)? = nil) {
         self.orderId = orderId
@@ -275,6 +276,9 @@ public struct OrderTrackingScreen: View {
                 deliveryOtp: update.deliveryOtp ?? self.trackingData?.deliveryOtp ?? self.orderDetail?.deliveryOtp
             )
             self.trackingData = updatedDto
+            if let lat = updatedDto.riderLat, let lng = updatedDto.riderLng, lat != 0.0, lng != 0.0 {
+                self.lastKnownRiderCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            }
             self.updateLiveActivity(with: updatedDto)
             self.resolveRoadRouteIfNeeded(for: updatedDto)
         }
@@ -563,7 +567,9 @@ public struct OrderTrackingScreen: View {
     // MARK: - Assigned Partner Card (🛵 Icon + Call Button)
     private var assignedPartnerCard: some View {
         let riderName = trackingData?.riderName ?? orderDetail?.riderName ?? "Assigned Delivery Partner"
-        let riderPhone = trackingData?.riderPhone ?? orderDetail?.riderPhone ?? ""
+        let riderPhone = (trackingData?.riderPhone?.isEmpty == false ? trackingData?.riderPhone : nil)
+            ?? (orderDetail?.riderPhone?.isEmpty == false ? orderDetail?.riderPhone : nil)
+            ?? "+91 98179 16180"
         let riderVehicle = orderDetail?.riderVehicle ?? "Electric Delivery Scooter"
         
         return HStack(alignment: .center, spacing: 12) {
@@ -594,24 +600,20 @@ public struct OrderTrackingScreen: View {
             
             Spacer()
             
-            if !riderPhone.isEmpty {
-                Button(action: {
-                    if let url = URL(string: "tel://\(riderPhone.replacingOccurrences(of: " ", with: ""))") {
-                        UIApplication.shared.open(url)
-                    }
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "phone.fill")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Call")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color(hex: "059669"))
-                    .cornerRadius(10)
+            Button(action: {
+                initiateCallToRider(phone: riderPhone)
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Call")
+                        .font(.system(size: 12, weight: .bold))
                 }
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color(hex: "059669"))
+                .cornerRadius(10)
             }
         }
         .padding(16)
@@ -941,9 +943,10 @@ public struct OrderTrackingScreen: View {
     // MARK: - Bill Summary & Payment Breakdown
     private var billSummaryCard: some View {
         let itemSubtotal = items.reduce(0.0) { $0 + ($1.effectivePrice * Double($1.quantity)) }
-        let effectiveDeliveryFee = orderDetail?.deliveryFee ?? (itemSubtotal >= 199.0 ? 0.0 : 2.0)
+        let effectiveDeliveryFee = orderDetail?.deliveryFee ?? (itemSubtotal > 300.0 ? 0.0 : 25.0)
         let isFreeDelivery = effectiveDeliveryFee <= 0.0
-        let totalAmt = orderDetail?.totalAmount ?? (itemSubtotal + (isFreeDelivery ? 0.0 : effectiveDeliveryFee))
+        let handlingFee = 5.0
+        let totalAmt = orderDetail?.totalAmount ?? (itemSubtotal + (isFreeDelivery ? 0.0 : effectiveDeliveryFee) + handlingFee)
         let isCod = (orderDetail?.paymentMethod?.uppercased() == "COD") || (orderDetail?.paymentMethod == nil)
         
         return VStack(alignment: .leading, spacing: 10) {
@@ -970,19 +973,29 @@ public struct OrderTrackingScreen: View {
                     .font(.system(size: 13))
                     .foregroundColor(Color(hex: "64748B"))
                 Spacer()
-                Text("₹\(Int(itemSubtotal))")
+                Text("₹\(String(format: "%.2f", itemSubtotal))")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(Color(hex: "0F172A"))
             }
             
             HStack {
-                Text("Delivery Partner Fee")
+                Text("10-Min Express Delivery Fee")
                     .font(.system(size: 13))
                     .foregroundColor(Color(hex: "64748B"))
                 Spacer()
-                Text(isFreeDelivery ? "FREE" : "₹\(Int(effectiveDeliveryFee))")
+                Text(isFreeDelivery ? "FREE" : "₹\(String(format: "%.2f", effectiveDeliveryFee))")
                     .font(.system(size: 13, weight: isFreeDelivery ? .bold : .medium))
                     .foregroundColor(isFreeDelivery ? Color(hex: "059669") : Color(hex: "0F172A"))
+            }
+            
+            HStack {
+                Text("Handling & Packaging Fee")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(hex: "64748B"))
+                Spacer()
+                Text("₹\(String(format: "%.2f", handlingFee))")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color(hex: "0F172A"))
             }
             
             Divider().background(Color(hex: "F1F5F9"))
@@ -992,9 +1005,9 @@ public struct OrderTrackingScreen: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(Color(hex: "0F172A"))
                 Spacer()
-                Text("₹\(Int(totalAmt))")
+                Text("₹\(String(format: "%.2f", totalAmt))")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(hex: "0F172A"))
+                    .foregroundColor(Color(hex: "059669"))
             }
         }
         .padding(16)
@@ -1177,17 +1190,22 @@ public struct OrderTrackingScreen: View {
     private var resolvedRiderCoordinate: CLLocationCoordinate2D? {
         let st = (trackingData?.status ?? orderDetail?.orderStatus ?? orderDetail?.status ?? "").uppercased()
         let activeRiderStatuses = [
-            "RIDER_ASSIGNED", "ACCEPTED", "HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED",
+            "RIDER_ASSIGNED", "ACCEPTED", "RIDER_ACCEPTED", "HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED",
             "DISPATCHED", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
         ]
         guard activeRiderStatuses.contains(st) || hasAssignedRider else {
             return nil
         }
         if let lat = trackingData?.riderLat, let lng = trackingData?.riderLng, lat != 0.0, lng != 0.0 {
-            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            return coord
         }
         if let lat = orderDetail?.riderLat, let lng = orderDetail?.riderLng, lat != 0.0, lng != 0.0 {
-            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            return coord
+        }
+        if let last = lastKnownRiderCoordinate {
+            return last
         }
         if hasAssignedRider, let mCoord = resolvedMerchantCoordinate {
             return CLLocationCoordinate2D(latitude: mCoord.latitude - 0.002, longitude: mCoord.longitude - 0.002)
@@ -1217,6 +1235,33 @@ public struct OrderTrackingScreen: View {
         copiedOrderId = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             copiedOrderId = false
+        }
+    }
+    
+    private func initiateCallToRider(phone: String) {
+        let clean = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        let dialPhone = phone.hasPrefix("+") ? "+\(clean)" : clean
+        
+        // 1. Always copy number to system pasteboard so user has instant access on any iPad/iPhone
+        UIPasteboard.general.string = dialPhone
+        
+        // 2. Try native telephone URL
+        let telUrl = URL(string: "tel://\(clean)")
+        let facetimeAudioUrl = URL(string: "facetime-audio://\(clean)")
+        
+        if let tUrl = telUrl, UIApplication.shared.canOpenURL(tUrl) {
+            UIApplication.shared.open(tUrl, options: [:], completionHandler: nil)
+        } else if let ftUrl = facetimeAudioUrl, UIApplication.shared.canOpenURL(ftUrl) {
+            UIApplication.shared.open(ftUrl, options: [:], completionHandler: nil)
+            toastMessage = "Calling \(phone) via FaceTime..."
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                self.toastMessage = nil
+            }
+        } else {
+            toastMessage = "Copied \(phone) to clipboard"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                self.toastMessage = nil
+            }
         }
     }
     
@@ -1256,6 +1301,9 @@ public struct OrderTrackingScreen: View {
                 if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: true) {
                     await MainActor.run {
                         self.orderDetail = fresh
+                        if let lat = fresh.riderLat, let lng = fresh.riderLng, lat != 0.0, lng != 0.0 {
+                            self.lastKnownRiderCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                        }
                     }
                     let s = fresh.status.uppercased()
                     if s == "DELIVERED" || s == "CANCELLED" {
@@ -1278,7 +1326,7 @@ public struct OrderTrackingScreen: View {
         }
         
         let st = (data.status ?? "").uppercased()
-        let isHeadingToStore = ["HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED"].contains(st)
+        let isHeadingToStore = ["HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED", "ACCEPTED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"].contains(st)
         let isPostPickup = ["DISPATCHED", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"].contains(st)
         
         guard isHeadingToStore || isPostPickup else {
@@ -1301,7 +1349,7 @@ public struct OrderTrackingScreen: View {
         }
         
         let st = (data.status ?? "").uppercased()
-        let isHeadingToStore = ["HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED"].contains(st)
+        let isHeadingToStore = ["HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED", "ACCEPTED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"].contains(st)
         let isPostPickup = ["DISPATCHED", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"].contains(st)
         
         guard isHeadingToStore || isPostPickup else {
@@ -1320,10 +1368,12 @@ public struct OrderTrackingScreen: View {
                 if let mLat = data.merchantLat, let mLng = data.merchantLng, mLat != 0.0 {
                     return CLLocationCoordinate2D(latitude: mLat, longitude: mLng)
                 }
+                return resolvedMerchantCoordinate
             } else if isPostPickup {
                 if let cLat = data.customerLat, let cLng = data.customerLng, cLat != 0.0 {
                     return CLLocationCoordinate2D(latitude: cLat, longitude: cLng)
                 }
+                return resolvedCustomerCoordinate
             }
             return nil
         }()

@@ -2968,6 +2968,16 @@ class TransactionalDeliveryRepository {
         };
       }
 
+      if (newState === 'DELIVERED' && !metadata.otpVerified) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 400,
+          error: 'OTP_AND_COD_REQUIRED',
+          message: 'DELIVERED state requires completeDeliveryWithOtp verification.'
+        };
+      }
+
       await client.query(
         `UPDATE delivery_sessions 
          SET state = $1, otp_verified = COALESCE($2, otp_verified), updated_at = NOW()
@@ -3524,7 +3534,8 @@ class TransactionalOrderRepository {
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,
         distanceKm,
-        isCod
+        isCod,
+        tip: data.tip || data.selectedTip || 0
       });
       const deliveryFee = pricingResult.deliveryFee;
       const taxAmount = pricingResult.taxAmount;

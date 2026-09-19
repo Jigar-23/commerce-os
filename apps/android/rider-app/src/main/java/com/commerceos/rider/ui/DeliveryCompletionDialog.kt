@@ -76,9 +76,9 @@ fun DeliveryCompletionDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Earnings Credited:", fontSize = 13.sp, color = Color(0xFF94A3B8))
+                            Text("Order Bill:", fontSize = 13.sp, color = Color(0xFF94A3B8))
                             Text(
-                                text = session.payoutFormatted ?: "₹35",
+                                text = session.payoutFormatted ?: (session.codAmount?.let { "₹${it.toInt()}" } ?: "₹60"),
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF10B981)

@@ -52,10 +52,10 @@ public struct DeliveryCompletionCelebrationView: View {
                         .foregroundColor(Color(hex: "94A3B8"))
                 }
                 
-                // Earnings Breakdown Card
+                // Order Bill Summary Card
                 VStack(spacing: 12) {
                     HStack {
-                        Text("Earnings Credited:")
+                        Text("Order Bill:")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(Color(hex: "94A3B8"))
                         Spacer()

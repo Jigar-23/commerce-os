@@ -12,6 +12,10 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
 
     public var activeDeliveryId: String? = nil
 
+    public var currentLocation: CLLocation? {
+        return lastLocation ?? locationManager.location
+    }
+
     private let locationManager = CLLocationManager()
 
     public override init() {

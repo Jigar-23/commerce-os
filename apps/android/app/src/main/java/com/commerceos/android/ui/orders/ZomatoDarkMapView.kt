@@ -362,13 +362,16 @@ private fun generateBlinkitGradeDarkMapHtml(
             pointer-events: none;
         }
         .biker-rotator {
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 60px;
             height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            pointer-events: none;
         }
         .biker-headlight {
             position: absolute;
@@ -409,6 +412,7 @@ private fun generateBlinkitGradeDarkMapHtml(
             align-items: center;
             justify-content: center;
             box-shadow: 0 6px 18px rgba(0, 245, 212, 0.7), 0 2px 6px rgba(0, 0, 0, 0.9);
+            z-index: 2;
         }
         .biker-core-puck svg {
             width: 19px;
@@ -579,9 +583,10 @@ private fun generateBlinkitGradeDarkMapHtml(
                 var markerHtml = '<div class="biker-anchor">' +
                                  '<div class="biker-rotator" style="transform: rotate(' + rot + 'deg);">' +
                                  '<div class="biker-headlight"></div>' +
+                                 '</div>' +
                                  (rider.isStale ? '' : '<div class="biker-pulse-primary"></div><div class="biker-pulse-secondary"></div>') +
                                  '<div class="biker-core-puck">' + bikeSvg + '</div>' +
-                                 '</div></div>';
+                                 '</div>';
                 var bikerIcon = L.divIcon({ className: '', html: markerHtml, iconSize: [60, 60], iconAnchor: [30, 30] });
                 riderMarker = L.marker([rider.lat, rider.lng], { icon: bikerIcon }).addTo(map);
                 currentMarkerHeading = rot;

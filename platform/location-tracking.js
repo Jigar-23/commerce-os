@@ -200,8 +200,10 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     mapMatched = mapMatchRiderToRoute(telemetry.latitude, telemetry.longitude, activeWaypoints);
   }
 
-  const riderCurrentLat = isAssigned ? mapMatched.snappedLat : null;
-  const riderCurrentLng = isAssigned ? mapMatched.snappedLng : null;
+  const sessionRiderLat = Number(session.current_lat || session.currentLat || session.rider_lat || session.riderLat || 0) || null;
+  const sessionRiderLng = Number(session.current_lng || session.currentLng || session.rider_lng || session.riderLng || 0) || null;
+  const riderCurrentLat = isAssigned ? (mapMatched.snappedLat || sessionRiderLat) : null;
+  const riderCurrentLng = isAssigned ? (mapMatched.snappedLng || sessionRiderLng) : null;
 
   const distToCustomerKm = (riderCurrentLat != null && cLat != null) ? haversineDistanceKm(riderCurrentLat, riderCurrentLng, cLat, cLng) : null;
   const distToStoreKm = (riderCurrentLat != null && mLat != null) ? haversineDistanceKm(riderCurrentLat, riderCurrentLng, mLat, mLng) : null;

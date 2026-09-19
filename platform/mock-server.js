@@ -937,12 +937,22 @@ const globalOrderOtpCache = global.globalOrderOtpCache || (global.globalOrderOtp
 
 function getOrderDeliveryOtp(orderOrSession) {
   if (!orderOrSession) return null;
-  const orderId = orderOrSession.orderId || orderOrSession.order_id || orderOrSession.id || orderOrSession.deliveryId || orderOrSession.delivery_id;
+  const oid = orderOrSession.orderId || orderOrSession.order_id;
+  const did = orderOrSession.deliveryId || orderOrSession.delivery_id;
+  const orderId = oid || did || orderOrSession.id;
   const existingOtp = orderOrSession.deliveryOtp || orderOrSession.delivery_otp || orderOrSession.otp || orderOrSession.secretOtp;
   if (existingOtp && String(existingOtp).trim() !== '4829' && String(existingOtp).trim() !== '123456') {
     const cleanPin = String(existingOtp).trim();
+    if (oid) globalOrderOtpCache.set(String(oid).trim(), cleanPin);
+    if (did) globalOrderOtpCache.set(String(did).trim(), cleanPin);
     if (orderId) globalOrderOtpCache.set(String(orderId).trim(), cleanPin);
     return cleanPin;
+  }
+  if (oid && globalOrderOtpCache.has(String(oid).trim())) {
+    return globalOrderOtpCache.get(String(oid).trim());
+  }
+  if (did && globalOrderOtpCache.has(String(did).trim())) {
+    return globalOrderOtpCache.get(String(did).trim());
   }
   if (orderId && globalOrderOtpCache.has(String(orderId).trim())) {
     return globalOrderOtpCache.get(String(orderId).trim());
@@ -950,10 +960,13 @@ function getOrderDeliveryOtp(orderOrSession) {
   if (!orderId) {
     return String(Math.floor(1000 + Math.random() * 9000));
   }
-  // Cryptographically deterministic 4-digit PIN unique to this specific orderId
-  const hash = crypto.createHash('sha256').update(String(orderId).trim() + (process.env.COMMERCEOS_OTP_PEPPER || 'commerce_os_otp_pepper_seed')).digest('hex');
+  // Cryptographically deterministic 4-digit PIN unique to this specific order
+  const seed = String(oid || did || orderId).trim();
+  const hash = crypto.createHash('sha256').update(seed + (process.env.COMMERCEOS_OTP_PEPPER || 'commerce_os_otp_pepper_seed')).digest('hex');
   const uniquePin = String((parseInt(hash.slice(0, 8), 16) % 9000) + 1000);
-  globalOrderOtpCache.set(String(orderId).trim(), uniquePin);
+  if (oid) globalOrderOtpCache.set(String(oid).trim(), uniquePin);
+  if (did) globalOrderOtpCache.set(String(did).trim(), uniquePin);
+  if (orderId) globalOrderOtpCache.set(String(orderId).trim(), uniquePin);
   return uniquePin;
 }
 
@@ -6746,15 +6759,22 @@ async function handleRequest(port, req, res) {
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
         const body = await parseBody(req);
-        const submittedOtp = String(body.otp || '').trim();
+        const submittedOtp = String(body.otp ?? body.submittedOtp ?? body.enteredPin ?? body.pin ?? body.deliveryPin ?? '').trim();
 
-        // Valid OTP verification against session OTP or dynamic order OTP
-        const expectedOtp = session.otp || getOrderDeliveryOtp(session) || getOrderDeliveryOtp({ orderId: session.orderId });
-        const isValid = !expectedOtp || submittedOtp === String(expectedOtp).trim() || submittedOtp === '123456' || (submittedOtp.length >= 4 && submittedOtp.length <= 6);
+        // Strict OTP verification against session OTP or dynamic order OTP
+        const expectedOtp = session.otp || session.deliveryOtp || session.deliveryPin || getOrderDeliveryOtp(session) || getOrderDeliveryOtp({ orderId: session.orderId, deliveryId: session.deliveryId });
+        const cleanExpected = String(expectedOtp || '').trim();
+        const isValid = Boolean(cleanExpected && submittedOtp === cleanExpected);
         if (!isValid) {
           session.otpAttemptsLeft = Math.max(0, (session.otpAttemptsLeft || 3) - 1);
           saveDb();
-          return json(res, 400, { error: 'INVALID_OTP', message: `Incorrect delivery PIN. ${session.otpAttemptsLeft} attempts remaining.`, attemptsLeft: session.otpAttemptsLeft });
+          return json(res, 400, {
+            ok: false,
+            verified: false,
+            error: 'INVALID_OTP',
+            message: `Incorrect delivery PIN. Please ask customer to re-check the 4-digit PIN.`,
+            attemptsLeft: session.otpAttemptsLeft
+          });
         }
 
         session.state = 'DELIVERED';
@@ -6916,15 +6936,47 @@ async function handleRequest(port, req, res) {
         const session = await getOrFetchDeliverySession(completeMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
+        const body = await parseBody(req);
+        const submittedOtp = String(body.otp ?? body.submittedOtp ?? body.enteredPin ?? body.pin ?? body.deliveryPin ?? body.deliveryOtp ?? '').trim();
+
+        // Strict OTP PIN verification against session OTP or dynamic order OTP
+        const expectedOtp = session.otp || session.deliveryOtp || session.deliveryPin || getOrderDeliveryOtp(session) || getOrderDeliveryOtp({ orderId: session.orderId, deliveryId: session.deliveryId });
+        const cleanExpected = String(expectedOtp || '').trim();
+        const isOtpValid = Boolean(cleanExpected && submittedOtp === cleanExpected);
+
+        if (!isOtpValid) {
+          session.otpAttemptsLeft = Math.max(0, (session.otpAttemptsLeft || 3) - 1);
+          saveDb();
+          return json(res, 400, {
+            ok: false,
+            verified: false,
+            error: 'INVALID_OTP',
+            message: 'Invalid delivery PIN. Please ask customer to re-check the 4-digit PIN.',
+            attemptsLeft: session.otpAttemptsLeft
+          });
+        }
+
+        // Cash on Delivery Reconciliation
+        if (session.isCod) {
+          const cashCollected = body.cashCollected ?? body.cash_collected ?? body.collectedAmount;
+          if (cashCollected != null) {
+            session.codReconciled = true;
+            session.codCollectedAmount = Number(cashCollected);
+            session.codCollectedAt = nowIso();
+          }
+        }
+
         session.state = 'DELIVERED';
+        session.otpVerified = true;
         session.deliveredAt = nowIso();
         session.history = session.history || [];
-        session.history.push({ state: 'DELIVERED', timestamp: nowIso() });
+        session.history.push({ state: 'DELIVERED', verifiedByOtp: true, timestamp: nowIso() });
 
         const order = findOrder(session.orderId);
         if (order) {
           order.orderStatus = 'DELIVERED';
           order.status = 'DELIVERED';
+          order.otpVerifiedAt = nowIso();
           if (order.paymentMethod === 'COD') {
             order.paymentStatus = 'COD_COLLECTED';
           }
@@ -6940,14 +6992,14 @@ async function handleRequest(port, req, res) {
         saveDb();
 
         if (productionPgPool) {
-          productionPgPool.query(`UPDATE delivery_sessions SET state = 'DELIVERED', updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId]).catch(() => {});
+          productionPgPool.query(`UPDATE delivery_sessions SET state = 'DELIVERED', otp_verified = true, cod_reconciled = $2, cod_collected_amount = $3, updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId, session.codReconciled || false, session.codCollectedAmount || null]).catch(() => {});
           if (session.orderId) {
-            productionPgPool.query(`UPDATE orders SET status = 'DELIVERED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId]).catch(() => {});
+            productionPgPool.query(`UPDATE orders SET status = 'DELIVERED', payment_status = $2, otp_verified_at = NOW(), updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId, session.isCod ? 'COD_COLLECTED' : 'PAID']).catch(() => {});
           }
         }
 
         broadcastDeliveryEvent(session.deliveryId, 'DELIVERED', session);
-        return json(res, 200, { ok: true, session: buildRiderDeliveryDTO(session), order });
+        return json(res, 200, { ok: true, verified: true, session: buildRiderDeliveryDTO(session), order });
       }
 
       // POST /api/v1/delivery/rider/presence (Idle Rider Online Presence & Location)

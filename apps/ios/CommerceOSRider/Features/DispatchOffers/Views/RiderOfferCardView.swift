@@ -24,7 +24,7 @@ public struct RiderOfferCardView: View {
             }
             .frame(height: 6)
             
-            // Header: Payout & SLA
+            // Header: Order Bill & SLA
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("NEW DISPATCH OFFER")
@@ -32,11 +32,23 @@ public struct RiderOfferCardView: View {
                         .foregroundColor(RiderTheme.Colors.safetyYellow)
                     Text("10-Min Guaranteed Delivery")
                         .font(.system(size: 13, weight: .bold))
+                    if !offer.orderId.isEmpty {
+                        Text("ID: \(offer.orderId)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
-                Text("₹\(String(format: "%.0f", offer.payoutAmount))")
-                    .font(.system(size: 26, weight: .black))
-                    .foregroundColor(RiderTheme.Colors.safetyGreen)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("ORDER BILL")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundColor(RiderTheme.Colors.safetyYellow)
+                    let bill = offer.orderBillAmount ?? (offer.payoutAmount > 0 ? offer.payoutAmount : 60.0)
+                    Text("₹\(String(format: "%.2f", bill))")
+                        .font(.system(size: 20, weight: .black))
+                        .foregroundColor(RiderTheme.Colors.safetyGreen)
+                }
             }
             
             Divider()
@@ -140,6 +152,8 @@ public struct RiderOfferCardView: View {
                     pipeline.dismissActiveOffer(reason: "ACCEPTED")
                     container.sessionManager.activeSession = session
                     container.locationManager.activeDeliveryId = session.deliveryId
+                    container.locationManager.startBackgroundTracking()
+                    container.telemetryStreamer.startStreaming(deliveryId: session.deliveryId)
                     isProcessing = false
                 }
             } catch {
