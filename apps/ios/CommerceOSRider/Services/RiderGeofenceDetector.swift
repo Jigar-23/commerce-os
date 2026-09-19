@@ -77,6 +77,10 @@ public final class RiderGeofenceDetector: NSObject, ObservableObject, CLLocation
         }
     }
     
+    public func updateStage(_ stage: String) {
+        self.activeStage = stage
+    }
+    
     /// Evaluates current GPS location against 50m boundaries with high-precision distance checks
     public func updateLocation(_ location: CLLocation) {
         let isHeadingToStore = (activeStage == "ASSIGNED" || activeStage == "ARRIVED_MERCHANT")

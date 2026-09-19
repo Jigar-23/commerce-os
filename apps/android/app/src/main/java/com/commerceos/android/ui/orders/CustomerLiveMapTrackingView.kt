@@ -81,7 +81,8 @@ fun CustomerLiveMapTrackingView(
     )
     val isHeadingToStore = activeStage in listOf(
         "HEADING_TO_STORE", "ACCEPTED", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE",
-        "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "PACKED", "SELLER_ACCEPTED", "ASSIGNED"
+        "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_MERCHANT", "AT_STORE", "PACKED",
+        "SELLER_ACCEPTED", "ASSIGNED", "DISPATCHED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"
     )
     val isOrderPlaced = !isHeadingToCustomer && !isHeadingToStore
 

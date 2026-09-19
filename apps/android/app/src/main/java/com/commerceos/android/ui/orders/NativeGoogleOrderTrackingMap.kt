@@ -162,7 +162,8 @@ fun NativeGoogleOrderTrackingMap(
     )
     val isHeadingToStore = stageUpper in listOf(
         "HEADING_TO_STORE", "ACCEPTED", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE",
-        "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "PACKED", "SELLER_ACCEPTED", "ASSIGNED"
+        "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_MERCHANT", "AT_STORE", "PACKED",
+        "SELLER_ACCEPTED", "ASSIGNED", "DISPATCHED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"
     )
     val riderLatLng = remember(riderLat, riderLng, storeLatLng, isPostPickup) {
         if (riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0) {

@@ -28,6 +28,7 @@ public final class RiderTelemetryStreamer: ObservableObject {
     private var lastRecordedLocation: CLLocation? = nil
     private var lastTransmissionTime: Date = Date.distantPast
     private var keepaliveTimer: Timer? = nil
+    private var keepaliveTask: Task<Void, Never>? = nil
     
     private let minStationaryJitterDistanceMeters: CLLocationDistance = 3.0
     private let stationarySpeedThresholdMs: CLLocationSpeed = 1.0 // 3.6 km/h
@@ -46,10 +47,23 @@ public final class RiderTelemetryStreamer: ObservableObject {
         self.lastTransmissionTime = Date.distantPast
 
         keepaliveTimer?.invalidate()
-        DispatchQueue.main.async { [weak self] in
-            self?.keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-                guard let self = self, self.isStreaming, let delId = self.activeDeliveryId else { return }
-                if Date().timeIntervalSince(self.lastTransmissionTime) >= 2.5 {
+        let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
+            guard let self = self, self.isStreaming, let delId = self.activeDeliveryId else { return }
+            if Date().timeIntervalSince(self.lastTransmissionTime) >= 2.0 {
+                if let loc = self.lastRecordedLocation ?? RiderBackgroundLocationManager.shared.currentLocation {
+                    self.transmitTelemetry(loc, deliveryId: delId, isDeadReckoned: false)
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.keepaliveTimer = timer
+
+        keepaliveTask?.cancel()
+        keepaliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard let self = self, self.isStreaming, let delId = self.activeDeliveryId else { break }
+                if Date().timeIntervalSince(self.lastTransmissionTime) >= 2.0 {
                     if let loc = self.lastRecordedLocation ?? RiderBackgroundLocationManager.shared.currentLocation {
                         self.transmitTelemetry(loc, deliveryId: delId, isDeadReckoned: false)
                     }
@@ -66,22 +80,18 @@ public final class RiderTelemetryStreamer: ObservableObject {
     public func processLocationUpdate(_ location: CLLocation) {
         guard isStreaming, let deliveryId = activeDeliveryId else { return }
         
-        // 1. Accuracy Filter (allow up to 500m for iPads, indoor Wi-Fi, and stationary desk testing)
-        let effectiveLocation: CLLocation
-        if location.horizontalAccuracy < 0 || location.horizontalAccuracy > 500.0 {
-            // Apply fallback with normalized accuracy so iPad Wi-Fi doesn't drop packets
-            effectiveLocation = CLLocation(
-                coordinate: location.coordinate,
-                altitude: location.altitude,
-                horizontalAccuracy: 25.0,
-                verticalAccuracy: location.verticalAccuracy,
-                course: location.course,
-                speed: location.speed,
-                timestamp: location.timestamp
-            )
-        } else {
-            effectiveLocation = location
-        }
+        // 1. Accuracy Filter & Normalization (guaranteed iPad Wi-Fi compatibility, never exceeds backend bounds)
+        let rawAcc = location.horizontalAccuracy
+        let normalizedAccuracy = (rawAcc > 0 && rawAcc <= 65.0) ? rawAcc : 25.0
+        let effectiveLocation = CLLocation(
+            coordinate: location.coordinate,
+            altitude: location.altitude,
+            horizontalAccuracy: normalizedAccuracy,
+            verticalAccuracy: location.verticalAccuracy,
+            course: location.course,
+            speed: location.speed,
+            timestamp: location.timestamp
+        )
         
         let now = Date()
         let timeSinceLastTransmission = now.timeIntervalSince(lastTransmissionTime)
@@ -167,6 +177,8 @@ public final class RiderTelemetryStreamer: ObservableObject {
     }
     
     public func stopStreaming() {
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
         keepaliveTimer?.invalidate()
         keepaliveTimer = nil
         self.isStreaming = false

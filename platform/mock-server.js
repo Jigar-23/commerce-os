@@ -6658,6 +6658,16 @@ async function handleRequest(port, req, res) {
         session.history = session.history || [];
         session.history.push({ state: 'OUT_FOR_DELIVERY', timestamp: nowIso() });
 
+        // Update route waypoints to customer destination upon package pickup
+        if (session.merchantLat && session.merchantLng && session.customerLat && session.customerLng) {
+          const custRoute = await resolveAuthoritativeRoute(session.merchantLat, session.merchantLng, session.customerLat, session.customerLng);
+          if (custRoute && custRoute.ok) {
+            session.waypoints = custRoute.waypoints;
+            session.distanceKm = custRoute.distanceKm;
+            session.estimatedTimeMins = custRoute.durationMins;
+          }
+        }
+
         const order = findOrder(session.orderId);
         if (order) {
           order.orderStatus = 'OUT_FOR_DELIVERY';
@@ -6674,12 +6684,15 @@ async function handleRequest(port, req, res) {
         saveDb();
 
         if (productionPgPool) {
-          productionPgPool.query(`UPDATE delivery_sessions SET state = 'OUT_FOR_DELIVERY', updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId]).catch(() => {});
+          productionPgPool.query(`UPDATE delivery_sessions SET state = 'OUT_FOR_DELIVERY', waypoints = $2, updated_at = NOW() WHERE (delivery_id = $1 OR order_id = $1)`, [session.deliveryId, JSON.stringify(session.waypoints || [])]).catch(() => {});
           productionPgPool.query(`UPDATE orders SET status = 'OUT_FOR_DELIVERY', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId]).catch(() => {});
         }
 
         broadcastDeliveryEvent(session.deliveryId, 'OUT_FOR_DELIVERY', session);
-        return json(res, 200, { ok: true, session: buildRiderDeliveryDTO(session), order });
+        const customerDto = buildCustomerTrackingDTO(session);
+        if (session.deliveryId) broadcastDeliveryEvent(session.deliveryId, 'TELEMETRY_UPDATED', customerDto);
+        if (session.orderId) broadcastDeliveryEvent(session.orderId, 'TELEMETRY_UPDATED', customerDto);
+        return json(res, 200, { ok: true, session: buildRiderDeliveryDTO(session), order, customerDto });
       }
 
       // POST /api/v1/delivery/(session/)?:deliveryId/arrive-customer
@@ -7103,15 +7116,16 @@ async function handleRequest(port, req, res) {
         const lng = Number(body.longitude);
         const speed = Number(body.speedKmh || body.speed || 0);
         const heading = Number(body.heading || body.bearing || 0);
-        const accuracy = Number(body.accuracyMeters || body.accuracy || 10);
+        let accuracy = Number(body.accuracyMeters || body.accuracy || 10);
         const seq = Number(body.sequenceNumber || Date.now());
 
         if (isNaN(lat) || isNaN(lng)) {
           return json(res, 400, { error: 'INVALID_LOCATION', message: 'Latitude and longitude coordinates are strictly required.' });
         }
 
-        if (accuracy > 150.0) {
-          return json(res, 400, { error: 'LOW_ACCURACY_REJECTED', message: 'Accuracy > 150m rejected' });
+        if (accuracy > 500.0) {
+          // Normalize rather than dropping telemetry from iPad Wi-Fi / indoors
+          accuracy = 35.0;
         }
 
         const riderId = authenticatedRiderId;
@@ -7229,7 +7243,7 @@ async function handleRequest(port, req, res) {
           });
         }
 
-        const session = deliveryId ? (db.deliverySessions || {})[deliveryId] || Object.values(db.deliverySessions || {}).find(s => s.deliveryId === deliveryId || s.orderId === deliveryId) : null;
+        const session = deliveryId ? (await getOrFetchDeliverySession(deliveryId)) : null;
         const telemetryRecord = {
           latitude: lat,
           longitude: lng,

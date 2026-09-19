@@ -22,6 +22,7 @@ public struct ZomatoDarkMapView: View {
     public var riderBearing: Double = 0.0
     public var speedKmh: Double = 0.0
     public var merchantTitle: String = "Fulfillment Hub"
+    public var isHeadingToStore: Bool = true
 
     @State private var coordinator: GoogleOrderTrackingCoordinator?
 
@@ -32,7 +33,8 @@ public struct ZomatoDarkMapView: View {
         routeCoordinates: [CLLocationCoordinate2D] = [],
         riderBearing: Double = 0.0,
         speedKmh: Double = 0.0,
-        merchantTitle: String = "Fulfillment Hub"
+        merchantTitle: String = "Fulfillment Hub",
+        isHeadingToStore: Bool = true
     ) {
         self.riderCoordinate = riderCoordinate
         self.merchantCoordinate = merchantCoordinate
@@ -41,6 +43,7 @@ public struct ZomatoDarkMapView: View {
         self.riderBearing = riderBearing
         self.speedKmh = speedKmh
         self.merchantTitle = merchantTitle
+        self.isHeadingToStore = isHeadingToStore
     }
 
     public var body: some View {
@@ -52,6 +55,7 @@ public struct ZomatoDarkMapView: View {
                 routeCoordinates: routeCoordinates,
                 riderBearing: riderBearing,
                 speedKmh: speedKmh,
+                isHeadingToStore: isHeadingToStore,
                 onCoordinatorCreated: { coord in
                     self.coordinator = coord
                 }
@@ -87,6 +91,7 @@ struct GoogleOrderTrackingWebView: UIViewRepresentable {
     let routeCoordinates: [CLLocationCoordinate2D]
     let riderBearing: Double
     let speedKmh: Double
+    let isHeadingToStore: Bool
     let onCoordinatorCreated: (GoogleOrderTrackingCoordinator) -> Void
 
     func makeUIView(context: Context) -> WKWebView {
@@ -120,7 +125,8 @@ struct GoogleOrderTrackingWebView: UIViewRepresentable {
             riderCoordinate: riderCoordinate,
             routeCoordinates: routeCoordinates,
             riderBearing: riderBearing,
-            speedKmh: speedKmh
+            speedKmh: speedKmh,
+            isHeadingToStore: isHeadingToStore
         )
     }
 
@@ -137,6 +143,7 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
 
     private var lastRouteOrigin: CLLocationCoordinate2D? = nil
     private var lastRouteDest: CLLocationCoordinate2D? = nil
+    private var lastTargetMode: String? = nil
     private var fallbackWaypointsJson: String = "[]"
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -157,22 +164,24 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
         riderCoordinate: CLLocationCoordinate2D?,
         routeCoordinates: [CLLocationCoordinate2D],
         riderBearing: Double,
-        speedKmh: Double
+        speedKmh: Double,
+        isHeadingToStore: Bool
     ) {
         let waypointsJson: String
         if !routeCoordinates.isEmpty {
             let pts = routeCoordinates.map { "[\($0.latitude),\($0.longitude)]" }.joined(separator: ",")
             waypointsJson = "[\(pts)]"
         } else if let rider = riderCoordinate {
-            let distToMerchant = merchantCoordinate.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? Double.infinity
-            let distToCustomer = customerCoordinate.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? Double.infinity
-            let dest = (distToMerchant < distToCustomer) ? (merchantCoordinate ?? customerCoordinate) : (customerCoordinate ?? merchantCoordinate)
+            // Strictly target merchant while heading to store, target customer after pickup
+            let dest = isHeadingToStore ? (merchantCoordinate ?? customerCoordinate) : (customerCoordinate ?? merchantCoordinate)
+            let modeKey = isHeadingToStore ? "STORE" : "CUSTOMER"
             if let dst = dest {
                 let origDelta = lastRouteOrigin.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? 1.0
                 let destDelta = lastRouteDest.map { abs($0.latitude - dst.latitude) + abs($0.longitude - dst.longitude) } ?? 1.0
-                if origDelta > 0.0008 || destDelta > 0.0001 {
+                if origDelta > 0.0003 || destDelta > 0.0001 || lastTargetMode != modeKey {
                     self.lastRouteOrigin = rider
                     self.lastRouteDest = dst
+                    self.lastTargetMode = modeKey
                     computeRoadPolyline(from: rider, to: dst)
                 }
             }
@@ -181,6 +190,7 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
             // Rider not yet assigned: strictly zero waypoints, zero line on map
             self.lastRouteOrigin = nil
             self.lastRouteDest = nil
+            self.lastTargetMode = nil
             self.fallbackWaypointsJson = "[]"
             waypointsJson = "[]"
         }

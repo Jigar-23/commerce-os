@@ -22,9 +22,9 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        locationManager.distanceFilter = 5.0
+        locationManager.distanceFilter = kCLDistanceFilterNone
         locationManager.pausesLocationUpdatesAutomatically = false
-        locationManager.activityType = .automotiveNavigation
+        locationManager.activityType = .otherNavigation
     }
 
     public func startBackgroundTracking() {

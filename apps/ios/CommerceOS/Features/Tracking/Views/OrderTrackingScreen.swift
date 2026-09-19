@@ -18,6 +18,9 @@ public struct OrderTrackingScreen: View {
     @State private var userRating: Int = 5
     @State private var ratingSubmitted: Bool = false
     @State private var localRoadRoute: [CLLocationCoordinate2D] = []
+    @State private var lastRouteTargetMode: String? = nil
+    @State private var lastCalculatedRiderCoord: CLLocationCoordinate2D? = nil
+    @State private var isCalculatingRoute: Bool = false
     @State private var isMapExpanded: Bool = false
     @State private var isShowingCancelSheet: Bool = false
     @State private var pulseScale: CGFloat = 0.85
@@ -57,6 +60,15 @@ public struct OrderTrackingScreen: View {
             return detailStatus
         }
         return "PLACED"
+    }
+
+    private var isCurrentHeadingToStore: Bool {
+        let st = (trackingData?.status ?? orderDetail?.orderStatus ?? orderDetail?.status ?? "").uppercased()
+        let isPost = [
+            "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU",
+            "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED", "DELIVERED"
+        ].contains(st)
+        return !isPost
     }
 
     private var hasAssignedRider: Bool {
@@ -129,7 +141,8 @@ public struct OrderTrackingScreen: View {
                         routeCoordinates: buildRouteCoordinates(trackingData),
                         riderBearing: trackingData?.riderBearing ?? 0.0,
                         speedKmh: trackingData?.speedKmh ?? 0.0,
-                        merchantTitle: storeDisplayName
+                        merchantTitle: storeDisplayName,
+                        isHeadingToStore: isCurrentHeadingToStore
                     )
                     .edgesIgnoringSafeArea(.all)
                     
@@ -329,7 +342,8 @@ public struct OrderTrackingScreen: View {
                 routeCoordinates: buildRouteCoordinates(trackingData),
                 riderBearing: trackingData?.riderBearing ?? 0.0,
                 speedKmh: trackingData?.speedKmh ?? 0.0,
-                merchantTitle: storeDisplayName
+                merchantTitle: storeDisplayName,
+                isHeadingToStore: isCurrentHeadingToStore
             )
             .frame(height: 300)
             
@@ -1190,8 +1204,8 @@ public struct OrderTrackingScreen: View {
     private var resolvedRiderCoordinate: CLLocationCoordinate2D? {
         let st = (trackingData?.status ?? orderDetail?.orderStatus ?? orderDetail?.status ?? "").uppercased()
         let activeRiderStatuses = [
-            "RIDER_ASSIGNED", "ACCEPTED", "RIDER_ACCEPTED", "HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED",
-            "DISPATCHED", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
+            "RIDER_ASSIGNED", "ACCEPTED", "RIDER_ACCEPTED", "HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_MERCHANT", "AT_STORE", "ASSIGNED",
+            "DISPATCHED", "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
         ]
         guard activeRiderStatuses.contains(st) || hasAssignedRider else {
             return nil
@@ -1326,8 +1340,17 @@ public struct OrderTrackingScreen: View {
         }
         
         let st = (data.status ?? "").uppercased()
-        let isHeadingToStore = ["HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED", "ACCEPTED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"].contains(st)
-        let isPostPickup = ["DISPATCHED", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"].contains(st)
+        let isPostPickup = [
+            "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU",
+            "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
+        ].contains(st)
+        
+        let isHeadingToStore = [
+            "HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP",
+            "ARRIVED_STORE", "ARRIVED_MERCHANT", "AT_STORE", "ASSIGNED", "ACCEPTED",
+            "RIDER_ASSIGNED", "RIDER_ACCEPTED", "DISPATCHED", "PACKED", "READY_FOR_PICKUP",
+            "SELLER_ACCEPTED"
+        ].contains(st)
         
         guard isHeadingToStore || isPostPickup else {
             return []
@@ -1343,55 +1366,95 @@ public struct OrderTrackingScreen: View {
     private func resolveRoadRouteIfNeeded(for data: CustomerOrderTrackingDto) {
         guard let rLat = data.riderLat, let rLng = data.riderLng, rLat != 0.0, rLng != 0.0 else {
             if !localRoadRoute.isEmpty {
-                DispatchQueue.main.async { self.localRoadRoute = [] }
+                DispatchQueue.main.async { 
+                    self.localRoadRoute = [] 
+                    self.lastRouteTargetMode = nil
+                    self.lastCalculatedRiderCoord = nil
+                }
             }
             return
         }
         
         let st = (data.status ?? "").uppercased()
-        let isHeadingToStore = ["HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "AT_STORE", "ASSIGNED", "ACCEPTED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"].contains(st)
-        let isPostPickup = ["DISPATCHED", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"].contains(st)
+        let isPostPickup = [
+            "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU",
+            "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
+        ].contains(st)
+        
+        let isHeadingToStore = [
+            "HEADING_TO_STORE", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP",
+            "ARRIVED_STORE", "ARRIVED_MERCHANT", "AT_STORE", "ASSIGNED", "ACCEPTED",
+            "RIDER_ASSIGNED", "RIDER_ACCEPTED", "DISPATCHED", "PACKED", "READY_FOR_PICKUP",
+            "SELLER_ACCEPTED"
+        ].contains(st)
         
         guard isHeadingToStore || isPostPickup else {
             if !localRoadRoute.isEmpty {
-                DispatchQueue.main.async { self.localRoadRoute = [] }
+                DispatchQueue.main.async { 
+                    self.localRoadRoute = [] 
+                    self.lastRouteTargetMode = nil
+                    self.lastCalculatedRiderCoord = nil
+                }
             }
             return
         }
         
-        guard localRoadRoute.isEmpty else { return }
+        let currentTargetMode = isHeadingToStore ? "STORE" : "CUSTOMER"
+        let currentRiderCoord = CLLocationCoordinate2D(latitude: rLat, longitude: rLng)
+        
+        // Mode flipped (e.g. rider confirmed pickup at store): invalidate old route immediately!
+        if lastRouteTargetMode != currentTargetMode {
+            self.lastRouteTargetMode = currentTargetMode
+            self.lastCalculatedRiderCoord = nil
+            DispatchQueue.main.async { self.localRoadRoute = [] }
+        }
+        
+        // Recalculate if route is empty OR rider has moved > 25 meters
+        var needsRecalc = localRoadRoute.isEmpty
+        if let last = lastCalculatedRiderCoord {
+            let dLat = abs(last.latitude - rLat)
+            let dLng = abs(last.longitude - rLng)
+            if dLat > 0.00025 || dLng > 0.00025 {
+                needsRecalc = true
+            }
+        } else {
+            needsRecalc = true
+        }
+        
+        guard needsRecalc, !isCalculatingRoute else { return }
         guard data.routePolyline == nil || data.routePolyline!.isEmpty else { return }
         
-        let startCoord = CLLocationCoordinate2D(latitude: rLat, longitude: rLng)
         let destCoord: CLLocationCoordinate2D? = {
             if isHeadingToStore {
                 if let mLat = data.merchantLat, let mLng = data.merchantLng, mLat != 0.0 {
                     return CLLocationCoordinate2D(latitude: mLat, longitude: mLng)
                 }
                 return resolvedMerchantCoordinate
-            } else if isPostPickup {
+            } else {
                 if let cLat = data.customerLat, let cLng = data.customerLng, cLat != 0.0 {
                     return CLLocationCoordinate2D(latitude: cLat, longitude: cLng)
                 }
                 return resolvedCustomerCoordinate
             }
-            return nil
         }()
         
         guard let targetDest = destCoord else { return }
         
+        isCalculatingRoute = true
         let req = MKDirections.Request()
-        req.source = MKMapItem(placemark: MKPlacemark(coordinate: startCoord))
+        req.source = MKMapItem(placemark: MKPlacemark(coordinate: currentRiderCoord))
         req.destination = MKMapItem(placemark: MKPlacemark(coordinate: targetDest))
         req.transportType = .automobile
         
         let directions = MKDirections(request: req)
         directions.calculate { response, _ in
-            guard let route = response?.routes.first else { return }
-            var points = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
-            route.polyline.getCoordinates(&points, range: NSRange(location: 0, length: route.polyline.pointCount))
             DispatchQueue.main.async {
+                self.isCalculatingRoute = false
+                guard let route = response?.routes.first else { return }
+                var points = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
+                route.polyline.getCoordinates(&points, range: NSRange(location: 0, length: route.polyline.pointCount))
                 self.localRoadRoute = points
+                self.lastCalculatedRiderCoord = currentRiderCoord
             }
         }
     }

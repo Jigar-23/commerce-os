@@ -310,7 +310,8 @@ public struct ActiveDeliveryScreen: View {
     }
     
     private var isEnRouteToStore: Bool {
-        sessionManager.activeSession?.status == "ASSIGNED" || sessionManager.activeSession?.status == "ARRIVED_MERCHANT"
+        let st = sessionManager.activeSession?.status ?? ""
+        return st == "ASSIGNED" || st == "ARRIVED_MERCHANT" || st == "READY_FOR_PICKUP"
     }
     
     private var currentWaypointCoordinate: CLLocationCoordinate2D? {
@@ -407,6 +408,10 @@ public struct ActiveDeliveryScreen: View {
         )
         await MainActor.run {
             sessionManager.activeSession = updated
+            geofence.updateStage(newStatus)
+            if !streamer.isStreaming {
+                streamer.startStreaming(deliveryId: s.deliveryId)
+            }
         }
     }
     
