@@ -18,6 +18,9 @@ public enum RiderEndpoint {
     case getProfile
     case activeSession
     case getActiveOffers
+    case getNotifications
+    case markNotificationRead(id: String)
+    case markAllNotificationsRead
 
     public var path: String {
         switch self {
@@ -55,14 +58,20 @@ public enum RiderEndpoint {
             return "api/v1/delivery/rider/active-session"
         case .getActiveOffers:
             return "api/v1/delivery/offers/active"
+        case .getNotifications:
+            return "api/v1/delivery/rider/notifications"
+        case .markNotificationRead(let id):
+            return "api/v1/delivery/rider/notifications/\(id)/read"
+        case .markAllNotificationsRead:
+            return "api/v1/delivery/rider/notifications/read-all"
         }
     }
 
     public var method: String {
         switch self {
-        case .sendOtp, .verifyOtp, .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .streamDeliveryTelemetry, .updatePresence, .toggleShift, .registerDeviceToken:
+        case .sendOtp, .verifyOtp, .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .streamDeliveryTelemetry, .updatePresence, .toggleShift, .registerDeviceToken, .markNotificationRead, .markAllNotificationsRead:
             return "POST"
-        case .getTripsHistory, .getProfile, .activeSession, .getActiveOffers:
+        case .getTripsHistory, .getProfile, .activeSession, .getActiveOffers, .getNotifications:
             return "GET"
         }
     }

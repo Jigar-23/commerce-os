@@ -35,7 +35,12 @@ class PrescriptionViewModel(private val repository: AppRepository) : ViewModel()
         }
     }
 
-    fun upload(customerId: String, patientName: String, attachments: List<String>) {
+    fun upload(
+        customerId: String,
+        patientName: String,
+        attachments: List<String>,
+        onUploaded: ((Prescription) -> Unit)? = null
+    ) {
         if (attachments.isEmpty()) {
             errorMessage = "Attach at least one prescription image"
             return
@@ -52,6 +57,7 @@ class PrescriptionViewModel(private val repository: AppRepository) : ViewModel()
                 is ApiResult.Success -> {
                     prescriptions = listOf(created.data) + prescriptions
                     errorMessage = null
+                    onUploaded?.invoke(created.data)
                 }
                 is ApiResult.Failure -> errorMessage = created.error.message
             }

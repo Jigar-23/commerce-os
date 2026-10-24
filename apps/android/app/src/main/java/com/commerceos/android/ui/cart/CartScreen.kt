@@ -131,12 +131,15 @@ fun CartScreen(
             }
         }
 
+        val rxRequiredInCart = cartItems.any { it.prescriptionRequired }
+        val isRxBlocked = rxRequiredInCart && attachedPrescriptionId.isNullOrBlank()
+
         StickyCheckoutBar(
             grandTotal = grandTotal,
             totalSavings = totalSavings,
-            rxBlocked = false,
+            rxBlocked = isRxBlocked,
             onProceed = onProceedToAddress,
-            onUploadPrescription = {}
+            onUploadPrescription = onUploadPrescription
         )
     }
 }

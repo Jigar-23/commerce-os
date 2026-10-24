@@ -112,7 +112,9 @@ data class StructuredAddress(
         // Compulsory Phone Number Validation for ALL addresses (Delivery contact / Rider calls)
         val cleanPhone = contactPhone.trim().replace(Regex("[^0-9]"), "").takeLast(10)
         if (cleanPhone.length != 10) {
-            phoneErr = "Phone number is required (10 digits for delivery updates)"
+            phoneErr = "Enter valid 10-digit mobile number for delivery updates"
+        } else if (!cleanPhone.matches(Regex("^[6-9][0-9]{9}$"))) {
+            phoneErr = "Enter valid Indian mobile number starting with 6, 7, 8 or 9"
         }
 
         // Recipient Name validation if someone else

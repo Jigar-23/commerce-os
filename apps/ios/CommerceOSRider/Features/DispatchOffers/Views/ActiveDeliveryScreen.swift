@@ -426,6 +426,16 @@ public struct ActiveDeliveryScreen: View {
             
             if res.success {
                 await MainActor.run {
+                    sessionManager.addCompletedOrder(
+                        deliveryId: session.deliveryId,
+                        orderId: session.orderId,
+                        customerName: session.customerName,
+                        dropoffAddress: session.customerAddress,
+                        earnings: session.estimatedEarnings,
+                        completedAt: Date(),
+                        isCod: session.isCod,
+                        codAmount: cashCollected ?? session.codAmountToCollect
+                    )
                     completedOrderId = session.orderId
                     completedCustomerName = session.customerName
                     completedIsCod = session.isCod
@@ -437,6 +447,29 @@ public struct ActiveDeliveryScreen: View {
             }
             return false
         } catch {
+            if let serverErr = error as? RiderAPIError,
+               case .serverError(_, let msg) = serverErr,
+               msg.contains("already verified") || msg.contains("DELIVERED") {
+                await MainActor.run {
+                    sessionManager.addCompletedOrder(
+                        deliveryId: session.deliveryId,
+                        orderId: session.orderId,
+                        customerName: session.customerName,
+                        dropoffAddress: session.customerAddress,
+                        earnings: session.estimatedEarnings,
+                        completedAt: Date(),
+                        isCod: session.isCod,
+                        codAmount: cashCollected ?? session.codAmountToCollect
+                    )
+                    completedOrderId = session.orderId
+                    completedCustomerName = session.customerName
+                    completedIsCod = session.isCod
+                    completedCodAmount = cashCollected ?? session.codAmountToCollect
+                    showingOtpDialog = false
+                    showCelebrationModal = true
+                }
+                return true
+            }
             return false
         }
     }
@@ -515,15 +548,15 @@ public struct DeliveryOtpEntryDialog: View {
                 VStack(spacing: 6) {
                     Text("Customer Delivery Verification")
                         .font(.system(size: 20, weight: .bold))
-                    Text("Ask customer for the 4-digit PIN displayed on their live tracking screen.")
+                    Text("Ask customer for the 6-digit PIN displayed on their live tracking screen.")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
                 
-                // 4-Digit Input Field
-                TextField("Enter 4-Digit PIN", text: $otp)
+                // 6-Digit Input Field
+                TextField("Enter 6-Digit PIN", text: $otp)
                     .font(.system(size: 32, weight: .black, design: .monospaced))
                     .multilineTextAlignment(.center)
                     .keyboardType(.numberPad)
@@ -531,6 +564,11 @@ public struct DeliveryOtpEntryDialog: View {
                     .background(Color(.systemGray6))
                     .cornerRadius(12)
                     .padding(.horizontal, 48)
+                    .onChange(of: otp) { val in
+                        if val.count > 6 {
+                            otp = String(val.prefix(6))
+                        }
+                    }
                 
                 if let err = errorMessage {
                     Text(err)
@@ -573,7 +611,7 @@ public struct DeliveryOtpEntryDialog: View {
             let success = await onVerify(otp)
             if !success {
                 await MainActor.run {
-                    errorMessage = "Invalid delivery PIN. Please ask customer to re-check."
+                    errorMessage = "Invalid delivery PIN. Please ask customer to re-check the 6-digit PIN."
                     isVerifying = false
                 }
             }

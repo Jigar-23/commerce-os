@@ -29,7 +29,7 @@ targets:
     info:
       path: CommerceOS/Info.plist
       properties:
-        CFBundleDisplayName: "CommerceOS"
+        CFBundleDisplayName: "Commerce OS"
         CFBundleIdentifier: "com.commerceos.customer"
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
@@ -81,7 +81,7 @@ targets:
     info:
       path: CommerceOSRider/Info.plist
       properties:
-        CFBundleDisplayName: "CommerceOS Rider"
+        CFBundleDisplayName: "Commerce OS Rider"
         CFBundleIdentifier: "com.commerceos.rider"
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"

@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-commerceos}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be injected via secret manager}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be injected via secret manager}"
       POSTGRES_MULTIPLE_DATABASES: commerceos_identity,commerceos_customer,commerceos_catalog,commerceos_inventory,commerceos_pricing,commerceos_cart,commerceos_checkout,commerceos_payment,commerceos_order,commerceos_fulfillment,commerceos_delivery,commerceos_prescription,commerceos_ai
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -24,7 +24,7 @@ services:
     image: redis:7.2-alpine
     container_name: commerceos-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?CRITICAL: REDIS_PASSWORD must be injected}
+    command: 'redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?CRITICAL: REDIS_PASSWORD must be injected}'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -32,6 +32,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  osrm:
+    image: osrm/osrm-backend:v5.27.1
+    container_name: commerceos-osrm
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld /data/routing.osrm
+    volumes:
+      - ./platform/docker/osrm-data:/data
+    ports:
+      - "5000:5000"
 
   app-server:
     build:
@@ -50,8 +60,9 @@ services:
       PORT: 8083
       DATABASE_URL: postgresql://${POSTGRES_USER:-commerceos}:${POSTGRES_PASSWORD}@postgres:5432/commerceos_order
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      JWT_SECRET: ${JWT_SECRET:?CRITICAL: JWT_SECRET must be injected}
-      PAYMENT_GATEWAY_WEBHOOK_SECRET: ${PAYMENT_GATEWAY_WEBHOOK_SECRET:?CRITICAL: PAYMENT_GATEWAY_WEBHOOK_SECRET required}
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-http://osrm:5000}
+      JWT_SECRET: "${JWT_SECRET:?CRITICAL: JWT_SECRET must be injected}"
+      PAYMENT_GATEWAY_WEBHOOK_SECRET: "${PAYMENT_GATEWAY_WEBHOOK_SECRET:?CRITICAL: PAYMENT_GATEWAY_WEBHOOK_SECRET required}"
     ports:
       - "8083:8083"
     healthcheck:
@@ -76,7 +87,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:?CRITICAL: GF_SECURITY_ADMIN_PASSWORD required}
+      - "GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:?CRITICAL: GF_SECURITY_ADMIN_PASSWORD required}"
 
 volumes:
   postgres_data:

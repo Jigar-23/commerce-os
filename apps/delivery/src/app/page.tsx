@@ -198,6 +198,7 @@ export default function DeliveryRiderApp() {
         headers: getAuthHeader(),
       });
       if (res.ok) {
+        const data = await res.json();
         const offersList = Array.isArray(data.offers)
           ? data.offers
           : (data.offer ? [data.offer] : ((data.offerId || data.id) ? [data] : []));

@@ -322,6 +322,7 @@ public class TrackingRepository: ObservableObject {
     @Published public var isLiveStreaming: Bool = false
     @Published public var streamError: String? = nil
     @Published public var isStreamReconnecting: Bool = false
+    public private(set) var lastEventId: String? = nil
 
     private var streamTask: Task<Void, Never>? = nil
     private var pollingTask: Task<Void, Never>? = nil
@@ -399,10 +400,10 @@ public class TrackingRepository: ObservableObject {
                             riderLng: self.activeTracking?.riderLng,
                             riderBearing: self.activeTracking?.riderBearing,
                             speedKmh: self.activeTracking?.speedKmh,
-                            merchantLat: 28.202224,
-                            merchantLng: 76.615418,
-                            customerLat: order.deliveryAddress?.latitude ?? 28.191828,
-                            customerLng: order.deliveryAddress?.longitude ?? 76.608148,
+                            merchantLat: self.activeTracking?.merchantLat ?? 0.0,
+                            merchantLng: self.activeTracking?.merchantLng ?? 0.0,
+                            customerLat: order.deliveryAddress?.latitude ?? self.activeTracking?.customerLat ?? 0.0,
+                            customerLng: order.deliveryAddress?.longitude ?? self.activeTracking?.customerLng ?? 0.0,
                             deliveryOtp: order.deliveryOtp,
                             isCod: order.paymentMethod == "COD",
                             totalAmount: order.totalAmount,
@@ -456,6 +457,9 @@ public class TrackingRepository: ObservableObject {
                     var req = URLRequest(url: url)
                     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    if let lastId = self.lastEventId, !lastId.isEmpty {
+                        req.setValue(lastId, forHTTPHeaderField: "Last-Event-ID")
+                    }
                     req.timeoutInterval = 300
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: req)
@@ -477,7 +481,12 @@ public class TrackingRepository: ObservableObject {
 
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
-                        if line.hasPrefix("data:") {
+                        if line.hasPrefix("id:") {
+                            let idStr = String(line.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !idStr.isEmpty {
+                                self.lastEventId = idStr
+                            }
+                        } else if line.hasPrefix("data:") {
                             let jsonString = String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
                             if let data = jsonString.data(using: .utf8) {
                                 var parsedPayload: LiveTrackingPayload? = nil
@@ -554,5 +563,6 @@ public class TrackingRepository: ObservableObject {
         streamTask = nil
         isLiveStreaming = false
         isStreamReconnecting = false
+        lastEventId = nil
     }
 }

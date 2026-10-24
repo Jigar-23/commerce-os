@@ -59,6 +59,9 @@ export default function DeliveryAddressMapModal({
   const [selectedInstructions, setSelectedInstructions] = useState<string[]>(['no_bell']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mapStyle, setMapStyle] = useState<'street' | 'dark' | 'satellite'>('street');
+  const [selectedCity, setSelectedCity] = useState(currentAddress?.city || 'Panipat');
+  const [selectedState, setSelectedState] = useState('Haryana');
+  const [selectedPostalCode, setSelectedPostalCode] = useState(currentAddress?.postalCode || '132103');
 
   // Dynamic geocoded address based on map position
   const [geocodedArea, setGeocodedArea] = useState(
@@ -138,6 +141,8 @@ export default function DeliveryAddressMapModal({
   const handleSelectPreset = (preset: typeof PRESET_LOCATIONS[0]) => {
     setMapPos({ lat: preset.lat, lng: preset.lng });
     setGeocodedArea(`${preset.area}, ${preset.city}, ${preset.postalCode}`);
+    setSelectedCity(preset.city);
+    setSelectedPostalCode(preset.postalCode);
     setSearchQuery(preset.name);
     setShowSearchResults(false);
   };
@@ -155,9 +160,9 @@ export default function DeliveryAddressMapModal({
       const newAddress = await createCustomerAddress({
         tag,
         addressLine,
-        city: 'Panipat',
-        state: 'Haryana',
-        postalCode: '132103',
+        city: selectedCity,
+        state: selectedState,
+        postalCode: selectedPostalCode,
         landmark,
         contactName,
         contactPhone,
@@ -167,7 +172,7 @@ export default function DeliveryAddressMapModal({
         deliveryInstructions: selectedInstructions.join(','),
       });
 
-      onAddressSaved();
+      onAddressSaved?.();
       onSelectAddress(newAddress);
       onClose();
     } catch (err) {

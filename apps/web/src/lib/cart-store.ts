@@ -206,7 +206,7 @@ export const useCart = create<CartState>()(
     {
       name: 'commerceos-cart-v2',
       partialize: (state) => ({
-        lines: state.lines.map((l) => ({ sku: l.sku, quantity: l.quantity })),
+        lines: state.lines,
       }),
     }
   )

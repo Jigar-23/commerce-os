@@ -1,0 +1,45 @@
+{
+  "$schema": "./schema.json",
+  "clientId": "commerceos-default",
+  "clientName": "Commerce OS Platform",
+  "vertical": "quick-commerce",
+  "customerApp": {
+    "name": "Commerce OS",
+    "androidPackage": "com.commerceos.android",
+    "iosBundleId": "com.commerceos.customer",
+    "versionName": "1.0.0",
+    "versionCode": 1
+  },
+  "riderApp": {
+    "name": "Commerce OS Rider",
+    "androidPackage": "com.commerceos.rider",
+    "iosBundleId": "com.commerceos.rider",
+    "versionName": "1.0.0",
+    "versionCode": 1
+  },
+  "api": {
+    "baseUrl": "https://commerce-os-api.onrender.com",
+    "port": 8080,
+    "osrmBaseUrl": "https://router.project-osrm.org"
+  },
+  "credentials": {
+    "mapsApiKey": "AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c",
+    "fcmServerKey": "fcm_key_production_token",
+    "jwtSecret": "production_jwt_secret_hs256_at_least_32_chars_long",
+    "jwtIssuer": "commerceos-auth",
+    "jwtAudience": "commerceos-clients",
+    "otpPepper": "production_otp_pepper_salt_64chars_long_entropy"
+  },
+  "merchant": {
+    "upiVpa": "commerceos@okaxis",
+    "upiName": "Commerce OS Store",
+    "defaultStoreId": "store_main_01",
+    "supportPhone": "+1-800-COMMERCE",
+    "supportEmail": "support@commerceos.io",
+    "serviceRadiusKm": 10.0,
+    "slaMinutes": 10
+  },
+  "database": {
+    "databaseUrl": "postgres://postgres:postgres@localhost:5432/commerce_os"
+  }
+}

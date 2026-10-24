@@ -55,13 +55,14 @@ class GooglePlacesSearchProvider(
                     .setQuery(trimmed)
                     .setSessionToken(currentSessionToken)
 
-                // Smart Proximity Bias: Bias towards current map camera center (~50km bounding box)
-                // Note: Using LocationBias (soft preference) ensures nearby results rank first,
-                // while global/unique places are never blocked.
-                val center = activeCameraCenter ?: LatLng(28.1970, 76.6190)
-                val southWest = LatLng(center.latitude - 0.45, center.longitude - 0.45)
-                val northEast = LatLng(center.latitude + 0.45, center.longitude + 0.45)
-                requestBuilder.setLocationBias(RectangularBounds.newInstance(southWest, northEast))
+                // Smart Proximity Bias: Bias towards current map camera center if available (~50km bounding box)
+                // Note: Using LocationBias (soft preference) ensures nearby results rank first.
+                val center = activeCameraCenter
+                if (center != null && center.latitude != 0.0 && center.longitude != 0.0) {
+                    val southWest = LatLng(center.latitude - 0.45, center.longitude - 0.45)
+                    val northEast = LatLng(center.latitude + 0.45, center.longitude + 0.45)
+                    requestBuilder.setLocationBias(RectangularBounds.newInstance(southWest, northEast))
+                }
 
                 val predictions = suspendCancellableCoroutine { continuation ->
                     placesClient.findAutocompletePredictions(requestBuilder.build())

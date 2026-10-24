@@ -17,11 +17,12 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
     }
 
     private let locationManager = CLLocationManager()
+    private var backgroundKeepaliveTimer: Timer?
 
     public override init() {
         super.init()
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
         locationManager.pausesLocationUpdatesAutomatically = false
         locationManager.activityType = .otherNavigation
@@ -41,11 +42,27 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
             self.lastLocation = current
             RiderTelemetryStreamer.shared.processLocationUpdate(current)
             RiderGeofenceDetector.shared.updateLocation(current)
+        } else {
+            locationManager.requestLocation()
         }
+
+        // Keepalive cycle: Keeps background execution active even when device is stationary indoors
+        backgroundKeepaliveTimer?.invalidate()
+        let timer = Timer(timeInterval: 4.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.isTracking else { return }
+            self.locationManager.requestLocation()
+            Task { @MainActor in
+                await RiderOfferEventPipeline.shared.pollActiveOffersOnce()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.backgroundKeepaliveTimer = timer
     }
 
     public func stopBackgroundTracking() {
         guard isTracking else { return }
+        backgroundKeepaliveTimer?.invalidate()
+        backgroundKeepaliveTimer = nil
         locationManager.stopUpdatingLocation()
         locationManager.stopUpdatingHeading()
         #if !targetEnvironment(simulator)
@@ -89,5 +106,8 @@ public final class RiderBackgroundLocationManager: NSObject, ObservableObject, C
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("[RiderLocation] Manager failed with error: \(error.localizedDescription)")
+        Task { @MainActor in
+            await RiderOfferEventPipeline.shared.pollActiveOffersOnce()
+        }
     }
 }

@@ -41,7 +41,7 @@ sealed interface CheckoutState {
 
 /** One-shot checkout outcome — never persistent state used as an event trigger. */
 sealed interface CheckoutEvent {
-    data class OrderPlaced(val orderId: String) : CheckoutEvent
+    data class OrderPlaced(val orderId: String, val order: CustomerOrderApiResponse? = null) : CheckoutEvent
 }
 
 /**
@@ -69,10 +69,10 @@ data class CheckoutUiState(
     val serviceabilityValid: Boolean get() = serviceability !is ServiceabilityState.Unavailable && serviceability !is ServiceabilityState.Error
     val pricingValid: Boolean get() = grandTotal > BigDecimal.ZERO || itemsSubtotal > BigDecimal.ZERO || items.isNotEmpty()
     val prescriptionValid: Boolean
-        get() = true
+        get() = if (items.any { it.prescriptionRequired }) !prescriptionId.isNullOrBlank() else true
 
     val readyForPayment: Boolean
-        get() = cartValid && addressValid && !isProcessing
+        get() = cartValid && addressValid && prescriptionValid && !isProcessing
 }
 
 class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
@@ -237,7 +237,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                 is ApiResult.Success -> {
                     uiState = uiState.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
                     checkoutIdempotencyKey = null
-                    _events.send(CheckoutEvent.OrderPlaced(result.data.id))
+                    _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
                 }
                 is ApiResult.Failure -> {
                     uiState = uiState.copy(

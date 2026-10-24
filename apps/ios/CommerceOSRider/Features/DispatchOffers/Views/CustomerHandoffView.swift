@@ -240,30 +240,30 @@ public struct CustomerHandoffView: View {
                     }
                 }
                 
-                Text("Ask customer for the 4-digit Delivery PIN displayed on their live tracking screen.")
+                Text("Ask customer for the 6-digit Delivery PIN displayed on their live tracking screen.")
                     .font(.system(size: 12))
                     .foregroundColor(Color(hex: "94A3B8"))
                 
-                // 4 Discrete PIN Boxes
-                HStack(spacing: 12) {
-                    ForEach(0..<4, id: \.self) { index in
+                // 6 Discrete PIN Boxes
+                HStack(spacing: 8) {
+                    ForEach(0..<6, id: \.self) { index in
                         ZStack {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(Color(hex: "16181F"))
-                                .frame(height: 52)
+                                .frame(height: 48)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10)
                                         .stroke(pinDigit(at: index).isEmpty ? Color(hex: "475569") : Color(hex: "38BDF8"), lineWidth: 1.5)
                                 )
                             Text(pinDigit(at: index))
-                                .font(.system(size: 22, weight: .black, design: .monospaced))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
                                 .foregroundColor(.white)
                         }
                     }
                 }
                 
                 // Hidden or Direct Text Field for easy keyboard input
-                TextField("Enter 4-digit PIN", text: $enteredOtp)
+                TextField("Enter 6-digit PIN", text: $enteredOtp)
                     .keyboardType(.numberPad)
                     .font(.system(size: 16, weight: .bold))
                     .multilineTextAlignment(.center)
@@ -272,8 +272,8 @@ public struct CustomerHandoffView: View {
                     .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: "334155"), lineWidth: 1))
                     .onChange(of: enteredOtp) { val in
-                        if val.count > 4 {
-                            enteredOtp = String(val.prefix(4))
+                        if val.count > 6 {
+                            enteredOtp = String(val.prefix(6))
                         }
                     }
                 
@@ -315,7 +315,7 @@ public struct CustomerHandoffView: View {
     }
     
     private var canSubmit: Bool {
-        let pinValid = enteredOtp.count >= 4
+        let pinValid = enteredOtp.count >= 4 && enteredOtp.count <= 6
         let codValid = !session.isCod || expectedCodAmount == 0 || codReconciled
         return pinValid && codValid
     }
@@ -350,7 +350,7 @@ public struct CustomerHandoffView: View {
                 if success {
                     onComplete()
                 } else {
-                    errorMessage = "Invalid delivery PIN. Please ask customer to re-check the 4-digit PIN."
+                    errorMessage = "Invalid delivery PIN. Please ask customer to re-check the 6-digit PIN."
                 }
             }
         }

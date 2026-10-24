@@ -255,10 +255,21 @@ class CartViewModel(
                     }
                 } else {
                     // Local offline guest add
-                    cartItems = cartItems + item
+                    val existingIndex = cartItems.indexOfFirst { it.sku == item.sku }
+                    val updatedItem = if (existingIndex >= 0) {
+                        val existing = cartItems[existingIndex]
+                        existing.copy(quantity = existing.quantity + item.quantity)
+                    } else {
+                        item
+                    }
+                    cartItems = if (existingIndex >= 0) {
+                        cartItems.toMutableList().also { it[existingIndex] = updatedItem }
+                    } else {
+                        cartItems + item
+                    }
                     if (cartDao != null) {
                         try {
-                            cartDao.insertOrUpdate(CartItemEntity.fromCartItem(item, LOCAL_OFFLINE_CART_KEY))
+                            cartDao.insertOrUpdate(CartItemEntity.fromCartItem(updatedItem, LOCAL_OFFLINE_CART_KEY))
                         } catch (_: Exception) {}
                     }
                     _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
@@ -305,10 +316,21 @@ class CartViewModel(
                         }
                     }
                 } else {
-                    cartItems = cartItems + cartItem
+                    val existingIndex = cartItems.indexOfFirst { it.sku == cartItem.sku }
+                    val updatedItem = if (existingIndex >= 0) {
+                        val existing = cartItems[existingIndex]
+                        existing.copy(quantity = existing.quantity + cartItem.quantity)
+                    } else {
+                        cartItem
+                    }
+                    cartItems = if (existingIndex >= 0) {
+                        cartItems.toMutableList().also { it[existingIndex] = updatedItem }
+                    } else {
+                        cartItems + cartItem
+                    }
                     if (cartDao != null) {
                         try {
-                            cartDao.insertOrUpdate(CartItemEntity.fromCartItem(cartItem, LOCAL_OFFLINE_CART_KEY))
+                            cartDao.insertOrUpdate(CartItemEntity.fromCartItem(updatedItem, LOCAL_OFFLINE_CART_KEY))
                         } catch (_: Exception) {}
                     }
                     _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))

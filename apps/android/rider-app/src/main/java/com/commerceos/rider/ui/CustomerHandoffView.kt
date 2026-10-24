@@ -306,7 +306,7 @@ fun CustomerHandoffView(
                     }
 
                     Text(
-                        text = "Ask customer for the 4-digit Delivery PIN shown on their app screen to complete the handoff.",
+                        text = "Ask customer for the 6-digit Delivery PIN shown on their app screen to complete the handoff.",
                         fontSize = 12.sp,
                         color = Color(0xFF94A3B8),
                         lineHeight = 16.sp
@@ -316,7 +316,7 @@ fun CustomerHandoffView(
                     OutlinedTextField(
                         value = enteredOtp,
                         onValueChange = { if (it.length <= 6 && it.all { ch -> ch.isDigit() }) onOtpChange(it) },
-                        placeholder = { Text("• • • •", fontSize = 24.sp, color = Color(0xFF475569), textAlign = TextAlign.Center) },
+                        placeholder = { Text("• • • • • •", fontSize = 24.sp, color = Color(0xFF475569), textAlign = TextAlign.Center) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true,
                         textStyle = androidx.compose.ui.text.TextStyle(
@@ -354,7 +354,7 @@ fun CustomerHandoffView(
                         onClick = onVerifyOtp,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                         shape = RoundedCornerShape(12.dp),
-                        enabled = !isLoading && enteredOtp.trim().length >= 4 && (!session.isCod || session.codReconciled),
+                        enabled = !isLoading && enteredOtp.trim().length in 4..6 && (!session.isCod || session.codReconciled),
                         modifier = Modifier.fillMaxWidth().height(56.dp)
                     ) {
                         if (isLoading) {

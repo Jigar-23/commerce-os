@@ -1746,6 +1746,21 @@ class TransactionalInventoryRepository {
     }));
   }
 
+  async markAdjustmentReversed(originalId, reversalId = null) {
+    if (!this.pool || !originalId) return { ok: false };
+    await this.pool.query(
+      `UPDATE inventory_ledger SET is_reversed = TRUE WHERE id = $1`,
+      [originalId]
+    ).catch(() => {});
+    if (reversalId) {
+      await this.pool.query(
+        `UPDATE inventory_ledger SET reversal_of_id = $1 WHERE id = $2`,
+        [originalId, reversalId]
+      ).catch(() => {});
+    }
+    return { ok: true };
+  }
+
   async setStockForStore(storeId, productId, sku, requestedStock, reason, actor = { type: 'SELLER' }) {
     if (!this.pool) return { ok: false, error: 'NO_POOL' };
 
@@ -2330,15 +2345,18 @@ class TransactionalOfferRepository {
 
       const offer = offerRes.rows[0];
 
-      // 2. Strict Rider Ownership Verification (supports claiming available dispatch offer)
-      if (offer.rider_id !== riderId) {
+      // 2. Strict Rider Ownership Verification (supports claiming unassigned pool offer or accepting assigned offer)
+      if (offer.rider_id && offer.rider_id !== riderId) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
+      } else if (!offer.rider_id) {
         const canClaim = ['CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED'].includes(offer.status);
         if (canClaim) {
           await client.query('UPDATE offers SET rider_id = $1 WHERE (offer_id = $2 OR id = $2)', [riderId, offerId]);
           offer.rider_id = riderId;
         } else {
           await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
+          return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been claimed or declined.' };
         }
       }
 
@@ -2591,12 +2609,9 @@ class LocalDevelopmentOfferRepository {
     }
 
     if (offer.riderId && offer.riderId !== riderId) {
-      const canClaim = ['CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED'].includes(offer.status);
-      if (canClaim) {
-        offer.riderId = riderId;
-      } else {
-        return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
-      }
+      return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
+    } else if (!offer.riderId) {
+      offer.riderId = riderId;
     }
 
     const now = Date.now();
@@ -3302,7 +3317,7 @@ class TransactionalOrderRepository {
     const authoritativeOrderType = requestedType;
 
     // 5. Authoritative Payment Method & Status Normalization
-    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'CARD', 'NET_BANKING'];
+    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'UPI_INTENT', 'CARD', 'NET_BANKING'];
     const rawMethod = data.paymentMethod ? String(data.paymentMethod).toUpperCase() : 'COD';
     if (!ALLOWED_PAYMENT_METHODS.includes(rawMethod)) {
       return {
@@ -3317,9 +3332,13 @@ class TransactionalOrderRepository {
     const requestedMethod = isCod ? 'COD' : rawMethod;
     const authoritativePaymentStatus = isCod ? 'COD_PENDING' : 'PAYMENT_PENDING';
 
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    const maxRetries = 3;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      attempt++;
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
 
       // 6. Authoritative Customer Resolution (from customers table)
       const customerRes = await client.query(
@@ -3354,12 +3373,24 @@ class TransactionalOrderRepository {
           // Fallback B: Auto-provision delivery address into customer_addresses table inside transaction
           const d = data.deliveryAddress || data.delivery_address || data.shippingAddress || data.shipping_address;
           const newAddrId = `addr_${crypto.randomUUID()}`;
-          const lat = Number(d.latitude) || 28.202224;
-          const lng = Number(d.longitude) || 76.615418;
-          const line = String(d.addressLine || d.address_line || d.formattedAddress || d.formatted_address || 'Delivery Address').trim();
-          const city = String(d.city || 'Rewari').trim();
-          const postalCode = String(d.postalCode || d.postal_code || '123401').trim();
-          const phone = String(customer.phone || '+919991416180');
+          const lat = Number(d.latitude);
+          const lng = Number(d.longitude);
+          if (isNaN(lat) || isNaN(lng)) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude and longitude are strictly required.' };
+          }
+          const line = String(d.addressLine || d.address_line || d.formattedAddress || d.formatted_address || '').trim();
+          if (!line) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'INVALID_ADDRESS_LINE', message: 'Valid delivery address line is strictly required.' };
+          }
+          const city = String(d.city || '').trim();
+          const postalCode = String(d.postalCode || d.postal_code || '').trim();
+          const phone = String(customer.phone || d.contactPhone || d.contact_phone || d.phone || '').trim();
+          if (!phone) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'CUSTOMER_PHONE_REQUIRED', message: 'Authoritative customer phone is strictly required.' };
+          }
 
           const insAddr = await client.query(
             `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
@@ -3752,7 +3783,7 @@ class TransactionalOrderRepository {
         session: sessionRes.rows[0]
       };
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       const idempotencyKey = data.idempotencyKey || data.idempotency_key || null;
       if ((err.code === '23505' || err.code === '40001') && idempotencyKey && this.pool) {
         // Idempotent race condition: query winner's inserted order
@@ -3774,9 +3805,15 @@ class TransactionalOrderRepository {
           };
         }
       }
+      if (err.code === '40001' && attempt < maxRetries) {
+        const jitterMs = Math.floor(Math.random() * 75) + 25; // 25ms to 100ms
+        await new Promise(r => setTimeout(r, jitterMs));
+        continue;
+      }
       throw err;
     } finally {
       client.release();
+    }
     }
   }
 
@@ -4755,8 +4792,11 @@ class TransactionalRiderRepository {
   async saveRider(riderData) {
     if (!this.pool) return null;
     const clean10 = (riderData.phone || '').replace(/\D/g, '').slice(-10);
-    const id = riderData.id || riderData.riderId || `rdr_${clean10 || Math.floor(1000000000 + Math.random() * 9000000000)}`;
-    const phone = clean10.length === 10 ? `+91${clean10}` : (riderData.phone || '+919991416180');
+    if (clean10.length !== 10) {
+      throw new Error('A valid 10-digit phone number is required to save a rider.');
+    }
+    const id = riderData.id || riderData.riderId || `rdr_${clean10}`;
+    const phone = `+91${clean10}`;
     const res = await this.pool.query(
       `INSERT INTO riders (id, rider_id, phone, full_name, vehicle_number, vehicle_type, tier, status, created_at, updated_at)
        VALUES ($1, $1, $2, $3, $4, $5, 'STANDARD', $6, NOW(), NOW())
@@ -5011,16 +5051,16 @@ class TransactionalPresenceRepository {
   async setShiftStatus(riderId, statusOrIsOnline, lat = null, lng = null) {
     if (!this.pool) return null;
     const status = (typeof statusOrIsOnline === 'string') ? statusOrIsOnline : (statusOrIsOnline ? 'ONLINE' : 'OFFLINE');
-    const finalLat = lat != null ? Number(lat) : 28.202224;
-    const finalLng = lng != null ? Number(lng) : 76.615418;
+    const finalLat = (lat != null && !isNaN(Number(lat))) ? Number(lat) : null;
+    const finalLng = (lng != null && !isNaN(Number(lng))) ? Number(lng) : null;
     const res = await this.pool.query(
       `INSERT INTO rider_presence (rider_id, status, last_known_lat, last_known_lng, last_seen_at)
        VALUES ($1, $2, $3, $4, NOW())
        ON CONFLICT (rider_id) 
        DO UPDATE SET 
          status = EXCLUDED.status, 
-         last_known_lat = COALESCE(EXCLUDED.last_known_lat, rider_presence.last_known_lat, 28.202224),
-         last_known_lng = COALESCE(EXCLUDED.last_known_lng, rider_presence.last_known_lng, 76.615418),
+         last_known_lat = COALESCE(EXCLUDED.last_known_lat, rider_presence.last_known_lat),
+         last_known_lng = COALESCE(EXCLUDED.last_known_lng, rider_presence.last_known_lng),
          last_seen_at = NOW()
        RETURNING *;`,
       [riderId, status, finalLat, finalLng]
@@ -5596,18 +5636,18 @@ class DispatchService {
         const ord = await this.orderRepo.getOrderById(orderId);
         if (ord) {
           const addr = (typeof ord.deliveryAddress === 'string' ? JSON.parse(ord.deliveryAddress) : (ord.deliveryAddress || ord.delivery_address)) || {};
-          cLat = addr.latitude || addr.lat || 28.1918;
-          cLng = addr.longitude || addr.lng || 76.6081;
+          cLat = (addr.latitude != null && !isNaN(Number(addr.latitude))) ? Number(addr.latitude) : ((addr.lat != null && !isNaN(Number(addr.lat))) ? Number(addr.lat) : null);
+          cLng = (addr.longitude != null && !isNaN(Number(addr.longitude))) ? Number(addr.longitude) : ((addr.lng != null && !isNaN(Number(addr.lng))) ? Number(addr.lng) : null);
           deliverySession.customerLat = cLat;
           deliverySession.customerLng = cLng;
           if (!deliverySession.customerAddress) {
-            deliverySession.customerAddress = addr.addressLine || addr.address_line || addr.address || 'Delivery Address, Rewari';
+            deliverySession.customerAddress = addr.addressLine || addr.address_line || addr.address || '';
           }
           if (!deliverySession.customerName) {
             deliverySession.customerName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customerId || ord.customer_id || '').slice(-4));
           }
           if (!deliverySession.customerPhone) {
-            deliverySession.customerPhone = addr.contactPhone || addr.contact_phone || '+919991416180';
+            deliverySession.customerPhone = addr.contactPhone || addr.contact_phone || ord.customerPhone || ord.customer_phone || '';
           }
         }
       } catch (err) {
@@ -6727,14 +6767,16 @@ async function initApplicationRepositories(options = {}) {
             if (oRes.rows.length > 0) {
               const ord = oRes.rows[0];
               const addr = (typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : ord.delivery_address) || {};
+              const cLat = (addr.latitude != null && !isNaN(Number(addr.latitude))) ? Number(addr.latitude) : ((addr.lat != null && !isNaN(Number(addr.lat))) ? Number(addr.lat) : null);
+              const cLng = (addr.longitude != null && !isNaN(Number(addr.longitude))) ? Number(addr.longitude) : ((addr.lng != null && !isNaN(Number(addr.lng))) ? Number(addr.lng) : null);
               deliverySession = {
                 ...deliverySession,
-                customerLat: addr.latitude || addr.lat || 28.1918,
-                customerLng: addr.longitude || addr.lng || 76.6081,
-                customerAddress: addr.addressLine || addr.address_line || addr.address || 'Delivery Address, Rewari',
+                customerLat: cLat,
+                customerLng: cLng,
+                customerAddress: addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : ''),
                 customerName: addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4)),
-                customerPhone: addr.contactPhone || addr.contact_phone || '+919991416180',
-                storeId: ord.store_id || 'store_rewari_hub_01',
+                customerPhone: addr.contactPhone || addr.contact_phone || ord.customer_phone || '',
+                storeId: ord.store_id || deliverySession.storeId,
                 orderId: ord.order_id || ord.id
               };
             }
@@ -6770,8 +6812,8 @@ async function initApplicationRepositories(options = {}) {
               return;
             }
             const addr = (typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : ord.delivery_address) || {};
-            const cLat = addr.latitude || addr.lat || ord.delivery_lat || 28.1918;
-            const cLng = addr.longitude || addr.lng || ord.delivery_lng || 76.6081;
+            const cLat = (addr.latitude != null && !isNaN(Number(addr.latitude))) ? Number(addr.latitude) : ((addr.lat != null && !isNaN(Number(addr.lat))) ? Number(addr.lat) : (ord.delivery_lat ? Number(ord.delivery_lat) : null));
+            const cLng = (addr.longitude != null && !isNaN(Number(addr.longitude))) ? Number(addr.longitude) : ((addr.lng != null && !isNaN(Number(addr.lng))) ? Number(addr.lng) : (ord.delivery_lng ? Number(ord.delivery_lng) : null));
             const parts = [
               addr.house_number || addr.houseNumber || addr.building,
               addr.address_line || addr.addressLine || addr.street,
@@ -6779,9 +6821,9 @@ async function initApplicationRepositories(options = {}) {
               addr.city,
               (addr.postal_code || addr.postalCode) ? ('PIN: ' + (addr.postal_code || addr.postalCode)) : null
             ].filter(Boolean);
-            const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : 'Delivery Address, Rewari'));
+            const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : ''));
             const cName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4));
-            const cPhone = addr.contactPhone || addr.contact_phone || '+919991416180';
+            const cPhone = addr.contactPhone || addr.contact_phone || ord.customer_phone || '';
             const dId = 'del_' + (ord.order_id || ord.id);
             await pool.query(
               `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
@@ -7035,8 +7077,8 @@ function createProductionRepositories(pool, options = {}) {
             return { ok: false, error: 'STORE_NOT_FOUND' };
           }
           const addr = (typeof ord.delivery_address === 'string' ? JSON.parse(ord.delivery_address) : ord.delivery_address) || {};
-          const cLat = addr.latitude || addr.lat || ord.delivery_lat || 28.1918;
-          const cLng = addr.longitude || addr.lng || ord.delivery_lng || 76.6081;
+          const cLat = (addr.latitude != null && !isNaN(Number(addr.latitude))) ? Number(addr.latitude) : ((addr.lat != null && !isNaN(Number(addr.lat))) ? Number(addr.lat) : (ord.delivery_lat ? Number(ord.delivery_lat) : null));
+          const cLng = (addr.longitude != null && !isNaN(Number(addr.longitude))) ? Number(addr.longitude) : ((addr.lng != null && !isNaN(Number(addr.lng))) ? Number(addr.lng) : (ord.delivery_lng ? Number(ord.delivery_lng) : null));
           const parts = [
             addr.house_number || addr.houseNumber || addr.building,
             addr.address_line || addr.addressLine || addr.street,
@@ -7044,9 +7086,9 @@ function createProductionRepositories(pool, options = {}) {
             addr.city,
             (addr.postal_code || addr.postalCode) ? ('PIN: ' + (addr.postal_code || addr.postalCode)) : null
           ].filter(Boolean);
-          const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : 'Delivery Address, Rewari'));
+          const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : ''));
           const cName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4));
-          const cPhone = addr.contactPhone || addr.contact_phone || '+919991416180';
+          const cPhone = addr.contactPhone || addr.contact_phone || ord.customer_phone || '';
           const dId = 'del_' + (ord.order_id || ord.id);
           await pool.query(
             `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)

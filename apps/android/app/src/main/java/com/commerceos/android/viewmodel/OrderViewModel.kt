@@ -98,6 +98,13 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
         private set
 
     private var trackingJob: Job? = null
+    private val orderOtpCache = mutableMapOf<String, String>()
+
+    fun setKnownOrderPin(orderId: String, pin: String?) {
+        if (!pin.isNullOrBlank()) {
+            orderOtpCache[orderId] = pin
+        }
+    }
 
     fun loadDetail(orderId: String) {
         viewModelScope.launch {
@@ -105,7 +112,16 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
             when (val result = repository.getOrderById(orderId)) {
                 is ApiResult.Success -> {
                     isOffline = false
-                    detail = OrderDetailUiState.Content(result.data)
+                    val cachedPin = orderOtpCache[orderId]
+                    val finalOrder = if (!cachedPin.isNullOrBlank() && result.data.deliveryOtp.isNullOrBlank()) {
+                        result.data.copy(deliveryOtp = cachedPin)
+                    } else {
+                        if (!result.data.deliveryOtp.isNullOrBlank()) {
+                            orderOtpCache[orderId] = result.data.deliveryOtp
+                        }
+                        result.data
+                    }
+                    detail = OrderDetailUiState.Content(finalOrder)
                     startLiveTrackingPolling(orderId)
                 }
                 is ApiResult.Failure -> {
@@ -249,6 +265,8 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
             val res = repository.cancelOrder(target.id, reasonText)
             when (res) {
                 is ApiResult.Success -> {
+                    detail = OrderDetailUiState.Content(res.data)
+                    trackingJob?.cancel()
                     cancellation = CancellationUiState()
                     _events.trySend(CancellationEvent.Success("Order cancelled"))
                 }

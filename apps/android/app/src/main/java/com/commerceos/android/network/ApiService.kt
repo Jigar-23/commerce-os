@@ -324,7 +324,8 @@ object NetworkClient {
 
         if (!canRefresh) return@Interceptor response
 
-        val newTokens = refreshTokensBlocking(refreshToken)
+        val currentToken = authTokenProvider()
+        val newTokens = refreshTokensBlocking(currentToken, refreshToken)
         if (newTokens == null) {
             onSessionExpired()
             return@Interceptor response
@@ -339,9 +340,14 @@ object NetworkClient {
         )
     }
 
-    private fun refreshTokensBlocking(refreshToken: String): Pair<String, String>? = synchronized(refreshLock) {
-        if (refreshing) return@synchronized null
-        refreshing = true
+    private fun refreshTokensBlocking(currentToken: String, refreshToken: String): Pair<String, String>? = synchronized(refreshLock) {
+        // Double-check: if a concurrent thread already refreshed the token while we were waiting for refreshLock
+        val activeToken = authTokenProvider()
+        if (activeToken.isNotBlank() && activeToken != currentToken) {
+            val activeRefresh = refreshTokenProvider().ifBlank { refreshToken }
+            return@synchronized activeToken to activeRefresh
+        }
+
         try {
             val requestBody = "{\"refreshToken\":\"$refreshToken\"}"
                 .toRequestBody("application/json".toMediaType())
@@ -365,8 +371,6 @@ object NetworkClient {
             }
         } catch (e: Exception) {
             null
-        } finally {
-            refreshing = false
         }
     }
 

@@ -3,10 +3,6 @@ package com.commerceos.android.location
 import kotlin.math.*
 
 object RealTimeEtaEngine {
-    // Master Dark Store coordinates (Rewari / NCR Quick Commerce Hub)
-    const val DEFAULT_STORE_LAT = 28.1970
-    const val DEFAULT_STORE_LNG = 76.6190
-
     /**
      * Calculates the great-circle Haversine distance in kilometers.
      */
@@ -31,11 +27,12 @@ object RealTimeEtaEngine {
     fun calculateEtaMinutes(
         userLat: Double?,
         userLng: Double?,
-        storeLat: Double = DEFAULT_STORE_LAT,
-        storeLng: Double = DEFAULT_STORE_LNG
+        storeLat: Double? = null,
+        storeLng: Double? = null
     ): Int {
-        if (userLat == null || userLng == null || userLat == 0.0 || userLng == 0.0) {
-            return 11
+        if (userLat == null || userLng == null || userLat == 0.0 || userLng == 0.0 ||
+            storeLat == null || storeLng == null || storeLat == 0.0 || storeLng == 0.0) {
+            return 10
         }
         val straightLineKm = calculateDistanceKm(storeLat, storeLng, userLat, userLng)
         val roadDistanceKm = straightLineKm * 1.30

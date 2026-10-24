@@ -101,12 +101,17 @@ fun RealLocationMapViewport(
     onRecenterGps: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val hasValidCenter = centerPoint != null && centerPoint.latitude != 0.0 && centerPoint.longitude != 0.0
     val initialTarget = remember(centerPoint) {
-        LatLng(centerPoint?.latitude ?: 28.1970, centerPoint?.longitude ?: 76.6190)
+        if (hasValidCenter) {
+            LatLng(centerPoint!!.latitude, centerPoint.longitude)
+        } else {
+            LatLng(20.5937, 78.9629)
+        }
     }
 
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(initialTarget, 17.5f)
+        position = CameraPosition.fromLatLngZoom(initialTarget, if (hasValidCenter) 17.5f else 5.0f)
     }
 
     // Sync camera to external centerPoint updates (e.g. from search selection or GPS button)

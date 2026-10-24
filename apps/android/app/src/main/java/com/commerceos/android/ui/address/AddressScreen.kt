@@ -1,5 +1,6 @@
 package com.commerceos.android.ui.address
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -31,6 +32,22 @@ fun AddressScreen(
 
     val state = viewModel.platformUiState
 
+    // System Hardware/Gesture Back Navigation Interceptor
+    BackHandler(enabled = true) {
+        if (state.isFlowActive) {
+            if (state.locationSearchQuery.isNotBlank()) {
+                viewModel.searchLocationPlaces("")
+            } else {
+                viewModel.navigateBack()
+                if (!viewModel.platformUiState.isFlowActive && viewModel.addresses.isEmpty()) {
+                    onBack?.invoke()
+                }
+            }
+        } else {
+            onBack?.invoke()
+        }
+    }
+
     LaunchedEffect(state.saveState) {
         if (state.saveState is com.commerceos.android.viewmodel.SaveState.Success) {
             viewModel.resetSaveState()
@@ -51,7 +68,16 @@ fun AddressScreen(
             isReverseGeocoding = state.isReverseGeocoding,
             saveState = state.saveState,
             conflictWarning = state.addressConflict,
-            onBack = { viewModel.navigateBack() },
+            onBack = {
+                if (state.locationSearchQuery.isNotBlank()) {
+                    viewModel.searchLocationPlaces("")
+                } else {
+                    viewModel.navigateBack()
+                    if (!viewModel.platformUiState.isFlowActive && viewModel.addresses.isEmpty()) {
+                        onBack?.invoke()
+                    }
+                }
+            },
             onSearchQueryChanged = { query -> viewModel.searchLocationPlaces(query) },
             onRequestGps = { viewModel.requestCurrentGpsLocation() },
             onSelectSearchResult = { result -> viewModel.selectPlaceSearchResult(result) },

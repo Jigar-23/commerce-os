@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS customer_addresses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_addresses_customer ON customer_addresses(customer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_default ON customer_addresses(customer_id) WHERE is_default = TRUE;
 
 CREATE TABLE IF NOT EXISTS auth_challenges (
     id VARCHAR(64) PRIMARY KEY,
@@ -377,6 +378,7 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_upi_utr ON payments(provider_ref) WHERE provider = 'UPI_INTENT' AND provider_ref IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS payment_webhook_events (
     id VARCHAR(64) PRIMARY KEY,

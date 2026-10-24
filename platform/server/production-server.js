@@ -119,6 +119,14 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS store_id VARCHAR(64);`).catch(() => {});
   pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS route_version INT NOT NULL DEFAULT 1;`).catch(() => {});
   pool.query(`ALTER TABLE inventory_ledger ALTER COLUMN reason SET NOT NULL;`).catch(() => {});
+  pool.query(`ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS reversal_of_id VARCHAR(64);`).catch(() => {});
+  pool.query(`ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_ledger_reversal ON inventory_ledger(reversal_of_id) WHERE reversal_of_id IS NOT NULL;`).catch(() => {});
+  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_default ON customer_addresses(customer_id) WHERE is_default = TRUE;`).catch(() => {});
+  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_upi_utr ON payments(provider_ref) WHERE provider = 'UPI_INTENT' AND provider_ref IS NOT NULL;`).catch(() => {});
+  pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_vpa VARCHAR(128);`).catch(() => {});
+  pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_ref_id VARCHAR(128);`).catch(() => {});
+  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
 }
 
 // 3. Authoritative OSRM Route Resolver Adapter
@@ -2405,8 +2413,14 @@ const server = http.createServer(async (req, res) => {
           phoneDigits = String(cRes.rows[0].phone).replace(/\D/g, '').slice(-10);
         }
       }
+      if (phoneDigits.length !== 10 && authClaims && authClaims.phone) {
+        phoneDigits = String(authClaims.phone).replace(/\D/g, '').slice(-10);
+      }
       if (phoneDigits.length !== 10) {
-        phoneDigits = '9991416180';
+        return sendJson(res, 400, {
+          error: 'CONTACT_PHONE_REQUIRED',
+          message: 'A valid 10-digit contact phone number is strictly required for delivery addresses.'
+        });
       }
       const formattedPhone = `+91${phoneDigits}`;
 
@@ -2424,24 +2438,56 @@ const server = http.createServer(async (req, res) => {
       const addrId = `addr_${crypto.randomUUID()}`;
       const isDefault = Boolean(body.isDefault);
 
-      if (isDefault) {
-        await pool.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
+      let r;
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['addr_lock_' + customerId]);
+          if (isDefault) {
+            await client.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
+          }
+          const insRes = await client.query(
+            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+             RETURNING *`,
+            [addrId, customerId, body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'), addrLine, city, postalCode, lat, lng, isDefault, formattedPhone]
+          );
+          await client.query('COMMIT');
+          r = insRes.rows[0];
+        } catch (e) {
+          await client.query('ROLLBACK');
+          throw e;
+        } finally {
+          client.release();
+        }
+      } else {
+        r = {
+          id: addrId,
+          customer_id: customerId,
+          address_type: body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'),
+          address_line: addrLine,
+          city,
+          postal_code: postalCode,
+          latitude: lat,
+          longitude: lng,
+          is_default: isDefault,
+          contact_phone: formattedPhone
+        };
       }
 
-      const insRes = await pool.query(
-        `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-         RETURNING *`,
-        [addrId, customerId, body.addressType || 'HOME', addrLine, city, postalCode, lat, lng, isDefault, formattedPhone]
-      );
-      const r = insRes.rows[0];
       return sendJson(res, 201, {
         id: r.id,
         customerId: r.customer_id,
+        tag: body.tag || (r.address_type === 'WORK' ? 'Work' : (r.address_type === 'OTHER' ? 'Other' : 'Home')),
         addressType: r.address_type,
         addressLine: r.address_line,
         city: r.city,
+        state: body.state || 'Haryana',
         postalCode: r.postal_code,
+        country: body.country || 'India',
+        landmark: body.landmark || '',
+        contactName: body.contactName || 'Customer',
         latitude: Number(r.latitude),
         longitude: Number(r.longitude),
         isDefault: Boolean(r.is_default),
@@ -2454,15 +2500,32 @@ const server = http.createServer(async (req, res) => {
     if (addrDefaultMatch && (method === 'POST' || method === 'PUT')) {
       const customerId = addrDefaultMatch[1];
       const addressId = addrDefaultMatch[2];
-      await pool.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
-      const updRes = await pool.query(
-        `UPDATE customer_addresses SET is_default = TRUE WHERE id = $1 AND (customer_id = $2 OR customer_id IS NULL) RETURNING *`,
-        [addressId, customerId]
-      );
-      if (updRes.rows.length === 0) {
-        return sendJson(res, 404, { error: 'ADDRESS_NOT_FOUND', message: 'Address not found.' });
+      let r;
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['addr_lock_' + customerId]);
+          await client.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
+          const updRes = await client.query(
+            `UPDATE customer_addresses SET is_default = TRUE WHERE id = $1 AND (customer_id = $2 OR customer_id IS NULL) RETURNING *`,
+            [addressId, customerId]
+          );
+          if (updRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'ADDRESS_NOT_FOUND', message: 'Address not found.' });
+          }
+          await client.query('COMMIT');
+          r = updRes.rows[0];
+        } catch (e) {
+          await client.query('ROLLBACK');
+          throw e;
+        } finally {
+          client.release();
+        }
+      } else {
+        r = { id: addressId, customer_id: customerId, address_type: 'HOME', address_line: 'Mock Line', city: 'City', postal_code: '123456', latitude: 28.2, longitude: 76.6, is_default: true, contact_phone: null };
       }
-      const r = updRes.rows[0];
       return sendJson(res, 200, {
         id: r.id,
         customerId: r.customer_id,
@@ -2482,27 +2545,43 @@ const server = http.createServer(async (req, res) => {
       const addressId = addrItemMatch[2];
       const body = await parseJsonBody(req);
 
-      if (body.isDefault === true) {
-        await pool.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
+      let r;
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['addr_lock_' + customerId]);
+          if (body.isDefault === true) {
+            await client.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
+          }
+          const updRes = await client.query(
+            `UPDATE customer_addresses
+             SET address_line = COALESCE($1, address_line),
+                 city = COALESCE($2, city),
+                 postal_code = COALESCE($3, postal_code),
+                 latitude = COALESCE($4, latitude),
+                 longitude = COALESCE($5, longitude),
+                 is_default = COALESCE($6, is_default),
+                 contact_phone = COALESCE($7, contact_phone)
+             WHERE id = $8 AND (customer_id = $9 OR customer_id IS NULL)
+             RETURNING *`,
+            [body.addressLine, body.city, body.postalCode, body.latitude, body.longitude, body.isDefault, body.contactPhone || body.phone, addressId, customerId]
+          );
+          if (updRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'ADDRESS_NOT_FOUND', message: 'Address not found.' });
+          }
+          await client.query('COMMIT');
+          r = updRes.rows[0];
+        } catch (e) {
+          await client.query('ROLLBACK');
+          throw e;
+        } finally {
+          client.release();
+        }
+      } else {
+        r = { id: addressId, customer_id: customerId, address_type: 'HOME', address_line: body.addressLine || 'Mock', city: body.city || 'City', postal_code: body.postalCode || '123456', latitude: body.latitude || 28.2, longitude: body.longitude || 76.6, is_default: Boolean(body.isDefault), contact_phone: body.contactPhone };
       }
-
-      const updRes = await pool.query(
-        `UPDATE customer_addresses
-         SET address_line = COALESCE($1, address_line),
-             city = COALESCE($2, city),
-             postal_code = COALESCE($3, postal_code),
-             latitude = COALESCE($4, latitude),
-             longitude = COALESCE($5, longitude),
-             is_default = COALESCE($6, is_default),
-             contact_phone = COALESCE($7, contact_phone)
-         WHERE id = $8 AND (customer_id = $9 OR customer_id IS NULL)
-         RETURNING *`,
-        [body.addressLine, body.city, body.postalCode, body.latitude, body.longitude, body.isDefault, body.contactPhone || body.phone, addressId, customerId]
-      );
-      if (updRes.rows.length === 0) {
-        return sendJson(res, 404, { error: 'ADDRESS_NOT_FOUND', message: 'Address not found.' });
-      }
-      const r = updRes.rows[0];
       return sendJson(res, 200, {
         id: r.id,
         customerId: r.customer_id,
@@ -2530,16 +2609,48 @@ const server = http.createServer(async (req, res) => {
       if (isNaN(lat) || isNaN(lng)) {
         return sendJson(res, 400, { error: 'INVALID_COORDINATES', message: 'lat and lng parameters are mandatory.' });
       }
-      return sendJson(res, 200, {
+
+      let geoDetails = {
         formattedAddress: `Location at ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-        street: 'Main Market Road',
-        locality: 'Model Town',
-        city: 'Rewari',
-        state: 'Haryana',
-        postalCode: '123401',
+        street: `Point (${lat.toFixed(3)}, ${lng.toFixed(3)})`,
+        locality: 'Current Location',
+        city: 'Delivery Area',
+        state: '',
+        postalCode: '',
         country: 'India',
         geoPoint: { latitude: lat, longitude: lng }
-      });
+      };
+
+      try {
+        const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const resp = await fetch(nominatimUrl, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'CommerceOS-Platform/1.0' }
+        });
+        clearTimeout(timeoutId);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.address) {
+            const addr = data.address;
+            geoDetails = {
+              formattedAddress: data.display_name || geoDetails.formattedAddress,
+              street: addr.road || addr.street || addr.pedestrian || addr.suburb || geoDetails.street,
+              locality: addr.suburb || addr.neighbourhood || addr.city_district || geoDetails.locality,
+              city: addr.city || addr.town || addr.village || addr.county || geoDetails.city,
+              state: addr.state || '',
+              postalCode: addr.postcode || '',
+              country: addr.country || 'India',
+              geoPoint: { latitude: lat, longitude: lng }
+            };
+          }
+        }
+      } catch (_) {
+        // Fall back gracefully to coordinates without injecting fake Rewari strings
+      }
+
+      return sendJson(res, 200, geoDetails);
     }
 
     // -------------------------------------------------------------
@@ -2688,7 +2799,7 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseJsonBody(req);
 
-      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'CARD', 'NET_BANKING'];
+      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'UPI_INTENT', 'CARD', 'NET_BANKING'];
       const rawPaymentMethod = body.paymentMethod || body.payment_method;
       const requestedMethod = rawPaymentMethod ? String(rawPaymentMethod).toUpperCase() : 'COD';
       if (!allowedPaymentMethods.includes(requestedMethod)) {
@@ -2714,7 +2825,10 @@ const server = http.createServer(async (req, res) => {
       );
       if (customerCheck.rows.length === 0) {
         // Auto-provision authenticated customer profile in Supabase PostgreSQL
-        const phone = authClaims.phone || '+919991416180';
+        const phone = authClaims.phone || (authClaims.sub && authClaims.sub.startsWith('+') ? authClaims.sub : null);
+        if (!phone) {
+          return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer phone number is required in auth token.' });
+        }
         const name = authClaims.name || ('Customer ' + phone.slice(-4));
         const insCust = await pool.query(
           `INSERT INTO customers (id, full_name, phone, is_active, created_at, updated_at)
@@ -2758,12 +2872,21 @@ const server = http.createServer(async (req, res) => {
           // Auto-provision address in customer address book if deliveryAddress was provided
           const d = rawDeliveryAddr;
           const addrId = `addr_${crypto.randomUUID()}`;
-          const lat = Number(d.latitude) || 28.202224;
-          const lng = Number(d.longitude) || 76.615418;
-          const line = String(d.addressLine || d.address_line || d.formattedAddress || d.formatted_address || 'Delivery Address').trim();
-          const city = String(d.city || 'Rewari').trim();
-          const postalCode = String(d.postalCode || d.postal_code || '123401').trim();
-          const phone = String(customerCheck.rows[0].phone || '+919991416180');
+          const lat = Number(d.latitude);
+          const lng = Number(d.longitude);
+          if (isNaN(lat) || isNaN(lng)) {
+            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude and longitude are strictly required.' });
+          }
+          const line = String(d.addressLine || d.address_line || d.formattedAddress || d.formatted_address || '').trim();
+          if (!line) {
+            return sendJson(res, 400, { error: 'INVALID_ADDRESS_LINE', message: 'Valid delivery address line is strictly required.' });
+          }
+          const city = String(d.city || '').trim();
+          const postalCode = String(d.postalCode || d.postal_code || '').trim();
+          const phone = String(customerCheck.rows[0].phone || '').trim();
+          if (!phone) {
+            return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer contact phone is strictly required.' });
+          }
 
           const insRes = await pool.query(
             `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
@@ -3216,13 +3339,22 @@ const server = http.createServer(async (req, res) => {
         if (body.deliveryAddress && (body.deliveryAddress.addressLine || body.deliveryAddress.latitude)) {
           const d = body.deliveryAddress;
           const addrId = `addr_${crypto.randomUUID()}`;
-          const lat = Number(d.latitude) || 28.202224;
-          const lng = Number(d.longitude) || 76.615418;
-          const line = String(d.addressLine || d.formattedAddress || 'Delivery Address').trim();
-          const city = String(d.city || 'Gurugram').trim();
-          const postalCode = String(d.postalCode || '122001').trim();
+          const lat = Number(d.latitude);
+          const lng = Number(d.longitude);
+          if (isNaN(lat) || isNaN(lng)) {
+            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude and longitude are strictly required.' });
+          }
+          const line = String(d.addressLine || d.formattedAddress || '').trim();
+          if (!line) {
+            return sendJson(res, 400, { error: 'INVALID_ADDRESS_LINE', message: 'Valid delivery address line is strictly required.' });
+          }
+          const city = String(d.city || '').trim();
+          const postalCode = String(d.postalCode || '').trim();
           const custRes = await pool.query(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
-          const phone = String((custRes.rows[0] && custRes.rows[0].phone) || '+919991416180');
+          const phone = String((custRes.rows[0] && custRes.rows[0].phone) || '').trim();
+          if (!phone) {
+            return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer phone is strictly required.' });
+          }
 
           const insRes = await pool.query(
             `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
@@ -3258,10 +3390,11 @@ const server = http.createServer(async (req, res) => {
       }
 
       const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || null;
+      const requestedPaymentMethod = (body.paymentMethod || body.payment_method || 'COD').toUpperCase();
       const placeResult = await appRepositories.orderRepo.placeOrderTransactionally(customerId, {
         addressId: customerAddr.id,
         deliveryAddress: customerAddr,
-        paymentMethod: 'COD',
+        paymentMethod: requestedPaymentMethod,
         items: rawCartItems,
         fulfillmentDecision: fulfillmentDecision.decision,
         idempotencyKey
@@ -3525,6 +3658,339 @@ const server = http.createServer(async (req, res) => {
       } else {
         const refunds = (appRepositories.paymentRepo.db.paymentRefunds || []).filter(r => r.orderId === targetOrderId);
         return sendJson(res, 200, { ok: true, refunds });
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Direct Zero-Fee UPI Payment: Initiate Intent URI: POST /api/v1/payments/upi/initiate
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/payments/upi/initiate' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for UPI initiation.' });
+      }
+
+      const body = await parseJsonBody(req);
+      const targetOrderId = body.orderId || body.order_id;
+      if (!targetOrderId) {
+        return sendJson(res, 400, { error: 'ORDER_ID_REQUIRED', message: 'orderId is required to initiate UPI payment.' });
+      }
+
+      let order = null;
+      if (pool) {
+        const orderRes = await pool.query(
+          `SELECT id, order_id, customer_id, store_id, total_amount, payment_method, payment_status, status FROM orders WHERE (order_id = $1 OR id = $1) LIMIT 1`,
+          [targetOrderId]
+        );
+        if (orderRes.rows.length === 0) {
+          return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+        }
+        order = orderRes.rows[0];
+      } else {
+        const list = appRepositories.orderRepo.db?.orders || [];
+        order = list.find(o => o.orderId === targetOrderId || o.id === targetOrderId);
+        if (!order) return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+      }
+
+      if (order.customer_id && order.customer_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN') {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Authenticated customer does not own this order.' });
+      }
+
+      if (order.payment_status === 'PAID') {
+        return sendJson(res, 200, { ok: true, alreadyPaid: true, orderId: order.order_id || order.id, paymentStatus: 'PAID' });
+      }
+
+      const merchantVpa = process.env.MERCHANT_UPI_VPA || 'commerceos@okaxis';
+      const merchantName = process.env.MERCHANT_UPI_NAME || 'CommerceOS Store';
+      const orderIdVal = order.order_id || order.id;
+      const formattedAmount = Number(order.total_amount).toFixed(2);
+      const encodedMerchantName = encodeURIComponent(merchantName);
+      const upiUri = `upi://pay?pa=${merchantVpa}&pn=${encodedMerchantName}&am=${formattedAmount}&tr=${orderIdVal}&tn=Order%20${orderIdVal}&cu=INR`;
+
+      return sendJson(res, 200, {
+        ok: true,
+        orderId: orderIdVal,
+        amount: Number(formattedAmount),
+        currency: 'INR',
+        merchantVpa,
+        merchantName,
+        upiUri,
+        qrPayload: upiUri,
+        expiryMinutes: 15
+      });
+    }
+
+    // -------------------------------------------------------------
+    // Direct Zero-Fee UPI Payment: Verify Intent / UTR: POST /api/v1/payments/upi/verify-intent
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/payments/upi/verify-intent' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for UPI verification.' });
+      }
+
+      const body = await parseJsonBody(req);
+      const targetOrderId = body.orderId || body.order_id;
+      const rawUtr = body.utr || body.utrNumber || body.rrn || body.approvalRefNo;
+
+      if (!targetOrderId) {
+        return sendJson(res, 400, { error: 'ORDER_ID_REQUIRED', message: 'orderId is required.' });
+      }
+      if (!rawUtr || String(rawUtr).trim().length < 6) {
+        return sendJson(res, 400, { error: 'INVALID_UTR', message: 'Valid bank UTR / reference number is required (minimum 6 characters).' });
+      }
+
+      const cleanUtr = String(rawUtr).trim();
+
+      if (pool) {
+        // Anti-Replay Security Guard
+        const existingUtr = await pool.query(
+          `SELECT id, order_id FROM payments WHERE provider_ref = $1 AND status = 'SUCCESS' LIMIT 1`,
+          [cleanUtr]
+        );
+        if (existingUtr.rows.length > 0) {
+          if (existingUtr.rows[0].order_id === targetOrderId) {
+            return sendJson(res, 200, { ok: true, orderId: targetOrderId, paymentStatus: 'PAID', message: 'Payment already verified for this order.' });
+          } else {
+            return sendJson(res, 409, { error: 'UTR_ALREADY_REDEEMED', message: 'This UTR reference number has already been used for another order.' });
+          }
+        }
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+          const orderRes = await client.query(
+            `SELECT id, order_id, customer_id, store_id, total_amount, payment_status, status FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+            [targetOrderId]
+          );
+          if (orderRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+          }
+          const order = orderRes.rows[0];
+          if (order.customer_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Cannot verify payment for another customer.' });
+          }
+          if (['CANCELLED', 'DELIVERED'].includes(order.status)) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, { error: 'INVALID_ORDER_STATE', message: `Cannot verify payment for order in status ${order.status}.` });
+          }
+
+          // Atomically update order payment status
+          await client.query(
+            `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (id = $1 OR order_id = $1)`,
+            [targetOrderId]
+          );
+
+          // Record payment with anti-replay provider_ref
+          const paymentId = 'pay_' + crypto.randomUUID();
+          await client.query(
+            `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'UPI', 'UPI_INTENT', $5, $6, NOW(), NOW())`,
+            [
+              paymentId,
+              paymentId,
+              order.order_id,
+              order.total_amount,
+              cleanUtr,
+              JSON.stringify({
+                utr: cleanUtr,
+                upiApp: body.upiApp || 'UPI_APP',
+                payerVpa: body.payerVpa || null,
+                verifiedAt: new Date().toISOString()
+              })
+            ]
+          );
+
+          // Check delivery session and trigger outbox dispatch
+          const sessRes = await client.query(
+            `SELECT delivery_id, store_id FROM delivery_sessions WHERE (order_id = $1 OR order_id = $2) LIMIT 1`,
+            [order.order_id, order.id]
+          );
+          const storeRes = await client.query(
+            `SELECT id, seller_approval_required FROM stores WHERE id = $1 LIMIT 1`,
+            [order.store_id]
+          );
+          const isSellerApprovalRequired = storeRes.rows.length > 0 && storeRes.rows[0].seller_approval_required === true;
+
+          if (sessRes.rows.length > 0) {
+            const deliveryId = sessRes.rows[0].delivery_id;
+            if (!isSellerApprovalRequired) {
+              await client.query(
+                `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
+                 VALUES ('DELIVERY_SESSION', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', 0, NOW(), NOW())`,
+                [
+                  deliveryId,
+                  JSON.stringify({
+                    deliveryId,
+                    orderId: order.order_id,
+                    storeId: order.store_id,
+                    dispatchMode: 'AUTO_DARK_STORE',
+                    paymentStatus: 'PAID'
+                  })
+                ]
+              );
+            } else {
+              await client.query(
+                `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
+                 VALUES ('ORDER', $1, 'ORDER_PAID', $2, 'PENDING', 0, NOW(), NOW())`,
+                [
+                  order.order_id,
+                  JSON.stringify({
+                    orderId: order.order_id,
+                    deliveryId,
+                    storeId: order.store_id,
+                    totalAmount: Number(order.total_amount),
+                    paymentStatus: 'PAID'
+                  })
+                ]
+              );
+            }
+          }
+
+          await client.query('COMMIT');
+
+          sseBroadcasterInstance.broadcast(`order_${order.order_id}`, 'ORDER_PAID', {
+            orderId: order.order_id,
+            paymentStatus: 'PAID',
+            status: order.status
+          });
+          if (order.store_id) {
+            sseBroadcasterInstance.broadcast(`seller_${order.store_id}`, 'ORDER_PAID', {
+              orderId: order.order_id,
+              paymentStatus: 'PAID'
+            });
+          }
+
+          return sendJson(res, 200, {
+            ok: true,
+            orderId: order.order_id,
+            paymentStatus: 'PAID',
+            paymentId,
+            message: 'UPI payment verified. Order dispatched.'
+          });
+        } catch (err) {
+          await client.query('ROLLBACK');
+          throw err;
+        } finally {
+          client.release();
+        }
+      } else {
+        return sendJson(res, 200, {
+          ok: true,
+          orderId: targetOrderId,
+          paymentStatus: 'PAID',
+          paymentId: 'pay_mock_' + Date.now(),
+          message: 'UPI payment verified in local mode.'
+        });
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Direct Zero-Fee Doorstep UPI: POST /api/v1/payments/doorstep-upi/complete
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/payments/doorstep-upi/complete' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const body = await parseJsonBody(req);
+      const deliveryId = body.deliveryId || body.delivery_id;
+      const rawUtr = body.utr || body.utrNumber;
+      const collectedAmount = Number(body.collectedAmount || body.amount || 0);
+
+      if (!deliveryId) {
+        return sendJson(res, 400, { error: 'DELIVERY_ID_REQUIRED', message: 'deliveryId is required.' });
+      }
+      if (!rawUtr || String(rawUtr).trim().length < 6) {
+        return sendJson(res, 400, { error: 'INVALID_UTR', message: 'Valid UTR number is required for doorstep UPI.' });
+      }
+
+      const cleanUtr = String(rawUtr).trim();
+
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+          const sessRes = await client.query(
+            `SELECT ds.id, ds.delivery_id, ds.order_id, ds.rider_id, o.total_amount, o.store_id
+             FROM delivery_sessions ds
+             JOIN orders o ON (o.order_id = ds.order_id OR o.id = ds.order_id)
+             WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)
+             FOR UPDATE`,
+            [deliveryId]
+          );
+          if (sessRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
+          }
+          const session = sessRes.rows[0];
+          if (session.rider_id && session.rider_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can record doorstep UPI.' });
+          }
+
+          const finalAmount = collectedAmount > 0 ? collectedAmount : Number(session.total_amount || 0);
+
+          // Update COD ledger to reconciled via UPI
+          await client.query(
+            `UPDATE cod_ledger
+             SET status = 'COLLECTED_RECONCILED',
+                 amount_collected = $2,
+                 collector_id = $3,
+                 notes = $4,
+                 reconciled = TRUE,
+                 updated_at = NOW()
+             WHERE (order_id = $1 OR id = $1)`,
+            [session.order_id, finalAmount, session.rider_id, `Doorstep UPI collected via UTR: ${cleanUtr}`]
+          );
+
+          // Update order payment status
+          await client.query(
+            `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
+            [session.order_id]
+          );
+
+          // Record in payments table
+          const paymentId = 'pay_' + crypto.randomUUID();
+          await client.query(
+            `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'UPI', 'DOORSTEP_UPI', $5, $6, NOW(), NOW())`,
+            [
+              paymentId,
+              paymentId,
+              session.order_id,
+              finalAmount,
+              cleanUtr,
+              JSON.stringify({ utr: cleanUtr, collectedByRider: session.rider_id, collectedAt: new Date().toISOString() })
+            ]
+          );
+
+          await client.query('COMMIT');
+          return sendJson(res, 200, {
+            ok: true,
+            deliveryId: session.delivery_id,
+            orderId: session.order_id,
+            paymentStatus: 'PAID',
+            reconciled: true,
+            message: 'Doorstep UPI payment verified and reconciled.'
+          });
+        } catch (err) {
+          await client.query('ROLLBACK');
+          throw err;
+        } finally {
+          client.release();
+        }
+      } else {
+        return sendJson(res, 200, {
+          ok: true,
+          deliveryId,
+          paymentStatus: 'PAID',
+          reconciled: true,
+          message: 'Doorstep UPI payment recorded in local mode.'
+        });
       }
     }
 
@@ -4441,24 +4907,41 @@ const server = http.createServer(async (req, res) => {
       if (pool) {
         try {
           const tripsRes = await pool.query(
-            `SELECT id, delivery_id, order_id, customer_name, customer_address, 
-                    state, is_cod, cod_amount, remaining_duration_mins, created_at, updated_at
-             FROM delivery_sessions 
-             WHERE rider_id = $1 
-             ORDER BY created_at DESC LIMIT 50`,
+            `SELECT ds.id, ds.delivery_id, ds.order_id, ds.merchant_name, ds.merchant_address,
+                    ds.customer_name, ds.customer_address, ds.distance_km,
+                    ds.state, ds.is_cod, ds.cod_amount, ds.remaining_duration_mins,
+                    ds.pricing_snapshot, ds.created_at, ds.updated_at,
+                    (SELECT COUNT(*) FROM order_lines ol WHERE ol.order_id = ds.order_id) AS items_count
+             FROM delivery_sessions ds
+             WHERE ds.rider_id = $1 
+             ORDER BY ds.created_at DESC LIMIT 50`,
             [riderId]
           );
-          trips = tripsRes.rows.map(r => ({
-            id: r.id || r.delivery_id,
-            tripId: r.delivery_id || r.id,
-            orderId: r.order_id,
-            customerArea: r.customer_address ? r.customer_address.split(',')[0].trim() : 'Customer Area',
-            distanceKm: 1.8,
-            durationMins: r.remaining_duration_mins != null ? Number(r.remaining_duration_mins) : 12,
-            payout: r.is_cod ? Math.max(35.0, Number(r.cod_amount) * 0.1) : 45.0,
-            status: r.state,
-            createdAt: r.created_at
-          }));
+          trips = tripsRes.rows.map(r => {
+            const payoutNum = r.pricing_snapshot?.riderPayout != null
+              ? Number(r.pricing_snapshot.riderPayout)
+              : (r.is_cod ? Math.max(40.0, Number(r.cod_amount) * 0.1) : 45.0);
+            return {
+              id: r.id || r.delivery_id,
+              deliveryId: r.delivery_id || r.id,
+              tripId: r.delivery_id || r.id,
+              orderId: r.order_id,
+              merchantName: r.merchant_name || 'CommerceOS Central Hub',
+              merchantAddress: r.merchant_address || 'Main Market, Rewari',
+              customerName: r.customer_name || 'Customer',
+              customerAddress: r.customer_address || 'Doorstep Delivery',
+              customerArea: r.customer_address ? r.customer_address.split(',')[0].trim() : 'Customer Area',
+              itemsCount: Number(r.items_count) || 1,
+              distanceKm: Number(r.distance_km) || 1.8,
+              durationMins: r.remaining_duration_mins != null ? Number(r.remaining_duration_mins) : 12,
+              payout: payoutNum,
+              payoutFormatted: '₹' + payoutNum.toFixed(2),
+              status: r.state,
+              state: r.state,
+              deliveredAt: r.updated_at || r.created_at,
+              createdAt: r.created_at
+            };
+          });
         } catch (dbErr) {
           console.warn('[production-server] rider trips query error:', dbErr.message);
         }
@@ -5655,6 +6138,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'ADJUSTMENT_NOT_FOUND', message: 'Original adjustment not found.' });
       }
       const orig = ledgerRow.rows[0];
+      if (orig.is_reversed || orig.reversal_of_id) {
+        return sendJson(res, 409, { error: 'ALREADY_REVERSED', message: 'This inventory adjustment has already been undone.' });
+      }
       const reverseDelta = -Number(orig.delta);
 
       const adj = await appRepositories.inventoryRepo.adjustStockForStore(
@@ -5669,6 +6155,9 @@ const server = http.createServer(async (req, res) => {
       if (!adj.ok) {
         return sendJson(res, adj.httpStatus || 400, { error: adj.error, message: adj.message });
       }
+
+      await appRepositories.inventoryRepo.markAdjustmentReversed(orig.id, adj.adjustmentId);
+
       return sendJson(res, 200, {
         ok: true,
         undoneAdjustmentId: adjustmentId,

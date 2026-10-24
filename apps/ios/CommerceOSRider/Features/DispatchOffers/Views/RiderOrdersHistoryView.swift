@@ -4,48 +4,9 @@ public struct RiderOrdersHistoryView: View {
     @EnvironmentObject private var sessionManager: RiderSessionManager
     let onSelectActiveOrder: () -> Void
     
-    @State private var completedOrders: [CompletedOrderItem] = [
-        CompletedOrderItem(
-            orderId: "ord_8921a9c1",
-            merchantName: "Koramangala Dark Store Hub",
-            customerName: "Priya Sharma",
-            customerAddress: "Flat 402, Green Glen Heights, Bellandur",
-            itemsCount: 3,
-            distanceKm: 2.4,
-            payout: 65.00,
-            deliveredAt: "10 mins ago"
-        ),
-        CompletedOrderItem(
-            orderId: "ord_7612b4d8",
-            merchantName: "Apollo Pharmacy HSR Hub",
-            customerName: "Amit Verma",
-            customerAddress: "Villa 12, Sobha Iris, Outer Ring Rd",
-            itemsCount: 1,
-            distanceKm: 3.1,
-            payout: 85.00,
-            deliveredAt: "45 mins ago"
-        ),
-        CompletedOrderItem(
-            orderId: "ord_6501c3e4",
-            merchantName: "Koramangala Dark Store Hub",
-            customerName: "Rahul Menon",
-            customerAddress: "Tower 3, Prestige Ferns, Kadubeesanahalli",
-            itemsCount: 4,
-            distanceKm: 1.8,
-            payout: 55.00,
-            deliveredAt: "1 hr ago"
-        ),
-        CompletedOrderItem(
-            orderId: "ord_5419d2f7",
-            merchantName: "Koramangala Dark Store Hub",
-            customerName: "Sneha Reddy",
-            customerAddress: "House 24, 5th Cross, HSR Sector 2",
-            itemsCount: 2,
-            distanceKm: 2.0,
-            payout: 60.00,
-            deliveredAt: "2 hrs ago"
-        )
-    ]
+    private var completedOrders: [CompletedOrderItem] {
+        sessionManager.completedOrders
+    }
     
     @State private var copiedOrderId: String? = nil
     
@@ -122,72 +83,97 @@ public struct RiderOrdersHistoryView: View {
                     .padding(.top, 4)
                     
                     // Completed Orders List
-                    ForEach(completedOrders) { order in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(RiderTheme.Colors.safetyGreen)
-                                    
-                                    let shortId = order.orderId.count > 8 ? String(order.orderId.suffix(8)).uppercased() : order.orderId.uppercased()
-                                    Text("ORDER #\(shortId)")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Button(action: {
-                                        UIPasteboard.general.string = order.orderId
-                                        copiedOrderId = order.orderId
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                            if copiedOrderId == order.orderId {
-                                                copiedOrderId = nil
+                    if completedOrders.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "clock.badge.checkmark")
+                                .font(.system(size: 40))
+                                .foregroundColor(Color(hex: "64748B"))
+                                .padding(.top, 40)
+                            Text("No completed deliveries yet today")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(Color(hex: "94A3B8"))
+                            Text("Completed customer orders will appear here automatically.")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(hex: "64748B"))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 30)
+                    } else {
+                        ForEach(completedOrders) { order in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(RiderTheme.Colors.safetyGreen)
+                                        
+                                        let shortId = order.orderId.count > 8 ? String(order.orderId.suffix(8)).uppercased() : order.orderId.uppercased()
+                                        Text("ORDER #\(shortId)")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundColor(.white)
+                                        
+                                        Button(action: {
+                                            UIPasteboard.general.string = order.orderId
+                                            copiedOrderId = order.orderId
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                                if copiedOrderId == order.orderId {
+                                                    copiedOrderId = nil
+                                                }
                                             }
+                                        }) {
+                                            Text(copiedOrderId == order.orderId ? "COPIED" : "COPY")
+                                                .font(.system(size: 9, weight: .black))
+                                                .foregroundColor(Color(hex: "38BDF8"))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color(hex: "1E293B"))
+                                                .cornerRadius(4)
                                         }
-                                    }) {
-                                        Text(copiedOrderId == order.orderId ? "COPIED" : "COPY")
-                                            .font(.system(size: 9, weight: .black))
-                                            .foregroundColor(Color(hex: "38BDF8"))
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color(hex: "1E293B"))
-                                            .cornerRadius(4)
                                     }
+                                    
+                                    Spacer()
+                                    
+                                    Text("+₹\(String(format: "%.2f", order.payout))")
+                                        .font(.system(size: 15, weight: .black))
+                                        .foregroundColor(RiderTheme.Colors.safetyGreen)
                                 }
                                 
-                                Spacer()
+                                Text("\(order.merchantName) → \(order.customerName)")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(hex: "CBD5E1"))
                                 
-                                Text("+₹\(String(format: "%.2f", order.payout))")
-                                    .font(.system(size: 15, weight: .black))
-                                    .foregroundColor(RiderTheme.Colors.safetyGreen)
+                                HStack {
+                                    Text("📦 \(order.itemsCount) item(s) • \(String(format: "%.1f", order.distanceKm)) km")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Color(hex: "94A3B8"))
+                                    Spacer()
+                                    Text(order.deliveredAt)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Color(hex: "64748B"))
+                                }
                             }
-                            
-                            Text("\(order.merchantName) → \(order.customerName)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(hex: "CBD5E1"))
-                            
-                            HStack {
-                                Text("📦 \(order.itemsCount) item(s) • \(String(format: "%.1f", order.distanceKm)) km")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(Color(hex: "94A3B8"))
-                                Spacer()
-                                Text(order.deliveredAt)
-                                    .font(.system(size: 11))
-                                    .foregroundColor(Color(hex: "64748B"))
-                            }
+                            .padding(14)
+                            .background(Color(hex: "16181F"))
+                            .cornerRadius(14)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color(hex: "262933"), lineWidth: 1)
+                            )
+                            .padding(.horizontal, 16)
                         }
-                        .padding(14)
-                        .background(Color(hex: "16181F"))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color(hex: "262933"), lineWidth: 1)
-                        )
-                        .padding(.horizontal, 16)
                     }
                     
                     Spacer(minLength: 40)
                 }
                 .padding(.top, 8)
+            }
+            .refreshable {
+                await sessionManager.fetchTripsHistory()
+            }
+            .task {
+                await sessionManager.fetchTripsHistory()
             }
             .background(Color(hex: "0D0F14").ignoresSafeArea())
             .navigationTitle("Orders History")
@@ -195,16 +181,4 @@ public struct RiderOrdersHistoryView: View {
         }
         .navigationViewStyle(.stack)
     }
-}
-
-public struct CompletedOrderItem: Identifiable {
-    public let id = UUID()
-    public let orderId: String
-    public let merchantName: String
-    public let customerName: String
-    public let customerAddress: String
-    public let itemsCount: Int
-    public let distanceKm: Double
-    public let payout: Double
-    public let deliveredAt: String
 }

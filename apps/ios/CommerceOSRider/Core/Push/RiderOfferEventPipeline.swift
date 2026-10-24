@@ -23,11 +23,13 @@ public final class RiderOfferEventPipeline: ObservableObject {
 
     private func setupBackgroundObservers() {
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.startBackgroundPolling()
+            Task { @MainActor [weak self] in
+                self?.startBackgroundPolling()
+            }
         }
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.stopBackgroundPolling()
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                self?.stopBackgroundPolling()
                 await self?.pollActiveOffersOnce()
             }
         }
@@ -42,13 +44,15 @@ public final class RiderOfferEventPipeline: ObservableObject {
             await self.pollActiveOffersOnce()
         }
 
-        // 2. Periodic reconciliation polling (every 3 seconds - 1:1 Android parity)
+        // 2. Periodic reconciliation polling (every 3 seconds - scheduled on .common mode)
         pollingTimer?.invalidate()
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.pollActiveOffersOnce()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        pollingTimer = timer
 
         // 3. Persistent Realtime SSE Stream
         startSseStream()
@@ -65,17 +69,33 @@ public final class RiderOfferEventPipeline: ObservableObject {
 
     private func startBackgroundPolling() {
         guard isListening else { return }
-        stopBackgroundPolling()
+        renewBackgroundTask()
 
-        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "RiderOfferBackgroundPoll") { [weak self] in
-            self?.stopBackgroundPolling()
-        }
-
+        backgroundPollingTask?.cancel()
         backgroundPollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.pollActiveOffersOnce()
+                guard let self = self, self.isListening else { break }
+                await self.pollActiveOffersOnce()
+                self.checkAndRenewBackgroundTask()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
+        }
+    }
+
+    private func renewBackgroundTask() {
+        if backgroundTaskId != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+            backgroundTaskId = .invalid
+        }
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "RiderOfferBackgroundPoll") { [weak self] in
+            guard let self = self else { return }
+            self.stopBackgroundPolling()
+        }
+    }
+
+    private func checkAndRenewBackgroundTask() {
+        if backgroundTaskId == .invalid {
+            renewBackgroundTask()
         }
     }
 

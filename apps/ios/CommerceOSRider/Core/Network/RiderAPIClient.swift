@@ -82,10 +82,6 @@ public final class RiderAPIClient: ObservableObject {
     
     private let session: URLSession
 
-    // Authoritative Production Rider API Client
-    public static let defaultRiderId = "rdr_9817916180"
-    public static let defaultRiderPhone = "+919817916180"
-
     public static func extractSubFromJwt(_ token: String) -> String? {
         let parts = token.components(separatedBy: ".")
         guard parts.count >= 2 else { return nil }

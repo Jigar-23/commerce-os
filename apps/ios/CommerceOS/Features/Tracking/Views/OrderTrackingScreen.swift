@@ -1062,7 +1062,8 @@ public struct OrderTrackingScreen: View {
     // MARK: - Support Button
     private var supportButton: some View {
         Button(action: {
-            if let url = URL(string: "tel://919817916180") {
+            let phone = configProvider.currentConfig.identity.supportPhone.filter { $0.isNumber || $0 == "+" }
+            if let url = URL(string: "tel://\(phone)") {
                 UIApplication.shared.open(url)
             }
         }) {
@@ -1220,9 +1221,6 @@ public struct OrderTrackingScreen: View {
         }
         if let last = lastKnownRiderCoordinate {
             return last
-        }
-        if hasAssignedRider, let mCoord = resolvedMerchantCoordinate {
-            return CLLocationCoordinate2D(latitude: mCoord.latitude - 0.002, longitude: mCoord.longitude - 0.002)
         }
         return nil
     }

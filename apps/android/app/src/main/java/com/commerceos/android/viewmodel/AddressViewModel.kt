@@ -94,6 +94,10 @@ class AddressViewModel(
     var platformUiState by mutableStateOf(AddressPlatformUiState())
         private set
 
+    // In-memory cache for preserving uncommitted draft address across navigation / backstack pops
+    var cachedDraftAddress: StructuredAddress? = null
+        private set
+
     val activeFormAddress: StructuredAddress
         get() = platformUiState.draftAddress
 
@@ -236,7 +240,25 @@ class AddressViewModel(
 
     // --- Single Source of Truth State Machine Transitions ---
 
-    fun startAddAddressFlow() {
+    fun discardDraft() {
+        cachedDraftAddress = null
+    }
+
+    fun startAddAddressFlow(forceReset: Boolean = false) {
+        val existingDraft = cachedDraftAddress
+        if (!forceReset && existingDraft != null && (existingDraft.houseNumber.isNotBlank() || existingDraft.geoLocation != null)) {
+            val resumeGeo = existingDraft.geoLocation ?: liveGpsLocation
+            platformUiState = AddressPlatformUiState(
+                currentStep = if (resumeGeo != null) AddressPlatformStep.LocationSelected(resumeGeo) else AddressPlatformStep.SearchingLocation(""),
+                originalAddress = null,
+                draftAddress = existingDraft,
+                activeGeocodedPlace = liveGpsPlace,
+                isEditingExisting = false,
+                editingAddressId = null
+            )
+            return
+        }
+
         val initialGeo = liveGpsLocation ?: selectedAddress?.let {
             val lat = it.latitude
             val lng = it.longitude
@@ -261,6 +283,7 @@ class AddressViewModel(
             )
         }
 
+        cachedDraftAddress = initialDraft
         platformUiState = AddressPlatformUiState(
             currentStep = if (initialGeo != null) AddressPlatformStep.LocationSelected(initialGeo) else AddressPlatformStep.SearchingLocation(""),
             originalAddress = null,
@@ -270,8 +293,10 @@ class AddressViewModel(
             editingAddressId = null
         )
 
-        // Request high-precision GPS lock on opening Add Address flow
-        requestCurrentGpsLocation()
+        // Only acquire GPS if no initial location is available
+        if (initialGeo == null) {
+            requestCurrentGpsLocation()
+        }
     }
 
     fun startEditAddressFlow(apiAddress: ApiAddress) {
@@ -519,6 +544,7 @@ class AddressViewModel(
     }
 
     fun updateFormAddress(updated: StructuredAddress) {
+        cachedDraftAddress = updated
         val conflict = updated.detectAddressConflict(platformUiState.activeGeocodedPlace)
         platformUiState = platformUiState.copy(
             draftAddress = updated,
@@ -557,6 +583,7 @@ class AddressViewModel(
                         val updatedList = addresses.map { if (it.id == addressId) result.data else it }
                         addresses = updatedList
                         selectedAddress = result.data
+                        cachedDraftAddress = null
                         errorMessage = null
                         isLoading = false
                         platformUiState = platformUiState.copy(
@@ -581,6 +608,7 @@ class AddressViewModel(
                         }
                         addresses = updatedList
                         selectedAddress = result.data
+                        cachedDraftAddress = null
                         errorMessage = null
                         isLoading = false
                         platformUiState = platformUiState.copy(
@@ -724,6 +752,7 @@ class AddressViewModel(
         profile = null
         isLoading = false
         errorMessage = null
+        cachedDraftAddress = null
         platformUiState = AddressPlatformUiState()
     }
 }

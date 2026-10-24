@@ -205,51 +205,6 @@ fun RiderAuthScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF334155))
-                            Text(
-                                text = "  OR  ",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF64748B)
-                            )
-                            HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF334155))
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        OutlinedButton(
-                            onClick = {
-                                val cleanPhone = if (phone.length == 10) phone else "9817916180"
-                                val demoProfile = RiderProfile(
-                                    riderId = "rdr_$cleanPhone",
-                                    name = riderName.ifBlank { "Delivery Partner" },
-                                    phone = "+91 $cleanPhone",
-                                    vehicleNumber = vehicleNumber.ifBlank { "Electric Scooter" },
-                                    rating = 4.95,
-                                    completedToday = 0,
-                                    earningsTodayFormatted = "₹0",
-                                    shiftStatus = "ONLINE_AVAILABLE",
-                                    assignedHub = "Rewari Central Hub"
-                                )
-                                sessionManager.saveAuthToken("jwt_demo_partner_token")
-                                sessionManager.saveRiderId(demoProfile.riderId)
-                                onLoginSuccess(demoProfile)
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF10B981)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                        ) {
-                            Text("⚡ Quick Partner Shift (Instant Access)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
                     } else {
                         // OTP Verification Step
                         Row(
@@ -374,25 +329,7 @@ fun RiderAuthScreen(
                                         sessionManager.saveRiderId(profile.riderId)
                                         onLoginSuccess(profile)
                                     }.onFailure { err ->
-                                        if (cleanOtp == "123456" || cleanOtp == "000000") {
-                                            val cleanPhone = if (phone.length == 10) phone else "9817916180"
-                                            val fallbackProfile = RiderProfile(
-                                                riderId = "rdr_$cleanPhone",
-                                                name = riderName.ifBlank { "Delivery Partner" },
-                                                phone = "+91 $cleanPhone",
-                                                vehicleNumber = vehicleNumber.ifBlank { "Electric Scooter" },
-                                                rating = 4.9,
-                                                completedToday = 0,
-                                                earningsTodayFormatted = "₹0",
-                                                shiftStatus = "ONLINE_AVAILABLE",
-                                                assignedHub = "Rewari Central Hub"
-                                            )
-                                            sessionManager.saveAuthToken("jwt_rider_access_token")
-                                            sessionManager.saveRiderId(fallbackProfile.riderId)
-                                            onLoginSuccess(fallbackProfile)
-                                        } else {
-                                            errorMessage = (err.message ?: "Verification failed") + "\n(Tip: You can also use master test OTP: 123456)"
-                                        }
+                                        errorMessage = err.message ?: "Verification failed. Please check the OTP sent to your phone."
                                     }
                                 }
                             },

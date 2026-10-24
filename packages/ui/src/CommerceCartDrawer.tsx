@@ -17,7 +17,7 @@ export interface CartDrawerItem {
   id?: string;
   sku?: string;
   productId?: string;
-  name: string;
+  name?: string;
   price?: number;
   unitPrice?: number;
   discountedPrice?: number;
@@ -172,8 +172,8 @@ export const CommerceCartDrawer: React.FC<CommerceCartDrawerProps> = ({
                           </div>
 
                           <div className="min-w-0">
-                            <h4 className="text-xs font-bold text-content-primary truncate" title={item.name}>
-                              {item.name}
+                            <h4 className="text-xs font-bold text-content-primary truncate" title={item.name || item.sku || 'Medicine Item'}>
+                              {item.name || item.sku || 'Medicine Item'}
                             </h4>
                             {item.packSize && (
                               <p className="text-2xs text-content-muted font-medium">{item.packSize}</p>

@@ -19,6 +19,7 @@ import com.commerceos.android.viewmodel.ServiceabilityState
 
 object PaymentConstants {
     const val COD = "COD"
+    const val UPI_INTENT = "UPI_INSTANT"
 }
 
 @Composable
@@ -86,6 +87,22 @@ fun PaymentScreen(
 
         Text("Payment", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
         Spacer(modifier = Modifier.height(Spacing.sm))
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = if (selectedMethod == PaymentConstants.UPI_INTENT) CommerceColors.InfoContainer else CommerceColors.Surface),
+            modifier = Modifier.fillMaxWidth().clickable { selectedMethod = PaymentConstants.UPI_INTENT }.padding(bottom = 12.dp)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = selectedMethod == PaymentConstants.UPI_INTENT, onClick = { selectedMethod = PaymentConstants.UPI_INTENT })
+                Spacer(modifier = Modifier.width(Spacing.md))
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Pay via UPI (GPay, PhonePe, Paytm)", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                    }
+                    Text("0% Gateway Fee · Instant direct bank transfer via any UPI app.", style = CommerceTypography.Caption, color = CommerceColors.TextMuted)
+                }
+            }
+        }
 
         Card(
             colors = CardDefaults.cardColors(containerColor = if (selectedMethod == PaymentConstants.COD) CommerceColors.InfoContainer else CommerceColors.Surface),

@@ -51,6 +51,7 @@ export default function ExpressCheckoutPage() {
   const updateQuantity = useCart((s) => s.updateQuantity);
   const removeItem = useCart((s) => s.removeItem);
   const clearCart = useCart((s) => s.clearCart);
+  const refreshFromServer = useCart((s) => s.refreshFromServer);
 
   const [paymentMethod, setPaymentMethod] = useState('COD');
   const [address, setAddress] = useState('');
@@ -89,7 +90,8 @@ export default function ExpressCheckoutPage() {
 
   useEffect(() => {
     loadAddresses();
-  }, []);
+    refreshFromServer();
+  }, [refreshFromServer]);
 
   // Provisional pricing for display before server calculation
   const provisionalSubtotal = lines.reduce((sum, item) => sum + (item.unitPrice || 0) * item.quantity, 0);
@@ -122,7 +124,7 @@ export default function ExpressCheckoutPage() {
     try {
       const orderPayload = {
         customerId: sessionUser.userId,
-        orderType: 'MEDICINE',
+        orderType: 'QUICK_COMMERCE_10MIN',
         addressId: currentAddress.id,
         deliveryAddress: currentAddress,
         paymentMethod,

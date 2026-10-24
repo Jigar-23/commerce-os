@@ -1,6 +1,7 @@
 package com.commerceos.android.ui.address.create
 
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
@@ -46,6 +47,7 @@ import androidx.core.content.ContextCompat
 import com.commerceos.android.location.PlaceSearchResult
 import com.commerceos.android.location.RealLocationMapViewport
 import com.commerceos.android.model.AddressConflictWarning
+import com.commerceos.android.model.RecipientType
 import com.commerceos.android.model.StructuredAddress
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceTypography
@@ -123,6 +125,15 @@ fun AddAddressFlow(
         }
     }
 
+    // Intercept physical and gesture back button to prevent abrupt flow destruction
+    BackHandler {
+        if (searchQuery.isNotBlank()) {
+            onSearchQueryChanged("")
+        } else {
+            onBack()
+        }
+    }
+
     val configuration = LocalConfiguration.current
     val initialPeekHeight = remember(configuration.screenHeightDp) {
         (configuration.screenHeightDp * 0.40f).dp.coerceIn(260.dp, 360.dp)
@@ -187,7 +198,7 @@ fun AddAddressFlow(
                     border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onSearchQueryChanged(" ") }
+                        .clickable { onSearchQueryChanged("") }
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -245,6 +256,8 @@ fun AddAddressFlow(
                     onValueChange = { onFormAddressChanged(formAddress.copy(houseNumber = it)) },
                     label = { Text("Address details*", fontSize = 12.sp) },
                     placeholder = { Text("Enter complete address*", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
+                    isError = validationResult.houseNumberError != null,
+                    supportingText = validationResult.houseNumberError?.let { { Text(it, color = Color(0xFFEF4444), fontSize = 11.sp) } },
                     trailingIcon = {
                         if (formAddress.houseNumber.isNotBlank()) {
                             IconButton(onClick = { onFormAddressChanged(formAddress.copy(houseNumber = "")) }) {
@@ -257,7 +270,8 @@ fun AddAddressFlow(
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF059669),
-                        unfocusedBorderColor = Color(0xFFCBD5E1),
+                        unfocusedBorderColor = if (validationResult.houseNumberError != null) Color(0xFFEF4444) else Color(0xFFCBD5E1),
+                        errorBorderColor = Color(0xFFEF4444),
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White
                     ),
@@ -322,7 +336,9 @@ fun AddAddressFlow(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Blinkit Signature Contact Details Section (Myself vs Someone else)
-                var isForSomeoneElse by remember { mutableStateOf(formAddress.contactName.isNotBlank() && formAddress.contactName != "Myself") }
+                var isForSomeoneElse by remember {
+                    mutableStateOf(formAddress.recipientType == RecipientType.SOMEONE_ELSE || (formAddress.contactName.isNotBlank() && formAddress.contactName != "Myself"))
+                }
 
                 Text(
                     text = "Contact details",
@@ -342,7 +358,7 @@ fun AddAddressFlow(
                         modifier = Modifier
                             .clickable {
                                 isForSomeoneElse = false
-                                onFormAddressChanged(formAddress.copy(contactName = ""))
+                                onFormAddressChanged(formAddress.copy(contactName = "", recipientType = RecipientType.ME))
                             }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -351,7 +367,7 @@ fun AddAddressFlow(
                             selected = !isForSomeoneElse,
                             onClick = {
                                 isForSomeoneElse = false
-                                onFormAddressChanged(formAddress.copy(contactName = ""))
+                                onFormAddressChanged(formAddress.copy(contactName = "", recipientType = RecipientType.ME))
                             },
                             colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF16A34A))
                         )
@@ -367,13 +383,19 @@ fun AddAddressFlow(
                     // Someone else Radio Option
                     Row(
                         modifier = Modifier
-                            .clickable { isForSomeoneElse = true }
+                            .clickable {
+                                isForSomeoneElse = true
+                                onFormAddressChanged(formAddress.copy(recipientType = RecipientType.SOMEONE_ELSE))
+                            }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
                             selected = isForSomeoneElse,
-                            onClick = { isForSomeoneElse = true },
+                            onClick = {
+                                isForSomeoneElse = true
+                                onFormAddressChanged(formAddress.copy(recipientType = RecipientType.SOMEONE_ELSE))
+                            },
                             colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF16A34A))
                         )
                         Spacer(modifier = Modifier.width(4.dp))
@@ -390,14 +412,17 @@ fun AddAddressFlow(
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = formAddress.contactName,
-                        onValueChange = { onFormAddressChanged(formAddress.copy(contactName = it)) },
+                        onValueChange = { onFormAddressChanged(formAddress.copy(contactName = it, recipientType = RecipientType.SOMEONE_ELSE)) },
                         label = { Text("Receiver's name*", fontSize = 12.sp) },
                         placeholder = { Text("Friend or family member name", fontSize = 13.sp) },
+                        isError = validationResult.contactNameError != null,
+                        supportingText = validationResult.contactNameError?.let { { Text(it, color = Color(0xFFEF4444), fontSize = 11.sp) } },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF059669),
-                            unfocusedBorderColor = Color(0xFFCBD5E1),
+                            unfocusedBorderColor = if (validationResult.contactNameError != null) Color(0xFFEF4444) else Color(0xFFCBD5E1),
+                            errorBorderColor = Color(0xFFEF4444),
                             focusedContainerColor = Color.White,
                             unfocusedContainerColor = Color.White
                         ),
@@ -411,21 +436,48 @@ fun AddAddressFlow(
                 OutlinedTextField(
                     value = formAddress.contactPhone,
                     onValueChange = { onFormAddressChanged(formAddress.copy(contactPhone = it)) },
-                    label = { Text(if (isForSomeoneElse) "Receiver's phone number*" else "Receiver phone number", fontSize = 12.sp) },
+                    label = { Text(if (isForSomeoneElse) "Receiver's phone number*" else "Receiver phone number*", fontSize = 12.sp) },
                     placeholder = { Text("+91 90507 23429", fontSize = 13.sp) },
+                    isError = validationResult.contactPhoneError != null,
+                    supportingText = validationResult.contactPhoneError?.let { { Text(it, color = Color(0xFFEF4444), fontSize = 11.sp) } },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF059669),
-                        unfocusedBorderColor = Color(0xFFCBD5E1),
+                        unfocusedBorderColor = if (validationResult.contactPhoneError != null) Color(0xFFEF4444) else Color(0xFFCBD5E1),
+                        errorBorderColor = Color(0xFFEF4444),
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Make default delivery address toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onFormAddressChanged(formAddress.copy(isDefault = !formAddress.isDefault)) }
+                        .padding(vertical = 4.dp)
+                ) {
+                    Checkbox(
+                        checked = formAddress.isDefault,
+                        onCheckedChange = { onFormAddressChanged(formAddress.copy(isDefault = it)) },
+                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF16A34A))
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Make this my default delivery address",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Button(
                     onClick = onSaveSubmitted,

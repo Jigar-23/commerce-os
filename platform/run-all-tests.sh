@@ -42,6 +42,18 @@ echo "----------------------------------------------------------------"
 node platform/test-postgres-live/run-local-contracts.js
 
 echo ""
+echo "----------------------------------------------------------------"
+echo "6. Zero-Fee UPI & Address Concurrency Matrix"
+echo "----------------------------------------------------------------"
+node platform/test-upi-payment-and-address-concurrency.test.js
+
+echo ""
+echo "----------------------------------------------------------------"
+echo "7. Ultra-Deep Sequence & Full-System Data Integrity Audit"
+echo "----------------------------------------------------------------"
+node platform/test-comprehensive-integrity-audit.js
+
+echo ""
 echo "================================================================"
 echo "🏆 ALL COMMERCE OS TEST SUITES EXECUTED WITH 100% SUCCESS"
 echo "================================================================"

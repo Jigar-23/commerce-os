@@ -166,10 +166,10 @@ export default function CustomerOrderHistoryPage() {
     }
   };
 
-  const handleReorder = (order: DisplayOrder) => {
-    order.items.forEach((item) => {
+  const handleReorder = async (order: DisplayOrder) => {
+    for (const item of order.items) {
       const sku = (item as any).sku || (item as any).productId || item.name;
-      addToCart({
+      await addToCart({
         sku,
         productId: (item as any).productId || sku,
         name: item.name,
@@ -181,8 +181,8 @@ export default function CustomerOrderHistoryPage() {
         coldChain: Boolean((item as any).coldChain),
         image: (item as any).image || '',
         expressDeliverySlaMins: order.deliverySlaMins || 10,
-      });
-    });
+      }, item.quantity);
+    }
     router.push('/checkout');
   };
 

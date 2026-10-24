@@ -20,6 +20,8 @@ android {
         }
 
         val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
+        val mapsApiKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: "AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c"
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
     }
 

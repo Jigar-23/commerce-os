@@ -142,11 +142,22 @@ public struct RiderOfferCardView: View {
     
     private func acceptOffer() {
         isProcessing = true
+        let currentLoc = container.locationManager.currentLocation
+        var body: [String: AnyEncodable] = [
+            "offer_id": AnyEncodable(offer.offerId)
+        ]
+        if let loc = currentLoc {
+            body["latitude"] = AnyEncodable(loc.coordinate.latitude)
+            body["longitude"] = AnyEncodable(loc.coordinate.longitude)
+            body["bearing"] = AnyEncodable(loc.course >= 0 ? loc.course : 0.0)
+            body["speed"] = AnyEncodable(loc.speed >= 0 ? loc.speed * 3.6 : 0.0)
+            body["accuracy"] = AnyEncodable(loc.horizontalAccuracy > 0 ? loc.horizontalAccuracy : 25.0)
+        }
         Task {
             do {
                 let session: ActiveDeliverySessionDto = try await container.apiClient.post(
                     endpoint: .acceptOffer(id: offer.offerId),
-                    body: ["offer_id": offer.offerId]
+                    body: body
                 )
                 await MainActor.run {
                     pipeline.dismissActiveOffer(reason: "ACCEPTED")

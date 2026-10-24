@@ -29,9 +29,11 @@ public final class RiderTelemetryBuffer {
 
     private func setupFlushTimer() {
         DispatchQueue.main.async {
-            self.flushTimer = Timer.scheduledTimer(withTimeInterval: RiderEnvironment.telemetryFlushIntervalSeconds, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: RiderEnvironment.telemetryFlushIntervalSeconds, repeats: true) { [weak self] _ in
                 self?.flush()
             }
+            RunLoop.main.add(timer, forMode: .common)
+            self.flushTimer = timer
         }
     }
 
@@ -44,12 +46,14 @@ public final class RiderTelemetryBuffer {
     ) {
         queue.async {
             self.sequenceCounter += 1
+            let rawAcc = location.horizontalAccuracy
+            let normalizedAcc = (rawAcc > 0 && rawAcc <= 65.0) ? rawAcc : 25.0
             let record = BufferedTelemetryRecord(
                 latitude: location.coordinate.latitude,
                 longitude: location.coordinate.longitude,
                 speedKmh: speedKmh,
                 bearing: bearing,
-                accuracyMeters: location.horizontalAccuracy,
+                accuracyMeters: normalizedAcc,
                 batteryPct: batteryPct,
                 deliveryId: deliveryId,
                 sequenceNumber: self.sequenceCounter,

@@ -1,0 +1,45 @@
+{
+  "$schema": "./schema.json",
+  "clientId": "freshcart-grocery",
+  "clientName": "FreshCart Hyperlocal Grocery",
+  "vertical": "grocery",
+  "customerApp": {
+    "name": "FreshCart",
+    "androidPackage": "com.freshcart.customer",
+    "iosBundleId": "com.freshcart.customer",
+    "versionName": "1.0.0",
+    "versionCode": 1
+  },
+  "riderApp": {
+    "name": "FreshCart Partner",
+    "androidPackage": "com.freshcart.rider",
+    "iosBundleId": "com.freshcart.rider",
+    "versionName": "1.0.0",
+    "versionCode": 1
+  },
+  "api": {
+    "baseUrl": "https://api.freshcart-grocery.com",
+    "port": 8080,
+    "osrmBaseUrl": "https://router.project-osrm.org"
+  },
+  "credentials": {
+    "mapsApiKey": "AIzaSyB_FRESHCART_MAPS_PROD_KEY_EXAMPLE_ABC123",
+    "fcmServerKey": "fcm_key_freshcart_grocery_production_token",
+    "jwtSecret": "freshcart_production_jwt_secret_hs256_at_least_32_chars",
+    "jwtIssuer": "freshcart-auth",
+    "jwtAudience": "freshcart-clients",
+    "otpPepper": "freshcart_pepper_7fa90123bca045618234deadbeef"
+  },
+  "merchant": {
+    "upiVpa": "freshcart@okaxis",
+    "upiName": "FreshCart Daily Express",
+    "defaultStoreId": "store_freshcart_central_01",
+    "supportPhone": "+918000112233",
+    "supportEmail": "support@freshcart-grocery.com",
+    "serviceRadiusKm": 8.0,
+    "slaMinutes": 10
+  },
+  "database": {
+    "databaseUrl": "postgres://freshcart_admin:SecureFreshCart2026!@db.freshcart-grocery.com:5432/freshcart_db"
+  }
+}

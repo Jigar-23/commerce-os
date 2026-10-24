@@ -167,8 +167,8 @@ public struct RiderAuthView: View {
     @ObservedObject private var apiClient = RiderAPIClient.shared
     public let onLoginSuccess: () -> Void
 
-    @State private var phone: String = "9817916180"
-    @State private var otp: String = "123456"
+    @State private var phone: String = ""
+    @State private var otp: String = ""
     @State private var challengeId: String? = nil
     @State private var isOtpSent: Bool = false
     @State private var isLoading: Bool = false

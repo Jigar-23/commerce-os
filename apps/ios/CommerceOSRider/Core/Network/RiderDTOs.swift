@@ -331,6 +331,10 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
         self.orderCreatedAt = orderCreatedAt
     }
 
+    public var estimatedEarnings: Double? {
+        payoutAmount
+    }
+
     enum SessionCodingKeys: String, CodingKey {
         case session
     }
@@ -401,20 +405,20 @@ public struct ActiveDeliverySessionDto: Identifiable, Codable {
 
         self.merchantAddress = (try? container.decode(String.self, forKey: .merchantAddress))
             ?? (try? container.decode(String.self, forKey: .pickupAddress))
-            ?? "Rewari Central Hub"
+            ?? "Store Hub"
 
-        self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat)) ?? 28.202224
-        self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng)) ?? 76.615418
+        self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat)) ?? 0.0
+        self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng)) ?? 0.0
 
         self.customerName = (try? container.decode(String.self, forKey: .customerName)) ?? "Customer"
-        self.customerPhone = (try? container.decode(String.self, forKey: .customerPhone)) ?? "+919817916180"
+        self.customerPhone = (try? container.decode(String.self, forKey: .customerPhone)) ?? ""
 
         self.customerAddress = (try? container.decode(String.self, forKey: .customerAddress))
             ?? (try? container.decode(String.self, forKey: .deliveryAddress))
             ?? "Customer Location"
 
-        self.customerLat = (try? container.decode(Double.self, forKey: .customerLat)) ?? 28.1918
-        self.customerLng = (try? container.decode(Double.self, forKey: .customerLng)) ?? 76.6081
+        self.customerLat = (try? container.decode(Double.self, forKey: .customerLat)) ?? 0.0
+        self.customerLng = (try? container.decode(Double.self, forKey: .customerLng)) ?? 0.0
 
         self.items = try? container.decode([String].self, forKey: .items)
         self.isCod = (try? container.decode(Bool.self, forKey: .isCod)) ?? false
@@ -568,14 +572,14 @@ public struct RiderProfileDto: Identifiable, Codable {
         self.riderId = (try? container.decode(String.self, forKey: .riderId))
             ?? (try? container.decode(String.self, forKey: .riderIdCamel))
             ?? (try? container.decode(String.self, forKey: .id))
-            ?? "rdr_9817916180"
+            ?? ""
 
         self.name = (try? container.decode(String.self, forKey: .name))
             ?? (try? container.decode(String.self, forKey: .fullName))
             ?? "Rider Partner"
 
         self.phone = (try? container.decode(String.self, forKey: .phone))
-            ?? "+919817916180"
+            ?? ""
 
         self.vehicleType = (try? container.decode(String.self, forKey: .vehicleType))
             ?? "EV 2-Wheeler"
@@ -635,6 +639,38 @@ public struct RiderShiftDto: Codable {
     }
 }
 
+public struct CompletedOrderItem: Identifiable, Codable {
+    public var id: String { orderId }
+    public let orderId: String
+    public let merchantName: String
+    public let customerName: String
+    public let customerAddress: String
+    public let itemsCount: Int
+    public let distanceKm: Double
+    public let payout: Double
+    public let deliveredAt: String
+
+    public init(
+        orderId: String,
+        merchantName: String,
+        customerName: String,
+        customerAddress: String,
+        itemsCount: Int,
+        distanceKm: Double,
+        payout: Double,
+        deliveredAt: String
+    ) {
+        self.orderId = orderId
+        self.merchantName = merchantName
+        self.customerName = customerName
+        self.customerAddress = customerAddress
+        self.itemsCount = itemsCount
+        self.distanceKm = distanceKm
+        self.payout = payout
+        self.deliveredAt = deliveredAt
+    }
+}
+
 public struct RiderNotificationItem: Identifiable, Codable {
     public var id: String { notificationId }
     public let notificationId: String
@@ -645,6 +681,87 @@ public struct RiderNotificationItem: Identifiable, Codable {
     public var readAt: Date?
     public let orderId: String?
     public let offerId: String?
+    public let orderStatus: String?
+    public let offerStatus: String?
+
+    enum CodingKeys: String, CodingKey {
+        case notificationId
+        case id
+        case title
+        case message
+        case body
+        case category
+        case createdAt
+        case created_at
+        case readAt
+        case read_at
+        case orderId
+        case order_id
+        case offerId
+        case offer_id
+        case orderStatus
+        case order_status
+        case offerStatus
+        case offer_status
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.notificationId = (try? c.decode(String.self, forKey: .notificationId))
+            ?? (try? c.decode(String.self, forKey: .id))
+            ?? UUID().uuidString
+        self.title = (try? c.decode(String.self, forKey: .title)) ?? "Alert"
+        self.message = (try? c.decode(String.self, forKey: .message))
+            ?? (try? c.decode(String.self, forKey: .body))
+            ?? ""
+        self.category = (try? c.decode(String.self, forKey: .category)) ?? "ORDERS"
+        let rawCreated = (try? c.decode(String.self, forKey: .createdAt)) ?? (try? c.decode(String.self, forKey: .created_at))
+        if let rawCreated = rawCreated {
+            let isoFormatter = ISO8601DateFormatter()
+            var parsed = isoFormatter.date(from: rawCreated)
+            if parsed == nil {
+                isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                parsed = isoFormatter.date(from: rawCreated)
+            }
+            self.createdAt = parsed
+        } else if let d = try? c.decode(Date.self, forKey: .createdAt) {
+            self.createdAt = d
+        } else {
+            self.createdAt = nil
+        }
+        let rawRead = (try? c.decode(String.self, forKey: .readAt)) ?? (try? c.decode(String.self, forKey: .read_at))
+        if let rawRead = rawRead {
+            let isoFormatter = ISO8601DateFormatter()
+            var parsed = isoFormatter.date(from: rawRead)
+            if parsed == nil {
+                isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                parsed = isoFormatter.date(from: rawRead)
+            }
+            self.readAt = parsed
+        } else if let d = try? c.decode(Date.self, forKey: .readAt) {
+            self.readAt = d
+        } else {
+            self.readAt = nil
+        }
+        self.orderId = (try? c.decode(String.self, forKey: .orderId)) ?? (try? c.decode(String.self, forKey: .order_id))
+        self.offerId = (try? c.decode(String.self, forKey: .offerId)) ?? (try? c.decode(String.self, forKey: .offer_id))
+        self.orderStatus = (try? c.decode(String.self, forKey: .orderStatus)) ?? (try? c.decode(String.self, forKey: .order_status))
+        self.offerStatus = (try? c.decode(String.self, forKey: .offerStatus)) ?? (try? c.decode(String.self, forKey: .offer_status))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(notificationId, forKey: .notificationId)
+        try c.encode(title, forKey: .title)
+        try c.encode(message, forKey: .message)
+        try c.encode(category, forKey: .category)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(readAt, forKey: .readAt)
+        try c.encodeIfPresent(orderId, forKey: .orderId)
+        try c.encodeIfPresent(offerId, forKey: .offerId)
+        try c.encodeIfPresent(orderStatus, forKey: .orderStatus)
+        try c.encodeIfPresent(offerStatus, forKey: .offerStatus)
+    }
 
     public init(
         notificationId: String,
@@ -654,7 +771,9 @@ public struct RiderNotificationItem: Identifiable, Codable {
         createdAt: Date? = nil,
         readAt: Date? = nil,
         orderId: String? = nil,
-        offerId: String? = nil
+        offerId: String? = nil,
+        orderStatus: String? = nil,
+        offerStatus: String? = nil
     ) {
         self.notificationId = notificationId
         self.title = title
@@ -664,5 +783,41 @@ public struct RiderNotificationItem: Identifiable, Codable {
         self.readAt = readAt
         self.orderId = orderId
         self.offerId = offerId
+        self.orderStatus = orderStatus
+        self.offerStatus = offerStatus
+    }
+}
+
+public struct RiderNotificationsResponse: Codable {
+    public let notifications: [RiderNotificationItem]
+    public let unreadCount: Int
+    public let totalCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case notifications
+        case unreadCount
+        case unread_count
+        case totalCount
+        case total_count
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.notifications = (try? c.decode([RiderNotificationItem].self, forKey: .notifications)) ?? []
+        self.unreadCount = (try? c.decode(Int.self, forKey: .unreadCount)) ?? (try? c.decode(Int.self, forKey: .unread_count)) ?? 0
+        self.totalCount = (try? c.decode(Int.self, forKey: .totalCount)) ?? (try? c.decode(Int.self, forKey: .total_count)) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(notifications, forKey: .notifications)
+        try c.encode(unreadCount, forKey: .unreadCount)
+        try c.encode(totalCount, forKey: .totalCount)
+    }
+
+    public init(notifications: [RiderNotificationItem] = [], unreadCount: Int = 0, totalCount: Int = 0) {
+        self.notifications = notifications
+        self.unreadCount = unreadCount
+        self.totalCount = totalCount
     }
 }

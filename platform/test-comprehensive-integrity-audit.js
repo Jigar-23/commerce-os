@@ -473,10 +473,7 @@ async function runAudit() {
   // Teardown server
   await new Promise(r => serverInstance.close(r));
   console.log('🔒 Verification server shut down cleanly.\n');
-
-  if (failedAssertions > 0) {
-    process.exit(1);
-  }
+  process.exit(failedAssertions > 0 ? 1 : 0);
 }
 
 runAudit().catch(err => {

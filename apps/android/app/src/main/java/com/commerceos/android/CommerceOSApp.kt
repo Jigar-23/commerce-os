@@ -194,6 +194,10 @@ fun CommerceOSApp(
                 is CheckoutEvent.OrderPlaced -> {
                     cartViewModel.clear()
                     cartViewModel.loadCart()
+                    val pin = event.order?.effectiveDeliveryPin
+                    if (!pin.isNullOrBlank()) {
+                        orderViewModel.setKnownOrderPin(event.orderId, pin)
+                    }
                     orderViewModel.loadDetail(event.orderId)
                     navigateRoot(Screen.OrderTracking(event.orderId))
                 }
@@ -812,7 +816,9 @@ fun CommerceOSApp(
                 RxUploadDialog(
                     onDismiss = { showRxUploadDialog = false },
                     onUpload = { patientName, attachments ->
-                        prescriptionViewModel.upload(authenticatedCustomerId, patientName, attachments)
+                        prescriptionViewModel.upload(authenticatedCustomerId, patientName, attachments) { uploadedRx ->
+                            checkoutViewModel.attachPrescription(uploadedRx.id)
+                        }
                         showRxUploadDialog = false
                     }
                 )

@@ -1,0 +1,45 @@
+{
+  "$schema": "./schema.json",
+  "clientId": "curequick-pharmacy",
+  "clientName": "CureQuick Express Pharmacy",
+  "vertical": "pharmacy",
+  "customerApp": {
+    "name": "CureQuick Rx",
+    "androidPackage": "com.curequick.customer",
+    "iosBundleId": "com.curequick.customer",
+    "versionName": "1.0.0",
+    "versionCode": 1
+  },
+  "riderApp": {
+    "name": "CureQuick Fleet",
+    "androidPackage": "com.curequick.rider",
+    "iosBundleId": "com.curequick.rider",
+    "versionName": "1.0.0",
+    "versionCode": 1
+  },
+  "api": {
+    "baseUrl": "https://api.curequickrx.com",
+    "port": 8080,
+    "osrmBaseUrl": "https://router.project-osrm.org"
+  },
+  "credentials": {
+    "mapsApiKey": "AIzaSyC_CUREQUICK_MAPS_PROD_KEY_EXAMPLE_XYZ789",
+    "fcmServerKey": "fcm_key_curequick_pharmacy_production_token",
+    "jwtSecret": "curequick_production_jwt_secret_hs256_at_least_32_chars",
+    "jwtIssuer": "curequick-auth",
+    "jwtAudience": "curequick-clients",
+    "otpPepper": "curequick_pepper_9dc12344fee09871122aaff00123"
+  },
+  "merchant": {
+    "upiVpa": "curequick@icici",
+    "upiName": "CureQuick Pharmacy Healthcare",
+    "defaultStoreId": "store_curequick_central_01",
+    "supportPhone": "+918000998877",
+    "supportEmail": "care@curequickrx.com",
+    "serviceRadiusKm": 10.0,
+    "slaMinutes": 15
+  },
+  "database": {
+    "databaseUrl": "postgres://curequick_admin:SecureCureQuick2026!@db.curequickrx.com:5432/curequick_db"
+  }
+}
