@@ -89,17 +89,30 @@ fun PaymentScreen(
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = if (selectedMethod == PaymentConstants.UPI_INTENT) CommerceColors.InfoContainer else CommerceColors.Surface),
-            modifier = Modifier.fillMaxWidth().clickable { selectedMethod = PaymentConstants.UPI_INTENT }.padding(bottom = 12.dp)
+            colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface.copy(alpha = 0.6f)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
         ) {
             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = selectedMethod == PaymentConstants.UPI_INTENT, onClick = { selectedMethod = PaymentConstants.UPI_INTENT })
+                RadioButton(selected = false, onClick = null, enabled = false)
                 Spacer(modifier = Modifier.width(Spacing.md))
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Pay via UPI (GPay, PhonePe, Paytm)", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                        Text("Pay via UPI (GPay, PhonePe, Paytm)", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextSecondary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = CommerceColors.SurfaceSubtle
+                        ) {
+                            Text(
+                                "COMING SOON",
+                                style = CommerceTypography.Meta,
+                                color = CommerceColors.TextMuted,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
-                    Text("0% Gateway Fee · Instant direct bank transfer via any UPI app.", style = CommerceTypography.Caption, color = CommerceColors.TextMuted)
+                    Text("Digital payments rollout in next release. Cash on Delivery is active.", style = CommerceTypography.Caption, color = CommerceColors.TextMuted)
                 }
             }
         }

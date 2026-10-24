@@ -362,8 +362,10 @@ object NetworkClient {
                     } catch (e: Exception) {
                         return@use null
                     }
-                    val access = json.get("accessToken")?.getAsString() ?: return@use null
-                    val refresh = json.get("refreshToken")?.getAsString() ?: return@use null
+                    val access = json.get("accessToken")?.getAsString()
+                        ?: json.get("token")?.getAsString()
+                        ?: return@use null
+                    val refresh = json.get("refreshToken")?.getAsString() ?: refreshToken
                     access to refresh
                 } else {
                     null

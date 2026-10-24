@@ -1530,10 +1530,28 @@ const server = http.createServer(async (req, res) => {
         }
       );
 
+      const refreshToken = jwt.sign(
+        {
+          sub: customer.id,
+          phone: customer.phone,
+          role: 'ROLE_CUSTOMER',
+          roles: ['ROLE_CUSTOMER'],
+          type: 'REFRESH_TOKEN'
+        },
+        JWT_SECRET,
+        {
+          algorithm: 'HS256',
+          issuer: JWT_ISSUER,
+          audience: JWT_AUDIENCE,
+          expiresIn: '30d'
+        }
+      );
+
       return sendJson(res, 200, {
         ok: true,
         accessToken: token,
         token: token,
+        refreshToken: refreshToken,
         userId: customer.id,
         customerId: customer.id,
         phone: customer.phone,
@@ -1672,6 +1690,23 @@ const server = http.createServer(async (req, res) => {
         }
       );
 
+      const refreshToken = jwt.sign(
+        {
+          sub: rider.rider_id || rider.id,
+          phone: rider.phone,
+          role: 'ROLE_RIDER',
+          roles: ['ROLE_RIDER'],
+          type: 'REFRESH_TOKEN'
+        },
+        JWT_SECRET,
+        {
+          algorithm: 'HS256',
+          issuer: JWT_ISSUER,
+          audience: JWT_AUDIENCE,
+          expiresIn: '30d'
+        }
+      );
+
       // Query Authoritative Presence / Shift State from DB
       let presence = null;
       if (appRepositories && appRepositories.presenceRepo) {
@@ -1706,6 +1741,8 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         accessToken: token,
+        token: token,
+        refreshToken: refreshToken,
         rider: {
           id: rider.rider_id || rider.id,
           phone: rider.phone,
@@ -1794,9 +1831,30 @@ const server = http.createServer(async (req, res) => {
         }
       );
 
+      const refreshToken = jwt.sign(
+        {
+          sub: seller.sellerId,
+          sellerId: seller.sellerId,
+          storeId: seller.storeId,
+          storeName: seller.storeName,
+          role: seller.roles?.[0] || 'ROLE_SELLER',
+          roles: seller.roles || ['ROLE_SELLER'],
+          type: 'REFRESH_TOKEN'
+        },
+        JWT_SECRET,
+        {
+          algorithm: 'HS256',
+          issuer: JWT_ISSUER,
+          audience: JWT_AUDIENCE,
+          expiresIn: '30d'
+        }
+      );
+
       return sendJson(res, 200, {
         ok: true,
         accessToken: token,
+        token: token,
+        refreshToken: refreshToken,
         sellerId: seller.sellerId,
         storeId: seller.storeId,
         storeName: seller.storeName,
@@ -1806,17 +1864,39 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/v1/auth/refresh' && method === 'POST') {
-      const authClaims = verifyAndDecodeJwt(req);
+      let body = {};
+      try {
+        body = await parseJsonBody(req);
+      } catch (_) {}
+
+      let authClaims = null;
+      const rawRefreshToken = body.refreshToken || body.refresh_token || body.token;
+      if (rawRefreshToken && typeof rawRefreshToken === 'string' && rawRefreshToken.trim()) {
+        try {
+          authClaims = jwt.verify(rawRefreshToken.trim(), JWT_SECRET, {
+            algorithms: ['HS256'],
+            issuer: JWT_ISSUER,
+            audience: JWT_AUDIENCE
+          });
+        } catch (err) {
+          return sendJson(res, 401, { error: 'INVALID_REFRESH_TOKEN', message: 'The provided refresh token is expired or invalid.' });
+        }
+      } else {
+        authClaims = verifyAndDecodeJwt(req);
+      }
+
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid token required for refresh.' });
       }
-      const token = jwt.sign(
+
+      const newAccessToken = jwt.sign(
         {
           sub: authClaims.sub,
           phone: authClaims.phone,
           role: authClaims.role,
           roles: authClaims.roles,
           storeId: authClaims.storeId,
+          sellerId: authClaims.sellerId,
           type: 'ACCESS_TOKEN'
         },
         JWT_SECRET,
@@ -1827,7 +1907,32 @@ const server = http.createServer(async (req, res) => {
           expiresIn: '7d'
         }
       );
-      return sendJson(res, 200, { ok: true, accessToken: token });
+
+      const newRefreshToken = jwt.sign(
+        {
+          sub: authClaims.sub,
+          phone: authClaims.phone,
+          role: authClaims.role,
+          roles: authClaims.roles,
+          storeId: authClaims.storeId,
+          sellerId: authClaims.sellerId,
+          type: 'REFRESH_TOKEN'
+        },
+        JWT_SECRET,
+        {
+          algorithm: 'HS256',
+          issuer: JWT_ISSUER,
+          audience: JWT_AUDIENCE,
+          expiresIn: '30d'
+        }
+      );
+
+      return sendJson(res, 200, {
+        ok: true,
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        token: newAccessToken
+      });
     }
 
     if ((pathname === '/api/v1/auth/session' || pathname === '/api/v1/auth/customer/session') && method === 'GET') {
@@ -5626,6 +5731,31 @@ const server = http.createServer(async (req, res) => {
             if (session.rider_id && session.rider_id !== authorizedRiderId) {
               return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider for this delivery can complete delivery.' });
             }
+            if (session.state === 'DELIVERED') {
+              if (action === 'complete') {
+                return sendJson(res, 200, {
+                  ok: true,
+                  verified: true,
+                  isIdempotentReplay: true,
+                  session: {
+                    id: session.id,
+                    deliveryId: session.delivery_id || session.id,
+                    orderId: session.order_id,
+                    riderId: session.rider_id,
+                    state: 'DELIVERED',
+                    status: 'DELIVERED'
+                  },
+                  message: 'Delivery is already completed.'
+                });
+              } else {
+                return sendJson(res, 409, {
+                  ok: false,
+                  verified: false,
+                  error: 'ALREADY_DELIVERED',
+                  message: 'Cannot re-deliver completed order.'
+                });
+              }
+            }
           }
         } catch (e) {
           console.error('[ProductionServer] delivery ownership check error:', e);
@@ -5634,6 +5764,24 @@ const server = http.createServer(async (req, res) => {
         const session = await appRepositories.deliveryRepo.findSessionById(deliveryId);
         if (session && session.riderId && session.riderId !== authorizedRiderId) {
           return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider for this delivery can complete delivery.' });
+        }
+        if (session && session.state === 'DELIVERED') {
+          if (action === 'complete') {
+            return sendJson(res, 200, {
+              ok: true,
+              verified: true,
+              isIdempotentReplay: true,
+              session,
+              message: 'Delivery is already completed.'
+            });
+          } else {
+            return sendJson(res, 409, {
+              ok: false,
+              verified: false,
+              error: 'ALREADY_DELIVERED',
+              message: 'Cannot re-deliver completed order.'
+            });
+          }
         }
       }
 

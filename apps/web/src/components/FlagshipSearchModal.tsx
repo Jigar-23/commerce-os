@@ -119,6 +119,8 @@ export default function FlagshipSearchModal({
     : [];
 
   const handleAddToCart = (product: MedicineProduct) => {
+    const isOutOfStock = product.inStock === false || (product.stockCount !== undefined && product.stockCount <= 0);
+    if (isOutOfStock) return;
     saveRecentSearch(product.name);
     const sku = product.sku || product.id;
     addToCart({
@@ -294,6 +296,7 @@ export default function FlagshipSearchModal({
                     const mrp = product.mrp || Math.round(price * 1.25);
                     const qty = getItemQuantity(product);
                     const isRx = Boolean(product.rxRequirement && product.rxRequirement !== 'NONE' && product.rxRequirement !== 'OTC');
+                    const isOutOfStock = product.inStock === false || (product.stockCount !== undefined && product.stockCount <= 0);
 
                     return (
                       <div
@@ -348,17 +351,26 @@ export default function FlagshipSearchModal({
                             )}
                           </div>
 
-                          <CommerceQuantityControl
-                            quantity={qty}
-                            onIncrement={() => handleAddToCart(product)}
-                            onDecrement={() => {
-                              const sku = product.sku || product.id;
-                              if (qty <= 1) removeItem(sku);
-                              else updateQuantity(sku, qty - 1);
-                            }}
-                            onAdd={() => handleAddToCart(product)}
-                            size="sm"
-                          />
+                          {isOutOfStock ? (
+                            <button
+                              disabled
+                              className="h-8 px-2.5 text-2xs font-bold text-content-muted bg-surface-subtle rounded-md cursor-not-allowed border border-border-default select-none"
+                            >
+                              Unavailable
+                            </button>
+                          ) : (
+                            <CommerceQuantityControl
+                              quantity={qty}
+                              onIncrement={() => handleAddToCart(product)}
+                              onDecrement={() => {
+                                const sku = product.sku || product.id;
+                                if (qty <= 1) removeItem(sku);
+                                else updateQuantity(sku, qty - 1);
+                              }}
+                              onAdd={() => handleAddToCart(product)}
+                              size="sm"
+                            />
+                          )}
                         </div>
                       </div>
                     );

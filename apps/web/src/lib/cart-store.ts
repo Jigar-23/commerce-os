@@ -95,7 +95,7 @@ export const useCart = create<CartState>()(
           : [...get().lines, { ...item, quantity }];
         set({ lines: optimisticLines });
 
-        if (!API_GATEWAY_URL || !customerId) return;
+        if (!customerId) return;
 
         try {
           set({ isLoading: true });
@@ -126,7 +126,7 @@ export const useCart = create<CartState>()(
         const optimisticLines = get().lines.filter((l) => l.sku !== sku);
         set({ lines: optimisticLines });
 
-        if (!API_GATEWAY_URL || !customerId) return;
+        if (!customerId) return;
 
         try {
           const res = await fetch(`${API_GATEWAY_URL}/api/v1/cart/${customerId}/items/${encodeURIComponent(sku)}`, {
@@ -155,7 +155,7 @@ export const useCart = create<CartState>()(
         const optimisticLines = get().lines.map((l) => (l.sku === sku ? { ...l, quantity } : l));
         set({ lines: optimisticLines });
 
-        if (!API_GATEWAY_URL || !customerId) return;
+        if (!customerId) return;
 
         try {
           const res = await fetch(`${API_GATEWAY_URL}/api/v1/cart/${customerId}/items/${encodeURIComponent(sku)}`, {
@@ -177,7 +177,7 @@ export const useCart = create<CartState>()(
 
       refreshFromServer: async () => {
         const customerId = getCustomerId();
-        if (!API_GATEWAY_URL || !customerId) return null;
+        if (!customerId) return null;
 
         try {
           set({ isLoading: true });

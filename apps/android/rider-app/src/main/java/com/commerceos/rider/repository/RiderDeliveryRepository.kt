@@ -825,8 +825,17 @@ class RiderDeliveryRepository(
                     conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
                 }
                 val json = try { JSONObject(responseStr) } catch (_: Exception) { JSONObject() }
-                if (code in 200..299 && json.has("session")) {
-                    val session = parseSessionJson(json.getJSONObject("session"))
+                if ((code in 200..299 || code == 409) && (json.has("session") || json.optString("error") == "ALREADY_DELIVERED" || json.optBoolean("isIdempotentReplay", false))) {
+                    val sessionObj = if (json.has("session")) {
+                        json.getJSONObject("session")
+                    } else {
+                        JSONObject().apply {
+                            put("id", deliveryId)
+                            put("deliveryId", deliveryId)
+                            put("state", "DELIVERED")
+                        }
+                    }
+                    val session = parseSessionJson(sessionObj)
                     activeLocalSession = null
                     return@withContext Result.success(session)
                 }

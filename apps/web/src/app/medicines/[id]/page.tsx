@@ -144,6 +144,8 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
 
   const handleAddToCart = () => {
     if (!product) return;
+    const isOutOfStock = product.inStock === false || (product.stockCount !== undefined && product.stockCount <= 0);
+    if (isOutOfStock) return;
     const sku = product.sku || product.id;
     addToCart({
       sku,
@@ -249,6 +251,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
   const mrp = product.mrp || Math.round(price * 1.25);
   const savings = Math.max(0, mrp - price);
   const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+  const isOutOfStock = product.inStock === false || (product.stockCount !== undefined && product.stockCount <= 0);
 
   return (
     <div className="min-h-screen bg-surface-canvas text-content-primary flex flex-col font-sans antialiased pb-24 selection:bg-surface-brandSubtle selection:text-content-brand">
@@ -390,7 +393,12 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
 
             {/* DOMINANT PURCHASE BUTTON */}
             <div className="pt-4 border-t border-border-subtle flex items-center gap-4">
-              {currentQty > 0 ? (
+              {isOutOfStock ? (
+                <div className="flex-1 py-3.5 px-6 rounded-2xl bg-surface-subtle border border-border-default text-content-muted font-black text-sm flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                  <PackageX className="h-5 w-5" />
+                  <span>OUT OF STOCK</span>
+                </div>
+              ) : currentQty > 0 ? (
                 <div className="flex items-center gap-3">
                   <CommerceQuantityControl
                     quantity={currentQty}
