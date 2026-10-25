@@ -202,9 +202,29 @@ public final class AddressViewModel: ObservableObject {
         UserDefaults.standard.set(address.id, forKey: selectedAddressKey)
     }
 
+    public private(set) var cachedDraftAddress: StructuredAddress? = nil
+
+    public func discardDraft() {
+        cachedDraftAddress = nil
+    }
+
     // MARK: - State Machine Flow Operations (1:1 Parity with Android AddressViewModel)
 
-    public func startAddAddressFlow() {
+    public func startAddAddressFlow(forceReset: Bool = false) {
+        let existingDraft = cachedDraftAddress
+        if !forceReset, let existingDraft = existingDraft, (!existingDraft.houseNumber.isEmpty || existingDraft.geoLocation != nil) {
+            let resumeGeo = existingDraft.geoLocation ?? liveGpsLocation
+            self.platformUiState = AddressPlatformUiState(
+                currentStep: resumeGeo != nil ? .locationSelected(point: resumeGeo!) : .searchingLocation(query: ""),
+                originalAddress: nil,
+                draftAddress: existingDraft,
+                isEditingExisting: false,
+                editingAddressId: nil,
+                activeGeocodedPlace: liveGpsPlace
+            )
+            return
+        }
+
         let initialGeo = liveGpsLocation ?? selectedAddress.flatMap { addr -> GeoPoint? in
             guard addr.latitude != 0.0, addr.longitude != 0.0 else { return nil }
             return GeoPoint(latitude: addr.latitude, longitude: addr.longitude, accuracyMeters: 10.0)
@@ -431,6 +451,7 @@ public final class AddressViewModel: ObservableObject {
     }
 
     public func updateFormAddress(_ updated: StructuredAddress) {
+        self.cachedDraftAddress = updated
         let conflict = updated.detectAddressConflict(mapPlace: platformUiState.activeGeocodedPlace)
         platformUiState.draftAddress = updated
         platformUiState.addressConflict = conflict
@@ -482,6 +503,7 @@ public final class AddressViewModel: ObservableObject {
                     )
                     self.addresses = self.addresses.map { $0.id == addressId ? updated : $0 }
                     self.selectedAddress = updated
+                    self.cachedDraftAddress = nil
                     self.isLoading = false
                     self.platformUiState.saveState = .success(updated)
                     self.platformUiState.currentStep = .addressBook
@@ -501,6 +523,7 @@ public final class AddressViewModel: ObservableObject {
                         self.addresses = [saved] + listWithoutNew
                     }
                     self.selectedAddress = saved
+                    self.cachedDraftAddress = nil
                     self.isLoading = false
                     self.platformUiState.saveState = .success(saved)
                     self.platformUiState.currentStep = .addressBook
@@ -593,6 +616,7 @@ public final class AddressViewModel: ObservableObject {
         profile = nil
         isLoading = false
         errorMessage = nil
+        cachedDraftAddress = nil
         platformUiState = AddressPlatformUiState()
     }
 

@@ -609,7 +609,7 @@ fun CommerceOSApp(
                             ?: addressViewModel.addresses.firstOrNull { it.isDefault }
                             ?: addressViewModel.addresses.firstOrNull()
 
-                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems)
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
                         if (currentSelected != null) {
                             checkoutViewModel.selectAddress(currentSelected)
                             navigate(Screen.PaymentGateway)

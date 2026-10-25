@@ -2459,11 +2459,12 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       const name = body.name || body.fullName || null;
       const email = body.email || null;
+      const phone = body.phone || null;
       await pool.query(
-        `UPDATE customers SET full_name = COALESCE($1, full_name), email = COALESCE($2, email), updated_at = NOW() WHERE id = $3`,
-        [name, email, customerId]
+        `UPDATE customers SET full_name = COALESCE($1, full_name), email = COALESCE($2, email), phone = COALESCE($3, phone), updated_at = NOW() WHERE id = $4`,
+        [name, email, phone, customerId]
       );
-      return sendJson(res, 200, { ok: true, id: customerId, name, email });
+      return sendJson(res, 200, { ok: true, id: customerId, name, fullName: name, email, phone });
     }
 
     // -------------------------------------------------------------

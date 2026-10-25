@@ -86,7 +86,7 @@ class CartViewModel(
         get() = totals?.coldChainPackagingFee ?: if (containsColdChain) BigDecimal("15.00") else BigDecimal.ZERO
 
     val effectiveGrandTotal: BigDecimal
-        get() = totals?.grandTotal ?: effectiveSubtotal.add(effectiveExpressFee).add(effectiveColdChainFee).subtract(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
+        get() = (totals?.grandTotal ?: effectiveSubtotal.add(effectiveExpressFee).add(effectiveColdChainFee)).subtract(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
 
     val mrpTotal: BigDecimal
         get() = (cartItems ?: emptyList()).fold(BigDecimal.ZERO) { acc, i ->
@@ -97,7 +97,7 @@ class CartViewModel(
     val totalSavings: BigDecimal
         get() {
             val sub = totals?.itemsSubtotal ?: effectiveSubtotal
-            return mrpTotal.subtract(sub ?: BigDecimal.ZERO).coerceAtLeast(BigDecimal.ZERO)
+            return mrpTotal.subtract(sub ?: BigDecimal.ZERO).add(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
         }
 
     private val LOCAL_OFFLINE_CART_KEY = "local_offline_cart"

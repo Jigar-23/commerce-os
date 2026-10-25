@@ -13,7 +13,18 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [redirectUrl, setRedirectUrl] = useState<string>('/');
   const setUser = useSession((s) => s.setUser);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const redirect = params.get('redirect');
+      if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+        setRedirectUrl(redirect);
+      }
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +44,7 @@ export default function LoginPage() {
           roles: resp.roles || ['ROLE_CUSTOMER'],
           accessToken: resp.accessToken,
         });
-        window.location.href = '/';
+        window.location.href = redirectUrl || '/';
       } else {
         throw new Error(resp?.message || resp?.error || 'Authentication failed.');
       }
@@ -62,7 +73,7 @@ export default function LoginPage() {
           roles: resp.roles || ['ROLE_CUSTOMER'],
           accessToken: resp.accessToken,
         });
-        window.location.href = '/';
+        window.location.href = redirectUrl || '/';
       } else {
         throw new Error(resp?.message || resp?.error || 'Registration failed.');
       }

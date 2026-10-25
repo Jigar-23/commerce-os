@@ -58,6 +58,7 @@ data class CheckoutUiState(
     val itemsSubtotal: BigDecimal = BigDecimal.ZERO,
     val deliveryFee: BigDecimal = BigDecimal.ZERO,
     val coldChainFee: BigDecimal = BigDecimal.ZERO,
+    val couponDiscount: BigDecimal = BigDecimal.ZERO,
     val grandTotal: BigDecimal = BigDecimal.ZERO,
     val serviceability: ServiceabilityState = ServiceabilityState.Idle,
     val state: CheckoutState = CheckoutState.Idle,
@@ -89,13 +90,14 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
     private var checkoutIdempotencyKey: String? = null
 
     /** Called when the customer reaches address selection: snapshot cart + totals. */
-    fun start(customerId: String, cartItems: List<CartItem>) {
+    fun start(customerId: String, cartItems: List<CartItem>, couponDiscount: BigDecimal = BigDecimal.ZERO) {
         this.customerId = customerId
         val subtotal = itemsSubtotal(cartItems)
         uiState = CheckoutUiState(
             items = cartItems,
             itemsSubtotal = subtotal,
-            grandTotal = subtotal,
+            couponDiscount = couponDiscount,
+            grandTotal = subtotal.subtract(couponDiscount).coerceAtLeast(BigDecimal.ZERO),
             serviceability = ServiceabilityState.Idle,
             state = CheckoutState.Validating
         )
@@ -156,7 +158,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                             serviceability = serviceabilityStatus,
                             deliveryFee = deliveryFee,
                             coldChainFee = coldChainFee,
-                            grandTotal = uiState.itemsSubtotal.add(deliveryFee).add(coldChainFee)
+                            grandTotal = uiState.itemsSubtotal.add(deliveryFee).add(coldChainFee).subtract(uiState.couponDiscount).coerceAtLeast(BigDecimal.ZERO)
                         )
 
                         uiState = updated.copy(
@@ -168,7 +170,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                             serviceability = serviceabilityStatus,
                             deliveryFee = BigDecimal.ZERO,
                             coldChainFee = BigDecimal.ZERO,
-                            grandTotal = uiState.itemsSubtotal
+                            grandTotal = uiState.itemsSubtotal.subtract(uiState.couponDiscount).coerceAtLeast(BigDecimal.ZERO)
                         )
                         uiState = updated.copy(
                             state = CheckoutState.Failed("UNSERVICEABLE", "Selected address is currently outside our delivery zone.")
@@ -182,7 +184,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                         serviceability = serviceabilityStatus,
                         deliveryFee = BigDecimal.ZERO,
                         coldChainFee = BigDecimal.ZERO,
-                        grandTotal = uiState.itemsSubtotal
+                        grandTotal = uiState.itemsSubtotal.subtract(uiState.couponDiscount).coerceAtLeast(BigDecimal.ZERO)
                     )
                     uiState = updated.copy(
                         state = CheckoutState.Failed("SERVICEABILITY_ERROR", errMsg)

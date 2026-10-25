@@ -351,7 +351,22 @@ export default function CustomerOrderHistoryPage() {
                           {cancelMsg[selectedOrder.orderId]}
                         </div>
                       ) : (
-                        ['PLACED', 'SELLER_ACCEPTED'].includes(selectedOrder.status) && (
+                        [
+                          'PLACED',
+                          'ORDER_PLACED',
+                          'CREATED',
+                          'CONFIRMED',
+                          'ACCEPTED',
+                          'SELLER_ACCEPTED',
+                          'ORDER_SELLER_ACCEPTED',
+                          'ALLOCATED_DARK_STORE',
+                          'PRESCRIPTION_VERIFICATION_PENDING',
+                          'PACKED',
+                          'PACKED_FEFO',
+                          'READY_FOR_PICKUP',
+                          'LOOKING_FOR_RIDER',
+                          'SEARCHING_FOR_RIDER'
+                        ].includes(selectedOrder.status) && (
                           <div className="pt-2 flex justify-end">
                             <button
                               onClick={() => handleCancelOrder(selectedOrder.orderId)}

@@ -109,7 +109,7 @@ export default function ExpressCheckoutPage() {
     if (!hasItems) return;
     if (!sessionUser?.userId) {
       setCheckoutError('Please sign in to complete your checkout.');
-      router.push('/login?redirect=/checkout');
+      router.push('/auth/login?redirect=/checkout');
       return;
     }
     if (!currentAddress) {

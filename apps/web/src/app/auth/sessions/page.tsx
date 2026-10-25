@@ -15,7 +15,7 @@ export default function SessionManagementPage() {
   const handleLogoutCurrent = () => {
     logout();
     setFeedback('You have been signed out of this session.');
-    setTimeout(() => router.push('/login'), 1500);
+    setTimeout(() => router.push('/auth/login'), 1500);
   };
 
   return (
@@ -83,7 +83,7 @@ export default function SessionManagementPage() {
             <ShieldCheck className="h-8 w-8 text-content-muted mx-auto" />
             <p className="text-sm font-bold text-content-secondary">No active session found</p>
             <Link
-              href="/login"
+              href="/auth/login"
               className="inline-block px-4 py-2 bg-action-primaryBg text-action-primaryText text-xs font-bold rounded-xl"
             >
               Sign In

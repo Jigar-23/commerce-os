@@ -233,6 +233,24 @@ export async function fetchCustomerProfile(customerId?: string) {
   return getJson(`${API_CONFIG.CUSTOMER}/api/v1/customers/${targetCustomerId}`);
 }
 
+export async function updateCustomerProfile(
+  payload: { fullName?: string; name?: string; email?: string; phone?: string },
+  customerId?: string
+) {
+  const targetCustomerId = customerId || getActiveCustomerId();
+  if (!targetCustomerId) throw new Error('UNAUTHENTICATED: Active session required to update profile.');
+  const res = await fetch(`${API_CONFIG.CUSTOMER}/api/v1/customers/${targetCustomerId}`, {
+    method: 'PUT',
+    headers: buildHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.message || 'Failed to update profile');
+  }
+  return res.json();
+}
+
 /**
  * Authoritative Order Placement.
  */
