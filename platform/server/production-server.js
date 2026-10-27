@@ -127,6 +127,26 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_vpa VARCHAR(128);`).catch(() => {});
   pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_ref_id VARCHAR(128);`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+
+  // ---------------------------------------------------------------------------
+  // 2b. Authoritative Database Keep-Alive Pulse (Prevents Cloud Hibernation)
+  // Secretly queries the database on a recurring 24-hour cycle (default)
+  // to reset cloud inactivity timers (Supabase, Neon, Render) without downtime.
+  // ---------------------------------------------------------------------------
+  const keepAliveIntervalMs = Number(process.env.DB_KEEPALIVE_INTERVAL_MS) || (24 * 60 * 60 * 1000); // 24 hours
+  const executeDbKeepAlive = async () => {
+    try {
+      if (!pool) return;
+      await pool.query('SELECT NOW() AS keepalive_pulse, 1 AS alive;');
+    } catch (keepAliveErr) {
+      if (process.env.DEBUG_KEEPALIVE === 'true') {
+        console.error('[DB-KeepAlive] Pulse check deferred:', keepAliveErr.message);
+      }
+    }
+  };
+  setTimeout(executeDbKeepAlive, 5000);
+  const keepAliveTimer = setInterval(executeDbKeepAlive, keepAliveIntervalMs);
+  if (keepAliveTimer.unref) keepAliveTimer.unref();
 }
 
 // 3. Authoritative OSRM Route Resolver Adapter

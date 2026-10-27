@@ -31,6 +31,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
     "whitelabel": "node scripts/whitelabel-cli.js",
     "seed:tenant": "node scripts/seed-tenant.js",
+    "db:keepalive": "node scripts/db-keepalive.js",
+    "db:keepalive:daemon": "node scripts/db-keepalive.js --daemon",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v"
   },

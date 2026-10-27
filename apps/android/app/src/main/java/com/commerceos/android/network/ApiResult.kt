@@ -90,8 +90,9 @@ object Api {
         val candidateBases = listOfNotNull(
             NetworkClient.baseUrl,
             com.commerceos.android.BuildConfig.API_BASE_URL.takeIf { it.isNotBlank() } ?: "https://commerce-os-api.onrender.com",
-            "http://10.0.2.2:8080",
+            "http://192.168.1.2:8080",
             "http://127.0.0.1:8080",
+            "http://10.0.2.2:8080",
             "http://127.0.0.1:8090",
             "http://10.0.2.2:8090"
         ).distinct()

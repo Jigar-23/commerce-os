@@ -57,6 +57,12 @@ To ensure any client can be spun up without breaking existing functionality:
 * **NO Hardcoded Store / Hub Identifiers**: Never hardcode store IDs (e.g. `STORE_REWARI_01`) or hardcoded geocoordinates into core code or business queries. All store resolution must be dynamic via spatial proximity or customer address context.
 * **NO Hardcoded Vertical Logic**: Never assume an order requires a prescription or cold-chain handling unless explicitly dictated by the catalog item metadata (`item.prescriptionRequired`, `item.coldChain`) and enabled by the tenant configuration.
 * **NO Production Mock Fallbacks**: Never use fake tokens (e.g., `jwt_demo_partner_token`), master OTP bypasses (`123456`), or synthetic tracking objects (`"Partner Assigning"`) in production paths. When an operation fails or data is unavailable, the system must **fail closed** with an explicit error code.
+* **ABSOLUTE DATABASE AUTHORITY & IMMUTABILITY ("NEVER CHANGE THE DB")**:
+  - The configured database URL (`DATABASE_URL`) is authoritative, persistent, and strictly **immutable**.
+  - Developers and AI agents are **strictly forbidden** from arbitrarily changing, swapping, or redirecting `DATABASE_URL` or database credentials.
+  - The database shall remain 100% consistent across all system operations.
+  - **User-Directed Failover Only**: In case of database outage, unreachable host, or disaster recovery, the system must **fail closed**. Never autonomously switch to a fallback database or mock store. The **USER alone** will explicitly specify which fallback database to target if and when a change is needed.
+  - **Automated 24-Hour Keep-Alive Pulse**: To prevent cloud PostgreSQL instances (Supabase, Neon, Render, AWS Aurora) from auto-pausing or hibernating due to inactivity, a discreet background keep-alive process executes every 24 hours (or configurable interval) with a lightweight heartbeat query (`SELECT NOW()`, `SELECT 1`) to ensure zero-touch persistence.
 
 ---
 
