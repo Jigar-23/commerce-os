@@ -1,6 +1,13 @@
 # Commerce OS Agent Instructions & Rules
 
-All AI agents, coding assistants, and contributors operating within this repository must strictly adhere to the rules defined below and in [RULEBOOK.md](file:///Users/jigar/Desktop/new-project/commerce-os/RULEBOOK.md).
+All AI agents, coding assistants, and contributors operating within this repository must strictly adhere to [WORKING_PRINCIPLES.md](file:///Users/jigar/Desktop/new-project/commerce-os/WORKING_PRINCIPLES.md) and [RULEBOOK.md](file:///Users/jigar/Desktop/new-project/commerce-os/RULEBOOK.md).
+
+---
+
+## ⭐️ SUPREME RULE 0: The "Minimal Change" Universal White-Label Invariant
+* Refer to [WORKING_PRINCIPLES.md](file:///Users/jigar/Desktop/new-project/commerce-os/WORKING_PRINCIPLES.md) before making ANY change to the codebase.
+* Commerce OS is a single universal commerce engine designed to be spun up for any client/vertical by **only** changing configuration (`DATABASE_URL`, `API_GATEWAY_URL`, package names, brand theme, and feature flags).
+* **NEVER** introduce hardcoded store IDs, hardcoded company/store names, or vertical-exclusive assumptions directly into the core order, checkout, cart, or dispatch engines.
 
 ---
 
