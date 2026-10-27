@@ -278,13 +278,13 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 ) {
                     SuggestionChip(
                         onClick = {
-                            serverHost = "https://commerce-os-api.onrender.com"
+                            serverHost = com.commerceos.android.BuildConfig.API_BASE_URL.ifBlank { "https://commerce-os-api.onrender.com" }
                             val prefs = context.getSharedPreferences("commerce_os_prefs", android.content.Context.MODE_PRIVATE)
                             prefs.edit().putString("custom_api_base_url", serverHost).apply()
                             NetworkClient.baseUrl = serverHost
-                            Toast.makeText(context, "Connected to Render Cloud API", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Connected to Configured API", Toast.LENGTH_SHORT).show()
                         },
-                        label = { Text("Render Cloud API", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold) }
+                        label = { Text("Configured Cloud API", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold) }
                     )
                 }
                 

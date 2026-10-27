@@ -570,7 +570,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
                       expressDeliverySlaMins: p.expressDeliverySlaMins || 10,
                     });
                   }}
-                  onCardClick={(item) => router.push(`/medicines/${item.id}`)}
+                  onCardClick={(item) => router.push(`/products/${item.id}`)}
                 />
               ))}
             </div>
@@ -583,7 +583,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
         products={allMedicines}
-        onSelectProduct={(p) => router.push(`/medicines/${p.id}`)}
+        onSelectProduct={(p) => router.push(`/products/${p.id}`)}
       />
 
       <DeliveryAddressMapModal

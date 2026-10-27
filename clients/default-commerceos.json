@@ -39,6 +39,11 @@
     "serviceRadiusKm": 10.0,
     "slaMinutes": 10
   },
+  "features": {
+    "prescriptions": true,
+    "coldChain": true,
+    "instant10Min": true
+  },
   "database": {
     "databaseUrl": "postgres://postgres:postgres@localhost:5432/commerce_os"
   }

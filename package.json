@@ -29,6 +29,8 @@
     "test:progress": "node platform/test-postgres-live/run-all-matrix-with-progress.js",
     "test:all": "node platform/test-postgres-live/run-all-matrix-with-progress.js",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "whitelabel": "node scripts/whitelabel-cli.js",
+    "seed:tenant": "node scripts/seed-tenant.js",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v"
   },

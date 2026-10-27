@@ -39,6 +39,11 @@
     "serviceRadiusKm": 8.0,
     "slaMinutes": 10
   },
+  "features": {
+    "prescriptions": false,
+    "coldChain": false,
+    "instant10Min": true
+  },
   "database": {
     "databaseUrl": "postgres://freshcart_admin:SecureFreshCart2026!@db.freshcart-grocery.com:5432/freshcart_db"
   }

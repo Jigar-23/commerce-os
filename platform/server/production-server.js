@@ -2051,7 +2051,7 @@ const server = http.createServer(async (req, res) => {
       ]);
     }
 
-    if ((pathname === '/api/v1/catalog/medicines/search' || pathname === '/api/v1/catalog/medicines' || pathname === '/api/v1/search') && method === 'GET') {
+    if ((pathname === '/api/v1/catalog/medicines/search' || pathname === '/api/v1/catalog/medicines' || pathname === '/api/v1/catalog/products/search' || pathname === '/api/v1/catalog/products' || pathname === '/api/v1/search') && method === 'GET') {
       const q = (parsedUrl.searchParams.get('q') || parsedUrl.searchParams.get('query') || '').trim();
       const cat = (parsedUrl.searchParams.get('category') || '').trim();
 
@@ -2099,7 +2099,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, autoRes.rows.map(r => r.name));
     }
 
-    const medDetailMatch = pathname.match(/^\/api\/v1\/catalog\/medicines\/([^/]+)$/);
+    const medDetailMatch = pathname.match(/^\/api\/v1\/catalog\/(?:medicines|products)\/([^/]+)$/);
     if (medDetailMatch && method === 'GET') {
       const prodId = medDetailMatch[1];
       const prodRes = await pool.query(
@@ -2129,7 +2129,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    if (pathname === '/api/v1/catalog/medicines/category' && method === 'GET') {
+    if ((pathname === '/api/v1/catalog/medicines/category' || pathname === '/api/v1/catalog/products/category') && method === 'GET') {
       const category = (parsedUrl.searchParams.get('category') || parsedUrl.searchParams.get('categoryId') || '').trim();
       let queryText = `SELECT id, sku, name, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required FROM products WHERE is_active = TRUE`;
       const queryParams = [];

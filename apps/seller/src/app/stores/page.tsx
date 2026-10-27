@@ -36,66 +36,8 @@ interface NearbyStoreResult {
   serviceRadiusKm: number;
 }
 
-// Initial authoritative stores across key operational fulfillment zones
-const DEFAULT_STORES: StoreHub[] = [
-  {
-    id: 'STORE_REWARI_01',
-    storeName: 'Commerce OS Rewari Central Store Hub',
-    address: '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
-    latitude: 28.202224,
-    longitude: 76.615418,
-    slaMinutes: 8,
-    sellerApprovalRequired: false,
-    isActive: true,
-    serviceRadiusKm: 10.0,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'STORE_GURGAON_01',
-    storeName: 'Cyber City Quick Fulfillment Hub',
-    address: 'DLF Cyber City, Phase 2, Sector 24, Gurugram, Haryana 122002',
-    latitude: 28.4906,
-    longitude: 77.0898,
-    slaMinutes: 10,
-    sellerApprovalRequired: false,
-    isActive: true,
-    serviceRadiusKm: 12.0,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'STORE_DELHI_01',
-    storeName: 'South Delhi Dark Store & Hub',
-    address: 'A-24 Hauz Khas Enclave, New Delhi, Delhi 110016',
-    latitude: 28.5494,
-    longitude: 77.2001,
-    slaMinutes: 10,
-    sellerApprovalRequired: false,
-    isActive: true,
-    serviceRadiusKm: 12.0,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'STORE_BANGALORE_01',
-    storeName: 'Koramangala Super Dark Store',
-    address: '12, 80 Feet Road, 4th Block, Koramangala, Bengaluru, Karnataka 560034',
-    latitude: 12.9352,
-    longitude: 77.6245,
-    slaMinutes: 8,
-    sellerApprovalRequired: false,
-    isActive: true,
-    serviceRadiusKm: 8.0,
-    createdAt: new Date().toISOString(),
-  },
-];
-
-// Predefined test customer locations for quick proximity simulation
-const SIMULATION_PRESETS = [
-  { name: 'Rewari Model Town (Near Rewari Hub)', lat: 28.1989, lng: 76.6186 },
-  { name: 'Gurgaon Golf Course Road', lat: 28.4682, lng: 77.0984 },
-  { name: 'Green Park Delhi (Near Hauz Khas)', lat: 28.5588, lng: 77.2028 },
-  { name: 'Indiranagar Bangalore (Near Koramangala)', lat: 12.9719, lng: 77.6412 },
-  { name: 'Faridabad Sector 15 (Out of Hub Reach)', lat: 28.4089, lng: 77.3178 },
-];
+// Initial authoritative stores empty set (populated from database or dynamic tenant configuration)
+const DEFAULT_STORES: StoreHub[] = [];
 
 function calculateHaversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371; // Earth radius in km
@@ -204,7 +146,9 @@ export default function StoresManagementPage() {
   // Initial trigger for default simulation
   useEffect(() => {
     if (stores.length > 0 && !capturedStore) {
-      handleResolveNearestStore(28.1989, 76.6186);
+      setSimLat(stores[0].latitude.toString());
+      setSimLng(stores[0].longitude.toString());
+      handleResolveNearestStore(stores[0].latitude, stores[0].longitude);
     }
   }, [stores]);
 
@@ -508,23 +452,25 @@ export default function StoresManagementPage() {
                   </div>
                 </div>
 
-                {/* Quick Preset Chips */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-2xs font-bold text-slate-400 uppercase">Quick Presets:</span>
-                  {SIMULATION_PRESETS.map((p) => (
-                    <button
-                      key={p.name}
-                      onClick={() => {
-                        setSimLat(p.lat.toString());
-                        setSimLng(p.lng.toString());
-                        handleResolveNearestStore(p.lat, p.lng);
-                      }}
-                      className="px-2.5 py-1 text-2xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 border border-white/10 transition-colors"
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
+                {/* Dynamic Store Preset Chips */}
+                {stores.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-2xs font-bold text-slate-400 uppercase">Quick Presets:</span>
+                    {stores.slice(0, 5).map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          setSimLat(s.latitude.toString());
+                          setSimLng(s.longitude.toString());
+                          handleResolveNearestStore(s.latitude, s.longitude);
+                        }}
+                        className="px-2.5 py-1 text-2xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 border border-white/10 transition-colors"
+                      >
+                        {s.storeName}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* Captured Store Result Display */}
                 {capturedStore && (
@@ -591,8 +537,23 @@ export default function StoresManagementPage() {
               {filteredStores.length === 0 ? (
                 <div className="p-12 text-center">
                   <Store className="w-12 h-12 text-content-muted mx-auto mb-3 opacity-40" />
-                  <p className="text-sm font-bold text-content-primary">No stores found</p>
-                  <p className="text-xs text-content-muted mt-1">Try adjusting your search query or add a new fulfillment hub.</p>
+                  <p className="text-sm font-bold text-content-primary">
+                    {stores.length === 0 ? 'No fulfillment hubs configured yet' : 'No matching stores found'}
+                  </p>
+                  <p className="text-xs text-content-muted mt-1">
+                    {stores.length === 0
+                      ? 'Add your first dark store or fulfillment hub using the button below to enable automatic proximity-capture routing.'
+                      : 'Try adjusting your search query or add a new fulfillment hub.'}
+                  </p>
+                  {stores.length === 0 && (
+                    <button
+                      onClick={openAddStoreModal}
+                      className="mt-4 px-4 py-2 text-xs font-bold text-white bg-action-primaryBg rounded-xl hover:bg-action-primaryBg/90 transition-all inline-flex items-center gap-2 shadow-md shadow-action-primaryBg/20"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Your First Hub
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">

@@ -2,9 +2,11 @@ import React from 'react';
 import './globals.css';
 import { Metadata } from 'next';
 
+const appName = process.env.NEXT_PUBLIC_APP_NAME || 'Commerce OS';
+
 export const metadata: Metadata = {
-  title: 'Commerce OS — Enterprise Digital Pharmacy & Healthcare Engine',
-  description: 'Sub-10 minute quick-commerce medicine delivery, AI prescription OCR, and verified doctor consultations.',
+  title: `${appName} — Universal Quick-Commerce Engine`,
+  description: `Instant 10-minute hyperlocal delivery, dynamic inventory, and real-time order tracking powered by ${appName}.`,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

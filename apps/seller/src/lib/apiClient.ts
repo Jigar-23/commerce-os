@@ -15,7 +15,7 @@ function resolveSellerApiUrl(): string {
   if (url && url.trim().length > 0) {
     return url.trim().replace(/\/$/, '');
   }
-  return 'https://commerce-os-api.onrender.com';
+  return '';
 }
 
 const API_BASE_URL = resolveSellerApiUrl();
@@ -66,7 +66,7 @@ class SellerApiClient {
     if (url && url.trim().length > 0) {
       return url.trim().replace(/\/$/, '');
     }
-    return this.baseUrl || 'https://commerce-os-api.onrender.com';
+    return this.baseUrl || '';
   }
 
   public getSession(): SellerSession | null {

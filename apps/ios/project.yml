@@ -30,6 +30,7 @@ targets:
       path: CommerceOS/Info.plist
       properties:
         CFBundleDisplayName: "Commerce OS"
+        COMMERCEOS_API_URL: "https://commerce-os-api.onrender.com"
         CFBundleIdentifier: "com.commerceos.customer"
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
@@ -82,6 +83,7 @@ targets:
       path: CommerceOSRider/Info.plist
       properties:
         CFBundleDisplayName: "Commerce OS Rider"
+        COMMERCEOS_API_URL: "https://commerce-os-api.onrender.com"
         CFBundleIdentifier: "com.commerceos.rider"
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"

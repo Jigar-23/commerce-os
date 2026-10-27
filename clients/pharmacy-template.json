@@ -39,6 +39,11 @@
     "serviceRadiusKm": 10.0,
     "slaMinutes": 15
   },
+  "features": {
+    "prescriptions": true,
+    "coldChain": true,
+    "instant10Min": true
+  },
   "database": {
     "databaseUrl": "postgres://curequick_admin:SecureCureQuick2026!@db.curequickrx.com:5432/curequick_db"
   }

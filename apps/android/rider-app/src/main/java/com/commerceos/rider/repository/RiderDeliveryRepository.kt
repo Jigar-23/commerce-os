@@ -200,7 +200,8 @@ class RiderDeliveryRepository(
 
     private fun getCandidateUrls(): List<String> {
         val primary = baseUrlProvider().trimEnd('/')
-        return if (primary.isNotBlank()) listOf(primary) else listOf("https://commerce-os-api.onrender.com")
+        val fallback = com.commerceos.rider.BuildConfig.API_BASE_URL.ifBlank { "https://commerce-os-api.onrender.com" }
+        return if (primary.isNotBlank()) listOf(primary) else listOf(fallback)
     }
 
     private fun openCandidateConnection(base: String, path: String, method: String): HttpURLConnection {
@@ -406,9 +407,9 @@ class RiderDeliveryRepository(
             val primary = baseUrlProvider().trimEnd('/')
             if (primary.isNotBlank() && !primary.contains("127.0.0.1") && !primary.contains("localhost")) {
                 urlsToTry.add(primary)
-            }
-            if (!urlsToTry.contains("https://commerce-os-api.onrender.com")) {
-                urlsToTry.add("https://commerce-os-api.onrender.com")
+            } else {
+                val fallback = com.commerceos.rider.BuildConfig.API_BASE_URL.ifBlank { "https://commerce-os-api.onrender.com" }
+                urlsToTry.add(fallback)
             }
 
             var lastCode = 0

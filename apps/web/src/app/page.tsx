@@ -377,7 +377,7 @@ export default function StorefrontHomePage() {
                   onAddToCart={handleAddToCart}
                   onIncrement={handleIncrement}
                   onDecrement={handleDecrement}
-                  onCardClick={(p) => router.push(`/medicines/${p.id}`)}
+                  onCardClick={(p) => router.push(`/products/${p.id}`)}
                 />
               ))}
             </div>
@@ -440,7 +440,7 @@ export default function StorefrontHomePage() {
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
         products={medicines}
-        onSelectProduct={(p) => router.push(`/medicines/${p.id}`)}
+        onSelectProduct={(p) => router.push(`/products/${p.id}`)}
       />
 
       {/* 9. ADDRESS SELECTION MAP MODAL */}

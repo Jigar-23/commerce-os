@@ -6,6 +6,11 @@ public enum RiderEnvironment {
            let url = URL(string: customUrl) {
             return url
         }
+        if let injected = Bundle.main.object(forInfoDictionaryKey: "COMMERCEOS_API_URL") as? String,
+           !injected.isEmpty && !injected.starts(with: "$("),
+           let url = URL(string: injected) {
+            return url
+        }
         if let saved = UserDefaults.standard.string(forKey: "commerceos_rider_server_url"),
            !saved.contains("localhost"), !saved.contains("127.0.0.1"), !saved.contains("192.168."),
            let url = URL(string: saved) {

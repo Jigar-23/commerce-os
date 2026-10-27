@@ -14,6 +14,10 @@ public enum ServerEnvironmentPreset: String, CaseIterable, Identifiable {
         case .lanGateway:
             return "http://192.168.1.76:3000"
         case .cloudRender:
+            if let injected = Bundle.main.object(forInfoDictionaryKey: "COMMERCEOS_API_URL") as? String,
+               !injected.isEmpty && !injected.starts(with: "$(") {
+                return injected
+            }
             return "https://commerce-os-api.onrender.com"
         case .localSimulator:
             return "http://localhost:3000"

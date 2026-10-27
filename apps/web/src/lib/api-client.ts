@@ -178,6 +178,9 @@ export async function fetchMedicineById(id: string): Promise<MedicineProduct | n
   return getJson(`${API_CONFIG.CATALOG}/api/v1/catalog/medicines/${id}`);
 }
 
+export const fetchCatalogProducts = fetchCatalogMedicines;
+export const fetchProductById = fetchMedicineById;
+
 export async function fetchCart(customerId?: string) {
   const targetCustomerId = customerId || getActiveCustomerId();
   if (!targetCustomerId) throw new Error('UNAUTHENTICATED: Active session required to access cart.');
