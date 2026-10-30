@@ -49,10 +49,10 @@ fun RiderLiveNavigationView(
     val context = LocalContext.current
     var showManualArrivalConfirmDialog by remember { mutableStateOf(false) }
 
-    val merchantLat = session.merchantLat?.takeIf { it != 0.0 } ?: 28.202224
-    val merchantLng = session.merchantLng?.takeIf { it != 0.0 } ?: 76.615418
-    val customerLat = session.customerLat?.takeIf { it != 0.0 } ?: 28.202224
-    val customerLng = session.customerLng?.takeIf { it != 0.0 } ?: 76.615418
+    val merchantLat = session.merchantLat?.takeIf { it != 0.0 } ?: 0.0
+    val merchantLng = session.merchantLng?.takeIf { it != 0.0 } ?: 0.0
+    val customerLat = session.customerLat?.takeIf { it != 0.0 } ?: 0.0
+    val customerLng = session.customerLng?.takeIf { it != 0.0 } ?: 0.0
 
     val isPhase1 = session.state in listOf("ASSIGNED", "ACCEPTED", "EN_ROUTE_PICKUP", "OUT_FOR_PICKUP", "EN_ROUTE_STORE", "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "ARRIVED_MERCHANT")
     val targetLat = if (isPhase1) merchantLat else customerLat

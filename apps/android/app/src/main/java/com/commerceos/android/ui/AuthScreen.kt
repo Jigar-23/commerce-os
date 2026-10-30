@@ -1,5 +1,6 @@
 package com.commerceos.android.ui
 
+import android.app.Activity
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +28,12 @@ import com.commerceos.android.ui.theme.CommerceTypography
 import com.commerceos.android.ui.theme.Radius
 import com.commerceos.android.ui.theme.Spacing
 import com.commerceos.android.viewmodel.AuthViewModel
+import com.google.firebase.FirebaseException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.PhoneAuthCredential
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,6 +45,116 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
     var showServerConfig by rememberSaveable { mutableStateOf(false) }
     var serverHost by rememberSaveable { mutableStateOf(NetworkClient.baseUrl) }
+
+    val activity = context as? Activity
+    var resendingToken by remember { mutableStateOf<PhoneAuthProvider.ForceResendingToken?>(null) }
+
+    fun dispatchGooglePhoneAuth() {
+        val currentPhone = viewModel.uiState.phone
+        android.util.Log.i("CommerceOSAuth", "dispatchGooglePhoneAuth clicked! currentPhone='$currentPhone'")
+        val cleanDigits = currentPhone.replace(Regex("[^0-9]"), "").let {
+            if (it.length > 10) it.takeLast(10) else it
+        }
+        android.util.Log.i("CommerceOSAuth", "cleanDigits='$cleanDigits', length=${cleanDigits.length}")
+        if (cleanDigits.length != 10) {
+            viewModel.setError("Please enter a valid 10-digit mobile number")
+            return
+        }
+        val formatted = "+91$cleanDigits"
+        viewModel.setLoading(true)
+
+        if (activity == null) {
+            android.util.Log.w("CommerceOSAuth", "activity is null, calling viewModel.sendOtp()")
+            viewModel.sendOtp()
+            return
+        }
+
+        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                android.util.Log.i("CommerceOSAuth", "onVerificationCompleted: code=${credential.smsCode}")
+                val code = credential.smsCode
+                if (!code.isNullOrBlank()) {
+                    viewModel.onOtpChange(code)
+                }
+                FirebaseAuth.getInstance().signInWithCredential(credential)
+                    .addOnSuccessListener { authRes ->
+                        authRes.user?.getIdToken(true)?.addOnSuccessListener { tokenRes ->
+                            tokenRes.token?.let { idToken ->
+                                android.util.Log.i("CommerceOSAuth", "Google idToken obtained, verifying with backend...")
+                                viewModel.verifyWithGoogleToken(idToken)
+                            }
+                        }
+                    }
+                    .addOnFailureListener { err ->
+                        android.util.Log.e("CommerceOSAuth", "Google sign-in credential failure: ${err.message}", err)
+                        viewModel.setError("Google verification error: ${err.message}")
+                    }
+            }
+
+            override fun onVerificationFailed(e: FirebaseException) {
+                android.util.Log.e("CommerceOSAuth", "Firebase Phone Auth failed: [${e.javaClass.simpleName}] ${e.message}", e)
+                Toast.makeText(context, "Google SMS issue (${e.localizedMessage}). Using server gateway...", Toast.LENGTH_LONG).show()
+                viewModel.setError("Firebase SMS: ${e.localizedMessage ?: e.message}")
+                viewModel.setLoading(false)
+                viewModel.sendOtp()
+            }
+
+            override fun onCodeSent(verificationId: String, token: PhoneAuthProvider.ForceResendingToken) {
+                android.util.Log.i("CommerceOSAuth", "onCodeSent: verificationId=$verificationId")
+                resendingToken = token
+                viewModel.setGoogleVerification(verificationId)
+                Toast.makeText(context, "Google SMS dispatched to $formatted", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val optionsBuilder = PhoneAuthOptions.newBuilder(FirebaseAuth.getInstance())
+            .setPhoneNumber(formatted)
+            .setTimeout(60L, TimeUnit.SECONDS)
+            .setActivity(activity)
+            .setCallbacks(callbacks)
+
+        resendingToken?.let { optionsBuilder.setForceResendingToken(it) }
+
+        try {
+            android.util.Log.i("CommerceOSAuth", "Triggering PhoneAuthProvider.verifyPhoneNumber for $formatted...")
+            PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
+        } catch (e: Exception) {
+            android.util.Log.e("CommerceOSAuth", "PhoneAuthProvider exception: ${e.message}", e)
+            viewModel.sendOtp()
+        }
+    }
+
+    fun submitOtpVerification() {
+        val enteredCode = viewModel.uiState.otpCode.trim()
+        val googleVerId = viewModel.uiState.googleVerificationId
+        android.util.Log.i("CommerceOSAuth", "submitOtpVerification: code='$enteredCode', googleVerId=$googleVerId")
+
+        if (googleVerId != null && enteredCode.length == 6) {
+            viewModel.setLoading(true)
+            val credential = PhoneAuthProvider.getCredential(googleVerId, enteredCode)
+            FirebaseAuth.getInstance().signInWithCredential(credential)
+                .addOnSuccessListener { authRes ->
+                    authRes.user?.getIdToken(true)?.addOnSuccessListener { tokenRes ->
+                        val idToken = tokenRes.token
+                        if (!idToken.isNullOrBlank()) {
+                            viewModel.verifyWithGoogleToken(idToken)
+                        } else {
+                            viewModel.setError("Could not retrieve Google Auth Token")
+                        }
+                    }?.addOnFailureListener { err ->
+                        android.util.Log.e("CommerceOSAuth", "getIdToken failed: ${err.message}", err)
+                        viewModel.setError("Google token error: ${err.localizedMessage ?: err.message}")
+                    }
+                }
+                .addOnFailureListener { err ->
+                    android.util.Log.w("CommerceOSAuth", "Firebase credential error: ${err.message}")
+                    viewModel.setLoading(false)
+                    viewModel.setError(err.localizedMessage ?: "Invalid verification code. Please check and try again.")
+                }
+        } else {
+            viewModel.verifyOtp()
+        }
+    }
 
 
 
@@ -178,6 +295,12 @@ fun AuthScreen(viewModel: AuthViewModel) {
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Text(
+                        text = "💡 Direct dev code 123456 verifies immediately",
+                        fontSize = 11.sp,
+                        color = CommerceColors.TextMuted,
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    )
                 }
 
                 uiState.errorMessage?.let {
@@ -189,7 +312,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
                 if (!uiState.isOtpSent) {
                     Button(
-                        onClick = viewModel::sendOtp,
+                        onClick = { viewModel.sendOtp() },
                         enabled = !uiState.isLoading && uiState.phone.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = CommerceColors.PrimaryDark,
@@ -209,7 +332,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                     }
                 } else {
                     Button(
-                        onClick = viewModel::verifyOtp,
+                        onClick = { viewModel.verifyOtp() },
                         enabled = !uiState.isLoading && uiState.verifyAttemptsLeft > 0,
                         colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Success),
                         shape = RoundedCornerShape(Radius.Button),
@@ -239,7 +362,10 @@ fun AuthScreen(viewModel: AuthViewModel) {
                                 fontWeight = FontWeight.Bold
                             )
                         } else {
-                            TextButton(onClick = viewModel::resendOtp, enabled = !uiState.isLoading) {
+                            TextButton(
+                                onClick = { viewModel.resendOtp() },
+                                enabled = !uiState.isLoading
+                            ) {
                                 Text("Resend Code", color = CommerceColors.Primary, style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -278,17 +404,17 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 ) {
                     SuggestionChip(
                         onClick = {
-                            serverHost = "http://192.168.1.2:8080"
+                            serverHost = "http://192.168.1.2:8083"
                             val prefs = context.getSharedPreferences("commerce_os_prefs", android.content.Context.MODE_PRIVATE)
                             prefs.edit().putString("custom_api_base_url", serverHost).apply()
                             NetworkClient.baseUrl = serverHost
-                            Toast.makeText(context, "Connected to Local Mac (192.168.1.2:8080)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Connected to Local Mac (192.168.1.2:8083)", Toast.LENGTH_SHORT).show()
                         },
                         label = { Text("Local Mac (192.168.1.2)", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold) }
                     )
                     SuggestionChip(
                         onClick = {
-                            serverHost = com.commerceos.android.BuildConfig.API_BASE_URL.ifBlank { "https://commerce-os-api.onrender.com" }
+                            serverHost = "https://commerce-os-api.onrender.com"
                             val prefs = context.getSharedPreferences("commerce_os_prefs", android.content.Context.MODE_PRIVATE)
                             prefs.edit().putString("custom_api_base_url", serverHost).apply()
                             NetworkClient.baseUrl = serverHost

@@ -154,24 +154,24 @@ final class AddressPlatformTests: XCTestCase {
     }
 
     func testRealTimeEtaEngineDistanceAndEta() {
-        // Test Store coordinates (Rewari / NCR Hub)
+        // Test Store coordinates (Hub)
         let storeLat = 28.1970
         let storeLng = 76.6190
 
         // Zero distance should clamp to minimum rapid delivery SLA (8 mins)
-        let zeroEta = RealTimeEtaEngine.calculateEtaMinutes(userLat: storeLat, userLng: storeLng)
+        let zeroEta = RealTimeEtaEngine.calculateEtaMinutes(userLat: storeLat, userLng: storeLng, storeLat: storeLat, storeLng: storeLng)
         XCTAssertEqual(zeroEta, 8)
 
         // ~5 km straight line distance
         // Road distance = 5 * 1.3 = 6.5 km
         // Travel time = 6.5 * 3 = 19.5 min + 4 prep = ~24 min
         let dist5KmLat = storeLat + (5.0 / 111.0)
-        let eta = RealTimeEtaEngine.calculateEtaMinutes(userLat: dist5KmLat, userLng: storeLng)
+        let eta = RealTimeEtaEngine.calculateEtaMinutes(userLat: dist5KmLat, userLng: storeLng, storeLat: storeLat, storeLng: storeLng)
         XCTAssertGreaterThanOrEqual(eta, 20)
         XCTAssertLessThanOrEqual(eta, 28)
 
         // Far away distance clamps to max 45 mins
-        let farEta = RealTimeEtaEngine.calculateEtaMinutes(userLat: 12.9716, userLng: 77.5946)
+        let farEta = RealTimeEtaEngine.calculateEtaMinutes(userLat: 12.9716, userLng: 77.5946, storeLat: storeLat, storeLng: storeLng)
         XCTAssertEqual(farEta, 45)
     }
 

@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.commerceos.android.location.PlaceSearchResult
 import com.commerceos.android.location.RealLocationMapViewport
+import com.commerceos.android.location.cleanAddressSegments
 import com.commerceos.android.model.AddressConflictWarning
 import com.commerceos.android.model.RecipientType
 import com.commerceos.android.model.StructuredAddress
@@ -125,13 +126,9 @@ fun AddAddressFlow(
         }
     }
 
-    // Intercept physical and gesture back button to prevent abrupt flow destruction
+    // Intercept physical and gesture back button for instant single-click exit
     BackHandler {
-        if (searchQuery.isNotBlank()) {
-            onSearchQueryChanged("")
-        } else {
-            onBack()
-        }
+        onBack()
     }
 
     val configuration = LocalConfiguration.current
@@ -207,44 +204,73 @@ fun AddAddressFlow(
                         Surface(
                             color = Color(0xFFDCFCE7),
                             shape = CircleShape,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(34.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Default.LocationOn,
                                     contentDescription = null,
                                     tint = Color(0xFF16A34A),
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            val localityDisplay = if (isReverseGeocoding) {
+                            val primaryArea = if (isReverseGeocoding) {
                                 "Detecting location..."
                             } else {
-                                val area = formAddress.subLocality.ifBlank { formAddress.street.ifBlank { formAddress.locality.ifBlank { "Selected Locality" } } }
-                                if (formAddress.city.isNotBlank() && !area.contains(formAddress.city, ignoreCase = true)) {
-                                    "$area, ${formAddress.city}"
-                                } else {
-                                    area
-                                }
+                                formAddress.subLocality.takeIf { it.isNotBlank() }
+                                    ?: formAddress.street.takeIf { it.isNotBlank() }
+                                    ?: formAddress.locality.takeIf { it.isNotBlank() }
+                                    ?: formAddress.city.takeIf { it.isNotBlank() }
+                                    ?: "Selected Location"
+                            }
+                            val secondarySubtitle = if (isReverseGeocoding) {
+                                "Pinpointing area on map..."
+                            } else {
+                                val full = cleanAddressSegments(
+                                    formAddress.street,
+                                    formAddress.subLocality,
+                                    formAddress.locality,
+                                    formAddress.city,
+                                    formAddress.state,
+                                    formAddress.postalCode
+                                )
+                                full.ifBlank { "Delivery pinpoint coordinates" }
                             }
                             Text(
-                                text = localityDisplay,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = primaryArea,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
                                 color = Color(0xFF0F172A),
-                                maxLines = 2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = secondarySubtitle,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B),
+                                maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = Color(0xFF94A3B8),
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            color = Color(0xFFDCFCE7),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable { onSearchQueryChanged("") }
+                        ) {
+                            Text(
+                                text = "Change",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF166534),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
 
@@ -481,7 +507,7 @@ fun AddAddressFlow(
 
                 Button(
                     onClick = onSaveSubmitted,
-                    enabled = !isSaving && validationResult.isValid,
+                    enabled = !isSaving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),

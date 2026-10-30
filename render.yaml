@@ -36,6 +36,12 @@ services:
         value: commerceos_fcm_production_server_key_authoritative
       - key: FCM_ENDPOINT_URL
         value: https://fcm.googleapis.com/fcm/send
+      - key: TWO_FACTOR_API_KEY
+        value: 8b075629-d2c5-11f1-ac3e-0200cd936042
+      - key: ENABLE_VOICE_OTP
+        value: "true"
+      - key: CALL_ONLY_OTP
+        value: "false"
 
   # -------------------------------------------------------------
   # 2. Standalone Merchant / Seller Web Portal

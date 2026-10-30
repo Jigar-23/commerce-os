@@ -132,6 +132,11 @@ data class VerifyOtpRequest(
     val otpCode: String
 )
 
+data class VerifyGoogleSmsRequest(
+    val idToken: String,
+    val phone: String? = null
+)
+
 data class RefreshTokenRequest(
     val refreshToken: String
 )
@@ -165,16 +170,16 @@ data class ApiAddress(
     val tag: String = "Home",
     val addressType: String = "HOME",
     val addressLine: String = "",
-    val city: String = "Rewari",
-    val state: String = "Haryana",
-    val postalCode: String = "123401",
+    val city: String = "",
+    val state: String = "",
+    val postalCode: String = "",
     val country: String = "India",
     val landmark: String = "",
-    val contactName: String = "Customer",
+    val contactName: String = "",
     val contactPhone: String = "",
     val isDefault: Boolean = false,
-    val latitude: Double? = 28.202224,
-    val longitude: Double? = 76.615418,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     val deliveryInstructions: String? = null,
     val placeId: String? = null,
     val accuracyMeters: Float? = null

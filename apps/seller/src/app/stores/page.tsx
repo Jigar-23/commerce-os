@@ -72,14 +72,16 @@ export default function StoresManagementPage() {
   const [isLocatingUser, setIsLocatingUser] = useState(false);
 
   // Proximity Store Capture Simulator State
-  const [simLat, setSimLat] = useState<string>('28.1989');
-  const [simLng, setSimLng] = useState<string>('76.6186');
+  const [simLat, setSimLat] = useState<string>('20.5937');
+  const [simLng, setSimLng] = useState<string>('78.9629');
   const [capturedStore, setCapturedStore] = useState<NearbyStoreResult | null>(null);
   const [nearbyRankings, setNearbyRankings] = useState<NearbyStoreResult[]>([]);
   const [simMessage, setSimMessage] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchStores = useCallback(async () => {
     setIsLoading(true);
+    setFetchError(null);
     try {
       const res = await sellerApi.get<{ ok: boolean; count: number; stores: StoreHub[] }>('/api/v1/seller/stores');
       if (res && res.data && Array.isArray(res.data.stores) && res.data.stores.length > 0) {
@@ -90,6 +92,7 @@ export default function StoresManagementPage() {
       }
     } catch {
       setStores(DEFAULT_STORES);
+      setFetchError('Failed to connect to stores API. Please verify backend server connectivity and authentication.');
     } finally {
       setIsLoading(false);
     }
@@ -334,6 +337,14 @@ export default function StoresManagementPage() {
                 </button>
               </div>
             </div>
+
+            {/* Error Banner */}
+            {fetchError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center justify-between">
+                <span>⚠️ {fetchError}</span>
+                <button onClick={fetchStores} className="underline font-bold text-red-800 ml-4 hover:text-red-900">Retry</button>
+              </div>
+            )}
 
             {/* Metric Banner */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -739,7 +750,7 @@ export default function StoresManagementPage() {
                         type="number"
                         step="any"
                         required
-                        placeholder="e.g. 28.202224"
+                        placeholder="e.g. 20.593722"
                         value={formLatitude}
                         onChange={(e) => setFormLatitude(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg border border-border-default bg-white text-content-primary font-mono text-xs focus:outline-none focus:border-action-primaryBg"
@@ -751,7 +762,7 @@ export default function StoresManagementPage() {
                         type="number"
                         step="any"
                         required
-                        placeholder="e.g. 76.615418"
+                        placeholder="e.g. 78.962911"
                         value={formLongitude}
                         onChange={(e) => setFormLongitude(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg border border-border-default bg-white text-content-primary font-mono text-xs focus:outline-none focus:border-action-primaryBg"

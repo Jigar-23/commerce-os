@@ -17,11 +17,11 @@ interface DeliveryAddressMapModalProps {
 }
 
 const PRESET_LOCATIONS = [
-  { name: 'Sector 18, Panipat', lat: 29.3909, lng: 76.9635, area: 'Sector 18, Urban Estate', city: 'Panipat', postalCode: '132103', eta: '8-12 mins' },
-  { name: 'Tech Park Phase II, Panipat', lat: 29.3980, lng: 76.9720, area: 'Plot 881, Tech Park Phase II', city: 'Panipat', postalCode: '132103', eta: '10-15 mins' },
-  { name: 'Green Park Colony, Panipat', lat: 29.3820, lng: 76.9550, area: 'House 14B, Green Park Colony', city: 'Panipat', postalCode: '132104', eta: '12-18 mins' },
-  { name: 'Model Town, Panipat', lat: 29.3950, lng: 76.9690, area: 'Model Town Main Market', city: 'Panipat', postalCode: '132103', eta: '6-10 mins' },
-  { name: 'DLF Cyber City, Gurgaon', lat: 28.4950, lng: 77.0890, area: 'Building 10, DLF Phase 2', city: 'Gurgaon', postalCode: '122002', eta: '15-22 mins' },
+  { name: 'Connaught Place, New Delhi', lat: 28.6315, lng: 77.2167, area: 'Radial Road 1, Connaught Place', city: 'New Delhi', postalCode: '110001', eta: '8-12 mins' },
+  { name: 'Bandra West, Mumbai', lat: 19.0596, lng: 72.8295, area: 'Hill Road, Bandra West', city: 'Mumbai', postalCode: '400050', eta: '10-15 mins' },
+  { name: 'Indiranagar, Bengaluru', lat: 12.9784, lng: 77.6408, area: '100 Feet Road, Indiranagar', city: 'Bengaluru', postalCode: '560038', eta: '8-12 mins' },
+  { name: 'DLF Cyber City, Gurugram', lat: 28.4950, lng: 77.0890, area: 'Building 10, DLF Phase 2', city: 'Gurugram', postalCode: '122002', eta: '10-15 mins' },
+  { name: 'Hitec City, Hyderabad', lat: 17.4474, lng: 78.3762, area: 'Madhapur, Hitec City', city: 'Hyderabad', postalCode: '500081', eta: '12-16 mins' },
 ];
 
 const INSTRUCTION_OPTIONS = [
@@ -41,7 +41,11 @@ export default function DeliveryAddressMapModal({
   onAddressSaved,
 }: DeliveryAddressMapModalProps) {
   const [activeTab, setActiveTab] = useState<'map' | 'form' | 'saved'>('map');
-  const [mapPos, setMapPos] = useState({ lat: 29.3909, lng: 76.9635 });
+  const [mapPos, setMapPos] = useState(
+    currentAddress?.latitude && currentAddress?.longitude
+      ? { lat: currentAddress.latitude, lng: currentAddress.longitude }
+      : { lat: 28.6315, lng: 77.2167 }
+  );
   const [mapZoom, setMapZoom] = useState(15);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -59,9 +63,9 @@ export default function DeliveryAddressMapModal({
   const [selectedInstructions, setSelectedInstructions] = useState<string[]>(['no_bell']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mapStyle, setMapStyle] = useState<'street' | 'dark' | 'satellite'>('street');
-  const [selectedCity, setSelectedCity] = useState(currentAddress?.city || 'Panipat');
-  const [selectedState, setSelectedState] = useState('Haryana');
-  const [selectedPostalCode, setSelectedPostalCode] = useState(currentAddress?.postalCode || '132103');
+  const [selectedCity, setSelectedCity] = useState(currentAddress?.city || 'New Delhi');
+  const [selectedState, setSelectedState] = useState(currentAddress?.state || 'Delhi');
+  const [selectedPostalCode, setSelectedPostalCode] = useState(currentAddress?.postalCode || '110001');
 
   // Dynamic geocoded address based on map position
   const [geocodedArea, setGeocodedArea] = useState(
@@ -101,12 +105,28 @@ export default function DeliveryAddressMapModal({
     }));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
     if (isDragging) {
       setIsDragging(false);
-      // Simulate reverse geocoding update after drag finishes
-      const nearest = PRESET_LOCATIONS[Math.floor(Math.abs(mapPos.lat * 100) % PRESET_LOCATIONS.length)];
-      setGeocodedArea(`${nearest.area}, ${nearest.city}, ${nearest.postalCode}`);
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${mapPos.lat}&lon=${mapPos.lng}&zoom=18&addressdetails=1`, {
+          headers: { 'User-Agent': 'CommerceOS-Web/1.0' },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const addr = data.address || {};
+          const city = addr.city || addr.town || addr.suburb || addr.village || selectedCity;
+          const state = addr.state || selectedState;
+          const postal = addr.postcode || selectedPostalCode;
+          setSelectedCity(city);
+          setSelectedState(state);
+          setSelectedPostalCode(postal);
+          setGeocodedArea(data.display_name || `${city}, ${state}`);
+          return;
+        }
+      } catch {}
+      setGeocodedArea(`Pinpoint (${mapPos.lat.toFixed(5)}, ${mapPos.lng.toFixed(5)})`);
     }
   };
 
@@ -114,26 +134,46 @@ export default function DeliveryAddressMapModal({
     setIsGeolocating(true);
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
+        async (pos) => {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
           setMapPos({ lat, lng });
-          const nearest = PRESET_LOCATIONS[Math.floor(Math.abs(lat * 100) % PRESET_LOCATIONS.length)];
-          setGeocodedArea(`${nearest.area}, ${nearest.city}`);
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+              headers: { 'User-Agent': 'CommerceOS-Web/1.0' },
+              signal: AbortSignal.timeout(3000),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const addr = data.address || {};
+              const city = addr.city || addr.town || addr.suburb || addr.village || selectedCity;
+              setSelectedCity(city);
+              if (addr.state) setSelectedState(addr.state);
+              if (addr.postcode) setSelectedPostalCode(addr.postcode);
+              setGeocodedArea(data.display_name || `${city}, ${addr.state || ''}`);
+              setIsGeolocating(false);
+              return;
+            }
+          } catch {}
+          setGeocodedArea(`Current Location (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
           setIsGeolocating(false);
         },
         () => {
           const defaultLoc = PRESET_LOCATIONS[0];
           setMapPos({ lat: defaultLoc.lat, lng: defaultLoc.lng });
           setGeocodedArea(`${defaultLoc.area}, ${defaultLoc.city}, ${defaultLoc.postalCode}`);
+          setSelectedCity(defaultLoc.city);
+          setSelectedPostalCode(defaultLoc.postalCode);
           setIsGeolocating(false);
         },
-        { timeout: 3000 }
+        { timeout: 5000 }
       );
     } else {
       const defaultLoc = PRESET_LOCATIONS[0];
       setMapPos({ lat: defaultLoc.lat, lng: defaultLoc.lng });
       setGeocodedArea(`${defaultLoc.area}, ${defaultLoc.city}, ${defaultLoc.postalCode}`);
+      setSelectedCity(defaultLoc.city);
+      setSelectedPostalCode(defaultLoc.postalCode);
       setIsGeolocating(false);
     }
   };

@@ -47,6 +47,7 @@ fun AddressBookContent(
     onProceedToPayment: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     fromProfile: Boolean = false,
+    getDistanceMeters: (ApiAddress) -> Double? = { null },
     modifier: Modifier = Modifier
 ) {
     var addressSearchQuery by remember { mutableStateOf("") }
@@ -231,6 +232,7 @@ fun AddressBookContent(
                         AddressCard(
                             address = address,
                             isSelected = address.id == selectedAddressId,
+                            distanceMeters = getDistanceMeters(address),
                             onSelect = { onSelectAddress(address) },
                             onEdit = { onEditAddress(address) },
                             onDelete = { addrToDelete = address },

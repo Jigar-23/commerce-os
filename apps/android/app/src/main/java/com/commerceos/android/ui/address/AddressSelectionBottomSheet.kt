@@ -34,6 +34,8 @@ import com.commerceos.android.model.ApiAddress
 fun AddressSelectionBottomSheet(
     addresses: List<ApiAddress>,
     selectedAddressId: String?,
+    liveGpsPlaceFormatted: String? = null,
+    getDistanceMeters: (ApiAddress) -> Double? = { null },
     searchResults: List<PlaceSearchResult> = emptyList(),
     isSearchingPlaces: Boolean = false,
     onSearchQueryChange: (String) -> Unit = {},
@@ -46,7 +48,7 @@ fun AddressSelectionBottomSheet(
     onDeleteAddress: (String) -> Unit,
     onSetDefaultAddress: (String) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
 
@@ -106,34 +108,41 @@ fun AddressSelectionBottomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp)
+                .padding(bottom = 24.dp)
         ) {
-            // Title Header
+            // Blinkit Header: Title + Close Icon
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onDismiss)
-                    .padding(vertical = 4.dp),
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Close",
-                    tint = Color(0xFF0F172A),
-                    modifier = Modifier.size(26.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Select a location",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
+                    text = "Select delivery location",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
                     color = Color(0xFF0F172A)
                 )
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clickable(onClick = onDismiss)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF334155),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Google Places Search Bar
+            // Search Bar: "Search for area, street name..."
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = {
@@ -144,7 +153,7 @@ fun AddressSelectionBottomSheet(
                     Text("Search for area, street name...", fontSize = 14.sp, color = Color(0xFF94A3B8))
                 },
                 leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(20.dp))
                 },
                 trailingIcon = {
                     if (searchQuery.isNotBlank()) {
@@ -157,7 +166,7 @@ fun AddressSelectionBottomSheet(
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFF059669),
                     unfocusedBorderColor = Color(0xFFE2E8F0),
@@ -173,60 +182,8 @@ fun AddressSelectionBottomSheet(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f, fill = false)
             ) {
-                // 1. Standalone "Use Current Location" Card (Zomato Pattern)
-                item {
-                    Surface(
-                        color = Color.White,
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { handleUseCurrentLocation() }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                color = Color(0xFFDCFCE7),
-                                shape = CircleShape,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.LocationOn,
-                                        contentDescription = null,
-                                        tint = Color(0xFF059669),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Use current location",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF059669)
-                                )
-                                Text(
-                                    "Using GPS for doorstep accuracy",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF64748B)
-                                )
-                            }
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = Color(0xFF94A3B8),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
-                // 2. Active Search Mode: Unified Zomato-Style Grouped Card
-                if (searchQuery.trim().length >= 2) {
+                // Grouped Card: "Use current location" + "Add new address" (Blinkit Pattern)
+                if (searchQuery.trim().length < 2) {
                     item {
                         Surface(
                             color = Color.White,
@@ -235,7 +192,124 @@ fun AddressSelectionBottomSheet(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                // A. Priority Saved Address Matches
+                                // 1. Use Current Location Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { handleUseCurrentLocation() }
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Use current location",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF16A34A)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = liveGpsPlaceFormatted?.takeIf { it.isNotBlank() } ?: "Exact GPS pinpoint delivery",
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF64748B),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                                // 2. Add New Address Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onAddNewAddress()
+                                            onDismiss()
+                                        }
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Text(
+                                        text = "Add new address",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF16A34A),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Saved Addresses Section Header
+                    if (addresses.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Your saved addresses",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF475569)
+                            )
+                        }
+
+                        items(addresses) { addr ->
+                            AddressCard(
+                                address = addr,
+                                isSelected = addr.id == selectedAddressId,
+                                distanceMeters = getDistanceMeters(addr),
+                                onSelect = {
+                                    onSelectAddress(addr)
+                                    onDismiss()
+                                },
+                                onEdit = {
+                                    onEditAddress(addr)
+                                    onDismiss()
+                                },
+                                onDelete = { onDeleteAddress(addr.id) },
+                                onSetDefault = { onSetDefaultAddress(addr.id) }
+                            )
+                        }
+                    }
+                } else {
+                    // Active Search Mode: Show results
+                    item {
+                        Surface(
+                            color = Color.White,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // Matching Saved Addresses
                                 matchingSavedAddresses.forEachIndexed { index, saved ->
                                     Row(
                                         modifier = Modifier
@@ -247,27 +321,24 @@ fun AddressSelectionBottomSheet(
                                             .padding(14.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            modifier = Modifier.width(36.dp)
+                                        Surface(
+                                            color = Color(0xFFFFFBEB),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.size(36.dp)
                                         ) {
-                                            Icon(
-                                                Icons.Default.Home,
-                                                contentDescription = null,
-                                                tint = Color(0xFF0F172A),
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                            Text(
-                                                text = "0 m",
-                                                fontSize = 10.sp,
-                                                color = Color(0xFF64748B),
-                                                fontWeight = FontWeight.Medium
-                                            )
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Home,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFD97706),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = saved.tag.ifBlank { "Saved Address" },
+                                                text = saved.tag.ifBlank { "Home" },
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF0F172A)
@@ -281,164 +352,74 @@ fun AddressSelectionBottomSheet(
                                             )
                                         }
                                     }
-                                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                                    if (index < matchingSavedAddresses.size - 1 || searchResults.isNotEmpty()) {
+                                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                                    }
                                 }
 
-                                // B. Google Places Autocomplete Predictions
+                                // Place Search Results
                                 if (isSearchingPlaces) {
-                                    Box(
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(24.dp),
-                                        contentAlignment = Alignment.Center
+                                            .padding(16.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         CircularProgressIndicator(
-                                            color = Color(0xFF059669),
-                                            modifier = Modifier.size(24.dp),
-                                            strokeWidth = 2.5.dp
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color(0xFF059669)
                                         )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text("Searching locations...", fontSize = 13.sp, color = Color(0xFF64748B))
                                     }
-                                } else if (searchResults.isEmpty() && matchingSavedAddresses.isEmpty()) {
-                                    Text(
-                                        text = "No matching locations found",
-                                        fontSize = 13.sp,
-                                        color = Color(0xFF64748B),
-                                        modifier = Modifier.padding(16.dp)
-                                    )
-                                } else {
-                                    searchResults.forEachIndexed { index, place ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    onSelectPlaceSearchResult(place)
-                                                    onDismiss()
-                                                }
-                                                .padding(14.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                }
+
+                                searchResults.forEachIndexed { index, place ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onSelectPlaceSearchResult(place) }
+                                            .padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            color = Color(0xFFF1F5F9),
+                                            shape = CircleShape,
+                                            modifier = Modifier.size(36.dp)
                                         ) {
-                                            Column(
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                modifier = Modifier.width(36.dp)
-                                            ) {
+                                            Box(contentAlignment = Alignment.Center) {
                                                 Icon(
-                                                    Icons.Default.LocationOn,
+                                                    Icons.Default.Place,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF64748B),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                if (place.distance != null) {
-                                                    Text(
-                                                        text = place.distance,
-                                                        fontSize = 10.sp,
-                                                        color = Color(0xFF64748B),
-                                                        fontWeight = FontWeight.Medium
-                                                    )
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = place.primaryText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF0F172A)
-                                                )
-                                                Text(
-                                                    text = place.secondaryText,
-                                                    fontSize = 12.sp,
-                                                    color = Color(0xFF64748B),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
+                                                    tint = Color(0xFF059669),
+                                                    modifier = Modifier.size(18.dp)
                                                 )
                                             }
                                         }
-                                        if (index < searchResults.size - 1) {
-                                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = place.primaryText,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A)
+                                            )
+                                            Text(
+                                                text = place.secondaryText,
+                                                fontSize = 12.sp,
+                                                color = Color(0xFF64748B),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // 3. Default Mode: Add Address Button & Saved Addresses
-                    item {
-                        Surface(
-                            color = Color.White,
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onAddNewAddress()
-                                    onDismiss()
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    color = Color(0xFFDCFCE7),
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.Add,
-                                            contentDescription = null,
-                                            tint = Color(0xFF059669),
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                    if (index < searchResults.size - 1) {
+                                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
                                     }
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "Add Address",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF059669)
-                                    )
-                                }
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    tint = Color(0xFF94A3B8),
-                                    modifier = Modifier.size(16.dp)
-                                )
                             }
-                        }
-                    }
-
-                    if (addresses.isNotEmpty()) {
-                        item {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "SAVED ADDRESSES",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF64748B),
-                                letterSpacing = 1.sp
-                            )
-                        }
-
-                        items(addresses) { addr ->
-                            AddressCard(
-                                address = addr,
-                                isSelected = addr.id == selectedAddressId,
-                                onSelect = {
-                                    onSelectAddress(addr)
-                                    onDismiss()
-                                },
-                                onEdit = {
-                                    onEditAddress(addr)
-                                    onDismiss()
-                                },
-                                onDelete = { onDeleteAddress(addr.id) },
-                                onSetDefault = { onSetDefaultAddress(addr.id) }
-                            )
                         }
                     }
                 }

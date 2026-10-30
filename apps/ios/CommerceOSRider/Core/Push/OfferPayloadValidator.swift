@@ -22,16 +22,16 @@ public struct OfferPayloadValidator {
             "merchantAddress", "merchant_address", "storeAddress", "store_address"
         ]) ?? "Merchant Hub"
 
-        let mLat = doubleValue(payload, keys: ["merchantLat", "merchant_lat", "storeLat"]) ?? 28.202224
-        let mLng = doubleValue(payload, keys: ["merchantLng", "merchant_lng", "storeLng"]) ?? 76.615418
+        let mLat = doubleValue(payload, keys: ["merchantLat", "merchant_lat", "storeLat"]) ?? 0.0
+        let mLng = doubleValue(payload, keys: ["merchantLng", "merchant_lng", "storeLng"]) ?? 0.0
 
         let customerName = stringValue(payload, keys: ["customerName", "customer_name"]) ?? "Customer"
         let customerAddr = stringValue(payload, keys: [
             "customerAddress", "customer_address", "deliveryAddress", "delivery_address"
         ]) ?? "Delivery Address"
 
-        let cLat = doubleValue(payload, keys: ["customerLat", "customer_lat", "destLat"]) ?? 28.202224
-        let cLng = doubleValue(payload, keys: ["customerLng", "customer_lng", "destLng"]) ?? 76.615418
+        let cLat = doubleValue(payload, keys: ["customerLat", "customer_lat", "destLat"]) ?? 0.0
+        let cLng = doubleValue(payload, keys: ["customerLng", "customer_lng", "destLng"]) ?? 0.0
 
         let distance = doubleValue(payload, keys: [
             "totalDistanceKm", "total_distance_km", "distance_km", "deliveryDistanceKm", "delivery_distance_km"

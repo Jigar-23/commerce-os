@@ -60,7 +60,7 @@ public struct PlaceOrderRequest: Codable {
             ?? (try? container.decode(String.self, forKey: .addressIdCamel))
         self.deliveryAddress = (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddress))
             ?? (try? container.decode(DeliveryAddressPayload.self, forKey: .deliveryAddressCamel))
-            ?? DeliveryAddressPayload(addressLine: "Rewari Hub", city: "Rewari", postalCode: "123401", latitude: 28.202224, longitude: 76.615418)
+            ?? DeliveryAddressPayload(addressLine: "", city: "", postalCode: "", latitude: 0.0, longitude: 0.0)
         self.items = (try? container.decode([OrderItemPayload].self, forKey: .items)) ?? []
         self.prescriptionId = (try? container.decode(String.self, forKey: .prescriptionId))
             ?? (try? container.decode(String.self, forKey: .prescriptionIdCamel))
@@ -112,12 +112,12 @@ public struct DeliveryAddressPayload: Codable {
         self.addressLine = (try? container.decode(String.self, forKey: .addressLine))
             ?? (try? container.decode(String.self, forKey: .addressLineCamel))
             ?? ""
-        self.city = (try? container.decode(String.self, forKey: .city)) ?? "Rewari"
+        self.city = (try? container.decode(String.self, forKey: .city)) ?? ""
         self.postalCode = (try? container.decode(String.self, forKey: .postalCode))
             ?? (try? container.decode(String.self, forKey: .postalCodeCamel))
-            ?? "123401"
-        self.latitude = (try? container.decode(Double.self, forKey: .latitude)) ?? 28.202224
-        self.longitude = (try? container.decode(Double.self, forKey: .longitude)) ?? 76.615418
+            ?? ""
+        self.latitude = (try? container.decode(Double.self, forKey: .latitude)) ?? 0.0
+        self.longitude = (try? container.decode(Double.self, forKey: .longitude)) ?? 0.0
     }
 
     public func encode(to encoder: Encoder) throws {

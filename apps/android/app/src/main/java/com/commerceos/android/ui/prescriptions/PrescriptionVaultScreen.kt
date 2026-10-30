@@ -1,5 +1,6 @@
 package com.commerceos.android.ui.prescriptions
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,9 +15,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.commerceos.android.model.Prescription
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceTypography
@@ -95,15 +100,21 @@ fun PrescriptionVaultScreen(
 
         Spacer(modifier = Modifier.height(Spacing.md))
 
+        val isLimitReached = prescriptions.size >= 100
         Button(
             onClick = onUpload,
+            enabled = !isLimitReached,
             shape = RoundedCornerShape(Radius.Button),
             colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(Spacing.sm))
-            Text("Upload prescription", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+            Text(
+                if (isLimitReached) "Storage limit reached (100/100)" else "Upload prescription (${prescriptions.size}/100)",
+                style = CommerceTypography.Label,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         Spacer(modifier = Modifier.height(Spacing.md))
@@ -172,11 +183,45 @@ private fun PrescriptionCard(rx: Prescription) {
             if (!rx.rejectionReason.isNullOrBlank()) {
                 Text(rx.rejectionReason, style = CommerceTypography.Caption, color = CommerceColors.Danger, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Text(
-                "${rx.attachments.size} ${if (rx.attachments.size == 1) "image" else "images"} attached",
-                style = CommerceTypography.Meta,
-                color = CommerceColors.TextMuted
-            )
+            if (rx.attachments.isNotEmpty()) {
+                val firstAttachment = rx.attachments.first()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
+                        .padding(6.dp)
+                ) {
+                    AsyncImage(
+                        model = firstAttachment,
+                        contentDescription = "Prescription image",
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(6.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = if (firstAttachment.startsWith("http")) "Cloud CDN Hosted" else "Image attached",
+                            style = CommerceTypography.Caption,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CommerceColors.TextPrimary
+                        )
+                        Text(
+                            text = if (firstAttachment.startsWith("http")) "Stored in Cloudflare R2" else "Uploaded",
+                            style = CommerceTypography.Meta,
+                            color = CommerceColors.TextMuted
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    "No attachments",
+                    style = CommerceTypography.Meta,
+                    color = CommerceColors.TextMuted
+                )
+            }
         }
     }
 }

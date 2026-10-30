@@ -95,12 +95,12 @@ public final class AddressRepository: ObservableObject {
         }
 
         let summary = address.displaySummary
-        let cleanLine = !summary.isEmpty ? summary : (!address.addressLine.isEmpty ? address.addressLine : "Rewari Central Hub, Model Town")
-        let cleanCity = !(address.city ?? "").isEmpty ? (address.city ?? "Rewari") : "Rewari"
-        let cleanPostal = !(address.postalCode ?? "").isEmpty ? (address.postalCode ?? "123401") : "123401"
-        let cleanLat = (address.latitude != 0.0) ? address.latitude : 28.202224
-        let cleanLng = (address.longitude != 0.0) ? address.longitude : 76.615418
-        let phone = address.contactPhone ?? address.recipientPhone ?? UserDefaults.standard.string(forKey: "customer_phone") ?? "+919991416180"
+        let cleanLine = !summary.isEmpty ? summary : address.addressLine
+        let cleanCity = address.city ?? ""
+        let cleanPostal = address.postalCode ?? ""
+        let cleanLat = address.latitude
+        let cleanLng = address.longitude
+        let phone = address.contactPhone ?? address.recipientPhone ?? UserDefaults.standard.string(forKey: "customer_phone") ?? ""
 
         let body = AddBody(
             addressType: address.addressType ?? "HOME",

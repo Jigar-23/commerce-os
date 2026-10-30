@@ -33,6 +33,11 @@ open class AppRepository {
             Api.run { NetworkClient.authApi.verifyOtp(VerifyOtpRequest(challengeId, phone, otpCode)) }
         }
 
+    suspend fun verifyGoogleSms(idToken: String, phone: String? = null): ApiResult<AuthResponse> =
+        withContext(Dispatchers.IO) {
+            Api.run { NetworkClient.authApi.verifyGoogleSms(VerifyGoogleSmsRequest(idToken, phone)) }
+        }
+
     open suspend fun getMedicines(query: String = ""): ApiResult<List<ApiMedicine>> =
         withContext(Dispatchers.IO) {
             Api.run {

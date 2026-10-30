@@ -507,22 +507,6 @@ public struct CartScreen: View {
                     }
                 }
                 
-                if activeAddress == nil {
-                    let fallback = AddressDto(
-                        id: "temp_default_rewari",
-                        tag: "Home",
-                        addressType: "HOME",
-                        addressLine: "Rewari Central Hub, Model Town",
-                        city: "Rewari",
-                        postalCode: "123401",
-                        latitude: 28.202224,
-                        longitude: 76.615418,
-                        isDefault: true
-                    )
-                    activeAddress = fallback
-                    await MainActor.run { self.addressRepository.selectAddress(fallback) }
-                }
-                
                 guard let addr = activeAddress else {
                     await MainActor.run {
                         self.isPlacingOrder = false
@@ -548,14 +532,14 @@ public struct CartScreen: View {
                 let itemsPayload = cartStore.items.values.map { entry in
                     OrderItemPayload(sku: entry.product.sku, quantity: entry.quantity)
                 }
-                let safeLat = (addr.latitude != 0.0) ? addr.latitude : 28.202224
-                let safeLng = (addr.longitude != 0.0) ? addr.longitude : 76.615418
+                let safeLat = addr.latitude
+                let safeLng = addr.longitude
                 let summary = addr.displaySummary
-                let cleanLine = !summary.isEmpty ? summary : (!addr.addressLine.isEmpty ? addr.addressLine : "Rewari Central Hub, Model Town")
+                let cleanLine = !summary.isEmpty ? summary : (!addr.addressLine.isEmpty ? addr.addressLine : "Delivery Address")
                 let addressPayload = DeliveryAddressPayload(
                     addressLine: cleanLine,
-                    city: addr.city ?? "Rewari",
-                    postalCode: addr.postalCode ?? "123401",
+                    city: addr.city ?? "",
+                    postalCode: addr.postalCode ?? "",
                     latitude: safeLat,
                     longitude: safeLng
                 )

@@ -6,11 +6,11 @@ import { useRouter } from 'next/navigation';
 import { sellerApi, SellerSession } from '@/lib/apiClient';
 import {
   BarChart3, Package, Layers, IndianRupee, XCircle, RefreshCw,
-  Settings, ChevronRight, ShieldCheck, Store, LogOut, Bike, MapPin
+  Settings, ChevronRight, ShieldCheck, Store, LogOut, Bike, MapPin, Users
 } from 'lucide-react';
 
 interface SellerSidebarProps {
-  activeTab: 'all' | 'orders' | 'inventory' | 'cod' | 'cancelled' | 'audit' | 'dashboard' | 'products' | 'pricing' | 'promotions' | 'settlements' | 'settings' | 'riders' | 'stores';
+  activeTab: 'all' | 'orders' | 'inventory' | 'cod' | 'cancelled' | 'audit' | 'dashboard' | 'products' | 'pricing' | 'promotions' | 'settlements' | 'settings' | 'riders' | 'stores' | 'users';
   ordersCount?: number;
   inventoryCount?: number;
   pendingCodAmount?: number;
@@ -119,6 +119,21 @@ export default function SellerSidebar({
             <div className="flex items-center space-x-3">
               <Bike className="w-4 h-4" />
               <span>Fleet & Riders</span>
+            </div>
+            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+          </Link>
+
+          <Link
+            href="/users"
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'users'
+                ? 'bg-surface-accentSubtle text-content-accent font-bold'
+                : 'text-content-secondary hover:bg-surface-subtle'
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <Users className="w-4 h-4" />
+              <span>Registered Users</span>
             </div>
             <ChevronRight className="w-3.5 h-3.5 opacity-40" />
           </Link>

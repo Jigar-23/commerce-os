@@ -149,10 +149,6 @@ public enum LocationResult: Equatable {
  * 1:1 parity with Android RealTimeEtaEngine.kt
  */
 public struct RealTimeEtaEngine {
-    // Master Dark Store coordinates (Rewari / NCR Quick Commerce Hub)
-    public static let defaultStoreLat: Double = 28.1970
-    public static let defaultStoreLng: Double = 76.6190
-
     /**
      * Calculates the great-circle Haversine distance in kilometers.
      */
@@ -177,13 +173,14 @@ public struct RealTimeEtaEngine {
     public static func calculateEtaMinutes(
         userLat: Double?,
         userLng: Double?,
-        storeLat: Double = defaultStoreLat,
-        storeLng: Double = defaultStoreLng
+        storeLat: Double? = nil,
+        storeLng: Double? = nil
     ) -> Int {
-        guard let uLat = userLat, let uLng = userLng, uLat != 0.0, uLng != 0.0 else {
-            return 11
+        guard let uLat = userLat, let uLng = userLng, uLat != 0.0, uLng != 0.0,
+              let sLat = storeLat, let sLng = storeLng, sLat != 0.0, sLng != 0.0 else {
+            return 10
         }
-        let straightLineKm = calculateDistanceKm(lat1: storeLat, lon1: storeLng, lat2: uLat, lon2: uLng)
+        let straightLineKm = calculateDistanceKm(lat1: sLat, lon1: sLng, lat2: uLat, lon2: uLng)
         let roadDistanceKm = straightLineKm * 1.30
         let prepTimeMinutes = 4.0
         let travelMinutes = roadDistanceKm * 3.0

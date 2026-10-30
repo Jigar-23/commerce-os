@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("kotlin-kapt")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -21,7 +22,7 @@ android {
             useSupportLibrary = true
         }
 
-        val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
+        val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "http://127.0.0.1:8083"
         val mapsApiKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: "AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
@@ -121,10 +122,15 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     // MAPS & GEOLOCATION
+    implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.maps.android:maps-compose:4.3.3")
     implementation("com.google.maps.android:android-maps-utils:3.8.0")
     implementation("com.google.android.libraries.places:places:3.4.0")
+
+    // FIREBASE AUTH (GOOGLE PHONE SMS)
+    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
 
     // UNIT TESTING
     testImplementation("junit:junit:4.13.2")

@@ -81,8 +81,9 @@ fun HomeScreen(
     cartItems: List<CartItem> = emptyList(),
     homeContext: HomeContext? = null,
     selectedAddress: ApiAddress? = null,
-    calculatedEtaMinutes: Int = 11,
+    calculatedEtaMinutes: Int = 0,
     locationHeaderLabel: String? = null,
+    isLocating: Boolean = false,
     onChangeAddress: () -> Unit = {},
     onProfileClick: () -> Unit = {},
     onEntityClick: (CommerceEntity) -> Unit = {},
@@ -132,6 +133,7 @@ fun HomeScreen(
                     selectedAddress = selectedAddress,
                     calculatedEtaMinutes = calculatedEtaMinutes,
                     locationHeaderLabel = locationHeaderLabel,
+                    isLocating = isLocating,
                     onChangeAddress = onChangeAddress,
                     onProfileClick = onProfileClick
                 )
@@ -292,33 +294,24 @@ private fun MedicineCategoryRail(
 private fun DeliveryAddressWidget(
     context: HomeContext?,
     selectedAddress: ApiAddress? = null,
-    calculatedEtaMinutes: Int = 11,
+    calculatedEtaMinutes: Int = 0,
     locationHeaderLabel: String? = null,
+    isLocating: Boolean = false,
     onChangeAddress: () -> Unit,
     onProfileClick: () -> Unit
 ) {
     val hasAddress = context?.hasAddress == true || selectedAddress != null || !locationHeaderLabel.isNullOrBlank()
 
-    val etaDisplay = remember(calculatedEtaMinutes, context) {
-        if (calculatedEtaMinutes > 0) {
-            "$calculatedEtaMinutes mins"
-        } else if (!context?.formattedEta.isNullOrBlank()) {
-            context!!.formattedEta!!
-        } else {
-            "10-15 mins"
-        }
-    }
-
-    val displayAddress = if (!locationHeaderLabel.isNullOrBlank()) {
+    val displayAddress = if (!locationHeaderLabel.isNullOrBlank() && locationHeaderLabel != "Select Delivery Location") {
         locationHeaderLabel
     } else if (hasAddress) {
         val tag = selectedAddress?.tag?.ifBlank { "Home" } ?: "Home"
         val line = selectedAddress?.addressLine?.takeIf { it.isNotBlank() }
             ?: context?.displayLabel?.takeIf { it.isNotBlank() }
-            ?: "Delivery Location"
+            ?: "Current Location"
         "$tag - $line"
     } else {
-        "Select Delivery Location"
+        "Current Location"
     }
 
     Row(
@@ -334,45 +327,97 @@ private fun DeliveryAddressWidget(
                 .weight(1f)
                 .clickable(onClick = onChangeAddress)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.LocationOn,
-                    contentDescription = null,
-                    tint = Color(0xFF059669),
-                    modifier = Modifier.size(17.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = displayAddress,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.width(2.dp))
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Select Location",
-                    tint = Color(0xFF64748B),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+            if (isLocating && selectedAddress == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Detecting location...",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(11.dp),
+                        color = Color(0xFF059669),
+                        strokeWidth = 1.5.dp
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "Finding closest delivery pinpoint...",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = displayAddress,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Select Location",
+                        tint = Color(0xFF64748B),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Delivering in ",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                )
-                Text(
-                    text = etaDisplay,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF059669)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (hasAddress && calculatedEtaMinutes > 0) {
+                        Text(
+                            text = "Delivering in ",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        Text(
+                            text = "$calculatedEtaMinutes mins",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF059669)
+                        )
+                    } else if (hasAddress && !context?.formattedEta.isNullOrBlank()) {
+                        Text(
+                            text = "Delivering in ",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        Text(
+                            text = context!!.formattedEta!!,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF059669)
+                        )
+                    } else {
+                        Text(
+                            text = "Tap to choose delivery location & view ETA",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                }
             }
         }
 
@@ -577,6 +622,35 @@ fun HeroCampaignWidget(hero: HomeHeroDto, onCta: () -> Unit) {
 @Composable
 private fun LoadingSkeletonWidget() {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        // 1. Shimmering Hero Banner Placeholder
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().height(130.dp)
+        ) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                SkeletonText(width = 160.dp, height = 16.dp)
+            }
+        }
+
+        // 2. Row of Category Circular Icons (Blinkit / Zepto pattern)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            repeat(4) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    SkeletonProductImage(
+                        modifier = Modifier.size(60.dp),
+                        shape = CircleShape
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SkeletonText(width = 44.dp, height = 10.dp)
+                }
+            }
+        }
+
+        // 3. Shimmering Product Cards
         repeat(3) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),

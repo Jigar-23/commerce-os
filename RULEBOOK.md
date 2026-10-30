@@ -87,3 +87,11 @@ Before completing any mobile feature task:
 * **Preserve Documentation & Comments:** Do not delete existing architectural notes, comments, or docstrings unless explicitly refactoring that specific subsystem.
 * **No Phantom Dependencies:** Do not add external native libraries/pods/Gradle plugins without verifying compatibility across both platforms.
 * **Environment Integrity:** Ensure `.env` configurations and API base URLs remain consistent across local, staging, and production environments.
+
+---
+
+## Rule 7: Strict Prohibition of Localhost in Server & Database Configurations
+
+* **Mandatory Invariant:** We NEVER use `localhost`, `127.0.0.1`, or local loopbacks as the default server URL or database URL in any application, repository, or environment unless explicitly requested by the user.
+* **Database:** All platform services connect to the authoritative remote cloud PostgreSQL database (`DATABASE_URL`).
+* **Server & Mobile:** Mobile and web clients connect to the authoritative remote API Gateway URL (`API_GATEWAY_URL` / `API_BASE_URL`). Real mobile devices must never be pointed at `localhost` / `127.0.0.1`.

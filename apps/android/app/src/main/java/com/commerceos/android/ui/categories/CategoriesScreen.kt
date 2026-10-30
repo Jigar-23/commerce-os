@@ -152,46 +152,24 @@ fun CategoriesScreen(
             .background(Color(0xFFF4F5F7))
             .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)
     ) {
-        // Top Header matching Home, Orders, and Account
-        Row(
+        // Top Header
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 2.dp, vertical = 2.dp)
         ) {
-            Column {
-                Text(
-                    text = "Shop by Category",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-                Text(
-                    text = "Certified medicines & healthcare essentials",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                )
-            }
-            Surface(
-                color = Color(0xFFECFDF5),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("⚡", fontSize = 11.sp)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "10-Min Delivery",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
-                    )
-                }
-            }
+            Text(
+                text = "Shop by Category",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Explore all categories & daily essentials",
+                fontSize = 12.sp,
+                color = Color(0xFF64748B)
+            )
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -203,50 +181,6 @@ fun CategoriesScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            // Reassuring Safety Banner
-            item(span = { GridItemSpan(2) }) {
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    shadowElevation = 0.5.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            color = Color(0xFFECFDF5),
-                            shape = CircleShape,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = Color(0xFF059669),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "100% Genuine & Licensed Pharmacy",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Text(
-                                text = "Dispensed directly from verified retail pharmacies",
-                                fontSize = 11.sp,
-                                color = Color(0xFF64748B)
-                            )
-                        }
-                    }
-                }
-            }
-
             items(categories) { cat ->
                 HealthcareCategoryCard(
                     category = cat,
@@ -333,7 +267,7 @@ private fun HealthcareCategoryCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (category.productCount > 0) "${category.productCount}+ products" else "Express delivery",
+                    text = if (category.productCount > 0) "${category.productCount}+ products" else "Explore",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFF059669)

@@ -74,3 +74,35 @@ sealed class LocationResult {
     data class Success(val location: GeoPoint) : LocationResult()
     data class Failure(val reason: String, val isPermissionError: Boolean = false) : LocationResult()
 }
+
+/**
+ * Deduplicates and normalizes comma-separated address segments.
+ * Eliminates redundant phrases, identical sub-tokens, and repeating words
+ * (e.g. "Shastri Nagar, Dhruva, Shastri Nagar, Dhruva" -> "Shastri Nagar, Dhruva").
+ */
+fun cleanAddressSegments(vararg segments: String?): String {
+    val tokens = mutableListOf<String>()
+    val seenNormalized = mutableSetOf<String>()
+
+    for (seg in segments) {
+        if (seg.isNullOrBlank()) continue
+        val parts = seg.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        for (part in parts) {
+            val norm = part.lowercase().replace(Regex("\\s+"), " ")
+            if (norm.isBlank()) continue
+
+            if (seenNormalized.contains(norm)) continue
+
+            val isDuplicate = tokens.any { existing ->
+                val existingNorm = existing.lowercase().replace(Regex("\\s+"), " ")
+                existingNorm == norm ||
+                (existingNorm.contains(norm) && norm.length < existingNorm.length && (existingNorm.startsWith("$norm ") || existingNorm.endsWith(" $norm") || existingNorm.contains(" $norm ")))
+            }
+            if (!isDuplicate) {
+                seenNormalized.add(norm)
+                tokens.add(part)
+            }
+        }
+    }
+    return tokens.joinToString(", ")
+}

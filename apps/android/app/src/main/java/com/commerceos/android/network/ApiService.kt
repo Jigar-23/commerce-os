@@ -152,6 +152,9 @@ interface AuthApi {
     @POST("/api/v1/auth/otp/verify")
     suspend fun verifyOtp(@Body request: VerifyOtpRequest): AuthResponse
 
+    @POST("/api/v1/auth/google-sms/verify")
+    suspend fun verifyGoogleSms(@Body request: VerifyGoogleSmsRequest): AuthResponse
+
     @POST("/api/v1/auth/refresh")
     suspend fun refresh(@Body request: RefreshTokenRequest): AuthResponse
 }

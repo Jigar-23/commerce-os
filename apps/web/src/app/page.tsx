@@ -211,58 +211,11 @@ export default function StorefrontHomePage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 space-y-6 sm:space-y-8">
-        {/* 2. INSTANT DELIVERY & TRUST HERO */}
-        {!query && (
-          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-navy-950 via-surface-inverse to-navy-950 text-white p-6 sm:p-8 shadow-xl border border-border-strong">
-            <div className="relative z-10 max-w-2xl space-y-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-xs font-black border border-border-brand">
-                  <Clock className="h-3.5 w-3.5 text-content-brand" />
-                  <span>Guaranteed 10-Minute Dispatch</span>
-                </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-inverse text-content-muted text-xs font-bold border border-border-strong">
-                  <ShieldCheck className="h-3.5 w-3.5 text-content-brand" />
-                  <span>100% Genuine Certified</span>
-                </span>
-              </div>
-
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-white leading-tight">
-                Instant Healthcare &amp; Daily Essentials Delivered in Minutes
-              </h1>
-
-              <p className="text-xs sm:text-sm text-content-muted max-w-xl font-normal leading-relaxed">
-                Direct fulfillment from licensed temperature-controlled dark stores with strict batch verification, 2–8°C cold chain safety, and registered pharmacist supervision.
-              </p>
-
-              <div className="pt-2 flex items-center gap-4 sm:gap-6 text-xs text-content-muted flex-wrap">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-surface-brandSubtle flex items-center justify-center text-content-brand">
-                    <Truck className="h-3.5 w-3.5" />
-                  </div>
-                  <span className="font-bold text-content-subtle">Live GPS Radar</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-surface-accentSubtle flex items-center justify-center text-content-accent">
-                    <ThermometerSnowflake className="h-3.5 w-3.5" />
-                  </div>
-                  <span className="font-bold text-content-subtle">Cold Chain (2–8°C)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-surface-brandSubtle flex items-center justify-center text-content-brand">
-                    <HeartPulse className="h-3.5 w-3.5" />
-                  </div>
-                  <span className="font-bold text-content-subtle">Rx Verified</span>
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
         {/* 3. CATEGORY SHOWCASE STRIP */}
         <section>
           <CommerceSectionHeader
             title="Shop by Category"
-            subtitle="Explore curated therapeutic categories and daily essentials"
+            subtitle="Explore curated categories and daily essentials"
           />
           <CommerceCategoryShowcase
             selectedCategory={selectedCategory}
@@ -292,7 +245,7 @@ export default function StorefrontHomePage() {
               }`}
             >
               <Clock className="h-3.5 w-3.5" />
-              ⚡ 10-Min Express
+              ⚡ Express Delivery
             </button>
             <button
               onClick={() => setFilterType('COLD_CHAIN')}

@@ -2,6 +2,7 @@ package com.commerceos.android.model
 
 import com.commerceos.android.location.GeoPoint
 import com.commerceos.android.location.GeocodedPlace
+import com.commerceos.android.location.cleanAddressSegments
 
 enum class EntranceType(val label: String) {
     MAIN_GATE("Main Gate"),
@@ -71,20 +72,16 @@ data class StructuredAddress(
 ) {
     val formattedAddress: String
         get() {
-            val parts = mutableListOf<String>()
-            val line1Parts = listOf(houseNumber.trim(), building.trim(), floor.trim()).filter { it.isNotBlank() }
-            if (line1Parts.isNotEmpty()) parts.add(line1Parts.joinToString(", "))
-            if (street.isNotBlank()) parts.add(street.trim())
-            if (subLocality.isNotBlank() && subLocality != street) parts.add(subLocality.trim())
-            if (locality.isNotBlank() && locality != city) parts.add(locality.trim())
-            if (landmark.isNotBlank()) parts.add("Near ${landmark.trim()}")
-            return parts.joinToString(", ").ifBlank { city }
+            val line1 = listOf(houseNumber.trim(), building.trim(), floor.trim()).filter { it.isNotBlank() }.joinToString(", ")
+            val landmarkStr = if (landmark.isNotBlank()) "Near ${landmark.trim()}" else ""
+            val raw = cleanAddressSegments(line1, street, subLocality, locality, landmarkStr, city)
+            return raw.ifBlank { city }
         }
 
     val displayLocationHeader: String
         get() {
             val shortTag = if (tag.isNotBlank()) tag else "Address"
-            val area = street.ifBlank { subLocality.ifBlank { city } }
+            val area = cleanAddressSegments(street, subLocality).ifBlank { city }
             return "$shortTag • $area"
         }
 
@@ -109,17 +106,17 @@ data class StructuredAddress(
             entranceErr = "Specify entrance details when Other is selected"
         }
 
-        // Compulsory Phone Number Validation for ALL addresses (Delivery contact / Rider calls)
+        // Phone Number Validation: strictly required if for someone else, or validated if filled
         val cleanPhone = contactPhone.trim().replace(Regex("[^0-9]"), "").takeLast(10)
-        if (cleanPhone.length != 10) {
-            phoneErr = "Enter valid 10-digit mobile number for delivery updates"
-        } else if (!cleanPhone.matches(Regex("^[6-9][0-9]{9}$"))) {
+        if (recipientType == RecipientType.SOMEONE_ELSE) {
+            if (cleanPhone.length != 10 || !cleanPhone.matches(Regex("^[6-9][0-9]{9}$"))) {
+                phoneErr = "Enter valid 10-digit mobile number for receiver"
+            }
+            if (contactName.trim().isBlank()) {
+                nameErr = "Receiver's name is required"
+            }
+        } else if (cleanPhone.isNotBlank() && (cleanPhone.length != 10 || !cleanPhone.matches(Regex("^[6-9][0-9]{9}$")))) {
             phoneErr = "Enter valid Indian mobile number starting with 6, 7, 8 or 9"
-        }
-
-        // Recipient Name validation if someone else
-        if (recipientType == RecipientType.SOMEONE_ELSE && contactName.trim().isBlank()) {
-            nameErr = "Recipient name is required"
         }
 
         val isValid = houseErr == null &&
@@ -138,16 +135,19 @@ data class StructuredAddress(
     }
 
     fun toAddAddressRequest(): AddAddressRequest {
-        val compositeLineParts = listOf(
-            houseNumber.trim(),
-            building.trim(),
-            floor.trim(),
-            street.trim(),
-            subLocality.trim()
-        ).filter { it.isNotBlank() }
+        val userDetails = listOfNotNull(
+            houseNumber.trim().takeIf { it.isNotBlank() },
+            building.trim().takeIf { it.isNotBlank() },
+            floor.trim().takeIf { it.isNotBlank() }
+        ).joinToString(", ")
 
-        val finalAddressLine = compositeLineParts.distinct().joinToString(", ").ifBlank {
-            "${street.trim()}, ${city.trim()}".trim().trim(',')
+        // Strictly keep the user's entered address details separate from the pinpoint:
+        // Pinpoint coordinates (latitude/longitude) and geographic areas are stored in their own fields.
+        // We do NOT append the map pinpoint onto the user's address details.
+        val finalAddressLine = if (userDetails.isNotBlank()) {
+            userDetails
+        } else {
+            cleanAddressSegments(street.trim(), subLocality.trim()).ifBlank { "Selected Delivery Address" }
         }
 
         val boundLat = geoLocation?.latitude ?: 0.0
@@ -200,17 +200,13 @@ data class StructuredAddress(
                 )
             } else null
 
-            val parts = api.addressLine.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            val house = if (parts.isNotEmpty()) parts.first() else api.addressLine
-            val streetPart = if (parts.size > 1) parts.drop(1).joinToString(", ") else ""
-
             return StructuredAddress(
                 id = api.id,
                 tag = api.tag.ifBlank { "Home" },
-                houseNumber = house,
+                houseNumber = api.addressLine.trim(),
                 building = "",
                 floor = "",
-                street = streetPart,
+                street = "",
                 subLocality = "",
                 locality = api.city,
                 landmark = api.landmark,

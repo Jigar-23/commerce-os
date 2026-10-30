@@ -36,7 +36,8 @@ data class AuthUiState(
     val resendCountdownSeconds: Int = 0,
     val verifyAttemptsLeft: Int = 5,
     val otpExpiresInSeconds: Int? = null,
-    val otpExpiresCountdownSeconds: Int = 0
+    val otpExpiresCountdownSeconds: Int = 0,
+    val googleVerificationId: String? = null
 )
 
 /**
@@ -61,7 +62,13 @@ class AuthViewModel(private val authUseCase: AuthUseCase) : ViewModel() {
     }
 
     fun onPhoneChange(value: String) {
-        uiState = uiState.copy(phone = value, errorMessage = null)
+        val digits = value.replace(Regex("[^0-9]"), "").let {
+            if (it.length > 10 && (it.startsWith("91") || it.startsWith("+91"))) it.takeLast(10)
+            else if (it.length > 10) it.take(10)
+            else it
+        }
+        android.util.Log.i("CommerceOSAuth", "onPhoneChange: input='$value' -> digits='$digits'")
+        uiState = uiState.copy(phone = digits, errorMessage = null)
     }
 
     fun onOtpChange(value: String) {
@@ -79,19 +86,45 @@ class AuthViewModel(private val authUseCase: AuthUseCase) : ViewModel() {
             resendCountdownSeconds = 0,
             verifyAttemptsLeft = MAX_VERIFY_ATTEMPTS,
             otpExpiresInSeconds = null,
-            otpExpiresCountdownSeconds = 0
+            otpExpiresCountdownSeconds = 0,
+            googleVerificationId = null
         )
+    }
+
+    fun setGoogleVerification(verificationId: String) {
+        uiState = uiState.copy(
+            isOtpSent = true,
+            isLoading = false,
+            googleVerificationId = verificationId,
+            challengeId = "google_$verificationId",
+            verifyAttemptsLeft = MAX_VERIFY_ATTEMPTS,
+            otpExpiresInSeconds = 300,
+            errorMessage = null
+        ).also {
+            startResendCountdown(30)
+            startExpiryCountdown(300)
+        }
+    }
+
+    fun setLoading(loading: Boolean) {
+        uiState = uiState.copy(isLoading = loading)
+    }
+
+    fun setError(message: String?) {
+        uiState = uiState.copy(isLoading = false, errorMessage = message)
     }
 
     fun sendOtp() {
         if (uiState.isLoading) return
-        val digitsOnly = uiState.phone.replace(Regex("[^0-9]"), "")
-        if (digitsOnly.length < 10 || digitsOnly.length > 15) {
-            uiState = uiState.copy(errorMessage = "Please enter a valid 10-digit mobile phone number")
+        val cleanDigits = uiState.phone.replace(Regex("[^0-9]"), "").let {
+            if (it.length > 10) it.takeLast(10) else it
+        }
+        if (cleanDigits.length != 10) {
+            uiState = uiState.copy(errorMessage = "Please enter a valid 10-digit mobile number")
             return
         }
-        val formatted = if (uiState.phone.startsWith("+")) uiState.phone else "+91$digitsOnly"
-        uiState = uiState.copy(phone = formatted, isLoading = true, errorMessage = null)
+        val formatted = "+91$cleanDigits"
+        uiState = uiState.copy(isLoading = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = authUseCase.sendOtp(formatted)) {
                 is ApiResult.Success -> {
@@ -199,6 +232,33 @@ class AuthViewModel(private val authUseCase: AuthUseCase) : ViewModel() {
                         isLoading = false,
                         errorMessage = message,
                         verifyAttemptsLeft = attemptsLeft.coerceAtLeast(0)
+                    )
+                }
+            }
+        }
+    }
+
+    fun verifyWithGoogleToken(idToken: String) {
+        uiState = uiState.copy(isLoading = true, errorMessage = null)
+        viewModelScope.launch {
+            when (val result = authUseCase.verifyGoogleSms(idToken, uiState.phone.ifBlank { null })) {
+                is ApiResult.Success -> {
+                    expiryJob?.cancel()
+                    countdownJob?.cancel()
+                    uiState = uiState.copy(isLoading = false)
+                    _events.trySend(
+                        AuthEvent.Authenticated(
+                            customerId = result.data.resolvedCustomerId,
+                            phone = result.data.phone ?: uiState.phone,
+                            accessToken = result.data.accessToken,
+                            refreshToken = result.data.refreshToken.orEmpty()
+                        )
+                    )
+                }
+                is ApiResult.Failure -> {
+                    uiState = uiState.copy(
+                        isLoading = false,
+                        errorMessage = result.error.message
                     )
                 }
             }

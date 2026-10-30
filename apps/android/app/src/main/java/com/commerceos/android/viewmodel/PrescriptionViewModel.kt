@@ -41,6 +41,10 @@ class PrescriptionViewModel(private val repository: AppRepository) : ViewModel()
         attachments: List<String>,
         onUploaded: ((Prescription) -> Unit)? = null
     ) {
+        if (prescriptions.size >= 100) {
+            errorMessage = "Prescription storage limit reached (maximum 100 prescriptions per account)."
+            return
+        }
         if (attachments.isEmpty()) {
             errorMessage = "Attach at least one prescription image"
             return

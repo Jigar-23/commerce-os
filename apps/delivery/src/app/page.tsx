@@ -176,13 +176,24 @@ export default function DeliveryRiderApp() {
     const token = getAuthToken();
     if (!token) return;
     try {
+      let lat = 0.0;
+      let lng = 0.0;
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
+          });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+        } catch {}
+      }
       await fetch(`${ORDER_API}/api/v1/delivery/rider/shift-status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...getAuthHeader(),
         },
-        body: JSON.stringify({ status: online ? 'ONLINE' : 'OFFLINE', latitude: 28.202224, longitude: 76.615418 }),
+        body: JSON.stringify({ status: online ? 'ONLINE' : 'OFFLINE', latitude: lat, longitude: lng }),
       });
     } catch {}
   }, []);

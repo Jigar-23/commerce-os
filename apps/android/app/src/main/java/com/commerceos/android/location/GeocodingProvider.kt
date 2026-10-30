@@ -90,31 +90,86 @@ class DefaultGeocodingProvider(private val context: Context) : GeocodingProvider
         }
 
     private fun parseAddressToGeocodedPlace(address: Address, lat: Double, lng: Double): GeocodedPlace {
-        val street = address.thoroughfare
-        val houseNo = address.subThoroughfare
-        val subLocality = address.subLocality
-        val locality = address.locality ?: address.subAdminArea
-        val city = locality ?: address.adminArea ?: "Unknown City"
-        val state = address.adminArea ?: ""
-        val postalCode = address.postalCode ?: ""
-        val country = address.countryName ?: "India"
+        val rawFullAddress = (0..address.maxAddressLineIndex)
+            .mapNotNull { address.getAddressLine(it) }
+            .joinToString(", ")
+            .trim()
 
-        val formattedParts = mutableListOf<String>()
-        if (!houseNo.isNullOrBlank()) formattedParts.add(houseNo)
-        if (!street.isNullOrBlank()) formattedParts.add(street)
-        if (!subLocality.isNullOrBlank()) formattedParts.add(subLocality)
-        if (!locality.isNullOrBlank() && locality != subLocality) formattedParts.add(locality)
-        if (state.isNotBlank()) formattedParts.add(state)
-        if (postalCode.isNotBlank()) formattedParts.add(postalCode)
-
-        val formattedAddress = if (formattedParts.isNotEmpty()) {
-            formattedParts.joinToString(", ")
+        val rawSegments = if (rawFullAddress.isNotBlank()) {
+            rawFullAddress.split(",").map { it.trim() }.filter { it.isNotBlank() }
         } else {
-            (0..address.maxAddressLineIndex).mapNotNull { address.getAddressLine(it) }.joinToString(", ")
+            emptyList()
         }
 
+        // Exclude trailing country segment ("India")
+        val nonCountrySegments = rawSegments.filterNot { it.equals("India", ignoreCase = true) }
+
+        // Resolve Locality and City
+        val locality = address.locality ?: address.subAdminArea
+        val state = address.adminArea ?: ""
+        val city = locality ?: state.ifBlank { "Unknown City" }
+
+        // Resolve PIN code (from address field or regex extraction from segments)
+        val postalCode = address.postalCode ?: run {
+            val pinRegex = Regex("\\b[1-9][0-9]{5}\\b")
+            nonCountrySegments.firstNotNullOfOrNull { seg ->
+                pinRegex.find(seg)?.value
+            } ?: ""
+        }
+        val country = address.countryName ?: "India"
+
+        // Candidate segments that represent local areas (excluding country, city, state, postal code)
+        val localSegments = nonCountrySegments.filterNot { seg ->
+            seg.equals(city, ignoreCase = true) ||
+            seg.equals(state, ignoreCase = true) ||
+            (postalCode.isNotBlank() && seg.contains(postalCode)) ||
+            (state.isNotBlank() && seg.contains(state, ignoreCase = true))
+        }
+
+        // SubLocality resolution: use explicit Android field, or the closest local segment to the city
+        val resolvedSubLocality = address.subLocality?.takeIf { it.isNotBlank() }
+            ?: when {
+                localSegments.size >= 2 -> localSegments.last()
+                localSegments.size == 1 && (address.thoroughfare.isNullOrBlank() || address.thoroughfare == localSegments[0]) -> localSegments[0]
+                else -> null
+            }
+
+        // Feature / Landmark resolution (building, apartment, colony, shop name)
+        val rawFeature = address.featureName?.trim()
+        val isValidFeature = !rawFeature.isNullOrBlank() &&
+            !rawFeature.matches(Regex("^[0-9\\-]+$")) &&
+            !rawFeature.contains("+") &&
+            !rawFeature.equals(resolvedSubLocality, ignoreCase = true) &&
+            !rawFeature.equals(city, ignoreCase = true) &&
+            !rawFeature.equals(state, ignoreCase = true) &&
+            !rawFeature.equals(postalCode, ignoreCase = true)
+
+        // Street / Road / Landmark resolution
+        val resolvedStreet = when {
+            !address.thoroughfare.isNullOrBlank() -> {
+                if (isValidFeature && rawFeature != address.thoroughfare) {
+                    "$rawFeature, ${address.thoroughfare}"
+                } else {
+                    address.thoroughfare
+                }
+            }
+            isValidFeature -> rawFeature
+            localSegments.size >= 2 -> localSegments.dropLast(1).joinToString(", ")
+            localSegments.size == 1 && localSegments[0] != resolvedSubLocality -> localSegments[0]
+            else -> null
+        }
+
+        val houseNo = address.subThoroughfare?.takeIf { it.isNotBlank() }
+
+        // Deduplicate and assemble ground-truth clean formatted address
+        val cleanFull = cleanAddressSegments(
+            if (rawFullAddress.isNotBlank()) rawFullAddress else {
+                listOfNotNull(houseNo, resolvedStreet, resolvedSubLocality, locality, state, postalCode).joinToString(", ")
+            }
+        )
+
         val confidence = when {
-            !postalCode.isNullOrBlank() && (!street.isNullOrBlank() || !subLocality.isNullOrBlank()) -> GeocodeConfidence.HIGH
+            postalCode.isNotBlank() && (!resolvedStreet.isNullOrBlank() || !resolvedSubLocality.isNullOrBlank()) -> GeocodeConfidence.HIGH
             !locality.isNullOrBlank() -> GeocodeConfidence.MEDIUM
             else -> GeocodeConfidence.LOW
         }
@@ -128,10 +183,10 @@ class DefaultGeocodingProvider(private val context: Context) : GeocodingProvider
 
         return GeocodedPlace(
             placeId = if (address.url != null) address.url else "geo_${lat.toString().take(7)}_${lng.toString().take(7)}",
-            formattedAddress = formattedAddress,
+            formattedAddress = cleanFull,
             houseNumber = houseNo,
-            street = street,
-            subLocality = subLocality,
+            street = resolvedStreet?.let { cleanAddressSegments(it) },
+            subLocality = resolvedSubLocality?.let { cleanAddressSegments(it) },
             locality = locality,
             city = city,
             district = address.subAdminArea,

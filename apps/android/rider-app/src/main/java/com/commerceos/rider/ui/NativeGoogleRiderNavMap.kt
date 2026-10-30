@@ -96,10 +96,10 @@ fun NativeGoogleRiderNavMap(
     val coroutineScope = rememberCoroutineScope()
 
     val storeLatLng = remember(merchantLat, merchantLng) {
-        LatLng(if (merchantLat != 0.0) merchantLat else 28.1970, if (merchantLng != 0.0) merchantLng else 76.6190)
+        LatLng(if (merchantLat != 0.0) merchantLat else 20.5937, if (merchantLng != 0.0) merchantLng else 78.9629)
     }
     val customerLatLng = remember(customerLat, customerLng) {
-        LatLng(if (customerLat != 0.0) customerLat else 28.2022, if (customerLng != 0.0) customerLng else 76.6154)
+        LatLng(if (customerLat != 0.0) customerLat else 20.5937, if (customerLng != 0.0) customerLng else 78.9629)
     }
     val riderLatLng = remember(riderLat, riderLng) {
         if (riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0) {

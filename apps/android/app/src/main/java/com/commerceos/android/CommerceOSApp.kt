@@ -27,6 +27,7 @@ import com.commerceos.android.config.LocalClientConfiguration
 import com.commerceos.android.di.AppContainer
 import kotlinx.coroutines.launch
 import com.commerceos.android.model.*
+import com.commerceos.android.location.cleanAddressSegments
 import com.commerceos.android.navigation.AppDestinationRouter
 import com.commerceos.android.ui.AuthScreen
 import com.commerceos.android.ui.account.AccountScreen
@@ -397,6 +398,7 @@ fun CommerceOSApp(
                         selectedAddress = activeAddr,
                         calculatedEtaMinutes = addressViewModel.calculatedEtaMinutes,
                         locationHeaderLabel = addressViewModel.activeLocationHeaderLabel,
+                        isLocating = addressViewModel.isAcquiringLiveGps,
                         homeContext = activeAddr?.let { addr ->
                             val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
                             val status = when {
@@ -623,11 +625,13 @@ fun CommerceOSApp(
                 is Screen.AddressSelection -> {
                     val isFromCheckout = screen.fromCheckout
                     val isFromProfile = screen.fromProfile
+                    val isDirectAddFlow = screen.directAddFlow
                     AddressScreen(
                         viewModel = addressViewModel,
                         serviceability = checkoutViewModel.uiState.serviceability,
                         onBack = { goBack() },
                         fromProfile = isFromProfile,
+                        directAddFlow = isDirectAddFlow,
                         onSelectAddress = { address ->
                             if (isFromCheckout) {
                                 checkoutViewModel.selectAddress(address)
@@ -652,18 +656,19 @@ fun CommerceOSApp(
                             }
                         } else null,
                         onSavedSuccessfully = {
+                            val saved = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                            if (saved != null) {
+                                addressViewModel.select(saved)
+                            }
                             if (isFromCheckout) {
-                                val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
-                                if (addr != null) checkoutViewModel.selectAddress(addr)
+                                if (saved != null) checkoutViewModel.selectAddress(saved)
                                 if (backStack.lastOrNull() is Screen.PaymentGateway) {
                                     goBack()
                                 } else {
                                     navigate(Screen.PaymentGateway)
                                 }
-                            } else if (isFromProfile) {
-                                addressViewModel.loadAddresses()
                             } else {
-                                goBack()
+                                navigateRoot(Screen.Home)
                             }
                         }
                     )
@@ -841,16 +846,27 @@ fun CommerceOSApp(
 
             if (showAddressBottomSheet) {
                 val addressState = addressViewModel.platformUiState
+                val place = addressViewModel.liveGpsPlace
+                val placeFormatted = cleanAddressSegments(
+                    place?.subLocality,
+                    place?.locality,
+                    place?.city,
+                    place?.state,
+                    place?.postalCode
+                ).ifBlank { cleanAddressSegments(place?.formattedAddress) }
+
                 AddressSelectionBottomSheet(
                     addresses = addressViewModel.addresses,
                     selectedAddressId = addressViewModel.selectedAddress?.id,
+                    liveGpsPlaceFormatted = placeFormatted,
+                    getDistanceMeters = { addr -> addressViewModel.getDistanceToSavedAddressMeters(addr) },
                     searchResults = addressState.placeSearchResults,
                     isSearchingPlaces = addressState.isSearchingPlaces,
                     onSearchQueryChange = { query -> addressViewModel.searchLocationPlaces(query) },
                     onSelectPlaceSearchResult = { result ->
                         showAddressBottomSheet = false
                         addressViewModel.selectPlaceSearchResult(result)
-                        navigate(Screen.AddressSelection())
+                        navigate(Screen.AddressSelection(directAddFlow = true))
                     },
                     onDismiss = {
                         showAddressBottomSheet = false
@@ -863,17 +879,17 @@ fun CommerceOSApp(
                     onAddNewAddress = {
                         showAddressBottomSheet = false
                         addressViewModel.startAddAddressFlow()
-                        navigate(Screen.AddressSelection())
+                        navigate(Screen.AddressSelection(directAddFlow = true))
                     },
                     onUseCurrentLocation = {
-                        addressViewModel.useCurrentGpsLocationAndMatchSaved {
+                        addressViewModel.useCurrentGpsLocationPinpoint {
                             showAddressBottomSheet = false
                         }
                     },
                     onEditAddress = { addr ->
                         showAddressBottomSheet = false
                         addressViewModel.startEditAddressFlow(addr)
-                        navigate(Screen.AddressSelection())
+                        navigate(Screen.AddressSelection(directAddFlow = true))
                     },
                     onDeleteAddress = { id -> addressViewModel.deleteAddress(id) },
                     onSetDefaultAddress = { id -> addressViewModel.setDefaultAddress(id) }

@@ -42,8 +42,8 @@ public struct LocationMapViewport: UIViewRepresentable {
 
         context.coordinator.webView = webView
 
-        let lat = centerCoordinate?.latitude ?? 28.1970
-        let lng = centerCoordinate?.longitude ?? 76.6190
+        let lat = centerCoordinate?.latitude ?? 20.5937
+        let lng = centerCoordinate?.longitude ?? 78.9629
         let html = generateGoogleMapsViewportHtml(lat: lat, lng: lng)
         webView.loadHTMLString(html, baseURL: URL(string: "https://maps.googleapis.com"))
 
@@ -70,8 +70,8 @@ public struct LocationMapViewport: UIViewRepresentable {
 
         init(_ parent: LocationMapViewport) {
             self.parent = parent
-            self.lastSettledLat = parent.centerCoordinate?.latitude ?? 28.1970
-            self.lastSettledLng = parent.centerCoordinate?.longitude ?? 76.6190
+            self.lastSettledLat = parent.centerCoordinate?.latitude ?? 20.5937
+            self.lastSettledLng = parent.centerCoordinate?.longitude ?? 78.9629
         }
 
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

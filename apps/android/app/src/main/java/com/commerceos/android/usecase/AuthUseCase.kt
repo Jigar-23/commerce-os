@@ -16,4 +16,7 @@ class AuthUseCase(private val repository: AppRepository) {
 
     suspend fun verifyOtp(challengeId: String, phone: String, code: String): ApiResult<AuthResponse> =
         repository.verifyOtp(challengeId, phone, code)
+
+    suspend fun verifyGoogleSms(idToken: String, phone: String? = null): ApiResult<AuthResponse> =
+        repository.verifyGoogleSms(idToken, phone)
 }

@@ -1229,7 +1229,7 @@ public struct OrderTrackingScreen: View {
         if let lat = trackingData?.merchantLat, let lng = trackingData?.merchantLng, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
-        return CLLocationCoordinate2D(latitude: 28.202224, longitude: 76.615418)
+        return nil
     }
     
     private var resolvedCustomerCoordinate: CLLocationCoordinate2D? {
@@ -1239,7 +1239,7 @@ public struct OrderTrackingScreen: View {
         if let lat = orderDetail?.deliveryAddress?.latitude, let lng = orderDetail?.deliveryAddress?.longitude, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
-        return CLLocationCoordinate2D(latitude: 28.1918, longitude: 76.6081)
+        return nil
     }
     
     private func copyOrderIdToClipboard() {

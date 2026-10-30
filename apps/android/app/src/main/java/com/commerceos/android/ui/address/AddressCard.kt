@@ -13,17 +13,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.commerceos.android.model.ApiAddress
-import com.commerceos.android.ui.theme.CommerceColors
-import com.commerceos.android.ui.theme.CommerceTypography
-import com.commerceos.android.ui.theme.Radius
+import java.util.Locale
 
 /**
- * Production Address Card with overflow menu hierarchy.
- * Masks sensitive recipient contact details for privacy, limits long lines, and ensures accessible touch targets.
+ * Production Address Card matching Blinkit's visual hierarchy.
+ * Displays left badge with Home/Work icon and live proximity ("You're here" for <=100m or "X.XX km").
  */
 @Composable
 fun AddressCard(
@@ -33,6 +32,7 @@ fun AddressCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onSetDefault: () -> Unit,
+    distanceMeters: Double? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -50,40 +50,74 @@ fun AddressCard(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // Left Column: House / Location Icon + Distance text
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(44.dp)
+            // Left Box: Soft cream container with Icon + "You're here" / Distance badge (Blinkit Pattern)
+            Surface(
+                color = Color(0xFFFFFBEB),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFFFEF3C7)),
+                modifier = Modifier
+                    .width(52.dp)
+                    .defaultMinSize(minHeight = 56.dp)
             ) {
-                Surface(
-                    color = Color(0xFFF8FAFC),
-                    shape = CircleShape,
-                    modifier = Modifier.size(36.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = when (address.tag.lowercase()) {
-                                "work", "office" -> Icons.Default.Place
-                                else -> Icons.Default.Home
-                            },
-                            contentDescription = null,
-                            tint = Color(0xFF0F172A),
-                            modifier = Modifier.size(20.dp)
+                    Icon(
+                        imageVector = when (address.tag.lowercase()) {
+                            "work", "office" -> Icons.Default.Place
+                            else -> Icons.Default.Home
+                        },
+                        contentDescription = null,
+                        tint = Color(0xFFD97706),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    val isAtLocation = distanceMeters != null && distanceMeters <= 100.0
+                    if (isAtLocation) {
+                        Surface(
+                            color = Color(0xFFDCFCE7),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.padding(horizontal = 1.dp)
+                        ) {
+                            Text(
+                                text = "You're here",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF15803D),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                            )
+                        }
+                    } else if (distanceMeters != null) {
+                        Text(
+                            text = String.format(Locale.US, "%.2f km", distanceMeters / 1000.0),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF475569),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    } else {
+                        Text(
+                            text = if (address.isDefault) "Default" else "Saved",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (address.isDefault) Color(0xFF16A34A) else Color(0xFF64748B),
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = if (address.isDefault) "Default" else "Saved",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (address.isDefault) Color(0xFF16A34A) else Color(0xFF64748B)
-                )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Right Column: Tag, Full Address, Phone & Bottom Action Icons
+            // Right Column: Tag, Full Address, Phone & Actions
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -97,7 +131,7 @@ fun AddressCard(
                         color = Color(0xFF0F172A)
                     )
 
-                    if (address.isDefault) {
+                    if (isSelected) {
                         Surface(
                             color = Color(0xFFDCFCE7),
                             shape = RoundedCornerShape(6.dp)
@@ -110,39 +144,56 @@ fun AddressCard(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
+                    } else if (address.isDefault) {
+                        Surface(
+                            color = Color(0xFFF1F5F9),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                "Default",
+                                color = Color(0xFF475569),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
                     text = address.addressLine,
                     fontSize = 13.sp,
                     color = Color(0xFF334155),
+                    lineHeight = 17.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Text(
-                    text = "${address.city}, ${address.state} ${address.postalCode}",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (address.city.isNotBlank()) {
+                    Text(
+                        text = "${address.city}${if (address.state.isNotBlank()) ", ${address.state}" else ""}${if (address.postalCode.isNotBlank()) " - ${address.postalCode}" else ""}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 if (address.contactPhone.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Phone number: ${address.contactPhone}",
                         fontSize = 12.sp,
-                        color = Color(0xFF64748B)
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF475569)
                     )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Bottom Circular Action Buttons (Zomato Screenshot Pattern)
+                // Bottom Circular Action Buttons
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

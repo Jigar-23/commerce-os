@@ -55,20 +55,20 @@ class AddressViewModel(
     val calculatedEtaMinutes: Int
         get() {
             val addr = selectedAddress
-            if (addr != null && addr.latitude != 0.0 && addr.longitude != 0.0) {
+            if (addr != null && addr.latitude != null && addr.longitude != null && addr.latitude != 0.0 && addr.longitude != 0.0) {
                 return RealTimeEtaEngine.calculateEtaMinutes(addr.latitude, addr.longitude)
             }
             val live = liveGpsLocation
             if (live != null && live.latitude != 0.0 && live.longitude != 0.0) {
                 return RealTimeEtaEngine.calculateEtaMinutes(live.latitude, live.longitude)
             }
-            return 11
+            return 0
         }
 
     val activeLocationHeaderLabel: String
         get() {
-            val addr = selectedAddress
-            if (addr != null) {
+            val addr = selectedAddress ?: addresses.firstOrNull()
+            if (addr != null && addr.addressLine.isNotBlank()) {
                 if (addr.id.startsWith("temp_gps_") || addr.tag.equals("Current Location", ignoreCase = true)) {
                     val place = liveGpsPlace
                     val colony = place?.subLocality?.takeIf { it.isNotBlank() }
@@ -76,18 +76,27 @@ class AddressViewModel(
                         ?: addr.addressLine.split(",").firstOrNull()?.trim()
                         ?: "Current Location"
                     val city = place?.city?.takeIf { it.isNotBlank() } ?: addr.city
-                    return "$colony, $city"
+                    return cleanAddressSegments(colony, city).ifBlank { "Current Location" }
                 }
                 val tag = addr.tag.ifBlank { "Home" }
-                val line = addr.addressLine.ifBlank { "${addr.city} ${addr.postalCode}".trim() }
-                return "$tag - $line"
+                val userDetails = addr.addressLine.trim()
+                return if (userDetails.isNotBlank()) {
+                    "$tag - $userDetails"
+                } else {
+                    val cleanFallback = cleanAddressSegments(addr.city, addr.postalCode)
+                    if (cleanFallback.isNotBlank()) "$tag - $cleanFallback" else "Current Location"
+                }
             }
             val place = liveGpsPlace
             if (place != null) {
                 val colony = place.subLocality ?: place.locality ?: place.street ?: place.city
-                return "$colony, ${place.city}"
+                val label = cleanAddressSegments(colony, place.city)
+                if (label.isNotBlank()) return label
             }
-            return "Select Delivery Location"
+            if (isAcquiringLiveGps) {
+                return "Detecting location..."
+            }
+            return "Current Location"
         }
 
     // Single Canonical UI State Container for Platform State Machine
@@ -118,8 +127,46 @@ class AddressViewModel(
     }
 
     fun fetchLiveGpsFallback() {
-        if (addresses.isNotEmpty() && selectedAddress != null) return
         useCurrentGpsLocationAndMatchSaved()
+    }
+
+    private fun matchProximityOrFallbackPinpoint(geoPoint: GeoPoint) {
+        // Check if any saved address is within a 100-meter radius of the current GPS pinpoint
+        val matchingSaved = addresses
+            .mapNotNull { addr ->
+                val aLat = addr.latitude
+                val aLng = addr.longitude
+                if (aLat != null && aLng != null && aLat != 0.0 && aLng != 0.0) {
+                    val distMeters = RealTimeEtaEngine.calculateDistanceKm(geoPoint.latitude, geoPoint.longitude, aLat, aLng) * 1000.0
+                    if (distMeters <= 100.0) addr to distMeters else null
+                } else null
+            }
+            .minByOrNull { it.second }
+            ?.first
+
+        if (matchingSaved != null) {
+            selectedAddress = matchingSaved
+        } else {
+            val place = liveGpsPlace
+            val fullArea = cleanAddressSegments(
+                place?.subLocality,
+                place?.locality,
+                place?.city
+            ).ifBlank { cleanAddressSegments(place?.formattedAddress).ifBlank { "Current Location" } }
+
+            selectedAddress = ApiAddress(
+                id = "temp_gps_${System.currentTimeMillis()}",
+                tag = "Current Location",
+                addressType = "OTHER",
+                addressLine = fullArea,
+                city = place?.city ?: "",
+                state = place?.state ?: "",
+                postalCode = place?.postalCode ?: "",
+                latitude = geoPoint.latitude,
+                longitude = geoPoint.longitude,
+                isDefault = false
+            )
+        }
     }
 
     fun useCurrentGpsLocationAndMatchSaved(onCompleted: () -> Unit = {}) {
@@ -143,53 +190,82 @@ class AddressViewModel(
                             is ApiResult.Failure -> {}
                         }
                     }
-
-                    // Check if any saved address is within a 20-meter radius of the current GPS pinpoint
-                    val matchingSaved = addresses
-                        .mapNotNull { addr ->
-                            val aLat = addr.latitude
-                            val aLng = addr.longitude
-                            if (aLat != null && aLng != null && aLat != 0.0 && aLng != 0.0) {
-                                val distMeters = RealTimeEtaEngine.calculateDistanceKm(geoPoint.latitude, geoPoint.longitude, aLat, aLng) * 1000.0
-                                if (distMeters <= 20.0) addr to distMeters else null
-                            } else null
-                        }
-                        .minByOrNull { it.second }
-                        ?.first
-
-                    if (matchingSaved != null) {
-                        selectedAddress = matchingSaved
-                    } else {
-                        val place = liveGpsPlace
-                        val colony = place?.subLocality?.takeIf { it.isNotBlank() }
-                            ?: place?.locality?.takeIf { it.isNotBlank() }
-                            ?: place?.street?.takeIf { it.isNotBlank() }
-                            ?: "Current Location"
-                        val fullArea = listOfNotNull(
-                            place?.subLocality?.takeIf { it.isNotBlank() },
-                            place?.locality?.takeIf { it.isNotBlank() && it != place.subLocality },
-                            place?.city?.takeIf { it.isNotBlank() }
-                        ).joinToString(", ").ifBlank { place?.formattedAddress ?: "Current Location" }
-
-                        selectedAddress = ApiAddress(
-                            id = "temp_gps_${System.currentTimeMillis()}",
-                            tag = "Current Location",
-                            addressType = "OTHER",
-                            addressLine = fullArea,
-                            city = place?.city ?: "",
-                            state = place?.state ?: "",
-                            postalCode = place?.postalCode ?: "",
-                            latitude = geoPoint.latitude,
-                            longitude = geoPoint.longitude,
-                            isDefault = false
-                        )
-                    }
+                    matchProximityOrFallbackPinpoint(geoPoint)
                 }
                 is LocationResult.Failure -> {}
             }
             isAcquiringLiveGps = false
             onCompleted()
         }
+    }
+
+    /**
+     * Explicit pinpoint selection: Sets active delivery location strictly to the
+     * exact GPS pinpoint, bypassing proximity snap to nearby saved addresses.
+     */
+    fun useCurrentGpsLocationPinpoint(onCompleted: () -> Unit = {}) {
+        viewModelScope.launch {
+            val provider = activeLocationProvider
+            if (provider == null || !provider.hasPermission()) {
+                onCompleted()
+                return@launch
+            }
+            isAcquiringLiveGps = true
+            when (val locResult = provider.getCurrentLocation(5000L)) {
+                is LocationResult.Success -> {
+                    val geoPoint = locResult.location
+                    liveGpsLocation = geoPoint
+                    val geocoder = activeGeocodingProvider
+                    if (geocoder != null) {
+                        when (val placeResult = geocoder.reverseGeocode(geoPoint.latitude, geoPoint.longitude)) {
+                            is ApiResult.Success -> {
+                                liveGpsPlace = placeResult.data
+                            }
+                            is ApiResult.Failure -> {}
+                        }
+                    }
+
+                    val place = liveGpsPlace
+                    val fullArea = cleanAddressSegments(
+                        place?.subLocality,
+                        place?.locality,
+                        place?.city
+                    ).ifBlank { cleanAddressSegments(place?.formattedAddress).ifBlank { "Current Location" } }
+
+                    selectedAddress = ApiAddress(
+                        id = "temp_gps_${System.currentTimeMillis()}",
+                        tag = "Current Location",
+                        addressType = "OTHER",
+                        addressLine = fullArea,
+                        city = place?.city ?: "",
+                        state = place?.state ?: "",
+                        postalCode = place?.postalCode ?: "",
+                        latitude = geoPoint.latitude,
+                        longitude = geoPoint.longitude,
+                        isDefault = false
+                    )
+                }
+                is LocationResult.Failure -> {}
+            }
+            isAcquiringLiveGps = false
+            onCompleted()
+        }
+    }
+
+    fun getDistanceToSavedAddressMeters(address: ApiAddress): Double? {
+        val live = liveGpsLocation ?: return null
+        val lat = address.latitude ?: return null
+        val lng = address.longitude ?: return null
+        if (lat == 0.0 || lng == 0.0) return null
+        return RealTimeEtaEngine.calculateDistanceKm(live.latitude, live.longitude, lat, lng) * 1000.0
+    }
+
+    fun cancelFlow() {
+        platformUiState = AddressPlatformUiState(
+            currentStep = AddressPlatformStep.AddressBook,
+            originalAddress = null,
+            draftAddress = StructuredAddress()
+        )
     }
 
     fun init(customerId: String, force: Boolean = false) {
@@ -220,10 +296,16 @@ class AddressViewModel(
             when (val result = repository.getAddresses(customerId)) {
                 is ApiResult.Success -> {
                     addresses = result.data
-                    val currentId = selectedAddress?.id
-                    selectedAddress = result.data.firstOrNull { it.id == currentId }
-                        ?: result.data.firstOrNull { it.isDefault }
-                        ?: result.data.firstOrNull()
+                    val live = liveGpsLocation
+                    if (live != null) {
+                        matchProximityOrFallbackPinpoint(live)
+                    } else {
+                        val currentId = selectedAddress?.id
+                        selectedAddress = result.data.firstOrNull { it.id == currentId }
+                            ?: result.data.firstOrNull { it.isDefault }
+                            ?: result.data.firstOrNull()
+                        useCurrentGpsLocationAndMatchSaved()
+                    }
                     errorMessage = if (result.data.isEmpty()) "No saved addresses yet" else null
                 }
                 is ApiResult.Failure -> {
@@ -268,9 +350,9 @@ class AddressViewModel(
         val initialDraft = if (initialPlace != null) {
             StructuredAddress(
                 geoLocation = initialGeo,
-                street = initialPlace.street ?: "",
-                subLocality = initialPlace.subLocality ?: "",
-                locality = initialPlace.locality ?: "",
+                street = initialPlace.street.orEmpty(),
+                subLocality = initialPlace.subLocality.orEmpty(),
+                locality = initialPlace.locality.orEmpty(),
                 city = initialPlace.city,
                 state = initialPlace.state,
                 postalCode = initialPlace.postalCode,
@@ -391,9 +473,9 @@ class AddressViewModel(
                     is ApiResult.Success -> {
                         val place = placeRes.data
                         val structured = StructuredAddress(
-                            street = place.street ?: place.subLocality ?: "",
-                            subLocality = place.subLocality ?: "",
-                            locality = place.locality ?: "",
+                            street = place.street.orEmpty(),
+                            subLocality = place.subLocality.orEmpty(),
+                            locality = place.locality.orEmpty(),
                             city = place.city,
                             state = place.state,
                             postalCode = place.postalCode,
@@ -476,24 +558,31 @@ class AddressViewModel(
         val geoPoint = GeoPoint(latitude = lat, longitude = lng, accuracyMeters = null, provider = "user_pin")
         platformUiState = platformUiState.copy(
             currentStep = AddressPlatformStep.ReverseGeocoding(geoPoint),
-            isReverseGeocoding = true
+            isReverseGeocoding = true,
+            draftAddress = platformUiState.draftAddress.copy(geoLocation = geoPoint)
         )
 
         reverseGeocodeJob = viewModelScope.launch {
-            delay(350) // 350ms debounce
+            delay(150) // Responsive debounce
             val geocoder = activeGeocodingProvider
             if (geocoder != null) {
                 when (val result = geocoder.reverseGeocode(lat, lng)) {
                     is ApiResult.Success -> {
                         val place = result.data
+                        val resolvedSubLocality = place.subLocality.orEmpty()
+                        val resolvedStreet = place.street.orEmpty()
+                        val resolvedLocality = place.locality.orEmpty()
+                        val resolvedCity = place.city.ifBlank { resolvedLocality }
+
+                        // Strictly bind to the new coordinates' geocoded values without leaking previous pin data
                         val updatedForm = platformUiState.draftAddress.copy(
-                            street = place.street ?: place.subLocality ?: platformUiState.draftAddress.street,
-                            subLocality = place.subLocality ?: platformUiState.draftAddress.subLocality,
-                            locality = place.locality ?: platformUiState.draftAddress.locality,
-                            city = place.city.ifBlank { platformUiState.draftAddress.city },
-                            state = place.state.ifBlank { platformUiState.draftAddress.state },
-                            postalCode = place.postalCode.ifBlank { platformUiState.draftAddress.postalCode },
-                            country = place.country,
+                            street = resolvedStreet,
+                            subLocality = resolvedSubLocality,
+                            locality = resolvedLocality,
+                            city = resolvedCity,
+                            state = place.state,
+                            postalCode = place.postalCode,
+                            country = place.country.ifBlank { "India" },
                             geoLocation = place.geoPoint,
                             placeId = place.placeId
                         )
@@ -506,14 +595,18 @@ class AddressViewModel(
                     }
                     is ApiResult.Failure -> {
                         val degradedPlace = GeocodedPlace(
-                            formattedAddress = "Pinned Location (${String.format("%.5f", lat)}, ${String.format("%.5f", lng)})",
+                            formattedAddress = "Pinned Location (${String.format(java.util.Locale.US, "%.5f", lat)}, ${String.format(java.util.Locale.US, "%.5f", lng)})",
                             city = platformUiState.draftAddress.city,
                             state = platformUiState.draftAddress.state,
                             postalCode = platformUiState.draftAddress.postalCode,
                             geoPoint = geoPoint
                         )
                         platformUiState = platformUiState.copy(
-                            draftAddress = platformUiState.draftAddress.copy(geoLocation = geoPoint),
+                            draftAddress = platformUiState.draftAddress.copy(
+                                geoLocation = geoPoint,
+                                street = "",
+                                subLocality = ""
+                            ),
                             activeGeocodedPlace = degradedPlace,
                             isReverseGeocoding = false,
                             locationErrorMessage = "Couldn't auto-resolve address details. Please verify and enter street and landmark manually.",
@@ -566,12 +659,24 @@ class AddressViewModel(
     }
 
     fun submitSaveFormAddress() {
-        val validation = platformUiState.draftAddress.validate()
+        val draft = platformUiState.draftAddress
+        val effectivePhone = draft.contactPhone.ifBlank {
+            profile?.phone?.replace("+91", "")?.trim() ?: ""
+        }
+        val formToValidate = draft.copy(contactPhone = effectivePhone)
+        val validation = formToValidate.validate()
         if (!validation.isValid) {
+            val firstError = validation.houseNumberError
+                ?: validation.postalCodeError
+                ?: validation.contactPhoneError
+                ?: validation.contactNameError
+                ?: "Please enter required address details"
+            errorMessage = firstError
+            platformUiState = platformUiState.copy(saveState = SaveState.Error(firstError))
             return
         }
 
-        val req = platformUiState.draftAddress.toAddAddressRequest()
+        val req = formToValidate.toAddAddressRequest()
         platformUiState = platformUiState.copy(saveState = SaveState.Saving)
 
         viewModelScope.launch {
@@ -694,6 +799,34 @@ class AddressViewModel(
             addresses = remaining
             if (selectedAddress?.id == addressId) {
                 selectedAddress = remaining.firstOrNull()
+            }
+        }
+
+        // Fallback to Live GPS location immediately if no saved address remains
+        if (selectedAddress == null) {
+            val live = liveGpsLocation
+            val place = liveGpsPlace
+            if (live != null) {
+                val fullArea = cleanAddressSegments(
+                    place?.subLocality,
+                    place?.locality,
+                    place?.city
+                ).ifBlank { cleanAddressSegments(place?.formattedAddress).ifBlank { "Current Location" } }
+
+                selectedAddress = ApiAddress(
+                    id = "temp_gps_${System.currentTimeMillis()}",
+                    tag = "Current Location",
+                    addressType = "OTHER",
+                    addressLine = fullArea,
+                    city = place?.city ?: "",
+                    state = place?.state ?: "",
+                    postalCode = place?.postalCode ?: "",
+                    latitude = live.latitude,
+                    longitude = live.longitude,
+                    isDefault = false
+                )
+            } else {
+                useCurrentGpsLocationPinpoint()
             }
         }
 

@@ -7,12 +7,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.ui.address.create.AddAddressFlow
+import com.commerceos.android.viewmodel.AddressPlatformStep
 import com.commerceos.android.viewmodel.AddressViewModel
 import com.commerceos.android.viewmodel.ServiceabilityState
 
 /**
  * Top-Level Production Address Screen Orchestrator.
  * Driven by AddressViewModel as the Single Source of Truth for state machine steps & address mutations.
+ * Supports direct single-click back exit when entered directly from bottom sheet or home screen.
  */
 @Composable
 fun AddressScreen(
@@ -23,6 +25,7 @@ fun AddressScreen(
     onSavedSuccessfully: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     fromProfile: Boolean = false,
+    directAddFlow: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -32,20 +35,20 @@ fun AddressScreen(
 
     val state = viewModel.platformUiState
 
-    // System Hardware/Gesture Back Navigation Interceptor
-    BackHandler(enabled = true) {
-        if (state.isFlowActive) {
-            if (state.locationSearchQuery.isNotBlank()) {
-                viewModel.searchLocationPlaces("")
-            } else {
-                viewModel.navigateBack()
-                if (!viewModel.platformUiState.isFlowActive && viewModel.addresses.isEmpty()) {
-                    onBack?.invoke()
-                }
-            }
+    val handleBackPress: () -> Unit = {
+        if (state.currentStep is AddressPlatformStep.EditingDetails && !state.isEditingExisting) {
+            // Stepping back from details form returns to pin on map
+            viewModel.navigateBack()
         } else {
+            // Direct single-click exit from Add Address / Pin on Map back to parent screen
+            viewModel.cancelFlow()
             onBack?.invoke()
         }
+    }
+
+    // System Hardware/Gesture Back Navigation Interceptor
+    BackHandler(enabled = true) {
+        handleBackPress()
     }
 
     LaunchedEffect(state.saveState) {
@@ -68,16 +71,7 @@ fun AddressScreen(
             isReverseGeocoding = state.isReverseGeocoding,
             saveState = state.saveState,
             conflictWarning = state.addressConflict,
-            onBack = {
-                if (state.locationSearchQuery.isNotBlank()) {
-                    viewModel.searchLocationPlaces("")
-                } else {
-                    viewModel.navigateBack()
-                    if (!viewModel.platformUiState.isFlowActive && viewModel.addresses.isEmpty()) {
-                        onBack?.invoke()
-                    }
-                }
-            },
+            onBack = handleBackPress,
             onSearchQueryChanged = { query -> viewModel.searchLocationPlaces(query) },
             onRequestGps = { viewModel.requestCurrentGpsLocation() },
             onSelectSearchResult = { result -> viewModel.selectPlaceSearchResult(result) },
@@ -96,6 +90,7 @@ fun AddressScreen(
             isLoading = viewModel.isLoading,
             errorMessage = viewModel.errorMessage,
             serviceability = serviceability,
+            getDistanceMeters = { addr -> viewModel.getDistanceToSavedAddressMeters(addr) },
             onSelectAddress = { addr ->
                 viewModel.select(addr)
                 onSelectAddress(addr)

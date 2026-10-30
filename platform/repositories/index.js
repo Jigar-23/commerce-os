@@ -2133,13 +2133,13 @@ class TransactionalOfferRepository {
       estimatedDurationMins: Number(r.estimated_duration_mins || 0),
       merchantName: r.merchant_name || '',
       merchantAddress: r.merchant_address || '',
-      merchantLat: Number(r.merchant_lat) || 28.202224,
-      merchantLng: Number(r.merchant_lng) || 76.615418,
+      merchantLat: Number(r.merchant_lat) || 0.0,
+      merchantLng: Number(r.merchant_lng) || 0.0,
       customerName: r.customer_name || '',
       customerPhone: r.customer_phone || '',
       customerAddress: r.customer_address || '',
-      customerLat: Number(r.customer_lat) || 28.202224,
-      customerLng: Number(r.customer_lng) || 76.615418,
+      customerLat: Number(r.customer_lat) || 0.0,
+      customerLng: Number(r.customer_lng) || 0.0,
       isCod: Boolean(r.is_cod),
       codAmount: Number(r.cod_amount || 0),
       orderTotal: Number(r.order_total || 0),
@@ -2224,13 +2224,13 @@ class TransactionalOfferRepository {
         estimatedDurationMins: Number(r.estimated_duration_mins || 0),
         merchantName: r.merchant_name || '',
         merchantAddress: r.merchant_address || '',
-        merchantLat: Number(r.merchant_lat) || 28.202224,
-        merchantLng: Number(r.merchant_lng) || 76.615418,
+        merchantLat: Number(r.merchant_lat) || 0.0,
+        merchantLng: Number(r.merchant_lng) || 0.0,
         customerName: r.customer_name || '',
         customerPhone: r.customer_phone || '',
         customerAddress: r.customer_address || '',
-        customerLat: Number(r.customer_lat) || 28.202224,
-        customerLng: Number(r.customer_lng) || 76.615418,
+        customerLat: Number(r.customer_lat) || 0.0,
+        customerLng: Number(r.customer_lng) || 0.0,
         isCod: Boolean(r.is_cod),
         codAmount: Number(r.cod_amount || 0),
         orderTotal: Number(r.order_total || 0),
@@ -5113,8 +5113,8 @@ class LocalDevelopmentPresenceRepository {
 
   async updatePresence(riderId, data = {}) {
     if (!this.db.riderPresence) this.db.riderPresence = {};
-    const lat = data.latitude != null ? Number(data.latitude) : 28.202224;
-    const lng = data.longitude != null ? Number(data.longitude) : 76.615418;
+    const lat = data.latitude != null ? Number(data.latitude) : 0.0;
+    const lng = data.longitude != null ? Number(data.longitude) : 0.0;
     const updated = {
       riderId,
       status: data.status || 'ONLINE',

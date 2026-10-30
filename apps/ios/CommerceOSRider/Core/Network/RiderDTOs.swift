@@ -141,15 +141,15 @@ public struct DispatchOfferDto: Identifiable, Codable {
             ?? (try? container.decode(String.self, forKey: .merchant_address))
             ?? (try? container.decode(String.self, forKey: .pickupAddress))
             ?? (try? container.decode(String.self, forKey: .pickup_address))
-            ?? "Rewari Central Hub"
+            ?? "Store Hub"
 
         self.merchantLat = (try? container.decode(Double.self, forKey: .merchantLat))
             ?? (try? container.decode(Double.self, forKey: .merchant_lat))
-            ?? 28.202224
+            ?? 0.0
 
         self.merchantLng = (try? container.decode(Double.self, forKey: .merchantLng))
             ?? (try? container.decode(Double.self, forKey: .merchant_lng))
-            ?? 76.615418
+            ?? 0.0
 
         self.customerName = (try? container.decode(String.self, forKey: .customerName))
             ?? (try? container.decode(String.self, forKey: .customer_name))
@@ -163,11 +163,11 @@ public struct DispatchOfferDto: Identifiable, Codable {
 
         self.customerLat = (try? container.decode(Double.self, forKey: .customerLat))
             ?? (try? container.decode(Double.self, forKey: .customer_lat))
-            ?? 28.1918
+            ?? 0.0
 
         self.customerLng = (try? container.decode(Double.self, forKey: .customerLng))
             ?? (try? container.decode(Double.self, forKey: .customer_lng))
-            ?? 76.6081
+            ?? 0.0
 
         var resolvedDist: Double? = try? container.decode(Double.self, forKey: .totalDistanceKm)
         if resolvedDist == nil { resolvedDist = try? container.decode(Double.self, forKey: .total_distance_km) }

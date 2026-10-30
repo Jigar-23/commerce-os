@@ -33,6 +33,8 @@
     "seed:tenant": "node scripts/seed-tenant.js",
     "db:keepalive": "node scripts/db-keepalive.js",
     "db:keepalive:daemon": "node scripts/db-keepalive.js --daemon",
+    "render:keepalive": "node scripts/render-keepalive.js",
+    "render:keepalive:daemon": "node scripts/render-keepalive.js --daemon",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v"
   },

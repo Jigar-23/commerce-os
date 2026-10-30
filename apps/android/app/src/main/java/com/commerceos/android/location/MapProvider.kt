@@ -10,9 +10,11 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -40,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.commerceos.android.ui.orders.ZEPTO_LIGHT_MAP_STYLE
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceTypography
@@ -56,10 +59,12 @@ import kotlinx.coroutines.*
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.PI
+import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.pow
+import kotlin.math.sinh
 import kotlin.math.tan
 
 /**
@@ -110,30 +115,40 @@ fun RealLocationMapViewport(
         }
     }
 
+    var useOsmEngine by remember { mutableStateOf(false) }
+    var osmLat by remember(centerPoint) { mutableDoubleStateOf(initialTarget.latitude) }
+    var osmLng by remember(centerPoint) { mutableDoubleStateOf(initialTarget.longitude) }
+    var osmZoom by remember { mutableFloatStateOf(16.5f) }
+    var isOsmDragging by remember { mutableStateOf(false) }
+
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(initialTarget, if (hasValidCenter) 17.5f else 5.0f)
     }
 
     // Sync camera to external centerPoint updates (e.g. from search selection or GPS button)
     LaunchedEffect(centerPoint) {
-        if (centerPoint != null && centerPoint.latitude != 0.0 && centerPoint.longitude != 0.0 && !cameraPositionState.isMoving) {
-            val target = LatLng(centerPoint.latitude, centerPoint.longitude)
-            val current = cameraPositionState.position.target
-            val dLat = kotlin.math.abs(current.latitude - target.latitude)
-            val dLng = kotlin.math.abs(current.longitude - target.longitude)
-            if (dLat > 0.0005 || dLng > 0.0005) {
-                cameraPositionState.animate(
-                    update = CameraUpdateFactory.newLatLngZoom(target, 17.5f),
-                    durationMs = 600
-                )
+        if (centerPoint != null && centerPoint.latitude != 0.0 && centerPoint.longitude != 0.0) {
+            osmLat = centerPoint.latitude
+            osmLng = centerPoint.longitude
+            if (!cameraPositionState.isMoving) {
+                val target = LatLng(centerPoint.latitude, centerPoint.longitude)
+                val current = cameraPositionState.position.target
+                val dLat = kotlin.math.abs(current.latitude - target.latitude)
+                val dLng = kotlin.math.abs(current.longitude - target.longitude)
+                if (dLat > 0.0005 || dLng > 0.0005) {
+                    cameraPositionState.animate(
+                        update = CameraUpdateFactory.newLatLngZoom(target, 17.5f),
+                        durationMs = 600
+                    )
+                }
             }
         }
     }
 
     // Debounced reverse geocoding callback when user stops dragging the map
     LaunchedEffect(cameraPositionState.isMoving) {
-        if (!cameraPositionState.isMoving) {
-            delay(300)
+        if (!cameraPositionState.isMoving && !useOsmEngine) {
+            delay(150)
             val target = cameraPositionState.position.target
             if (target.latitude != 0.0 && target.longitude != 0.0) {
                 onMapCameraSettled(target.latitude, target.longitude)
@@ -141,7 +156,7 @@ fun RealLocationMapViewport(
         }
     }
 
-    val isMoving = cameraPositionState.isMoving
+    val isMoving = if (useOsmEngine) isOsmDragging else cameraPositionState.isMoving
 
     val pinLiftY by animateDpAsState(
         targetValue = if (isMoving) (-16).dp else 0.dp,
@@ -196,13 +211,86 @@ fun RealLocationMapViewport(
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.lg))
     ) {
-        // Native Google Map Viewport
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = mapProperties,
-            uiSettings = mapUiSettings
-        )
+        if (!useOsmEngine) {
+            // Native Google Map Viewport
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = mapProperties,
+                uiSettings = mapUiSettings
+            )
+        } else {
+            // Interactive OpenStreetMap / CartoCDN Voyager Tile Canvas
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = { isOsmDragging = true },
+                            onDragEnd = {
+                                isOsmDragging = false
+                                onMapCameraSettled(osmLat, osmLng)
+                            },
+                            onDragCancel = {
+                                isOsmDragging = false
+                                onMapCameraSettled(osmLat, osmLng)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val n = 2.0.pow(osmZoom.toDouble())
+                                val worldPx = 256.0 * n
+                                val deltaLng = -(dragAmount.x / worldPx) * 360.0
+                                osmLng = (osmLng + deltaLng).coerceIn(-180.0, 180.0)
+
+                                val currentWorldY = (1.0 - asinh(tan(Math.toRadians(osmLat))) / PI) / 2.0
+                                val newWorldY = (currentWorldY - (dragAmount.y / worldPx)).coerceIn(0.01, 0.99)
+                                osmLat = Math.toDegrees(atan(sinh(PI * (1.0 - 2.0 * newWorldY)))).coerceIn(-85.05, 85.05)
+                            }
+                        )
+                    }
+            ) {
+                MapTileCanvas(
+                    latitude = osmLat,
+                    longitude = osmLng,
+                    zoomLevel = osmZoom
+                )
+            }
+
+            // Zoom Controls for OSM Engine
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable { osmZoom = (osmZoom + 1f).coerceAtMost(19f) }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = Color(0xFF334155), modifier = Modifier.size(18.dp))
+                    }
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable { osmZoom = (osmZoom - 1f).coerceAtLeast(10f) }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Close, contentDescription = "Zoom Out", tint = Color(0xFF334155), modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
 
         // Exact Zomato-Grade Grounded Center Pin
         ZomatoGroundedDeliveryPin(

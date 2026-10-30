@@ -96,7 +96,22 @@ Users interact with apps through thousands of branching decision paths. The syst
 
 ---
 
-## 6. Pre-Commit Verification Checklist
+## 6. Strict Prohibition of Localhost in Server & Database Configurations
+
+> **MANDATORY INVARIANT:** We NEVER use `localhost`, `127.0.0.1`, or local loopbacks as the default server URL or database URL in any application, repository, or environment unless explicitly requested by the user.
+
+1. **Database Invariant**:
+   - All platform services, microservices, and scripts must connect to the authoritative remote cloud PostgreSQL database (`DATABASE_URL`, e.g. AWS Supabase pooled instance).
+   - Zero fallback to local SQLite, mock JSON databases, or local un-migrated PostgreSQL instances.
+
+2. **Server & Mobile Client Invariant**:
+   - Mobile apps (Android `apps/android`, iOS `apps/ios`) and web apps (`apps/web`, `apps/seller`) must communicate with the authoritative remote production API Gateway URL (`API_GATEWAY_URL` / `API_BASE_URL` / `https://commerce-os-api.onrender.com` or customer-dedicated cloud domain).
+   - On physical mobile devices (Android and iOS), `localhost` and `127.0.0.1` resolve to the phone's loopback interface itself, causing 30-second connection timeouts, silent request drops, and broken authentication.
+   - Any client failover lists must never inject arbitrary `localhost` or `127.0.0.1` before the authoritative remote gateway.
+
+---
+
+## 7. Pre-Commit Verification Checklist
 
 Before marking any task complete or committing code to version control, execute the following mandatory verification steps:
 

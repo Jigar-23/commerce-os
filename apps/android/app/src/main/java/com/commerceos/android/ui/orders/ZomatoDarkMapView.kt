@@ -474,19 +474,23 @@ private fun generateBlinkitGradeDarkMapHtml(
     var customerHtml = '<div class="pin-wrapper"><div class="pin-head customer-head"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div><div class="pin-needle customer-needle"></div><div class="pin-shadow"></div></div>';
     var bikeSvg = '<svg viewBox="0 0 24 24"><path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm14-8.5c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm-8.2-7.5l-2.4-4H5v2h2.2l1.6 2.7c-.8.8-1.3 1.8-1.5 3h2.1c.2-.7.6-1.3 1.1-1.8l1.7 2.1h3.7v-2h-2.5l-1.9-2.4.9-2.6 1.8 1.4v2.6h2v-3.7l-2.8-2.2c-.3-.2-.7-.3-1.1-.3-.4 0-.8.2-1.1.5l-1.6 2.4z"/></svg>';
 
-    var effectiveMLat = $merchantLat || 28.202224;
-    var effectiveMLng = $merchantLng || 76.615418;
-    var effectiveCLat = $customerLat || 28.202224;
-    var effectiveCLng = $customerLng || 76.615418;
+    var effectiveMLat = $merchantLat;
+    var effectiveMLng = $merchantLng;
+    var effectiveCLat = $customerLat;
+    var effectiveCLng = $customerLng;
 
-    var sIcon = L.divIcon({ className: '', html: storeHtml, iconSize: [48, 56], iconAnchor: [24, 56] });
-    storeMarker = L.marker([effectiveMLat, effectiveMLng], { icon: sIcon }).addTo(map);
-
-    var cIcon = L.divIcon({ className: '', html: customerHtml, iconSize: [48, 56], iconAnchor: [24, 56] });
-    customerMarker = L.marker([effectiveCLat, effectiveCLng], { icon: cIcon }).addTo(map);
-
-    var initBounds = [[effectiveMLat, effectiveMLng], [effectiveCLat, effectiveCLng]];
-    map.fitBounds(initBounds, { padding: [50, 50], maxZoom: 16 });
+    if (effectiveMLat && effectiveMLng) {
+      var sIcon = L.divIcon({ className: '', html: storeHtml, iconSize: [48, 56], iconAnchor: [24, 56] });
+      storeMarker = L.marker([effectiveMLat, effectiveMLng], { icon: sIcon }).addTo(map);
+    }
+    if (effectiveCLat && effectiveCLng) {
+      var cIcon = L.divIcon({ className: '', html: customerHtml, iconSize: [48, 56], iconAnchor: [24, 56] });
+      customerMarker = L.marker([effectiveCLat, effectiveCLng], { icon: cIcon }).addTo(map);
+    }
+    if (effectiveMLat && effectiveMLng && effectiveCLat && effectiveCLng) {
+      var initBounds = [[effectiveMLat, effectiveMLng], [effectiveCLat, effectiveCLng]];
+      map.fitBounds(initBounds, { padding: [50, 50], maxZoom: 16 });
+    }
 
     var motionFrameId = null;
     var currentMarkerHeading = 0;

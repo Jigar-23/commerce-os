@@ -17,3 +17,9 @@ if [ -n "$POSTGRES_MULTIPLE_DATABASES" ]; then
 	done
 	echo "Multiple databases created"
 fi
+
+if [ -f "/schema.sql" ]; then
+	echo "Applying Commerce OS authoritative schema to database 'commerceos_order' from /schema.sql..."
+	psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" -d commerceos_order -f /schema.sql
+	echo "Authoritative schema applied successfully to commerceos_order."
+fi

@@ -36,14 +36,14 @@ fun CustomerLiveMapTrackingView(
     onExitFullscreen: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
-    val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 28.202224
-    val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 76.615418
+    val merchantLat = liveTracking?.merchantLat?.takeIf { it != 0.0 } ?: 0.0
+    val merchantLng = liveTracking?.merchantLng?.takeIf { it != 0.0 } ?: 0.0
     val customerLat = liveTracking?.customerLat?.takeIf { it != 0.0 }
         ?: order.deliveryAddress?.latitude?.takeIf { it != 0.0 }
-        ?: 28.202224
+        ?: 0.0
     val customerLng = liveTracking?.customerLng?.takeIf { it != 0.0 }
         ?: order.deliveryAddress?.longitude?.takeIf { it != 0.0 }
-        ?: 76.615418
+        ?: 0.0
 
     val telemetry = liveTracking?.liveRiderTelemetry
     val realRiderLat = telemetry?.latitude?.takeIf { it != 0.0 }

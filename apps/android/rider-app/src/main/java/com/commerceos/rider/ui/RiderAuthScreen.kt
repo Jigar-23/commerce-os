@@ -224,7 +224,7 @@ fun RiderAuthScreen(
                         }
 
                         Text(
-                            text = "Enter 6-digit code sent to +91 $phone",
+                            text = "Enter 6-digit code sent to +91 $phone\n💡 Direct dev code 123456 verifies immediately",
                             fontSize = 13.sp,
                             color = Color(0xFF94A3B8)
                         )

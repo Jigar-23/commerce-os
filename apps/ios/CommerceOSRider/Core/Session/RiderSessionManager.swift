@@ -58,13 +58,14 @@ public final class RiderSessionManager: ObservableObject {
             let longitude: Double
         }
 
+        let curLoc = RiderBackgroundLocationManager.shared.lastLocation
         let body = ShiftPayload(
             online: true,
             isOnline: true,
             shiftStatus: "ONLINE_AVAILABLE",
             status: "ONLINE_AVAILABLE",
-            latitude: 28.202224,
-            longitude: 76.615418
+            latitude: curLoc?.coordinate.latitude ?? 0.0,
+            longitude: curLoc?.coordinate.longitude ?? 0.0
         )
 
         try? await apiClient.postVoid(
@@ -110,8 +111,8 @@ public final class RiderSessionManager: ObservableObject {
             isOnline: newStatus,
             shiftStatus: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
             status: newStatus ? "ONLINE_AVAILABLE" : "OFFLINE",
-            latitude: curLoc?.coordinate.latitude ?? 28.202224,
-            longitude: curLoc?.coordinate.longitude ?? 76.615418
+            latitude: curLoc?.coordinate.latitude ?? 0.0,
+            longitude: curLoc?.coordinate.longitude ?? 0.0
         )
         try? await apiClient.postVoid(
             endpoint: .toggleShift(online: newStatus),
@@ -144,13 +145,14 @@ public final class RiderSessionManager: ObservableObject {
                     let latitude: Double
                     let longitude: Double
                 }
+                let loc = RiderBackgroundLocationManager.shared.lastLocation?.coordinate
                 let body = HeartbeatPayload(
                     online: true,
                     isOnline: true,
                     shiftStatus: "ONLINE_AVAILABLE",
                     status: "ONLINE_AVAILABLE",
-                    latitude: 28.202224,
-                    longitude: 76.615418
+                    latitude: loc?.latitude ?? 0.0,
+                    longitude: loc?.longitude ?? 0.0
                 )
                 try? await self.apiClient.postVoid(
                     endpoint: .toggleShift(online: true),

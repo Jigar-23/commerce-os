@@ -61,8 +61,8 @@ object OfferPayloadValidator {
                 ?: json.optString("store_address").takeIf { it.isNotBlank() }
                 ?: "Merchant Hub"
 
-            val merchantLat = json.optDoubleOrNull("merchantLat") ?: json.optDoubleOrNull("merchant_lat") ?: json.optDoubleOrNull("storeLat") ?: 28.202224
-            val merchantLng = json.optDoubleOrNull("merchantLng") ?: json.optDoubleOrNull("merchant_lng") ?: json.optDoubleOrNull("storeLng") ?: 76.615418
+            val merchantLat = json.optDoubleOrNull("merchantLat") ?: json.optDoubleOrNull("merchant_lat") ?: json.optDoubleOrNull("storeLat") ?: 0.0
+            val merchantLng = json.optDoubleOrNull("merchantLng") ?: json.optDoubleOrNull("merchant_lng") ?: json.optDoubleOrNull("storeLng") ?: 0.0
 
             val customerName = json.optString("customerName").takeIf { it.isNotBlank() }
                 ?: json.optString("customer_name").takeIf { it.isNotBlank() }
@@ -74,8 +74,8 @@ object OfferPayloadValidator {
                 ?: json.optString("delivery_address").takeIf { it.isNotBlank() }
                 ?: "Delivery Address"
 
-            val customerLat = json.optDoubleOrNull("customerLat") ?: json.optDoubleOrNull("customer_lat") ?: json.optDoubleOrNull("destLat") ?: 28.202224
-            val customerLng = json.optDoubleOrNull("customerLng") ?: json.optDoubleOrNull("customer_lng") ?: json.optDoubleOrNull("destLng") ?: 76.615418
+            val customerLat = json.optDoubleOrNull("customerLat") ?: json.optDoubleOrNull("customer_lat") ?: json.optDoubleOrNull("destLat") ?: 0.0
+            val customerLng = json.optDoubleOrNull("customerLng") ?: json.optDoubleOrNull("customer_lng") ?: json.optDoubleOrNull("destLng") ?: 0.0
 
             val isCod = json.optBoolean("isCod", json.optBoolean("is_cod", false))
             val codAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount") ?: 0.0
@@ -200,8 +200,8 @@ object OfferPayloadValidator {
                 ?: data["merchant_address"]?.takeIf { it.isNotBlank() }
                 ?: "Merchant Hub"
 
-            val merchantLat = data["merchantLat"]?.toDoubleOrNull() ?: 28.202224
-            val merchantLng = data["merchantLng"]?.toDoubleOrNull() ?: 76.615418
+            val merchantLat = data["merchantLat"]?.toDoubleOrNull() ?: 0.0
+            val merchantLng = data["merchantLng"]?.toDoubleOrNull() ?: 0.0
 
             val customerName = data["customerName"]?.takeIf { it.isNotBlank() } ?: "Customer"
 
@@ -209,8 +209,8 @@ object OfferPayloadValidator {
                 ?: data["customer_address"]?.takeIf { it.isNotBlank() }
                 ?: "Delivery Address"
 
-            val customerLat = data["customerLat"]?.toDoubleOrNull() ?: 28.202224
-            val customerLng = data["customerLng"]?.toDoubleOrNull() ?: 76.615418
+            val customerLat = data["customerLat"]?.toDoubleOrNull() ?: 0.0
+            val customerLng = data["customerLng"]?.toDoubleOrNull() ?: 0.0
 
             val isCod = data["isCod"]?.toBoolean() ?: false
             val codAmount = data["codAmount"]?.toDoubleOrNull() ?: 0.0

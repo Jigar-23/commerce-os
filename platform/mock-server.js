@@ -5391,6 +5391,23 @@ async function handleRequest(port, req, res) {
         return json(res, 200, { ok: true, count: dbRiders.length, riders: dbRiders });
       }
 
+      // GET /api/v1/seller/users or /api/v1/seller/customers
+      if ((path === '/api/v1/seller/users' || path === '/api/v1/seller/customers') && req.method === 'GET') {
+        const users = (db.customers || []).map(c => ({
+          id: c.id,
+          phone: c.phone,
+          full_name: c.full_name || c.name || 'Registered Customer',
+          email: c.email || null,
+          tier: c.tier || 'STANDARD',
+          is_active: c.is_active !== false,
+          created_at: c.created_at || new Date().toISOString(),
+          total_orders: (db.orders || []).filter(o => o.customer_id === c.id || o.customer_id === c.phone).length,
+          total_spend: 0,
+          addresses_count: (c.addresses || []).length
+        }));
+        return json(res, 200, { ok: true, count: users.length, users });
+      }
+
       // POST /api/v1/seller/riders
       if (path === '/api/v1/seller/riders' && req.method === 'POST') {
         const body = await parseBody(req);

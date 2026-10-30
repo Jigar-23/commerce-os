@@ -51,6 +51,11 @@ Every line of code written in this repository must strictly adhere to these seve
 ### Invariant VII: FCM Data-Only Push Architecture
 * **Rule**: All push notifications sent to Rider or Customer apps must use data-only payloads (`data: { ... }`, zero top-level `notification` object). This allows background services to process payloads deterministically even when the application is killed or the device is in Doze mode.
 
+### Invariant VIII: Strict Prohibition of Localhost in Server & Database Configurations
+* **Rule**: We NEVER use `localhost`, `127.0.0.1`, or local synthetic loopbacks as the default server URL or database URL unless explicitly asked by the user for an isolated manual run.
+* **Database**: All services must strictly connect to the authoritative remote cloud PostgreSQL database (`DATABASE_URL`). Zero local SQLite or local mock databases.
+* **Server**: All mobile and web clients must connect to the authoritative remote backend API Gateway URL (`API_GATEWAY_URL` / `API_BASE_URL`). Real mobile devices must never be pointed at `localhost` / `127.0.0.1`, which refers to the phone itself and causes 30-second connection timeouts.
+
 ---
 
 ## 3. Comprehensive Hiccup Inventory Across Commerce OS
