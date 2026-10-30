@@ -3322,21 +3322,13 @@ async function handleRequest(port, req, res) {
 
         const digitsOnly = String(rawPhone).replace(/\D/g, '');
         const cleanPhone = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+        const canonicalPhone = cleanPhone.length === 10 ? `+91${cleanPhone}` : rawPhone;
         const twoFactorMobile = digitsOnly.length === 12 && digitsOnly.startsWith('91') ? digitsOnly : (cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone);
         const apiKey = body.apiKey || TWO_FACTOR_API_KEY || process.env.TWO_FACTOR_API_KEY || process.env.TWOFACTOR_API_KEY || process.env.API_KEY_2FACTOR;
 
         let user = null;
         if (appRepositories && appRepositories.customerRepo) {
-          user = await appRepositories.customerRepo.findCustomerByPhone(rawPhone);
-          if (!user) {
-            user = await appRepositories.customerRepo.createCustomer({
-              id: 'usr_' + String(Math.floor(100000 + Math.random() * 900000)),
-              phone: rawPhone,
-              name: 'Customer ' + cleanPhone.slice(-4),
-              email: `user_${cleanPhone}@commerceos.io`,
-              role: 'ROLE_CUSTOMER'
-            });
-          }
+          user = await appRepositories.customerRepo.findCustomerByPhone(canonicalPhone);
         }
 
         // The OTP is minted and kept ONLY server-side under a challengeId.
@@ -3508,11 +3500,12 @@ async function handleRequest(port, req, res) {
             user = await appRepositories.customerRepo.findCustomerByPhone(cleanPhone);
           }
           if (!user) {
+            const isTestUser = cleanPhone === '9999999999';
             user = await appRepositories.customerRepo.createCustomer({
-              id: 'cust_' + cleanPhone,
+              id: isTestUser ? 'cust_test_user' : 'cust_' + cleanPhone,
               phone: canonicalPhone,
-              name: 'Customer ' + cleanPhone.slice(-4),
-              email: `user_${cleanPhone}@commerceos.io`,
+              name: isTestUser ? 'Test User' : 'Customer ' + cleanPhone.slice(-4),
+              email: isTestUser ? 'test@commerceos.io' : `user_${cleanPhone}@commerceos.io`,
               role: 'ROLE_CUSTOMER'
             });
           }
