@@ -5262,6 +5262,180 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------------------------------------
+    // Seller Customer 360° Profile: GET /api/v1/seller/users/:customerId & /api/v1/seller/customers/:customerId
+    // -------------------------------------------------------------
+    const customerDetailMatch = pathname.match(/^\/api\/v1\/seller\/(?:users|customers)\/([^/]+)$/);
+    if (customerDetailMatch && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const targetCustomerId = decodeURIComponent(customerDetailMatch[1]).trim();
+      const clean10 = targetCustomerId.replace(/\D/g, '').slice(-10);
+      const custVariants = [targetCustomerId];
+      if (clean10.length === 10) {
+        custVariants.push(`cust_${clean10}`);
+        custVariants.push(`usr_${clean10}`);
+        custVariants.push(`+91${clean10}`);
+        custVariants.push(clean10);
+      }
+      const uniqueVariants = Array.from(new Set(custVariants.filter(Boolean)));
+
+      try {
+        // 1. Fetch customer profile
+        const custRes = await pool.query(
+          `SELECT * FROM customers 
+           WHERE id = ANY($1) OR phone = ANY($1) 
+           ORDER BY (CASE WHEN id = $2 THEN 0 ELSE 1 END), updated_at DESC LIMIT 1`,
+          [uniqueVariants, targetCustomerId]
+        );
+
+        let customer = custRes.rows[0] || null;
+
+        // 2. Fetch all saved addresses
+        let addrRes;
+        if (clean10.length === 10) {
+          addrRes = await pool.query(
+            `SELECT * FROM customer_addresses 
+             WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2
+             ORDER BY is_default DESC, created_at DESC`,
+            [uniqueVariants, clean10]
+          );
+        } else {
+          addrRes = await pool.query(
+            `SELECT * FROM customer_addresses 
+             WHERE customer_id = ANY($1)
+             ORDER BY is_default DESC, created_at DESC`,
+            [uniqueVariants]
+          );
+        }
+        const addresses = addrRes.rows;
+
+        // 3. Fetch all orders
+        let ordersRes;
+        if (clean10.length === 10) {
+          ordersRes = await pool.query(
+            `SELECT * FROM orders 
+             WHERE customer_id = ANY($1) 
+                OR (delivery_address IS NOT NULL AND (delivery_address->>'contact_phone') LIKE '%' || $2)
+             ORDER BY created_at DESC`,
+            [uniqueVariants, clean10]
+          );
+        } else {
+          ordersRes = await pool.query(
+            `SELECT * FROM orders 
+             WHERE customer_id = ANY($1)
+             ORDER BY created_at DESC`,
+            [uniqueVariants]
+          );
+        }
+        const orders = ordersRes.rows.map(o => {
+          let items = o.items;
+          if (typeof items === 'string') {
+            try { items = JSON.parse(items); } catch { items = []; }
+          }
+          let delivery_address = o.delivery_address;
+          if (typeof delivery_address === 'string') {
+            try { delivery_address = JSON.parse(delivery_address); } catch { delivery_address = null; }
+          }
+          return {
+            ...o,
+            items: Array.isArray(items) ? items : [],
+            delivery_address: delivery_address || null
+          };
+        });
+
+        // 4. Fetch active cart
+        const cartRes = await pool.query(
+          `SELECT * FROM carts 
+           WHERE customer_id = ANY($1) 
+           ORDER BY updated_at DESC LIMIT 1`,
+          [uniqueVariants]
+        );
+        let cart = cartRes.rows[0] || null;
+        if (cart && typeof cart.items === 'string') {
+          try { cart.items = JSON.parse(cart.items); } catch { cart.items = []; }
+        }
+
+        // 5. Fetch prescriptions
+        let prescriptions = [];
+        try {
+          const prescRes = await pool.query(
+            `SELECT * FROM prescriptions 
+             WHERE customer_id = ANY($1) 
+             ORDER BY created_at DESC`,
+            [uniqueVariants]
+          );
+          prescriptions = prescRes.rows;
+        } catch (e) {
+          prescriptions = [];
+        }
+
+        // If customer was not found in customers table, build synthetic from addresses or orders
+        if (!customer) {
+          const firstOrder = orders[0];
+          const firstAddr = addresses[0];
+          customer = {
+            id: targetCustomerId,
+            phone: (firstAddr && firstAddr.contact_phone) || (firstOrder && firstOrder.delivery_address && firstOrder.delivery_address.contact_phone) || (clean10.length === 10 ? `+91${clean10}` : targetCustomerId),
+            full_name: (firstAddr && firstAddr.contact_name) || (firstOrder && firstOrder.delivery_address && (firstOrder.delivery_address.name || firstOrder.delivery_address.contact_name)) || 'Customer ' + (clean10.slice(-4) || 'User'),
+            email: null,
+            tier: 'STANDARD',
+            is_active: true,
+            created_at: (firstOrder && firstOrder.created_at) || (firstAddr && firstAddr.created_at) || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+        }
+
+        // Analytics calculation
+        const totalOrders = orders.length;
+        const deliveredOrders = orders.filter(o => ['DELIVERED', 'COMPLETED'].includes(String(o.status).toUpperCase())).length;
+        const cancelledOrders = orders.filter(o => String(o.status).toUpperCase() === 'CANCELLED').length;
+        const activeOrders = orders.filter(o => !['DELIVERED', 'COMPLETED', 'CANCELLED', 'REFUNDED'].includes(String(o.status).toUpperCase())).length;
+        
+        let grossOrderValue = 0;
+        let realizedSpend = 0;
+        for (const o of orders) {
+          const amt = Number(o.total_amount || 0);
+          grossOrderValue += amt;
+          if (String(o.status).toUpperCase() !== 'CANCELLED') {
+            realizedSpend += amt;
+          }
+        }
+        const nonCancelledCount = totalOrders - cancelledOrders;
+        const avgOrderValue = nonCancelledCount > 0 ? Math.round(realizedSpend / nonCancelledCount) : 0;
+        const firstOrderDate = orders.length > 0 ? orders[orders.length - 1].created_at : null;
+        const lastOrderDate = orders.length > 0 ? orders[0].created_at : null;
+
+        const analytics = {
+          totalOrders,
+          deliveredOrders,
+          activeOrders,
+          cancelledOrders,
+          grossOrderValue,
+          realizedSpend,
+          avgOrderValue,
+          firstOrderDate,
+          lastOrderDate
+        };
+
+        return sendJson(res, 200, {
+          ok: true,
+          customer,
+          addresses,
+          orders,
+          cart,
+          prescriptions,
+          analytics
+        });
+      } catch (err) {
+        console.error('Error in seller customer detail:', err);
+        return sendJson(res, 500, { error: 'DB_ERROR', message: err.message });
+      }
+    }
+
+    // -------------------------------------------------------------
     // Rider Offers & Delivery Router: GET /api/v1/delivery/offers/active
     // -------------------------------------------------------------
     if (pathname === '/api/v1/delivery/offers/active' && method === 'GET') {

@@ -29,6 +29,13 @@ export interface SellerSession {
   role: string;
 }
 
+export interface ApiResponse<T> {
+  data: T;
+  ok: boolean;
+  status: number;
+  error?: string;
+}
+
 export interface RegisteredUser {
   id: string;
   phone: string;
@@ -44,6 +51,113 @@ export interface RegisteredUser {
   primary_address?: string | null;
   primary_city?: string | null;
   addresses_count: number;
+}
+
+export interface CustomerAddress {
+  id: string;
+  customer_id: string;
+  address_type?: string;
+  address_line: string;
+  city: string;
+  postal_code?: string;
+  latitude?: number;
+  longitude?: number;
+  is_default: boolean;
+  contact_phone?: string;
+  contact_name?: string;
+  created_at?: string;
+}
+
+export interface CustomerOrderItem {
+  sku?: string;
+  product_id?: string;
+  title?: string;
+  name?: string;
+  quantity?: number;
+  qty?: number;
+  price?: number;
+  unit_price?: number;
+  total?: number;
+  image_url?: string;
+  image?: string;
+}
+
+export interface CustomerOrderHistory {
+  id: string;
+  order_id?: string;
+  customer_id: string;
+  store_id?: string;
+  status: string;
+  total_amount: number | string;
+  tax_amount?: number | string;
+  delivery_fee?: number | string;
+  payment_method?: string;
+  payment_status?: string;
+  is_cod?: boolean;
+  items: CustomerOrderItem[];
+  delivery_address?: any;
+  delivery_pin?: string;
+  cancellation?: any;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CustomerCartItem {
+  sku?: string;
+  title?: string;
+  name?: string;
+  quantity?: number;
+  price?: number;
+  image_url?: string;
+}
+
+export interface CustomerCart {
+  id: string;
+  customer_id: string;
+  items: CustomerCartItem[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CustomerPrescription {
+  id: string;
+  customer_id: string;
+  patient_name?: string;
+  age?: number;
+  gender?: string;
+  doctor_name?: string;
+  doctor_registration_no?: string;
+  attachments?: any;
+  note?: string;
+  status: string;
+  pharmacist_id?: string;
+  license_no?: string;
+  rejection_reason?: string;
+  reviewed_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CustomerAnalytics {
+  totalOrders: number;
+  deliveredOrders: number;
+  activeOrders: number;
+  cancelledOrders: number;
+  grossOrderValue: number;
+  realizedSpend: number;
+  avgOrderValue: number;
+  firstOrderDate: string | null;
+  lastOrderDate: string | null;
+}
+
+export interface CustomerFullDetail {
+  ok: boolean;
+  customer: RegisteredUser;
+  addresses: CustomerAddress[];
+  orders: CustomerOrderHistory[];
+  cart: CustomerCart | null;
+  prescriptions: CustomerPrescription[];
+  analytics: CustomerAnalytics;
 }
 
 function isValidRenderToken(token: string | undefined | null): boolean {
@@ -344,6 +458,109 @@ class SellerApiClient {
       } catch (err) {
         console.warn('[getUsers] Live order fallback resolution error:', err);
       }
+    }
+
+    return res;
+  }
+
+  public async getUserDetail(customerId: string): Promise<ApiResponse<CustomerFullDetail>> {
+    const encodedId = encodeURIComponent(customerId);
+    const res = await this.request<CustomerFullDetail>(`/api/v1/seller/users/${encodedId}`);
+    
+    // If successful and has data, return
+    if (res.ok && res.data && res.data.customer) {
+      return res;
+    }
+
+    // Resilient fallback from orders if endpoint is temporarily unavailable
+    try {
+      const ordersRes = await this.get<any[]>('/api/v1/orders/seller');
+      if (ordersRes.ok && Array.isArray(ordersRes.data)) {
+        const clean10 = customerId.replace(/\D/g, '').slice(-10);
+        const matchedOrders = ordersRes.data.filter((o: any) => {
+          const cId = o.customer_id || o.customerId;
+          const phone = o.customerPhone || o.resolved_phone || (o.delivery_address && o.delivery_address.contact_phone) || (o.deliveryAddress && o.deliveryAddress.contact_phone);
+          if (cId === customerId) return true;
+          if (clean10 && (String(cId).includes(clean10) || String(phone).includes(clean10))) return true;
+          return false;
+        });
+
+        const firstOrder = matchedOrders[0];
+        const addr = firstOrder?.deliveryAddress || firstOrder?.delivery_address;
+        const customer: RegisteredUser = {
+          id: customerId,
+          phone: firstOrder?.customerPhone || addr?.contact_phone || (clean10 ? `+91${clean10}` : customerId),
+          full_name: firstOrder?.customerName || addr?.contact_name || 'Customer ' + (clean10 ? clean10.slice(-4) : 'User'),
+          email: null,
+          tier: 'STANDARD',
+          is_active: true,
+          created_at: firstOrder?.createdAt || firstOrder?.created_at || new Date().toISOString(),
+          total_orders: matchedOrders.length,
+          total_spend: matchedOrders.reduce((sum: number, o: any) => sum + Number(o.totalAmount || o.total_amount || 0), 0),
+          addresses_count: addr ? 1 : 0
+        };
+
+        const addresses: CustomerAddress[] = addr ? [{
+          id: addr.id || 'addr_primary',
+          customer_id: customerId,
+          address_line: addr.address_line || addr.address || 'Address on file',
+          city: addr.city || 'Rewari',
+          postal_code: addr.postal_code,
+          latitude: addr.latitude,
+          longitude: addr.longitude,
+          is_default: true,
+          contact_phone: addr.contact_phone || customer.phone
+        }] : [];
+
+        const mappedOrders: CustomerOrderHistory[] = matchedOrders.map((o: any) => ({
+          id: o.id || o.order_id,
+          order_id: o.order_id || o.id,
+          customer_id: o.customer_id || customerId,
+          status: o.status || 'PLACED',
+          total_amount: o.totalAmount || o.total_amount || 0,
+          payment_method: o.paymentMethod || o.payment_method || 'COD',
+          payment_status: o.paymentStatus || o.payment_status || 'PENDING',
+          is_cod: o.isCod ?? o.is_cod ?? true,
+          items: Array.isArray(o.items) ? o.items : [],
+          delivery_address: o.deliveryAddress || o.delivery_address,
+          delivery_pin: o.delivery_pin,
+          created_at: o.createdAt || o.created_at || new Date().toISOString()
+        }));
+
+        const totalOrders = mappedOrders.length;
+        const deliveredOrders = mappedOrders.filter(o => ['DELIVERED', 'COMPLETED'].includes(String(o.status).toUpperCase())).length;
+        const cancelledOrders = mappedOrders.filter(o => String(o.status).toUpperCase() === 'CANCELLED').length;
+        const activeOrders = mappedOrders.filter(o => !['DELIVERED', 'COMPLETED', 'CANCELLED'].includes(String(o.status).toUpperCase())).length;
+        const grossOrderValue = mappedOrders.reduce((s, o) => s + Number(o.total_amount || 0), 0);
+        const realizedSpend = mappedOrders.filter(o => String(o.status).toUpperCase() !== 'CANCELLED').reduce((s, o) => s + Number(o.total_amount || 0), 0);
+        const nonCancelled = totalOrders - cancelledOrders;
+
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            ok: true,
+            customer,
+            addresses,
+            orders: mappedOrders,
+            cart: null,
+            prescriptions: [],
+            analytics: {
+              totalOrders,
+              deliveredOrders,
+              activeOrders,
+              cancelledOrders,
+              grossOrderValue,
+              realizedSpend,
+              avgOrderValue: nonCancelled > 0 ? Math.round(realizedSpend / nonCancelled) : 0,
+              firstOrderDate: mappedOrders.length > 0 ? mappedOrders[mappedOrders.length - 1].created_at : null,
+              lastOrderDate: mappedOrders.length > 0 ? mappedOrders[0].created_at : null
+            }
+          }
+        };
+      }
+    } catch (e) {
+      console.warn('[getUserDetail] Fallback error:', e);
     }
 
     return res;
