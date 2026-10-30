@@ -1611,8 +1611,8 @@ const server = http.createServer(async (req, res) => {
       if (challengeId) {
         const chRes = await pool.query(
           `SELECT id, phone, otp_hash, expires_at, attempts, verified_at FROM auth_challenges
-           WHERE id = $1 AND phone = $2 AND verified_at IS NULL AND expires_at > NOW()`,
-          [challengeId, formattedPhone]
+           WHERE id = $1 AND (phone = $2 OR phone = $3 OR phone LIKE '%' || $3) AND verified_at IS NULL AND expires_at > NOW()`,
+          [challengeId, formattedPhone, phoneDigits]
         );
 
         if (chRes.rows.length === 0) {
@@ -2007,8 +2007,8 @@ const server = http.createServer(async (req, res) => {
 
       const chRes = await pool.query(
         `SELECT id, phone, otp_hash, expires_at, attempts, verified_at FROM auth_challenges
-         WHERE id = $1 AND phone = $2 AND verified_at IS NULL AND expires_at > NOW()`,
-        [challengeId, formattedPhone]
+         WHERE id = $1 AND (phone = $2 OR phone = $3 OR phone LIKE '%' || $3) AND verified_at IS NULL AND expires_at > NOW()`,
+        [challengeId, formattedPhone, phoneDigits]
       );
 
       if (chRes.rows.length === 0) {

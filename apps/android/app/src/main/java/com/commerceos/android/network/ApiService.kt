@@ -402,8 +402,9 @@ object NetworkClient {
                     }
                 )
                 .build()
+            val safeUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
             Retrofit.Builder()
-                .baseUrl(baseUrl)
+                .baseUrl(safeUrl)
                 .client(client)
                 .addConverterFactory(GsonConverterFactory.create())
                 .build()

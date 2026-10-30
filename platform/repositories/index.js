@@ -357,9 +357,15 @@ class TransactionalCustomerRepository {
 
   async verifyOtpChallenge(phone, challengeId, submittedOtp, isLocalTest = false) {
     if (!this.pool) return { ok: false, error: 'NO_POOL' };
+    const digitsOnly = String(phone || '').replace(/\D/g, '');
+    const clean10 = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+    const formatted = clean10.length === 10 ? `+91${clean10}` : phone;
     const res = await this.pool.query(
-      `SELECT * FROM auth_challenges WHERE id = $1 AND phone = $2 LIMIT 1`,
-      [challengeId, phone]
+      `SELECT * FROM auth_challenges 
+       WHERE id = $1 
+         AND (phone = $2 OR phone = $3 OR phone = $4 OR phone LIKE '%' || $3)
+       LIMIT 1`,
+      [challengeId, phone, clean10, formatted]
     );
     const challenge = res.rows[0];
     if (!challenge) {

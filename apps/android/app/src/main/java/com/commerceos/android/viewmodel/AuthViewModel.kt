@@ -198,8 +198,12 @@ class AuthViewModel(private val authUseCase: AuthUseCase) : ViewModel() {
             return
         }
         uiState = uiState.copy(isLoading = true, errorMessage = null)
+        val cleanDigits = uiState.phone.replace(Regex("[^0-9]"), "").let {
+            if (it.length > 10) it.takeLast(10) else it
+        }
+        val targetPhone = if (cleanDigits.length == 10) "+91$cleanDigits" else uiState.phone
         viewModelScope.launch {
-            when (val result = authUseCase.verifyOtp(uiState.challengeId, uiState.phone, code)) {
+            when (val result = authUseCase.verifyOtp(uiState.challengeId, targetPhone, code)) {
                 is ApiResult.Success -> {
                     expiryJob?.cancel()
                     uiState = uiState.copy(isLoading = false)
