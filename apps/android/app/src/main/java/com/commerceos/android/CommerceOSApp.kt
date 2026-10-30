@@ -611,9 +611,13 @@ fun CommerceOSApp(
                             ?: addressViewModel.addresses.firstOrNull { it.isDefault }
                             ?: addressViewModel.addresses.firstOrNull()
 
-                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
-                        if (currentSelected != null) {
-                            checkoutViewModel.selectAddress(currentSelected)
+                        val isCompleteSavedAddress = currentSelected != null &&
+                            !currentSelected.id.startsWith("temp_gps_") &&
+                            !currentSelected.tag.equals("Current Location", ignoreCase = true)
+
+                        if (isCompleteSavedAddress) {
+                            checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                            checkoutViewModel.selectAddress(currentSelected!!)
                             navigate(Screen.PaymentGateway)
                         } else {
                             addressViewModel.init(authenticatedCustomerId, force = true)

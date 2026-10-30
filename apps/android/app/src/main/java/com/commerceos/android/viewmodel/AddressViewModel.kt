@@ -131,14 +131,14 @@ class AddressViewModel(
     }
 
     private fun matchProximityOrFallbackPinpoint(geoPoint: GeoPoint) {
-        // Check if any saved address is within a 100-meter radius of the current GPS pinpoint
+        // Check if any saved address is within a 50-meter radius of the current GPS pinpoint
         val matchingSaved = addresses
             .mapNotNull { addr ->
                 val aLat = addr.latitude
                 val aLng = addr.longitude
                 if (aLat != null && aLng != null && aLat != 0.0 && aLng != 0.0) {
                     val distMeters = RealTimeEtaEngine.calculateDistanceKm(geoPoint.latitude, geoPoint.longitude, aLat, aLng) * 1000.0
-                    if (distMeters <= 100.0) addr to distMeters else null
+                    if (distMeters <= 50.0) addr to distMeters else null
                 } else null
             }
             .minByOrNull { it.second }
@@ -147,6 +147,11 @@ class AddressViewModel(
         if (matchingSaved != null) {
             selectedAddress = matchingSaved
         } else {
+            // Keep existing manually selected saved address if present
+            val current = selectedAddress
+            if (current != null && !current.id.startsWith("temp_gps_") && !current.tag.equals("Current Location", ignoreCase = true)) {
+                return
+            }
             val place = liveGpsPlace
             val fullArea = cleanAddressSegments(
                 place?.subLocality,

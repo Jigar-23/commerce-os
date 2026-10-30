@@ -133,11 +133,15 @@ fun CartScreen(
 
         val rxRequiredInCart = cartItems.any { it.prescriptionRequired }
         val isRxBlocked = rxRequiredInCart && attachedPrescriptionId.isNullOrBlank()
+        val isAddressSaved = deliveryAddress != null &&
+            !deliveryAddress.id.startsWith("temp_gps_") &&
+            !deliveryAddress.tag.equals("Current Location", ignoreCase = true)
 
         StickyCheckoutBar(
             grandTotal = grandTotal,
             totalSavings = totalSavings,
             rxBlocked = isRxBlocked,
+            hasSavedAddress = isAddressSaved,
             onProceed = onProceedToAddress,
             onUploadPrescription = onUploadPrescription
         )
@@ -1098,6 +1102,7 @@ private fun StickyCheckoutBar(
     grandTotal: String?,
     totalSavings: String?,
     rxBlocked: Boolean,
+    hasSavedAddress: Boolean = true,
     onProceed: () -> Unit,
     onUploadPrescription: () -> Unit
 ) {
@@ -1154,6 +1159,19 @@ private fun StickyCheckoutBar(
                 ) {
                     Text("Upload Prescription", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
                 }
+            } else if (!hasSavedAddress) {
+                Button(
+                    onClick = onProceed,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF059669),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
+                    Text("Select Address ➔", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = Color.White)
+                }
             } else {
                 Button(
                     onClick = onProceed,
@@ -1177,28 +1195,34 @@ private fun CartDeliveryAddressCard(
     deliveryAddress: ApiAddress?,
     onChangeAddress: (() -> Unit)?
 ) {
+    val isCompleteAddress = deliveryAddress != null &&
+        !deliveryAddress.id.startsWith("temp_gps_") &&
+        !deliveryAddress.tag.equals("Current Location", ignoreCase = true)
+
     Surface(
         color = Color.White,
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, if (isCompleteAddress) Color(0xFFE2E8F0) else Color(0xFFFDE68A)),
         shadowElevation = 0.5.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onChangeAddress != null) Modifier.clickable { onChangeAddress() } else Modifier)
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                color = Color(0xFFF0FDF4),
+                color = if (isCompleteAddress) Color(0xFFF0FDF4) else Color(0xFFFEF3C7),
                 shape = CircleShape,
-                border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                border = BorderStroke(1.dp, if (isCompleteAddress) Color(0xFFBBF7D0) else Color(0xFFFCD34D)),
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Default.Place,
                         contentDescription = "Delivery Location",
-                        tint = Color(0xFF059669),
+                        tint = if (isCompleteAddress) Color(0xFF059669) else Color(0xFFD97706),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1209,38 +1233,55 @@ private fun CartDeliveryAddressCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (deliveryAddress != null) "Deliver to ${deliveryAddress.tag.ifBlank { "Home" }}" else "Delivery Address",
+                        text = if (isCompleteAddress) "Deliver to ${deliveryAddress?.tag?.ifBlank { "Home" }}" else "Add Delivery Address",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        color = Color(0xFFDCFCE7),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = "⚡ 10 Mins",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF166534),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                        )
+                    if (isCompleteAddress) {
+                        Surface(
+                            color = Color(0xFFDCFCE7),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "⚡ 10 Mins",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF166534),
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    } else {
+                        Surface(
+                            color = Color(0xFFFEF3C7),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "Required",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB45309),
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = if (deliveryAddress != null) {
+                    text = if (isCompleteAddress) {
                         val fullLine = listOfNotNull(
-                            deliveryAddress.addressLine.takeIf { it.isNotBlank() },
-                            deliveryAddress.city.takeIf { it.isNotBlank() }
+                            deliveryAddress?.addressLine?.takeIf { it.isNotBlank() },
+                            deliveryAddress?.city?.takeIf { it.isNotBlank() }
                         ).joinToString(", ")
                         fullLine.ifBlank { "Selected delivery location" }
+                    } else if (deliveryAddress != null && deliveryAddress.addressLine.isNotBlank()) {
+                        "Near ${deliveryAddress.addressLine} • Add house/flat details to place order"
                     } else {
-                        "No address selected. Tap change to select or add."
+                        "Tap to choose or enter your complete address"
                     },
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B),
+                    color = if (isCompleteAddress) Color(0xFF64748B) else Color(0xFFB45309),
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
@@ -1253,10 +1294,10 @@ private fun CartDeliveryAddressCard(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (deliveryAddress != null) "Change" else "Add",
+                        text = if (isCompleteAddress) "Change" else "Add",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
+                        color = if (isCompleteAddress) Color(0xFF059669) else Color(0xFFD97706)
                     )
                 }
             }
