@@ -3446,8 +3446,6 @@ async function handleRequest(port, req, res) {
           }
         }
 
-        const digitsOnly = String(rawPhone).replace(/\D/g, '');
-        const cleanPhone = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
         const isRiderAuth = (body.role === 'ROLE_RIDER' || body.role === 'rider' || path.includes('/rider'));
 
         if (isRiderAuth) {
