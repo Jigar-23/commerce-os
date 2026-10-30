@@ -19,7 +19,8 @@ import {
   XCircle, Filter, ArrowUpDown, ChevronRight, UserCheck, UserX,
   ExternalLink, Eye, Copy, Check, ShoppingCart, Package, FileText,
   Clock, Navigation, AlertCircle, Hash, ArrowUpRight, DollarSign,
-  Activity, Tag, Compass, AlertTriangle, Layers, Sparkles
+  Activity, Tag, Compass, AlertTriangle, Layers, Sparkles,
+  Pencil, Save, X, Edit3
 } from 'lucide-react';
 
 export default function RegisteredUsersPage() {
@@ -38,6 +39,19 @@ export default function RegisteredUsersPage() {
   const [detailTab, setDetailTab] = useState<'OVERVIEW' | 'ORDERS' | 'ADDRESSES' | 'CART' | 'PRESCRIPTIONS'>('OVERVIEW');
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('ALL');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Edit Customer State
+  const [isEditingUser, setIsEditingUser] = useState(false);
+  const [editForm, setEditForm] = useState({
+    fullName: '',
+    phone: '',
+    email: '',
+    tier: 'STANDARD',
+    isActive: true
+  });
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [saveUserError, setSaveUserError] = useState<string | null>(null);
+  const [saveUserSuccess, setSaveUserSuccess] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -76,6 +90,119 @@ export default function RegisteredUsersPage() {
       console.error('Failed to load full user details:', err);
     } finally {
       setIsLoadingDetail(false);
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (!selectedUser) return;
+    const currentCust = userDetail?.customer || selectedUser;
+    setEditForm({
+      fullName: currentCust.full_name || '',
+      phone: currentCust.phone || '',
+      email: currentCust.email || '',
+      tier: (currentCust.tier || 'STANDARD').toUpperCase(),
+      isActive: currentCust.is_active !== false
+    });
+    setSaveUserError(null);
+    setSaveUserSuccess(null);
+    setIsEditingUser(true);
+  };
+
+  const handleSaveEdit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedUser) return;
+
+    if (!editForm.fullName.trim()) {
+      setSaveUserError('Customer full name is required.');
+      return;
+    }
+    const cleanPhone = editForm.phone.replace(/\D/g, '').slice(-10);
+    if (cleanPhone.length !== 10) {
+      setSaveUserError('A valid 10-digit mobile phone number is required.');
+      return;
+    }
+
+    setIsSavingUser(true);
+    setSaveUserError(null);
+    setSaveUserSuccess(null);
+
+    try {
+      const formattedPhone = `+91${cleanPhone}`;
+      const payload = {
+        fullName: editForm.fullName.trim(),
+        full_name: editForm.fullName.trim(),
+        phone: formattedPhone,
+        email: editForm.email.trim() || null,
+        tier: editForm.tier,
+        isActive: editForm.isActive,
+        is_active: editForm.isActive
+      };
+
+      const res = await sellerApi.updateUser(selectedUser.id, payload);
+      if (res.ok && res.data) {
+        const updated = res.data.customer || {
+          ...selectedUser,
+          full_name: payload.fullName,
+          phone: payload.phone,
+          email: payload.email,
+          tier: payload.tier,
+          is_active: payload.isActive
+        };
+
+        // Update selectedUser
+        setSelectedUser((prev) => (prev ? {
+          ...prev,
+          full_name: updated.full_name || payload.fullName,
+          phone: updated.phone || payload.phone,
+          email: updated.email !== undefined ? updated.email : payload.email,
+          tier: updated.tier || payload.tier,
+          is_active: updated.is_active !== undefined ? updated.is_active : payload.isActive,
+          updated_at: new Date().toISOString()
+        } : null));
+
+        // Update userDetail
+        setUserDetail((prev) => (prev ? {
+          ...prev,
+          customer: {
+            ...prev.customer,
+            full_name: updated.full_name || payload.fullName,
+            phone: updated.phone || payload.phone,
+            email: updated.email !== undefined ? updated.email : payload.email,
+            tier: updated.tier || payload.tier,
+            is_active: updated.is_active !== undefined ? updated.is_active : payload.isActive,
+            updated_at: new Date().toISOString()
+          }
+        } : null));
+
+        // Update user entry in registry list
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === selectedUser.id
+              ? {
+                  ...u,
+                  full_name: updated.full_name || payload.fullName,
+                  phone: updated.phone || payload.phone,
+                  email: updated.email !== undefined ? updated.email : payload.email,
+                  tier: updated.tier || payload.tier,
+                  is_active: updated.is_active !== undefined ? updated.is_active : payload.isActive,
+                  updated_at: new Date().toISOString()
+                }
+              : u
+          )
+        );
+
+        setSaveUserSuccess('Customer information updated successfully.');
+        setTimeout(() => {
+          setIsEditingUser(false);
+          setSaveUserSuccess(null);
+        }, 1200);
+      } else {
+        setSaveUserError(res.error || 'Failed to update customer profile.');
+      }
+    } catch (err: any) {
+      setSaveUserError(err?.message || 'Error occurred while saving customer profile.');
+    } finally {
+      setIsSavingUser(false);
     }
   };
 
@@ -553,6 +680,14 @@ export default function RegisteredUsersPage() {
                       >
                         {selectedUser.is_active ? 'ACTIVE' : 'INACTIVE'}
                       </span>
+                      <button
+                        onClick={handleStartEdit}
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-bold text-3xs transition inline-flex items-center space-x-1 border border-amber-300 shadow-2xs ml-1"
+                        title="Edit Customer Profile Information"
+                      >
+                        <Pencil className="w-3 h-3 text-amber-700" />
+                        <span>Edit Info</span>
+                      </button>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3 mt-1 text-2xs text-content-muted">
@@ -735,10 +870,19 @@ export default function RegisteredUsersPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Customer Credentials */}
                       <div className="bg-surface-subtle p-5 rounded-2xl border border-border-default space-y-3">
-                        <h3 className="text-3xs font-extrabold uppercase tracking-wider text-content-muted flex items-center space-x-1.5">
-                          <ShieldCheck className="w-3.5 h-3.5 text-action-speedBg" />
-                          <span>Account Credentials &amp; Status</span>
-                        </h3>
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-3xs font-extrabold uppercase tracking-wider text-content-muted flex items-center space-x-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-action-speedBg" />
+                            <span>Account Credentials &amp; Status</span>
+                          </h3>
+                          <button
+                            onClick={handleStartEdit}
+                            className="text-action-speedBg hover:underline text-3xs font-bold inline-flex items-center space-x-1"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            <span>Edit Profile</span>
+                          </button>
+                        </div>
 
                         <div className="space-y-2 text-2xs">
                           <div className="flex items-center justify-between py-1 border-b border-border-subtle">
@@ -1374,6 +1518,155 @@ export default function RegisteredUsersPage() {
                   Close Profile
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Customer Profile Modal */}
+        {isEditingUser && selectedUser && (
+          <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-lg w-full border border-border-default shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="p-6 bg-surface-subtle border-b border-border-default flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+                    <Pencil className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-content-primary">Edit Customer Information</h3>
+                    <p className="text-3xs text-content-muted font-mono">ID: {selectedUser.id}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsEditingUser(false)}
+                  disabled={isSavingUser}
+                  className="p-2 text-content-muted hover:text-content-primary rounded-xl transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} className="p-6 space-y-4 text-xs">
+                {saveUserError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-2xs font-bold flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{saveUserError}</span>
+                  </div>
+                )}
+
+                {saveUserSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-2xs font-bold flex items-center space-x-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{saveUserSuccess}</span>
+                  </div>
+                )}
+
+                {/* Full Name */}
+                <div className="space-y-1">
+                  <label className="text-2xs font-extrabold uppercase text-content-muted tracking-wider">
+                    Full Name / Customer Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.fullName}
+                    onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full px-3.5 py-2.5 bg-surface-subtle border border-border-default rounded-xl text-xs font-bold text-content-primary focus:outline-hidden focus:ring-2 focus:ring-action-speedBg/20 focus:border-action-speedBg transition"
+                  />
+                </div>
+
+                {/* Phone Number */}
+                <div className="space-y-1">
+                  <label className="text-2xs font-extrabold uppercase text-content-muted tracking-wider">
+                    Mobile Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    placeholder="e.g. +91 9817916180 or 10 digits"
+                    className="w-full px-3.5 py-2.5 bg-surface-subtle border border-border-default rounded-xl text-xs font-bold text-content-primary focus:outline-hidden focus:ring-2 focus:ring-action-speedBg/20 focus:border-action-speedBg transition"
+                  />
+                  <p className="text-3xs text-content-muted">Authoritative mobile number for SMS/OTP verification and delivery dispatch</p>
+                </div>
+
+                {/* Email Address */}
+                <div className="space-y-1">
+                  <label className="text-2xs font-extrabold uppercase text-content-muted tracking-wider">
+                    Email Address (Optional)
+                  </label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    placeholder="e.g. customer@example.com"
+                    className="w-full px-3.5 py-2.5 bg-surface-subtle border border-border-default rounded-xl text-xs font-bold text-content-primary focus:outline-hidden focus:ring-2 focus:ring-action-speedBg/20 focus:border-action-speedBg transition"
+                  />
+                </div>
+
+                {/* Account Tier & Status Grid */}
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div className="space-y-1">
+                    <label className="text-2xs font-extrabold uppercase text-content-muted tracking-wider">
+                      Account Tier
+                    </label>
+                    <select
+                      value={editForm.tier}
+                      onChange={(e) => setEditForm({ ...editForm, tier: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-surface-subtle border border-border-default rounded-xl text-xs font-bold text-content-primary focus:outline-hidden"
+                    >
+                      <option value="STANDARD">STANDARD</option>
+                      <option value="SILVER">SILVER</option>
+                      <option value="GOLD">GOLD</option>
+                      <option value="PLATINUM">PLATINUM</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-2xs font-extrabold uppercase text-content-muted tracking-wider">
+                      Account Status
+                    </label>
+                    <select
+                      value={editForm.isActive ? 'ACTIVE' : 'INACTIVE'}
+                      onChange={(e) => setEditForm({ ...editForm, isActive: e.target.value === 'ACTIVE' })}
+                      className="w-full px-3.5 py-2.5 bg-surface-subtle border border-border-default rounded-xl text-xs font-bold text-content-primary focus:outline-hidden"
+                    >
+                      <option value="ACTIVE">ACTIVE (Authorized)</option>
+                      <option value="INACTIVE">INACTIVE (Suspended)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="pt-4 flex items-center justify-end space-x-2.5 border-t border-border-subtle">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingUser(false)}
+                    disabled={isSavingUser}
+                    className="px-4 py-2 bg-surface-subtle hover:bg-slate-200 text-content-secondary rounded-xl font-bold text-xs transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingUser}
+                    className="px-5 py-2 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl font-bold text-xs transition flex items-center space-x-1.5 shadow-md shadow-subtle disabled:opacity-50"
+                  >
+                    {isSavingUser ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Save Changes</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

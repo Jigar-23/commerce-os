@@ -5728,6 +5728,119 @@ async function handleRequest(port, req, res) {
         });
       }
 
+      // PATCH & PUT /api/v1/seller/users/:customerId or /api/v1/seller/customers/:customerId
+      if (sellerCustomerDetailMatch && (req.method === 'PATCH' || req.method === 'PUT')) {
+        const targetCustomerId = decodeURIComponent(sellerCustomerDetailMatch[1]).trim();
+        const clean10 = targetCustomerId.replace(/\D/g, '').slice(-10);
+        const custVariants = [targetCustomerId];
+        if (clean10.length === 10) {
+          custVariants.push(`cust_${clean10}`);
+          custVariants.push(`usr_${clean10}`);
+          custVariants.push(`+91${clean10}`);
+          custVariants.push(clean10);
+        }
+        const uniqueVariants = Array.from(new Set(custVariants.filter(Boolean)));
+        const body = await parseBody(req);
+        const fullName = body.fullName || body.full_name || body.name;
+        let phone = body.phone;
+        if (phone) {
+          const digits = String(phone).replace(/\D/g, '').slice(-10);
+          if (digits.length === 10) {
+            phone = `+91${digits}`;
+          }
+        }
+        const email = body.email !== undefined ? (body.email ? String(body.email).trim() : null) : undefined;
+        const tier = body.tier ? String(body.tier).trim().toUpperCase() : undefined;
+        const isActive = body.isActive !== undefined ? Boolean(body.isActive) : (body.is_active !== undefined ? Boolean(body.is_active) : undefined);
+
+        if (productionPgPool) {
+          try {
+            let updRes = await productionPgPool.query(
+              `UPDATE customers SET
+                full_name = COALESCE($1, full_name),
+                phone = COALESCE($2, phone),
+                email = CASE WHEN $3::text IS NOT NULL THEN $3::text ELSE email END,
+                tier = COALESCE($4, tier),
+                is_active = COALESCE($5, is_active),
+                updated_at = NOW()
+               WHERE id = ANY($6) OR phone = ANY($6)
+               RETURNING *`,
+              [
+                fullName || null,
+                phone || null,
+                email !== undefined ? email : null,
+                tier || null,
+                isActive !== undefined ? isActive : null,
+                uniqueVariants
+              ]
+            );
+
+            let customer = updRes.rows[0];
+            if (!customer) {
+              const insertRes = await productionPgPool.query(
+                `INSERT INTO customers (id, full_name, phone, email, tier, is_active, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                 ON CONFLICT (id) DO UPDATE SET
+                   full_name = COALESCE(EXCLUDED.full_name, customers.full_name),
+                   phone = COALESCE(EXCLUDED.phone, customers.phone),
+                   email = COALESCE(EXCLUDED.email, customers.email),
+                   tier = COALESCE(EXCLUDED.tier, customers.tier),
+                   is_active = COALESCE(EXCLUDED.is_active, customers.is_active),
+                   updated_at = NOW()
+                 RETURNING *`,
+                [
+                  targetCustomerId,
+                  fullName || 'Customer ' + (clean10.slice(-4) || 'User'),
+                  phone || (clean10.length === 10 ? `+91${clean10}` : ''),
+                  email || null,
+                  tier || 'STANDARD',
+                  isActive !== undefined ? isActive : true
+                ]
+              );
+              customer = insertRes.rows[0];
+            }
+
+            return json(res, 200, {
+              ok: true,
+              message: 'Customer profile updated successfully.',
+              customer
+            });
+          } catch (err) {
+            console.error('[MockServer] Error updating customer in productionPgPool:', err);
+          }
+        }
+
+        // In-memory fallback
+        db.customers = db.customers || [];
+        let cust = db.customers.find(c => uniqueVariants.includes(c.id) || uniqueVariants.includes(c.phone));
+        if (!cust) {
+          cust = {
+            id: targetCustomerId,
+            phone: phone || (clean10.length === 10 ? `+91${clean10}` : ''),
+            full_name: fullName || 'Customer ' + (clean10.slice(-4) || 'User'),
+            email: email || null,
+            tier: tier || 'STANDARD',
+            is_active: isActive !== undefined ? isActive : true,
+            created_at: new Date().toISOString()
+          };
+          db.customers.push(cust);
+        } else {
+          if (fullName) cust.full_name = fullName;
+          if (phone) cust.phone = phone;
+          if (email !== undefined) cust.email = email;
+          if (tier) cust.tier = tier;
+          if (isActive !== undefined) cust.is_active = isActive;
+          cust.updated_at = new Date().toISOString();
+        }
+        saveDb();
+
+        return json(res, 200, {
+          ok: true,
+          message: 'Customer profile updated successfully.',
+          customer: cust
+        });
+      }
+
       // POST /api/v1/seller/riders
       if (path === '/api/v1/seller/riders' && req.method === 'POST') {
         const body = await parseBody(req);

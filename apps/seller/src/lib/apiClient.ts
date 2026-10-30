@@ -565,6 +565,26 @@ class SellerApiClient {
 
     return res;
   }
+
+  public async updateUser(
+    customerId: string,
+    data: {
+      fullName?: string;
+      full_name?: string;
+      phone?: string;
+      email?: string | null;
+      tier?: string;
+      isActive?: boolean;
+      is_active?: boolean;
+    }
+  ): Promise<ApiResponse<{ ok: boolean; message: string; customer: RegisteredUser }>> {
+    const encodedId = encodeURIComponent(customerId);
+    const res = await this.patch<{ ok: boolean; message: string; customer: RegisteredUser }>(
+      `/api/v1/seller/users/${encodedId}`,
+      data
+    );
+    return res;
+  }
 }
 
 export const sellerApi = new SellerApiClient();
