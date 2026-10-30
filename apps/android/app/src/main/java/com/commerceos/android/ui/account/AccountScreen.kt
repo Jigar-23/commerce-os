@@ -45,8 +45,8 @@ fun AccountScreen(
     onNotifications: () -> Unit = {},
     onLogout: () -> Unit
 ) {
-    val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: "Customer"
-    val phone = profile?.phone?.takeIf { it.isNotBlank() } ?: fallbackPhone
+    val displayName = profile?.displayName?.trim()?.takeIf { it.isNotBlank() } ?: "Customer"
+    val phone = profile?.phone?.trim()?.takeIf { it.isNotBlank() } ?: fallbackPhone.trim()
     val context = LocalContext.current
     var showRefillDialog by remember { mutableStateOf(false) }
 
@@ -405,8 +405,8 @@ private fun ProfileMenuRow(
     }
 }
 
-private fun maskPhone(phone: String): String {
-    val digits = phone.filter { it.isDigit() }
+private fun maskPhone(phone: String?): String {
+    val digits = phone?.filter { it.isDigit() } ?: ""
     if (digits.length < 4) return "Verified mobile number"
     val suffix = digits.takeLast(4)
     val prefix = if (digits.length >= 10) "+91 " else ""

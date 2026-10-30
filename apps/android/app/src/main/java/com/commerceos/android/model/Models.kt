@@ -433,18 +433,34 @@ data class RegisterCustomerRequest(
 
 // Server-owned customer profile (GET /api/v1/customers/:id)
 data class CustomerProfile(
-    val id: String,
-    val fullName: String = "",
+    @com.google.gson.annotations.SerializedName(value = "id", alternate = ["customerId", "customer_id"])
+    val id: String? = null,
+
+    @com.google.gson.annotations.SerializedName(value = "fullName", alternate = ["full_name", "name", "contactName", "contact_name"])
+    val fullName: String? = null,
+
+    @com.google.gson.annotations.SerializedName(value = "email", alternate = ["emailAddress", "email_address"])
     val email: String? = null,
-    val phone: String = "",
-    val status: String = "ACTIVE"
+
+    @com.google.gson.annotations.SerializedName(value = "phone", alternate = ["phoneNumber", "phone_number", "contactPhone", "contact_phone"])
+    val phone: String? = null,
+
+    @com.google.gson.annotations.SerializedName(value = "status", alternate = ["tier", "user_status"])
+    val status: String? = "ACTIVE"
 ) {
-    val displayName: String get() = fullName.ifBlank { "Customer" }
+    val displayName: String get() {
+        val name = fullName?.trim()
+        if (!name.isNullOrBlank()) return name
+        val p = phone?.filter { it.isDigit() } ?: ""
+        return if (p.length >= 4) "Customer ${p.takeLast(4)}" else "Customer"
+    }
+
     val maskedPhone: String get() {
-        val digits = phone.replace(Regex("[^0-9]"), "")
+        val p = phone?.trim() ?: ""
+        val digits = p.filter { it.isDigit() }
         return if (digits.length >= 10) {
             "+91 ${digits.take(5)} ${digits.takeLast(5)}"
-        } else phone
+        } else if (p.isNotBlank()) p else "Verified Phone"
     }
 }
 

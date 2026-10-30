@@ -2878,32 +2878,44 @@ const server = http.createServer(async (req, res) => {
     const custProfileMatch = pathname.match(/^\/api\/v1\/customers\/([^/]+)$/);
     if (custProfileMatch && method === 'GET') {
       const customerId = custProfileMatch[1];
+      const clean10 = customerId.replace(/\D/g, '').slice(-10);
+      const variants = [customerId];
+      if (clean10.length === 10) {
+        variants.push(`cust_${clean10}`);
+        variants.push(`usr_${clean10}`);
+        variants.push(`+91${clean10}`);
+        variants.push(clean10);
+      }
+      const uniqueVariants = Array.from(new Set(variants.filter(Boolean)));
+
       const cRes = await pool.query(
-        `SELECT id, full_name, phone, email, tier, is_active, created_at FROM customers WHERE id = $1`,
-        [customerId]
+        `SELECT id, full_name, phone, email, tier, is_active, created_at FROM customers WHERE id = ANY($1) OR phone = ANY($1) ORDER BY (CASE WHEN id = $2 THEN 0 ELSE 1 END), updated_at DESC LIMIT 1`,
+        [uniqueVariants, customerId]
       );
       if (cRes.rows.length === 0) {
+        const fallbackName = clean10.length === 10 ? 'Customer ' + clean10.slice(-4) : 'Customer';
         return sendJson(res, 200, {
           id: customerId,
           customerId: customerId,
-          name: 'Customer',
-          fullName: 'Customer',
-          phone: '',
+          name: fallbackName,
+          fullName: fallbackName,
+          phone: clean10.length === 10 ? `+91${clean10}` : '',
           email: '',
-          tier: 'GOLD',
+          tier: 'STANDARD',
           isActive: true
         });
       }
       const c = cRes.rows[0];
+      const resolvedName = (c.full_name && c.full_name.trim()) || (c.phone ? 'Customer ' + c.phone.slice(-4) : 'Customer');
       return sendJson(res, 200, {
         id: c.id,
         customerId: c.id,
-        name: c.full_name,
-        fullName: c.full_name,
-        phone: c.phone,
+        name: resolvedName,
+        fullName: resolvedName,
+        phone: c.phone || (clean10.length === 10 ? `+91${clean10}` : ''),
         email: c.email || '',
-        tier: c.tier || 'GOLD',
-        isActive: c.is_active
+        tier: c.tier || 'STANDARD',
+        isActive: c.is_active !== false
       });
     }
 

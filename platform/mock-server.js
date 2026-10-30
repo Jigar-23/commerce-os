@@ -8259,7 +8259,17 @@ async function handleRequest(port, req, res) {
 
       // Profile
       if (path === '/api/v1/customers/' + customerId || path.endsWith('/profile')) {
-        return json(res, 200, { ...customer, addresses: addrBook() });
+        const c = customer || {};
+        const fallbackName = c.fullName || c.full_name || c.name || (c.phone ? 'Customer ' + String(c.phone).slice(-4) : 'Customer');
+        return json(res, 200, {
+          ...c,
+          id: c.id || customerId,
+          customerId: c.id || customerId,
+          fullName: fallbackName,
+          name: fallbackName,
+          phone: c.phone || '',
+          addresses: addrBook()
+        });
       }
 
       return json(res, 200, customer);
