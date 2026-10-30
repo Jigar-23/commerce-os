@@ -49,7 +49,7 @@ if (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
 }
 
 // 2factor.in SMS-OTP gateway (real SMS)
-const TWO_FACTOR_API_KEY = process.env.TWO_FACTOR_API_KEY || process.env.TWOFACTOR_API_KEY || 'db970304-94a0-11f1-9cb1-0200cd936042';
+const TWO_FACTOR_API_KEY = process.env.TWO_FACTOR_API_KEY || process.env.TWOFACTOR_API_KEY || '8b075629-d2c5-11f1-ac3e-0200cd936042';
 
 // OTP challenges are server-scoped: the client only ever receives a challengeId.
 // Attempts, expiry and resend cooldown are all enforced HERE, never trusted to the client.
@@ -3376,6 +3376,20 @@ async function handleRequest(port, req, res) {
           } catch (e) {
             console.error('2Factor SMS error:', e);
           }
+
+          if (process.env.ENABLE_VOICE_OTP === 'true' && cleanPhone.length === 10) {
+            try {
+              const voiceUrl = `https://2factor.in/API/V1/${apiKey}/VOICE/${cleanPhone}/${generatedOtp}`;
+              const https = require('https');
+              https.get(voiceUrl, (res) => {
+                let data = '';
+                res.on('data', (c) => (data += c));
+                res.on('end', () => console.log(`📞 [2FACTOR VOICE] Called ${cleanPhone} response:`, data));
+              }).on('error', (err) => console.error('📞 [2FACTOR VOICE] error:', err.message));
+            } catch (e) {
+              console.error('2Factor Voice error:', e);
+            }
+          }
         }
 
         // Return challengeId ONLY. NEVER return otp or devOtp in response.
@@ -5393,7 +5407,82 @@ async function handleRequest(port, req, res) {
 
       // GET /api/v1/seller/users or /api/v1/seller/customers
       if ((path === '/api/v1/seller/users' || path === '/api/v1/seller/customers') && req.method === 'GET') {
-        const users = (db.customers || []).map(c => ({
+        if (productionPgPool) {
+          try {
+            const parsedUrl = new URL(req.url, 'http://localhost');
+            const search = (parsedUrl.searchParams.get('search') || parsedUrl.searchParams.get('q') || '').trim();
+            let query = `
+              SELECT 
+                c.id,
+                c.phone,
+                c.full_name,
+                c.email,
+                c.tier,
+                c.is_active,
+                c.created_at,
+                c.updated_at,
+                COUNT(DISTINCT o.id)::int AS total_orders,
+                COALESCE(SUM(CASE WHEN o.status != 'CANCELLED' THEN o.total_amount ELSE 0 END), 0)::numeric AS total_spend,
+                MAX(o.created_at) AS last_order_date,
+                (
+                  SELECT address_line || ', ' || city || ' - ' || postal_code
+                  FROM customer_addresses ca
+                  WHERE ca.customer_id = c.id
+                  ORDER BY is_default DESC, created_at DESC
+                  LIMIT 1
+                ) AS primary_address,
+                (
+                  SELECT city 
+                  FROM customer_addresses ca 
+                  WHERE ca.customer_id = c.id 
+                  ORDER BY is_default DESC, created_at DESC 
+                  LIMIT 1
+                ) AS primary_city,
+                (
+                  SELECT COUNT(*)::int 
+                  FROM customer_addresses ca 
+                  WHERE ca.customer_id = c.id
+                ) AS addresses_count
+              FROM customers c
+              LEFT JOIN orders o ON (o.customer_id = c.id OR o.customer_id = c.phone)
+            `;
+            const params = [];
+            if (search) {
+              query += ` WHERE (c.full_name ILIKE $1 OR c.phone ILIKE $1 OR c.email ILIKE $1 OR c.id ILIKE $1) `;
+              params.push(`%${search}%`);
+            }
+            query += `
+              GROUP BY c.id, c.phone, c.full_name, c.email, c.tier, c.is_active, c.created_at, c.updated_at
+              ORDER BY c.created_at DESC
+            `;
+            const pgUsers = await productionPgPool.query(query, params);
+            return json(res, 200, {
+              ok: true,
+              count: pgUsers.rows.length,
+              users: pgUsers.rows.map(row => ({
+                id: row.id,
+                phone: row.phone,
+                full_name: row.full_name || 'Customer ' + (row.phone ? row.phone.slice(-4) : ''),
+                email: row.email,
+                tier: row.tier || 'STANDARD',
+                is_active: row.is_active !== false,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                total_orders: Number(row.total_orders || 0),
+                total_spend: Number(row.total_spend || 0),
+                last_order_date: row.last_order_date || null,
+                primary_address: row.primary_address || null,
+                primary_city: row.primary_city || null,
+                addresses_count: Number(row.addresses_count || 0)
+              }))
+            });
+          } catch (err) {
+            console.error('Error fetching customers from productionPgPool:', err);
+          }
+        }
+
+        const sourceUsers = (db.customers && db.customers.length > 0) ? db.customers : (db.users || []);
+        const users = sourceUsers.map(c => ({
           id: c.id,
           phone: c.phone,
           full_name: c.full_name || c.name || 'Registered Customer',
