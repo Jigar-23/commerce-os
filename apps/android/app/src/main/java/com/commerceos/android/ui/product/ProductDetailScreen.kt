@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.commerceos.android.model.ApiMedicine
 import com.commerceos.android.model.CartItem
+import com.commerceos.android.model.MedicineImageResolver
 import com.commerceos.android.model.MedicineInfo
 import com.commerceos.android.ui.components.ProductImage
 import com.commerceos.android.ui.components.ShimmerBox
@@ -136,6 +137,9 @@ private fun ProductDetailContent(
 @Composable
 private fun HeroImageSection(product: CommerceProduct) {
     val discountPercent = product.discountPercent
+    val resolvedImage = androidx.compose.runtime.remember(product.sku, product.name, product.image) {
+        MedicineImageResolver.resolve(sku = product.sku, name = product.name, rawImage = product.image)
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -143,7 +147,7 @@ private fun HeroImageSection(product: CommerceProduct) {
             .padding(Spacing.lg)
     ) {
         ProductImage(
-            imageUrl = product.image,
+            imageUrl = resolvedImage,
             contentDescription = product.name,
             contentScale = ContentScale.Fit,
             shape = RoundedCornerShape(Radius.ImageTile),

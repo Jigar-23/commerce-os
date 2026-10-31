@@ -89,16 +89,24 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
     private var checkoutIdempotencyKey: String? = null
 
-    /** Called when the customer reaches address selection: snapshot cart + totals. */
+    /** Called when the customer reaches address selection: snapshot cart + totals. Preserves selected address/Rx if already set. */
     fun start(customerId: String, cartItems: List<CartItem>, couponDiscount: BigDecimal = BigDecimal.ZERO) {
         this.customerId = customerId
-        val subtotal = itemsSubtotal(cartItems)
+        val existingAddress = uiState.address
+        val existingPrescription = uiState.prescriptionId
+        val existingSlot = uiState.selectedSlotText
+        val effectiveItems = if (cartItems.isNotEmpty()) cartItems else uiState.items
+        val subtotal = itemsSubtotal(effectiveItems)
+
         uiState = CheckoutUiState(
-            items = cartItems,
+            items = effectiveItems,
+            address = existingAddress,
+            prescriptionId = existingPrescription,
+            selectedSlotText = existingSlot,
             itemsSubtotal = subtotal,
             couponDiscount = couponDiscount,
             grandTotal = subtotal.subtract(couponDiscount).coerceAtLeast(BigDecimal.ZERO),
-            serviceability = ServiceabilityState.Idle,
+            serviceability = uiState.serviceability,
             state = CheckoutState.Validating
         )
         if (uiState.address != null) {

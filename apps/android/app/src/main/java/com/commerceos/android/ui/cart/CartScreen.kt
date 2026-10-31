@@ -468,7 +468,7 @@ private fun CartItemRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         val resolvedImage = remember(item.sku, item.name, item.image) {
-            item.image?.takeIf { it.isNotBlank() } ?: MedicineImageResolver.resolve(item.sku, item.name)
+            MedicineImageResolver.resolve(sku = item.sku, name = item.name, rawImage = item.image)
         }
         ProductImage(
             imageUrl = resolvedImage,

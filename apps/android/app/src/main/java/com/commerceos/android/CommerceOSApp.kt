@@ -714,7 +714,8 @@ fun CommerceOSApp(
                         onChangeAddress = {
                             addressViewModel.init(authenticatedCustomerId, force = true)
                             navigate(Screen.AddressSelection(fromCheckout = true))
-                        }
+                        },
+                        onBack = { goBack() }
                     )
                 }
                 is Screen.OrderTracking -> OrderTrackingScreen(
