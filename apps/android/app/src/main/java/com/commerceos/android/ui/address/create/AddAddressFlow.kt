@@ -503,6 +503,16 @@ fun AddAddressFlow(
                     )
                 }
 
+                if (saveState is SaveState.Error) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = (saveState as SaveState.Error).message,
+                        color = Color(0xFFDC2626),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Button(

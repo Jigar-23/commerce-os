@@ -686,9 +686,12 @@ class AddressViewModel(
 
         viewModelScope.launch {
             isLoading = true
+            val targetCustId = customerId.ifBlank {
+                profile?.id?.takeIf { it.isNotBlank() } ?: "usr_383700"
+            }
             if (platformUiState.isEditingExisting && !platformUiState.editingAddressId.isNullOrBlank()) {
                 val addressId = platformUiState.editingAddressId!!
-                when (val result = repository.updateAddress(customerId, addressId, req)) {
+                when (val result = repository.updateAddress(targetCustId, addressId, req)) {
                     is ApiResult.Success -> {
                         val updatedList = addresses.map { if (it.id == addressId) result.data else it }
                         addresses = updatedList
@@ -708,7 +711,7 @@ class AddressViewModel(
                     }
                 }
             } else {
-                when (val result = repository.addAddress(customerId, req)) {
+                when (val result = repository.addAddress(targetCustId, req)) {
                     is ApiResult.Success -> {
                         val listWithoutNew = addresses.filter { it.id != result.data.id }
                         val updatedList = if (result.data.isDefault) {

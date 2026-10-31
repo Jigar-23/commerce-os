@@ -2938,11 +2938,49 @@ const server = http.createServer(async (req, res) => {
     const addrListMatch = pathname.match(/^\/api\/v1\/customers\/([^/]+)\/addresses$/);
     if (addrListMatch && method === 'GET') {
       const customerId = addrListMatch[1];
-      const resAddresses = await pool.query(
-        `SELECT id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at
-         FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC`,
-        [customerId]
-      );
+      const clean10 = customerId.replace(/\D/g, '').slice(-10);
+
+      let queryCustIds = [customerId];
+      let searchPhone10 = clean10.length === 10 ? clean10 : null;
+
+      if (!searchPhone10 && pool) {
+        try {
+          const cRow = await pool.query(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
+          if (cRow.rows.length > 0 && cRow.rows[0].phone) {
+            const p10 = String(cRow.rows[0].phone).replace(/\D/g, '').slice(-10);
+            if (p10.length === 10) searchPhone10 = p10;
+          }
+        } catch (_) {}
+      }
+
+      if (searchPhone10 && pool) {
+        try {
+          const linkedCusts = await pool.query(
+            `SELECT id FROM customers WHERE id = $1 OR phone LIKE '%' || $2`,
+            [customerId, searchPhone10]
+          );
+          queryCustIds = Array.from(new Set([customerId, ...linkedCusts.rows.map(r => r.id)]));
+        } catch (_) {}
+      }
+
+      let resAddresses = { rows: [] };
+      if (pool) {
+        if (searchPhone10) {
+          resAddresses = await pool.query(
+            `SELECT id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at
+             FROM customer_addresses 
+             WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2 
+             ORDER BY is_default DESC, created_at DESC`,
+            [queryCustIds, searchPhone10]
+          );
+        } else {
+          resAddresses = await pool.query(
+            `SELECT id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at
+             FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC`,
+            [customerId]
+          );
+        }
+      }
 
       return sendJson(res, 200, resAddresses.rows.map(r => ({
         id: r.id,
@@ -2995,15 +3033,27 @@ const server = http.createServer(async (req, res) => {
       }
       const formattedPhone = `+91${phoneDigits}`;
 
-      // Ensure customer exists in customers table to prevent foreign key constraint violations
-      const custCheck = await pool.query(`SELECT id FROM customers WHERE id = $1`, [customerId]);
-      if (custCheck.rows.length === 0) {
-        await pool.query(
-          `INSERT INTO customers (id, phone, full_name, created_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (id) DO NOTHING`,
-          [customerId, formattedPhone, body.contactName || 'Customer']
+      // Ensure customer exists in customers table without unique phone constraint conflict
+      let effectiveDbCustomerId = customerId;
+      if (pool) {
+        const custCheck = await pool.query(
+          `SELECT id FROM customers WHERE id = $1 OR phone = $2 OR phone = $3 LIMIT 1`,
+          [customerId, formattedPhone, phoneDigits]
         );
+        if (custCheck.rows.length > 0) {
+          effectiveDbCustomerId = custCheck.rows[0].id;
+        } else {
+          const insCust = await pool.query(
+            `INSERT INTO customers (id, phone, full_name, created_at, updated_at)
+             VALUES ($1, $2, $3, NOW(), NOW())
+             ON CONFLICT (phone) DO UPDATE SET updated_at = NOW()
+             RETURNING id`,
+            [customerId, formattedPhone, body.contactName || 'Customer']
+          );
+          if (insCust.rows.length > 0) {
+            effectiveDbCustomerId = insCust.rows[0].id;
+          }
+        }
       }
 
       const addrId = `addr_${crypto.randomUUID()}`;
@@ -3014,15 +3064,18 @@ const server = http.createServer(async (req, res) => {
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
-          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['addr_lock_' + customerId]);
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['addr_lock_' + effectiveDbCustomerId]);
           if (isDefault) {
-            await client.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [customerId]);
+            await client.query(
+              `UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1 OR customer_id = $2`,
+              [effectiveDbCustomerId, customerId]
+            );
           }
           const insRes = await client.query(
             `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
              RETURNING *`,
-            [addrId, customerId, body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'), addrLine, city, postalCode, lat, lng, isDefault, formattedPhone]
+            [addrId, effectiveDbCustomerId, body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'), addrLine, city, postalCode, lat, lng, isDefault, formattedPhone]
           );
           await client.query('COMMIT');
           r = insRes.rows[0];
@@ -5304,42 +5357,57 @@ const server = http.createServer(async (req, res) => {
         );
 
         let customer = custRes.rows[0] || null;
+        let effectiveClean10 = clean10.length === 10 ? clean10 : null;
+        if (customer && customer.phone) {
+          const p10 = String(customer.phone).replace(/\D/g, '').slice(-10);
+          if (p10.length === 10) {
+            effectiveClean10 = p10;
+            custVariants.push(`cust_${p10}`);
+            custVariants.push(`usr_${p10}`);
+            custVariants.push(`+91${p10}`);
+            custVariants.push(p10);
+          }
+        }
+        if (customer && customer.id && !custVariants.includes(customer.id)) {
+          custVariants.push(customer.id);
+        }
+        const finalVariants = Array.from(new Set(custVariants.filter(Boolean)));
 
         // 2. Fetch all saved addresses
         let addrRes;
-        if (clean10.length === 10) {
+        if (effectiveClean10) {
           addrRes = await pool.query(
             `SELECT * FROM customer_addresses 
              WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2
              ORDER BY is_default DESC, created_at DESC`,
-            [uniqueVariants, clean10]
+            [finalVariants, effectiveClean10]
           );
         } else {
           addrRes = await pool.query(
             `SELECT * FROM customer_addresses 
              WHERE customer_id = ANY($1)
              ORDER BY is_default DESC, created_at DESC`,
-            [uniqueVariants]
+            [finalVariants]
           );
         }
         const addresses = addrRes.rows;
 
         // 3. Fetch all orders
         let ordersRes;
-        if (clean10.length === 10) {
+        if (effectiveClean10) {
           ordersRes = await pool.query(
             `SELECT * FROM orders 
              WHERE customer_id = ANY($1) 
                 OR (delivery_address IS NOT NULL AND (delivery_address->>'contact_phone') LIKE '%' || $2)
              ORDER BY created_at DESC`,
-            [uniqueVariants, clean10]
+            [finalVariants, effectiveClean10]
           );
         } else {
           ordersRes = await pool.query(
             `SELECT * FROM orders 
              WHERE customer_id = ANY($1)
              ORDER BY created_at DESC`,
-            [uniqueVariants]
+            [finalVariants]
           );
         }
         const orders = ordersRes.rows.map(o => {

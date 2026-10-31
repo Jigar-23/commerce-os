@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import SellerSidebar from '@/components/SellerSidebar';
 import HeaderQuickSearch from '@/components/HeaderQuickSearch';
 import SellerAuthGuard from '@/components/SellerAuthGuard';
@@ -24,6 +26,7 @@ import {
 } from 'lucide-react';
 
 export default function RegisteredUsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<RegisteredUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -533,7 +536,7 @@ export default function RegisteredUsersPage() {
                           <tr
                             key={user.id}
                             className="hover:bg-surface-subtle/50 transition-colors group cursor-pointer"
-                            onClick={() => handleOpenUserDetail(user)}
+                            onClick={() => router.push(`/users/${encodeURIComponent(user.id)}`)}
                           >
                             {/* Customer Avatar & Name */}
                             <td className="py-3.5 px-4">
@@ -543,7 +546,7 @@ export default function RegisteredUsersPage() {
                                 </div>
                                 <div className="min-w-0">
                                   <div className="flex items-center space-x-1.5">
-                                    <p className="font-bold text-content-primary truncate">
+                                    <p className="font-bold text-content-primary truncate group-hover:text-action-speedBg transition-colors">
                                       {displayName}
                                     </p>
                                     {user.is_active ? (
@@ -637,13 +640,22 @@ export default function RegisteredUsersPage() {
 
                             {/* Actions */}
                             <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => handleOpenUserDetail(user)}
-                                className="px-2.5 py-1.5 rounded-lg text-content-secondary hover:text-content-accent hover:bg-surface-accentSubtle border border-border-default transition text-2xs font-bold inline-flex items-center space-x-1"
-                              >
-                                <Eye className="w-3 h-3" />
-                                <span>Details</span>
-                              </button>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <Link
+                                  href={`/users/${encodeURIComponent(user.id)}`}
+                                  className="px-2.5 py-1.5 rounded-lg bg-action-speedBg text-white hover:bg-action-speedBg/90 transition text-2xs font-bold inline-flex items-center space-x-1 shadow-xs"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>View Page</span>
+                                </Link>
+                                <button
+                                  onClick={() => handleOpenUserDetail(user)}
+                                  title="Quick Drawer Preview"
+                                  className="p-1.5 rounded-lg text-content-secondary hover:text-content-accent hover:bg-surface-accentSubtle border border-border-default transition"
+                                >
+                                  <Layers className="w-3 h-3" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
