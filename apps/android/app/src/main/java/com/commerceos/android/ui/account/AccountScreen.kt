@@ -73,10 +73,10 @@ fun AccountScreen(
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showRefillDialog by remember { mutableStateOf(false) }
 
-    val displayName = localName?.takeIf { it.isNotBlank() }
-        ?: profile?.displayName?.trim()?.takeIf { it.isNotBlank() }
-        ?: "Customer"
+    val hasCustomName = !localName.isNullOrBlank() && !localName!!.trim().startsWith("Customer", ignoreCase = true)
     val phone = profile?.phone?.trim()?.takeIf { it.isNotBlank() } ?: fallbackPhone.trim()
+    val formattedPhone = formatPhone(phone)
+    val displayName = if (hasCustomName) localName!!.trim() else formattedPhone
 
     Column(
         modifier = Modifier
@@ -162,6 +162,23 @@ fun AccountScreen(
                                     .border(1.5.dp, Color(0xFF10B981), CircleShape),
                                 contentScale = ContentScale.Crop
                             )
+                        } else if (hasCustomName) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFECFDF5),
+                                border = BorderStroke(1.5.dp, Color(0xFF10B981)),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    val initial = displayName.trim().firstOrNull()?.uppercaseChar() ?: 'U'
+                                    Text(
+                                        text = "$initial",
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color(0xFF065F46)
+                                    )
+                                }
+                            }
                         } else {
                             Surface(
                                 shape = CircleShape,
@@ -170,12 +187,11 @@ fun AccountScreen(
                                 modifier = Modifier.fillMaxSize()
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    val initial = displayName.trim().firstOrNull()?.uppercaseChar() ?: 'C'
-                                    Text(
-                                        text = "$initial",
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color(0xFF065F46)
+                                    Icon(
+                                        Icons.Default.Person,
+                                        contentDescription = "Profile",
+                                        tint = Color(0xFF059669),
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
@@ -203,44 +219,87 @@ fun AccountScreen(
                     Spacer(modifier = Modifier.width(14.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = displayName,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (hasCustomName) {
                             Text(
-                                text = maskPhone(phone),
-                                fontSize = 13.sp,
-                                color = Color(0xFF475569),
-                                fontWeight = FontWeight.Medium
+                                text = displayName,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                color = Color(0xFFDCFCE7),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = formattedPhone,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF475569),
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = Color(0xFFDCFCE7),
+                                    shape = RoundedCornerShape(6.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = Color(0xFF166534),
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        "Verified",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF166534)
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF166534),
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            "Verified",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF166534)
+                                        )
+                                    }
                                 }
                             }
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = formattedPhone,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = Color(0xFFDCFCE7),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF166534),
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Text(
+                                            "Verified",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF166534)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "+ Add your name",
+                                fontSize = 13.sp,
+                                color = Color(0xFF059669),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable { showEditProfileDialog = true }
+                            )
                         }
                     }
 
@@ -377,7 +436,7 @@ fun AccountScreen(
 
     if (showEditProfileDialog) {
         EditProfileDialog(
-            currentName = displayName,
+            currentName = localName ?: "",
             currentAvatarFile = avatarFile,
             onDismiss = { showEditProfileDialog = false },
             onSave = { newName, newBitmap, newUri, removePhoto ->
@@ -730,10 +789,9 @@ private fun ProfileMenuRow(
     }
 }
 
-private fun maskPhone(phone: String?): String {
+private fun formatPhone(phone: String?): String {
     val digits = phone?.filter { it.isDigit() } ?: ""
-    if (digits.length < 4) return "Verified mobile number"
-    val suffix = digits.takeLast(4)
-    val prefix = if (digits.length >= 10) "+91 " else ""
-    return "${prefix}XXXXX $suffix"
+    if (digits.length < 10) return phone?.takeIf { it.isNotBlank() } ?: "+91 Mobile"
+    val tenDigits = digits.takeLast(10)
+    return "+91 ${tenDigits.substring(0, 5)} ${tenDigits.substring(5)}"
 }

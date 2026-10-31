@@ -252,7 +252,7 @@ fun CommerceOSApp(
         is Screen.Cart -> terminology.cartLabel
         is Screen.Account -> "My Account"
         is Screen.Catalog -> "Catalog"
-        is Screen.ProductDetail -> "Product"
+        is Screen.ProductDetail -> "Medicine Details"
         is Screen.AddressSelection -> if (screen.fromProfile) "Saved Addresses" else "Deliver to"
         is Screen.PaymentGateway -> terminology.checkoutLabel
         is Screen.OrderTracking -> "Order Status"
@@ -340,7 +340,7 @@ fun CommerceOSApp(
         },
         bottomBar = {
             Column {
-                if (cartViewModel.itemCount > 0 && currentScreen !is Screen.Cart && currentScreen !is Screen.PaymentGateway && currentScreen !is Screen.OrderTracking && currentScreen !is Screen.Account) {
+                if (cartViewModel.itemCount > 0 && currentScreen !is Screen.Cart && currentScreen !is Screen.PaymentGateway && currentScreen !is Screen.OrderTracking && currentScreen !is Screen.Account && currentScreen !is Screen.ProductDetail) {
                     GlobalCartBar(
                         itemCount = cartViewModel.itemCount,
                         subtotal = cartViewModel.effectiveGrandTotal,
@@ -361,14 +361,14 @@ fun CommerceOSApp(
                         NavigationBarItem(
                             selected = currentScreen is Screen.Categories,
                             onClick = { navigateRoot(Screen.Categories) },
-                            icon = { Icon(Icons.Default.Menu, contentDescription = "Categories") },
+                            icon = { Icon(Icons.Default.Category, contentDescription = "Categories") },
                             label = { Text("Categories", fontSize = 11.sp) },
                             colors = bottomNavColors
                         )
                         NavigationBarItem(
                             selected = currentScreen is Screen.OrderHistory,
                             onClick = { navigateRoot(Screen.OrderHistory); orderViewModel.loadHistory(authenticatedCustomerId) },
-                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = terminology.orderLabel) },
+                            icon = { Icon(Icons.Default.ShoppingBag, contentDescription = terminology.orderLabel) },
                             label = { Text(terminology.orderLabel, fontSize = 11.sp) },
                             colors = bottomNavColors
                         )
@@ -478,6 +478,9 @@ fun CommerceOSApp(
                         else cartViewModel.updateQuantity(sku, qty)
                     },
                     onSearchClick = { query ->
+                        if (query.isBlank()) {
+                            universalSearchViewModel.reset()
+                        }
                         openUniversalSearch(UniversalSearchQuery(text = query))
                     },
                     onVerticalSelect = { vertical ->
@@ -494,9 +497,8 @@ fun CommerceOSApp(
                         }
                     },
                     onOpenCatalog = {
-                        val catalogQuery = CatalogQuery()
-                        catalogViewModel.open(catalogQuery)
-                        navigate(Screen.Catalog(catalogQuery))
+                        universalSearchViewModel.reset()
+                        openUniversalSearch(UniversalSearchQuery(text = ""))
                     },
                     onUploadPrescription = {
                         showRxUploadDialog = true
@@ -514,9 +516,8 @@ fun CommerceOSApp(
                 is Screen.Categories -> CategoriesScreen(
                     viewModel = categoryViewModel,
                     onSelectCategory = { category ->
-                        val catalogQuery = CatalogQuery(categoryId = category.id, categoryName = category.name)
-                        catalogViewModel.open(catalogQuery)
-                        navigate(Screen.Catalog(catalogQuery))
+                        universalSearchViewModel.executeSearch(category.name)
+                        openUniversalSearch(UniversalSearchQuery(text = category.name))
                     }
                 )
                 is Screen.VerticalHome -> VerticalHomeScreen(

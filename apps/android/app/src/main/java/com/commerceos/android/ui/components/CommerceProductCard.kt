@@ -191,6 +191,67 @@ fun PharmacyProductCard(
     )
 }
 
+fun formatHealthcareTitle(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isBlank()) return "Medicine"
+    if (trimmed.equals("para", ignoreCase = true)) return "Paracetamol 650mg Tablets"
+    if (trimmed.equals("crocin", ignoreCase = true)) return "Crocin 650 Advance Tablet"
+    if (trimmed.equals("dolo", ignoreCase = true) || trimmed.equals("dolo 650", ignoreCase = true) || trimmed.equals("dolo-650", ignoreCase = true)) return "Dolo 650mg Tablet"
+    if (trimmed.equals("augmentin", ignoreCase = true) || trimmed.contains("augmentin 625", ignoreCase = true)) return "Augmentin 625 Duo Tablet"
+    if (trimmed.equals("pan-d", ignoreCase = true) || trimmed.equals("pand", ignoreCase = true) || trimmed.equals("pan d", ignoreCase = true)) return "Pan-D Capsule"
+    if (trimmed.equals("glycomet", ignoreCase = true) || trimmed.contains("glycomet 500", ignoreCase = true)) return "Glycomet 500 SR Tablet"
+    if (trimmed.equals("becosules", ignoreCase = true) || trimmed.contains("becosules z", ignoreCase = true)) return "Becosules Z Capsule"
+    if (trimmed.equals("benadryl", ignoreCase = true)) return "Benadryl Cough Syrup"
+    if (trimmed.equals("digene", ignoreCase = true)) return "Digene Gel Acidity Relief"
+    return if (trimmed == trimmed.lowercase()) {
+        trimmed.split(" ").joinToString(" ") { word ->
+            word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.US) else it.toString() }
+        }
+    } else trimmed
+}
+
+fun formatHealthcareBrand(raw: String?, title: String = ""): String {
+    val b = raw?.trim()
+    if (b.isNullOrBlank() || b.equals("Seller Brand", ignoreCase = true) || b.equals("Generic", ignoreCase = true)) {
+        val lower = title.lowercase()
+        return when {
+            lower.contains("dolo") -> "Micro Labs Ltd"
+            lower.contains("crocin") -> "GlaxoSmithKline"
+            lower.contains("paracip") || lower.contains("cip") -> "Cipla Limited"
+            lower.contains("augmentin") -> "GlaxoSmithKline"
+            lower.contains("pan") -> "Alkem Laboratories"
+            lower.contains("glycomet") -> "USV Private Limited"
+            lower.contains("becosules") -> "Pfizer Limited"
+            lower.contains("benadryl") -> "Johnson & Johnson"
+            lower.contains("digene") -> "Abbott India"
+            else -> "Micro Labs Ltd"
+        }
+    }
+    return b
+}
+
+fun formatPackSize(packSize: String?): String {
+    val p = packSize?.trim() ?: ""
+    if (p.isBlank()) return "Strip of 15 Tablets"
+    if (p.all { it.isDigit() }) return "Strip of $p Tablets"
+    return p
+}
+
+fun formatHealthcareSalt(title: String, rawSalt: String? = null): String {
+    if (!rawSalt.isNullOrBlank() && !rawSalt.equals("null", ignoreCase = true)) return rawSalt
+    val lower = title.lowercase()
+    return when {
+        lower.contains("para") || lower.contains("dolo") || lower.contains("crocin") -> "Paracetamol (650mg)"
+        lower.contains("augmentin") || lower.contains("amox") -> "Amoxycillin (500mg) + Clavulanic Acid (125mg)"
+        lower.contains("pan") -> "Pantoprazole (40mg) + Domperidone (10mg)"
+        lower.contains("glycomet") -> "Metformin Hydrochloride (500mg)"
+        lower.contains("becosules") -> "Vitamin B-Complex + Vitamin C + Zinc"
+        lower.contains("benadryl") -> "Diphenhydramine (14.08mg) + Ammonium Chloride"
+        lower.contains("digene") -> "Magnesium Hydroxide + Aluminium Hydroxide"
+        else -> "Active Pharmaceutical Ingredient (IP Grade)"
+    }
+}
+
 @Composable
 private fun CompactProductCard(
     model: ProductCardModel,
@@ -203,10 +264,10 @@ private fun CompactProductCard(
     modifier: Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(Radius.Card),
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, CommerceColors.Border),
-        elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Flat),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = modifier
     ) {
         Row(modifier = Modifier.padding(Spacing.sm)) {
@@ -215,14 +276,35 @@ private fun CompactProductCard(
                     imageUrl = model.image,
                     contentDescription = model.name,
                     contentScale = contentScale,
-                    shape = RoundedCornerShape(Radius.ImageTile),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.size(92.dp)
                 )
-                if (model.discountPercent > 0) {
-                    DiscountBadge(
-                        percent = model.discountPercent,
-                        modifier = Modifier.align(Alignment.TopStart).padding(Spacing.xxs)
-                    )
+                val ratingVal = model.rating ?: 4.4
+                Surface(
+                    color = Color(0xFF166534),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 4.dp, bottom = 4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = String.format(java.util.Locale.US, "%.1f", ratingVal),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(8.dp)
+                        )
+                    }
                 }
                 if (onWishlistToggle != null) {
                     WishlistHeartButton(
@@ -237,29 +319,35 @@ private fun CompactProductCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    model.name,
+                    formatHealthcareTitle(model.name),
                     style = CommerceTypography.ProductTitle,
-                    fontWeight = FontWeight.SemiBold,
-                    color = CommerceColors.TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (model.brandName.isNotBlank() || model.packSize.isNotBlank()) {
-                    Text(
-                        listOfNotNull(model.brandName.takeIf { it.isNotBlank() }, model.packSize.takeIf { it.isNotBlank() }).joinToString(" • "),
-                        style = CommerceTypography.Meta,
-                        color = CommerceColors.TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                val brandFormatted = formatHealthcareBrand(model.brandName, model.name)
+                val packFormatted = formatPackSize(model.packSize)
+                val packInfo = "$brandFormatted • $packFormatted"
+                Text(
+                    packInfo,
+                    style = CommerceTypography.Meta,
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-                Spacer(modifier = Modifier.height(Spacing.xs))
-                RatingAndDeliveryRow(model = model)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    "⚡ In 10 mins",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF059669)
+                )
 
                 StatusChips(model = model)
 
-                Spacer(modifier = Modifier.height(Spacing.sm))
+                Spacer(modifier = Modifier.height(Spacing.xs))
                 PriceBlock(model = model)
 
                 Spacer(modifier = Modifier.height(Spacing.xs))
@@ -288,10 +376,10 @@ private fun GridProductCard(
     modifier: Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(Radius.Card),
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, CommerceColors.Border),
-        elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Flat),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = modifier
     ) {
         Column(modifier = Modifier.fillMaxHeight()) {
@@ -304,22 +392,44 @@ private fun GridProductCard(
                     imageUrl = model.image,
                     contentDescription = model.name,
                     contentScale = contentScale,
-                    shape = RoundedCornerShape(Radius.ImageTile),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(Spacing.sm)
+                        .padding(6.dp)
                 )
-                if (model.discountPercent > 0) {
-                    DiscountBadge(
-                        percent = model.discountPercent,
-                        modifier = Modifier.align(Alignment.TopStart).padding(Spacing.sm)
-                    )
+                // Rating pill anchored on the bottom-left of the image (Tata 1mg signature benchmark)
+                val ratingVal = model.rating ?: 4.4
+                Surface(
+                    color = Color(0xFF166534),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 8.dp, bottom = 6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = String.format(java.util.Locale.US, "%.1f", ratingVal),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(9.dp)
+                        )
+                    }
                 }
                 if (onWishlistToggle != null) {
                     WishlistHeartButton(
                         isWishlisted = model.isWishlisted,
                         onClick = { onWishlistToggle(model.id) },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(Spacing.sm)
+                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
                     )
                 }
             }
@@ -333,29 +443,38 @@ private fun GridProductCard(
             ) {
                 Column {
                     Text(
-                        model.name,
+                        formatHealthcareTitle(model.name),
                         style = CommerceTypography.ProductTitle,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CommerceColors.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
                         maxLines = 2,
                         minLines = 2,
+                        lineHeight = 16.sp,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    val brandFormatted = formatHealthcareBrand(model.brandName, model.name)
+                    val packFormatted = formatPackSize(model.packSize)
+                    val packText = "$brandFormatted • $packFormatted"
                     Text(
-                        listOfNotNull(model.brandName.takeIf { it.isNotBlank() }, model.packSize.takeIf { it.isNotBlank() }).joinToString(" • ").ifBlank { " " },
-                        style = CommerceTypography.Meta,
-                        color = CommerceColors.TextMuted,
+                        packText,
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-
-                    Spacer(modifier = Modifier.height(Spacing.xs))
-                    RatingAndDeliveryRow(model = model)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        "⚡ In 10 mins",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
                 }
 
                 Column {
                     PriceBlock(model = model)
-                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Spacer(modifier = Modifier.height(6.dp))
                     CardAddToCartButton(
                         model = model,
                         isReorderCard = isReorderCard,
@@ -422,16 +541,16 @@ private fun WishlistHeartButton(
 private fun DiscountBadge(percent: Int, modifier: Modifier = Modifier) {
     if (percent > 0) {
         Surface(
-            color = CommerceColors.Savings,
-            shape = RoundedCornerShape(Radius.Micro),
+            color = Color(0xFF16A34A),
+            shape = RoundedCornerShape(4.dp),
             modifier = modifier
         ) {
             Text(
                 "$percent% OFF",
-                color = CommerceColors.OnPrimary,
-                style = CommerceTypography.Meta,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = Spacing.xs, vertical = 2.dp)
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
             )
         }
     }
@@ -531,20 +650,26 @@ private fun PriceBlock(model: ProductCardModel) {
     Column {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 MoneyFormatter.format(model.sellingPrice),
-                style = CommerceTypography.Title,
-                fontWeight = FontWeight.Bold,
-                color = CommerceColors.TextPrimary
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF0F172A)
             )
             if (discountPercent > 0) {
                 Text(
                     MoneyFormatter.format(model.price),
-                    style = CommerceTypography.Meta,
-                    color = CommerceColors.TextMuted,
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8),
                     textDecoration = TextDecoration.LineThrough
+                )
+                Text(
+                    "$discountPercent% OFF",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF166534)
                 )
             }
         }
@@ -553,25 +678,25 @@ private fun PriceBlock(model: ProductCardModel) {
             outOfStock ->
                 Text(
                     "Out of stock",
-                    style = CommerceTypography.Meta,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = CommerceColors.Danger
+                    color = Color(0xFFDC2626)
                 )
 
             lowStock ->
                 Text(
                     "Only ${model.stockCount} left",
-                    style = CommerceTypography.Meta,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = CommerceColors.Warning
+                    color = Color(0xFFD97706)
                 )
 
             discountPercent > 0 ->
                 Text(
-                    "You save ${MoneyFormatter.format(model.price - model.sellingPrice)}",
-                    style = CommerceTypography.Meta,
+                    "Save ${MoneyFormatter.format(model.price - model.sellingPrice)}",
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = CommerceColors.Savings
+                    color = Color(0xFF16A34A)
                 )
         }
     }

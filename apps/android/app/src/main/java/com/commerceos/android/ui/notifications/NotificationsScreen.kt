@@ -44,66 +44,12 @@ fun NotificationsScreen(
     val categories = listOf("All", "Orders", "Prescriptions", "Refills", "Offers")
 
     var notificationsList by remember {
-        mutableStateOf(
-            listOf(
-                PharmacyNotification(
-                    id = "notif_1",
-                    title = "Order Packed & Out for Delivery",
-                    message = "Order #MED-8492 is packed by Apollo Pharmacy and out for delivery with rider Amit. Arriving in 8 mins.",
-                    category = "Orders",
-                    timestamp = "5 mins ago",
-                    isRead = false,
-                    icon = Icons.Default.CheckCircle,
-                    iconTint = Color(0xFF059669),
-                    iconBg = Color(0xFFECFDF5)
-                ),
-                PharmacyNotification(
-                    id = "notif_2",
-                    title = "Prescription Verified by Pharmacist",
-                    message = "Rx #RX-2041 for Paracetamol 650mg verified by licensed pharmacist Dr. Priya Nair (Reg #58210).",
-                    category = "Prescriptions",
-                    timestamp = "1 hour ago",
-                    isRead = false,
-                    icon = Icons.Default.ThumbUp,
-                    iconTint = Color(0xFF0284C7),
-                    iconBg = Color(0xFFF0F9FF)
-                ),
-                PharmacyNotification(
-                    id = "notif_3",
-                    title = "Medicine Refill Reminder",
-                    message = "Your monthly supply of Glycomet GP1 is running low. Tap to reorder with 1-tap express delivery.",
-                    category = "Refills",
-                    timestamp = "Yesterday",
-                    isRead = true,
-                    icon = Icons.Default.Refresh,
-                    iconTint = Color(0xFFD97706),
-                    iconBg = Color(0xFFFFFBEB)
-                ),
-                PharmacyNotification(
-                    id = "notif_4",
-                    title = "Cold-Chain Safety Guarantee",
-                    message = "Your temperature-sensitive Insulin was packed with certified ice gel packs at 2°C - 8°C.",
-                    category = "Orders",
-                    timestamp = "2 days ago",
-                    isRead = true,
-                    icon = Icons.Default.Favorite,
-                    iconTint = Color(0xFF059669),
-                    iconBg = Color(0xFFECFDF5)
-                ),
-                PharmacyNotification(
-                    id = "notif_5",
-                    title = "Flat ₹100 Off on Healthcare Essentials",
-                    message = "Use coupon HEALTH100 on orders above ₹499. Valid on multivitamins, skin care & first aid.",
-                    category = "Offers",
-                    timestamp = "3 days ago",
-                    isRead = true,
-                    icon = Icons.Default.Star,
-                    iconTint = Color(0xFF7C3AED),
-                    iconBg = Color(0xFFF5F3FF)
-                )
-            )
-        )
+        mutableStateOf(emptyList<PharmacyNotification>())
     }
+
+    var orderAlertsEnabled by remember { mutableStateOf(true) }
+    var rxAlertsEnabled by remember { mutableStateOf(true) }
+    var refillAlertsEnabled by remember { mutableStateOf(true) }
 
     val filteredList = if (selectedCategory == "All") {
         notificationsList
@@ -200,42 +146,84 @@ fun NotificationsScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Notifications List
+        // Notifications List or Clean Empty State
         if (filteredList.isEmpty()) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                contentAlignment = Alignment.Center
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        color = Color.White,
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        modifier = Modifier.size(64.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Notifications,
-                                contentDescription = null,
-                                tint = Color(0xFF94A3B8),
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
+                Surface(
+                    color = Color.White,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.size(64.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(32.dp)
+                        )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "No notifications in this category",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF334155)
-                    )
-                    Text(
-                        text = "You'll see pharmacy updates & alerts here",
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B)
-                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "No notifications yet",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Real-time delivery status, prescription approvals, and medicine refill alerts will appear here.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "DELIVERY & HEALTHCARE ALERTS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF94A3B8),
+                            letterSpacing = 0.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NotificationToggleRow(
+                            title = "Order Dispatch & Live Rider SLA",
+                            subtitle = "Push alerts when rider departs store",
+                            checked = orderAlertsEnabled,
+                            onCheckedChange = { orderAlertsEnabled = it }
+                        )
+                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
+                        NotificationToggleRow(
+                            title = "Pharmacist Prescription Review",
+                            subtitle = "Immediate status on uploaded Rx slips",
+                            checked = rxAlertsEnabled,
+                            onCheckedChange = { rxAlertsEnabled = it }
+                        )
+                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
+                        NotificationToggleRow(
+                            title = "Refill Reminders",
+                            subtitle = "Advance 3-day chronic medicine alert",
+                            checked = refillAlertsEnabled,
+                            onCheckedChange = { refillAlertsEnabled = it }
+                        )
+                    }
                 }
             }
         } else {
@@ -356,5 +344,35 @@ private fun NotificationCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NotificationToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
+            Text(subtitle, fontSize = 11.sp, color = Color(0xFF64748B))
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF059669),
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = Color(0xFFCBD5E1)
+            ),
+            modifier = Modifier.size(width = 44.dp, height = 24.dp)
+        )
     }
 }

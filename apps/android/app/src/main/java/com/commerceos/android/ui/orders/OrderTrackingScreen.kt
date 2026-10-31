@@ -17,11 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -438,7 +434,7 @@ fun OrderTrackingContent(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "Order Delivered Successfully 🎉",
+                            text = "Order Delivered Successfully",
                             fontSize = 19.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A),
@@ -470,7 +466,12 @@ fun OrderTrackingContent(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🛵", fontSize = 20.sp)
+                                    Icon(
+                                        imageVector = Icons.Default.LocalShipping,
+                                        contentDescription = "Delivery Partner",
+                                        tint = Color(0xFF059669),
+                                        modifier = Modifier.size(24.dp)
+                                    )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
                                         Text(
@@ -639,7 +640,12 @@ fun OrderTrackingContent(
                                     modifier = Modifier.size(46.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text("🛵", fontSize = 22.sp)
+                                        Icon(
+                                            imageVector = Icons.Default.LocalShipping,
+                                            contentDescription = "Rider",
+                                            tint = Color(0xFF059669),
+                                            modifier = Modifier.size(24.dp)
+                                        )
                                     }
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))

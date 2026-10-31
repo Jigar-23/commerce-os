@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -19,11 +22,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.commerceos.android.model.*
 import com.commerceos.android.ui.components.CommerceEntityRenderer
 import com.commerceos.android.ui.components.ProductImage
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceTypography
+import com.commerceos.android.ui.theme.PlusJakartaSans
 import com.commerceos.android.ui.theme.Radius
 import com.commerceos.android.util.MoneyFormatter
 
@@ -134,10 +139,10 @@ fun ProductRowSection(
         Spacer(modifier = Modifier.height(10.dp))
         val configuration = androidx.compose.ui.platform.LocalConfiguration.current
         val responsiveCardWidth = remember(configuration.screenWidthDp) {
-            if (configuration.screenWidthDp > 600) 210.dp else (configuration.screenWidthDp * 0.42f).coerceIn(145f, 175f).dp
+            if (configuration.screenWidthDp > 600) 190.dp else 156.dp
         }
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
             items(entities) { entity ->
@@ -149,7 +154,7 @@ fun ProductRowSection(
                     cartQuantityMap = cartQuantityMap,
                     modifier = Modifier
                         .width(responsiveCardWidth)
-                        .height(280.dp)
+                        .height(254.dp)
                 )
             }
         }
@@ -223,31 +228,66 @@ fun BrandRowSection(
     section: HomeSection,
     onEntityClick: (CommerceEntity) -> Unit
 ) {
-    val brands = section.entities.mapNotNull { (it as? CommerceEntity.Brand)?.item }
-    if (brands.isEmpty()) return
+    val rawBrands = section.entities.mapNotNull { (it as? CommerceEntity.Brand)?.item }
+    val brands = if (rawBrands.isEmpty() || rawBrands.all { it.name.equals("Seller Brand", ignoreCase = true) || it.name.isBlank() }) {
+        listOf(
+            BrandItem("brand-cipla", "Cipla"),
+            BrandItem("brand-sunpharma", "Sun Pharma"),
+            BrandItem("brand-abbott", "Abbott"),
+            BrandItem("brand-drreddy", "Dr. Reddy's"),
+            BrandItem("brand-glenmark", "Glenmark"),
+            BrandItem("brand-mankind", "Mankind"),
+            BrandItem("brand-dabur", "Dabur"),
+            BrandItem("brand-himalaya", "Himalaya"),
+            BrandItem("brand-zydus", "Zydus")
+        )
+    } else {
+        rawBrands
+    }
 
     Column {
-        SectionHeader(title = section.title, subtitle = null, actionLabel = null, onAction = null)
+        SectionHeader(title = (section.title ?: "").ifBlank { "Popular Healthcare Brands" }, subtitle = null, actionLabel = null, onAction = null)
         Spacer(modifier = Modifier.height(10.dp))
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             for (brand in brands) {
-                val entity = CommerceEntity.Brand(item = brand, vertical = "general")
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-                    shape = RoundedCornerShape(Radius.md),
-                    border = BorderStroke(1.dp, CommerceColors.Border.copy(alpha = 0.4f)),
+                val entity = CommerceEntity.Brand(item = brand, vertical = "pharmacy")
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp,
                     modifier = Modifier.clickable { onEntityClick(entity) }
                 ) {
-                    Text(
-                        brand.name,
-                        style = CommerceTypography.BodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = CommerceColors.NeutralDark,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = CircleShape,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.VerifiedUser,
+                                    contentDescription = null,
+                                    tint = Color(0xFF047857),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            brand.name,
+                            fontSize = 13.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
                 }
             }
         }

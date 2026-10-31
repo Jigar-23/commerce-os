@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.commerceos.android.model.CatalogCategory
@@ -28,7 +29,7 @@ import com.commerceos.android.viewmodel.CategoryTaxonomyUiState
 import com.commerceos.android.viewmodel.CategoryViewModel
 
 data class CategoryPresentation(
-    val emoji: String,
+    val icon: ImageVector,
     val iconTint: Color,
     val iconBg: Color,
     val highlights: String
@@ -38,73 +39,73 @@ private fun getPresentation(categoryName: String): CategoryPresentation {
     val lower = categoryName.lowercase()
     return when {
         lower.contains("pain") || lower.contains("fever") -> CategoryPresentation(
-            emoji = "🌡️",
+            icon = Icons.Default.Healing,
             iconTint = Color(0xFFEF4444),
             iconBg = Color(0xFFFEF2F2),
             highlights = "Paracetamol, Dolo, Balms"
         )
         lower.contains("cold") || lower.contains("cough") -> CategoryPresentation(
-            emoji = "🤧",
+            icon = Icons.Default.Thermostat,
             iconTint = Color(0xFF0284C7),
             iconBg = Color(0xFFF0F9FF),
             highlights = "Syrups, Lozenges, Inhalers"
         )
         lower.contains("diabetes") -> CategoryPresentation(
-            emoji = "🩺",
+            icon = Icons.Default.Bloodtype,
             iconTint = Color(0xFF4F46E5),
             iconBg = Color(0xFFEEF2FF),
             highlights = "Glucometers, Strips, Care"
         )
         lower.contains("antibiotic") || lower.contains("infect") -> CategoryPresentation(
-            emoji = "🧪",
+            icon = Icons.Default.Science,
             iconTint = Color(0xFF0D9488),
             iconBg = Color(0xFFF0FDFA),
             highlights = "Amoxiclav, Azithral"
         )
         lower.contains("vitamin") || lower.contains("nutrition") -> CategoryPresentation(
-            emoji = "🌿",
+            icon = Icons.Default.FitnessCenter,
             iconTint = Color(0xFF059669),
             iconBg = Color(0xFFECFDF5),
             highlights = "Multivitamins, Zinc, Calcium"
         )
         lower.contains("stomach") || lower.contains("digest") || lower.contains("gas") -> CategoryPresentation(
-            emoji = "💊",
+            icon = Icons.Default.LocalPharmacy,
             iconTint = Color(0xFFD97706),
             iconBg = Color(0xFFFFFBEB),
             highlights = "Antacids, Digene, ORS"
         )
         lower.contains("heart") || lower.contains("cardiac") || lower.contains("bp") -> CategoryPresentation(
-            emoji = "❤️",
+            icon = Icons.Default.Favorite,
             iconTint = Color(0xFFDB2777),
             iconBg = Color(0xFFFDF2F8),
             highlights = "BP Monitors, Heart Health"
         )
         lower.contains("first aid") || lower.contains("wound") || lower.contains("bandage") -> CategoryPresentation(
-            emoji = "🩹",
+            icon = Icons.Default.MedicalServices,
             iconTint = Color(0xFFE11D48),
             iconBg = Color(0xFFFFF1F2),
             highlights = "Bandages, Antiseptic, Dettol"
         )
         lower.contains("skin") || lower.contains("hair") || lower.contains("derma") -> CategoryPresentation(
-            emoji = "✨",
+            icon = Icons.Default.Face,
             iconTint = Color(0xFF9333EA),
             iconBg = Color(0xFFFAF5FF),
             highlights = "Derma Creams, Lotions"
         )
         lower.contains("baby") || lower.contains("mother") -> CategoryPresentation(
-            emoji = "👶",
+            icon = Icons.Default.ChildCare,
             iconTint = Color(0xFF2563EB),
             iconBg = Color(0xFFEFF6FF),
             highlights = "Diapers, Wipes, Gripe Water"
         )
         lower.contains("ayurved") || lower.contains("herbal") -> CategoryPresentation(
-            emoji = "🍃",
+            icon = Icons.Default.Eco,
             iconTint = Color(0xFF16A34A),
             iconBg = Color(0xFFF0FDF4),
             highlights = "Chyawanprash, Immunity"
         )
         else -> CategoryPresentation(
-            emoji = "💊",
+            icon = Icons.Default.Medication,
             iconTint = Color(0xFF059669),
             iconBg = Color(0xFFECFDF5),
             highlights = "Certified Medicines"
@@ -209,7 +210,7 @@ private fun HealthcareCategoryCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .height(138.dp)
+            .height(148.dp)
             .clickable(onClick = onClick)
     ) {
         Column(
@@ -230,7 +231,12 @@ private fun HealthcareCategoryCard(
                     modifier = Modifier.size(38.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(pres.emoji, fontSize = 20.sp)
+                        Icon(
+                            imageVector = pres.icon,
+                            contentDescription = null,
+                            tint = pres.iconTint,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
 
@@ -254,16 +260,20 @@ private fun HealthcareCategoryCard(
                 Text(
                     text = category.name,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
+                    fontSize = 13.5.sp,
                     color = Color(0xFF0F172A),
-                    maxLines = 1
+                    minLines = 2,
+                    maxLines = 2,
+                    lineHeight = 17.sp,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = pres.highlights,
                     fontSize = 11.sp,
                     color = Color(0xFF64748B),
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(

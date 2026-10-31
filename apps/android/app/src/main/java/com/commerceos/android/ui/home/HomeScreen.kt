@@ -250,14 +250,14 @@ private fun MedicineCategoryRail(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .width(80.dp)
+                        .width(86.dp)
                         .clickable { onSelectCategory(cat.query) }
                 ) {
                     Surface(
                         color = Color(0xFFF1F5F9),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                        modifier = Modifier.size(72.dp)
+                        modifier = Modifier.size(68.dp)
                     ) {
                         ProductImage(
                             imageUrl = cat.imageUrl,
@@ -265,16 +265,18 @@ private fun MedicineCategoryRail(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(10.dp)
+                                .padding(8.dp)
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = cat.name,
-                        fontSize = 11.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF1E293B),
-                        maxLines = 1,
+                        minLines = 2,
+                        maxLines = 2,
+                        lineHeight = 14.sp,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -311,7 +313,12 @@ private fun PrescriptionQuickStrip(
                 modifier = Modifier.size(38.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("📄", fontSize = 18.sp)
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = "Prescription",
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -363,17 +370,19 @@ private fun DeliveryAddressWidget(
 ) {
     val hasAddress = context?.hasAddress == true || selectedAddress != null || !locationHeaderLabel.isNullOrBlank()
 
-    val displayAddress = if (!locationHeaderLabel.isNullOrBlank() && locationHeaderLabel != "Select Delivery Location") {
-        locationHeaderLabel
-    } else if (hasAddress) {
-        val tag = selectedAddress?.tag?.ifBlank { "Home" } ?: "Home"
-        val line = selectedAddress?.addressLine?.takeIf { it.isNotBlank() }
-            ?: context?.displayLabel?.takeIf { it.isNotBlank() }
-            ?: "Current Location"
-        "$tag - $line"
-    } else {
-        "Current Location"
-    }
+    val titleTag = (when {
+        selectedAddress?.tag?.isNotBlank() == true -> selectedAddress.tag
+        !locationHeaderLabel.isNullOrBlank() && locationHeaderLabel != "Select Delivery Location" -> locationHeaderLabel.take(20)
+        hasAddress -> "Home"
+        else -> "Deliver to"
+    } ?: "Deliver to")
+
+    val addressLine = (when {
+        selectedAddress?.addressLine?.isNotBlank() == true -> selectedAddress.addressLine
+        context?.displayLabel?.isNotBlank() == true -> context.displayLabel
+        !locationHeaderLabel.isNullOrBlank() && locationHeaderLabel != "Select Delivery Location" -> locationHeaderLabel
+        else -> "Select delivery location"
+    } ?: "Select delivery location")
 
     Row(
         modifier = Modifier
@@ -382,55 +391,54 @@ private fun DeliveryAddressWidget(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Column: Location and Delivery ETA
-        Column(
+        // Left Column: Modern Healthcare Navigation Pinpoint + Address & ETA
+        Row(
             modifier = Modifier
                 .weight(1f)
-                .clickable(onClick = onChangeAddress)
+                .clickable(onClick = onChangeAddress),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isLocating && selectedAddress == null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = Color(0xFF059669),
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Detecting location...",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
+            // Directional Navigation GPS Arrow Badge (Tata 1mg / PharmEasy / Blinkit standard)
+            Surface(
+                color = Color(0xFFECFDF5),
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (isLocating && selectedAddress == null) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color(0xFF059669),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.NearMe,
+                            contentDescription = "Delivery Location",
+                            tint = Color(0xFF059669),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(2.dp))
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Delivering to",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF64748B),
+                    letterSpacing = 0.2.sp
+                )
+                Spacer(modifier = Modifier.height(1.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(11.dp),
-                        color = Color(0xFF059669),
-                        strokeWidth = 1.5.dp
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = "Finding closest delivery pinpoint...",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = Color(0xFF059669),
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = displayAddress,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = titleTag,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF0F172A),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -438,57 +446,45 @@ private fun DeliveryAddressWidget(
                     Spacer(modifier = Modifier.width(2.dp))
                     Icon(
                         Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Select Location",
-                        tint = Color(0xFF64748B),
+                        contentDescription = "Change Location",
+                        tint = Color(0xFF059669),
                         modifier = Modifier.size(18.dp)
                     )
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (hasAddress && calculatedEtaMinutes > 0) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFFDCFCE7),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
                         Text(
-                            text = "Delivering in ",
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B)
-                        )
-                        Text(
-                            text = "$calculatedEtaMinutes mins",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF059669)
-                        )
-                    } else if (hasAddress && !context?.formattedEta.isNullOrBlank()) {
-                        Text(
-                            text = "Delivering in ",
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B)
-                        )
-                        Text(
-                            text = context!!.formattedEta!!,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF059669)
-                        )
-                    } else {
-                        Text(
-                            text = "Tap to choose delivery location & view ETA",
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B)
+                            text = if (calculatedEtaMinutes > 0) "⚡ $calculatedEtaMinutes MINS" else "⚡ 10 MINS",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF166534),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(1.dp))
+
+                Text(
+                    text = addressLine,
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(10.dp))
 
-        // Right Action: User profile
+        // Right Action: User profile button
         Surface(
-            color = Color(0xFFF1F5F9),
+            color = Color.White,
             shape = CircleShape,
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            shadowElevation = 0.5.dp,
             modifier = Modifier
                 .size(38.dp)
                 .clickable(onClick = onProfileClick)
@@ -530,9 +526,9 @@ private fun UniversalSearchBar(
 
     Surface(
         color = Color.White,
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
-        shadowElevation = 1.dp,
+        shape = RoundedCornerShape(24.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 1.5.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)

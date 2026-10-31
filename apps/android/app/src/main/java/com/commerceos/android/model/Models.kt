@@ -1,5 +1,6 @@
 package com.commerceos.android.model
 
+import com.google.gson.annotations.SerializedName
 import java.math.BigDecimal
 
 data class ApiMedicine(
@@ -248,20 +249,35 @@ data class CartCheckoutRequest(
 
 // Prescription upload / pharmacist verification (port 8089)
 data class Prescription(
-    val id: String,
-    val customerId: String,
-    val patientName: String,
+    @SerializedName(value = "id")
+    val id: String = "",
+    @SerializedName(value = "customerId", alternate = ["customer_id"])
+    val customerId: String = "",
+    @SerializedName(value = "patientName", alternate = ["patient_name"])
+    val patientName: String = "Patient",
+    @SerializedName(value = "age")
     val age: Int? = null,
+    @SerializedName(value = "gender")
     val gender: String? = null,
+    @SerializedName(value = "doctorName", alternate = ["doctor_name"])
     val doctorName: String? = null,
+    @SerializedName(value = "doctorRegistrationNo", alternate = ["doctor_registration_no"])
     val doctorRegistrationNo: String? = null,
+    @SerializedName(value = "attachments")
     val attachments: List<String> = emptyList(),
+    @SerializedName(value = "note")
     val note: String = "",
-    val status: String,
+    @SerializedName(value = "status")
+    val status: String = "PENDING",
+    @SerializedName(value = "pharmacistId", alternate = ["pharmacist_id"])
     val pharmacistId: String? = null,
+    @SerializedName(value = "licenseNo", alternate = ["license_no"])
     val licenseNo: String? = null,
+    @SerializedName(value = "rejectionReason", alternate = ["rejection_reason"])
     val rejectionReason: String? = null,
+    @SerializedName(value = "reviewedAt", alternate = ["reviewed_at"])
     val reviewedAt: String? = null,
+    @SerializedName(value = "createdAt", alternate = ["created_at"])
     val createdAt: String? = null
 )
 

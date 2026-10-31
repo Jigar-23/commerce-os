@@ -1,7 +1,10 @@
 package com.commerceos.android.ui.components
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,20 +33,33 @@ object VerticalExperienceQuality {
         modifier: Modifier = Modifier
     ) {
         val (icon, title, body) = when (config.domain) {
-            CommerceDomain.PHARMACY -> Triple("💊", "No Medicines Found", "Your prescription vault or cart is empty.")
-            CommerceDomain.FASHION -> Triple("👗", "No Apparel Items", "Browse new arrivals or saved favorites.")
-            CommerceDomain.FOOD -> Triple("🍕", "No Dishes or Restaurants Available", "Try searching for a different cuisine or locality.")
-            CommerceDomain.ELECTRONICS -> Triple("⚡", "No Tech Products Available", "Explore alternate gadget categories or brands.")
-            CommerceDomain.SERVICES -> Triple("🛠️", "No Service Technicians Available", "Select another appointment slot or service type.")
-            CommerceDomain.GENERAL_COMMERCE -> Triple("📦", "No Products Available", "Check back soon for new inventory.")
+            CommerceDomain.PHARMACY -> Triple(Icons.Default.Medication, "No Medicines Found", "Your prescription vault or cart is empty.")
+            CommerceDomain.FASHION -> Triple(Icons.Default.Checkroom, "No Apparel Items", "Browse new arrivals or saved favorites.")
+            CommerceDomain.FOOD -> Triple(Icons.Default.Restaurant, "No Dishes or Restaurants Available", "Try searching for a different cuisine or locality.")
+            CommerceDomain.ELECTRONICS -> Triple(Icons.Default.Devices, "No Tech Products Available", "Explore alternate gadget categories or brands.")
+            CommerceDomain.SERVICES -> Triple(Icons.Default.Build, "No Service Technicians Available", "Select another appointment slot or service type.")
+            CommerceDomain.GENERAL_COMMERCE -> Triple(Icons.Default.Inventory2, "No Products Available", "Check back soon for new inventory.")
         }
 
         Column(
             modifier = modifier.fillMaxWidth().padding(Spacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(icon, style = CommerceTypography.Display)
-            Spacer(modifier = Modifier.height(Spacing.sm))
+            Surface(
+                color = CommerceColors.SurfaceSubtle,
+                shape = CircleShape,
+                modifier = Modifier.size(64.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = CommerceColors.Primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(Spacing.md))
             Text(title, style = CommerceTypography.Title, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
             Spacer(modifier = Modifier.height(Spacing.xs))
             Text(body, style = CommerceTypography.BodySmall, color = CommerceColors.TextMuted)

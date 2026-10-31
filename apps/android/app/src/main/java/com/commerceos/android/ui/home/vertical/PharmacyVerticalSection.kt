@@ -3,6 +3,8 @@ package com.commerceos.android.ui.home.vertical
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,7 +28,16 @@ fun PharmacyVerticalSection(onOpenCatalog: (CatalogQuery) -> Unit) {
                         Text("HEALTH & PHARMACY", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold, color = CommerceColors.OnPrimary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                     }
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("💊 Medicines & Healthcare Catalog", style = CommerceTypography.Title, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Medication,
+                            contentDescription = null,
+                            tint = CommerceColors.Primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Medicines & Healthcare Catalog", style = CommerceTypography.Title, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                    }
                 }
             }
         }

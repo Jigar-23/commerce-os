@@ -38,7 +38,12 @@ object LocalProfileManager {
     fun getCustomName(context: Context, customerId: String): String? {
         val safeId = sanitizeCustomerId(customerId)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_PREFIX_NAME + safeId, null)?.trim()?.takeIf { it.isNotBlank() }
+        val saved = prefs.getString(KEY_PREFIX_NAME + safeId, null)?.trim()?.takeIf { it.isNotBlank() }
+        if (saved != null && saved.startsWith("Customer", ignoreCase = true)) {
+            prefs.edit().remove(KEY_PREFIX_NAME + safeId).apply()
+            return null
+        }
+        return saved
     }
 
     /**

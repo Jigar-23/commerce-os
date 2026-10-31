@@ -32,6 +32,7 @@ import com.commerceos.android.model.CartItem
 import com.commerceos.android.model.MedicineImageResolver
 import com.commerceos.android.model.Prescription
 import com.commerceos.android.ui.components.ProductImage
+import com.commerceos.android.ui.components.formatHealthcareTitle
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceElevation
 import com.commerceos.android.ui.theme.CommerceTypography
@@ -305,9 +306,11 @@ private fun FreeDeliveryBanner(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (unlocked) "🎉" else "⚡",
-                        fontSize = 13.sp
+                    Icon(
+                        imageVector = if (unlocked) Icons.Default.CheckCircle else Icons.Default.ElectricBolt,
+                        contentDescription = null,
+                        tint = if (unlocked) Color(0xFF16A34A) else Color(0xFFF59E0B),
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     if (unlocked) {
@@ -485,9 +488,9 @@ private fun CartItemRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = item.name.orEmpty().ifBlank { "Medicine Item" },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = formatHealthcareTitle(item.name.orEmpty().ifBlank { "Medicine Item" }),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
                 color = Color(0xFF0F172A),
                 maxLines = 2,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -525,15 +528,17 @@ private fun CartItemRow(
             val mrpVal = item.mrp
             val lineSavings = (mrpVal - item.unitPrice).multiply(BigDecimal.valueOf(item.quantity.toLong())).coerceAtLeast(BigDecimal.ZERO)
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Text(
                     MoneyFormatter.format(item.unitPrice),
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF0F172A)
                 )
                 if (mrpVal > item.unitPrice) {
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         MoneyFormatter.format(mrpVal),
                         fontSize = 11.sp,
@@ -542,12 +547,11 @@ private fun CartItemRow(
                     )
                 }
                 if (lineSavings > BigDecimal.ZERO) {
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         "Save ${MoneyFormatter.format(lineSavings)}",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
+                        color = Color(0xFF16A34A)
                     )
                 }
             }
@@ -573,9 +577,9 @@ private fun QuantityControls(
     onIncrease: () -> Unit
 ) {
     Surface(
-        color = Color(0xFFECFDF5),
+        color = Color(0xFF047857),
         shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
+        shadowElevation = 0.5.dp
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -591,14 +595,14 @@ private fun QuantityControls(
                     text = "−",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF059669)
+                    color = Color.White
                 )
             }
             Text(
                 text = quantity.toString(),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF059669),
+                color = Color.White,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
             Box(
@@ -611,7 +615,7 @@ private fun QuantityControls(
                     text = "+",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF059669)
+                    color = Color.White
                 )
             }
         }
@@ -1223,7 +1227,12 @@ private fun SummaryCard(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("🏷️", fontSize = 16.sp)
+                        Icon(
+                            imageVector = Icons.Default.LocalOffer,
+                            contentDescription = "Savings",
+                            tint = Color(0xFF166534),
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "You are saving $totalSavings on this order!",

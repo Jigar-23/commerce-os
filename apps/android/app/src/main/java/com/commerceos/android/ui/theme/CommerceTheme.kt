@@ -393,6 +393,14 @@ fun CommerceTheme(
     MaterialTheme(
         colorScheme = scheme,
         typography = baseTypography,
-        content = content
+        content = {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.material3.LocalTextStyle provides TextStyle(
+                    fontFamily = PlusJakartaSans,
+                    color = textColor
+                ),
+                content = content
+            )
+        }
     )
 }

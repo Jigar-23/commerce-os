@@ -170,7 +170,7 @@ fun ProductSearchCard(
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    result.title,
+                    com.commerceos.android.ui.components.formatHealthcareTitle(result.title),
                     style = CommerceTypography.BodySmall,
                     fontWeight = FontWeight.Bold,
                     color = CommerceColors.TextPrimary,

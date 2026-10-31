@@ -1,5 +1,11 @@
 package com.commerceos.android.ui.search
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import java.util.Locale
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -110,9 +116,6 @@ fun SearchScreen(
             .apply()
     }
 
-    var showVoiceDialog by remember { mutableStateOf(false) }
-    var showCameraDialog by remember { mutableStateOf(false) }
-
     val searchUiState = viewModel?.uiState ?: SearchUiState.Idle
 
     fun commitSearch(raw: String) {
@@ -125,21 +128,30 @@ fun SearchScreen(
         viewModel?.executeSearch(query)
     }
 
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            val spokenMatches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val recognizedText = spokenMatches?.firstOrNull()?.trim()
+            if (!recognizedText.isNullOrBlank()) {
+                queryText = recognizedText
+                commitSearch(recognizedText)
+            }
+        }
+    }
+
+    var showCameraDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(initialQuery.text) {
         if (initialQuery.text.isNotBlank()) {
             queryText = initialQuery.text
             commitSearch(initialQuery.text)
+        } else {
+            queryText = ""
+            isSearchSubmitted = false
+            viewModel?.reset()
         }
-    }
-
-    if (showVoiceDialog) {
-        VoiceSearchDialog(
-            onDismiss = { showVoiceDialog = false },
-            onResult = { res ->
-                queryText = res
-                commitSearch(res)
-            }
-        )
     }
 
     if (showCameraDialog) {
@@ -235,7 +247,11 @@ fun SearchScreen(
                                     onValueChange = {
                                         queryText = it
                                         isSearchSubmitted = false
-                                        viewModel?.updateQuery(it)
+                                        if (it.isBlank()) {
+                                            viewModel?.reset()
+                                        } else {
+                                            viewModel?.updateQuery(it)
+                                        }
                                     },
                                     singleLine = true,
                                     textStyle = TextStyle(
@@ -298,7 +314,18 @@ fun SearchScreen(
                             }
 
                             IconButton(
-                                onClick = { showVoiceDialog = true },
+                                onClick = {
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Search medicines, salts & health products...")
+                                    }
+                                    try {
+                                        speechRecognizerLauncher.launch(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Voice search is not available on this device", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Icon(
@@ -359,7 +386,7 @@ fun SearchScreen(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("All", "Medicines", "Generic Substitutes 🪙", "Express ⚡ 10 Mins").forEach { filter ->
+                        listOf("All", "Medicines", "Branded Generics", "Express ⚡ 10 Mins").forEach { filter ->
                             val isSelected = selectedFilter == filter
                             Surface(
                                 color = if (isSelected) Color(0xFFE8F5E9) else Color.White,
@@ -443,13 +470,13 @@ fun SearchScreen(
                     val filteredResults = when (selectedFilter) {
                         "Express ⚡ 10 Mins" -> rawResults.filter { it.isExpressEligible == true }
                         "Medicines" -> rawResults.filter { it.vertical.equals("pharmacy", ignoreCase = true) || it.entityType == SearchEntityType.PRODUCT }
-                        "Generic Substitutes 🪙" -> rawResults.filter { it.title.contains("Paracip", ignoreCase = true) || it.title.contains("generic", ignoreCase = true) || it.title.contains("Moxikind", ignoreCase = true) }
+                        "Branded Generics" -> rawResults.filter { it.title.contains("Paracip", ignoreCase = true) || it.title.contains("generic", ignoreCase = true) || it.title.contains("Moxikind", ignoreCase = true) }
                         else -> rawResults
                     }
 
                     SearchResultsView(
                         queryText = queryText,
-                        results = if (filteredResults.isEmpty() && selectedFilter == "Generic Substitutes 🪙") rawResults else filteredResults,
+                        results = if (filteredResults.isEmpty() && selectedFilter == "Branded Generics") rawResults else filteredResults,
                         cartQuantityMap = cartQuantityMap,
                         onSelectSearchResult = onSelectSearchResult,
                         onAddToCart = onAddToCart,
@@ -967,7 +994,7 @@ private fun SearchIdleRichView(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("🎟️", fontSize = 18.sp)
+                    Icon(Icons.Default.LocalOffer, contentDescription = null, tint = Color(0xFF0C831F), modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -1231,7 +1258,7 @@ private fun SearchIdleRichView(
                         modifier = Modifier.size(46.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("📄", fontSize = 22.sp)
+                            Icon(Icons.Default.Description, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(24.dp))
                         }
                     }
 
@@ -1566,8 +1593,13 @@ private fun ModernSearchResultCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 // Title
+                val formattedTitle = com.commerceos.android.ui.components.formatHealthcareTitle(result.title)
+                val formattedSalt = com.commerceos.android.ui.components.formatHealthcareSalt(result.title, meta.saltComposition)
+                val formattedBrand = com.commerceos.android.ui.components.formatHealthcareBrand(meta.manufacturer, result.title)
+                val formattedPack = com.commerceos.android.ui.components.formatPackSize(meta.packDescription)
+
                 Text(
-                    text = result.title,
+                    text = formattedTitle,
                     fontSize = 14.sp,
                     fontFamily = PlusJakartaSans,
                     fontWeight = FontWeight.Bold,
@@ -1583,7 +1615,7 @@ private fun ModernSearchResultCard(
                     modifier = Modifier.padding(vertical = 3.dp)
                 ) {
                     Text(
-                        text = meta.saltComposition,
+                        text = formattedSalt,
                         fontSize = 10.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.SemiBold,
@@ -1596,7 +1628,7 @@ private fun ModernSearchResultCard(
 
                 // Pack size & Manufacturer subtitle
                 Text(
-                    text = meta.packDescription,
+                    text = "$formattedPack • $formattedBrand",
                     fontSize = 11.sp,
                     color = Color(0xFF6B7280),
                     maxLines = 1,
@@ -1743,7 +1775,12 @@ private fun HealthConcernCard(
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(concern.emoji, fontSize = 20.sp)
+                    Icon(
+                        imageVector = concern.icon,
+                        contentDescription = null,
+                        tint = concern.accentColor,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
             }
 
@@ -1928,7 +1965,7 @@ private fun SearchEmptyWidget(
             modifier = Modifier.size(68.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Text("🔍", fontSize = 28.sp)
+                Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(32.dp))
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
@@ -1987,10 +2024,23 @@ private fun SearchEmptyWidget(
                     .clickable { onSelectConcern(concern.query) }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(concern.emoji, fontSize = 18.sp)
+                    Surface(
+                        color = concern.bgColor,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = concern.icon,
+                                contentDescription = null,
+                                tint = concern.accentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = concern.title,
@@ -2101,7 +2151,7 @@ data class HealthConcern(
     val title: String,
     val subtitle: String,
     val query: String,
-    val emoji: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val bgColor: Color,
     val accentColor: Color
 )
@@ -2455,14 +2505,14 @@ private val TOP_MEDICINE_CATALOG = listOf(
 )
 
 private val HEALTH_CONCERNS = listOf(
-    HealthConcern("Fever & Pain", "Paracetamol, Dolo 650", "fever", "💊", Color(0xFFFEF2F2), Color(0xFFDC2626)),
-    HealthConcern("Cough & Cold", "Syrups, Lozenges, Vicks", "cough", "🫁", Color(0xFFEFF6FF), Color(0xFF2563EB)),
-    HealthConcern("Diabetes Care", "Strips, Glucometers", "diabetes", "🩸", Color(0xFFFFFBEB), Color(0xFFD97706)),
-    HealthConcern("Stomach & Gas", "Digene Gel, Antacids", "digestion", "🫧", Color(0xFFF0FDF4), Color(0xFF16A34A)),
-    HealthConcern("Skin Care", "Acne, Ointments, Creams", "skin care", "🧴", Color(0xFFFAF5FF), Color(0xFF9333EA)),
-    HealthConcern("Immunity & Herbs", "Chyawanprash, Giloy", "immunity", "🌿", Color(0xFFF0FDF4), Color(0xFF0C831F)),
-    HealthConcern("Vitamins & Calcium", "Becosules, Zinc, D3", "vitamin", "⚡", Color(0xFFFFF7ED), Color(0xFFEA580C)),
-    HealthConcern("First Aid & Wounds", "Bandages, Dettol, Cotton", "first aid", "🩹", Color(0xFFFFF1F2), Color(0xFFE11D48))
+    HealthConcern("Fever & Pain", "Paracetamol, Dolo 650", "fever", Icons.Default.Healing, Color(0xFFFEF2F2), Color(0xFFDC2626)),
+    HealthConcern("Cough & Cold", "Syrups, Lozenges, Vicks", "cough", Icons.Default.Thermostat, Color(0xFFEFF6FF), Color(0xFF2563EB)),
+    HealthConcern("Diabetes Care", "Strips, Glucometers", "diabetes", Icons.Default.Bloodtype, Color(0xFFFFFBEB), Color(0xFFD97706)),
+    HealthConcern("Stomach & Gas", "Digene Gel, Antacids", "digestion", Icons.Default.LocalPharmacy, Color(0xFFF0FDF4), Color(0xFF16A34A)),
+    HealthConcern("Skin Care", "Acne, Ointments, Creams", "skin care", Icons.Default.Face, Color(0xFFFAF5FF), Color(0xFF9333EA)),
+    HealthConcern("Immunity & Herbs", "Chyawanprash, Giloy", "immunity", Icons.Default.Eco, Color(0xFFF0FDF4), Color(0xFF0C831F)),
+    HealthConcern("Vitamins & Calcium", "Becosules, Zinc, D3", "vitamin", Icons.Default.FitnessCenter, Color(0xFFFFF7ED), Color(0xFFEA580C)),
+    HealthConcern("First Aid & Wounds", "Bandages, Dettol, Cotton", "first aid", Icons.Default.MedicalServices, Color(0xFFFFF1F2), Color(0xFFE11D48))
 )
 
 private val TOP_HEALTHCARE_PICKS = listOf(

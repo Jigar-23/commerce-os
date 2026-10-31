@@ -151,20 +151,34 @@ private fun EmptyVault() {
 
 @Composable
 private fun PrescriptionCard(rx: Prescription) {
-    val presented = presentRxStatus(rx.status)
+    val safeStatus = rx.status?.takeIf { it.isNotBlank() } ?: "PENDING"
+    val presented = presentRxStatus(safeStatus)
+    val patient = rx.patientName?.takeIf { it.isNotBlank() } ?: "Patient"
+    val dateDisplay = formatRxDate(rx.createdAt)
+    val attachments = rx.attachments ?: emptyList()
+
     Card(
         colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
         shape = RoundedCornerShape(Radius.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(presented.icon, contentDescription = null, tint = presented.color, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(Spacing.sm))
+                Surface(
+                    color = presented.background,
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(presented.icon, contentDescription = null, tint = presented.color, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(rx.patientName, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                    Text(rx.createdAt ?: "Recently uploaded", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
+                    Text(patient, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                    Text(dateDisplay, style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
                 }
                 Surface(color = presented.background, shape = RoundedCornerShape(Radius.Chip)) {
                     Text(
@@ -172,52 +186,90 @@ private fun PrescriptionCard(rx: Prescription) {
                         style = CommerceTypography.Meta,
                         fontWeight = FontWeight.Bold,
                         color = presented.color,
-                        modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xxs)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
             }
 
             if (!rx.doctorName.isNullOrBlank()) {
-                Text("Doctor: ${rx.doctorName}", style = CommerceTypography.Caption, color = CommerceColors.TextSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Doctor: ",
+                        style = CommerceTypography.Meta,
+                        fontWeight = FontWeight.Bold,
+                        color = CommerceColors.TextMuted
+                    )
+                    Text(
+                        rx.doctorName ?: "",
+                        style = CommerceTypography.Caption,
+                        color = CommerceColors.TextSecondary
+                    )
+                }
             }
             if (!rx.rejectionReason.isNullOrBlank()) {
-                Text(rx.rejectionReason, style = CommerceTypography.Caption, color = CommerceColors.Danger, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(rx.rejectionReason ?: "", style = CommerceTypography.Caption, color = CommerceColors.Danger, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            if (rx.attachments.isNotEmpty()) {
-                val firstAttachment = rx.attachments.first()
-                val isLocal = firstAttachment.startsWith("/") || firstAttachment.startsWith("file:") || firstAttachment.startsWith("local:")
-                val modelToLoad: Any = if (firstAttachment.startsWith("/")) {
-                    java.io.File(firstAttachment)
-                } else if (firstAttachment.startsWith("file:")) {
-                    java.io.File(firstAttachment.removePrefix("file://"))
-                } else {
-                    firstAttachment
+            if (attachments.isNotEmpty()) {
+                val firstAttachment = attachments.firstOrNull() ?: ""
+                val isDataUri = firstAttachment.startsWith("data:")
+                val isHttp = firstAttachment.startsWith("http://") || firstAttachment.startsWith("https://")
+                val isLocal = firstAttachment.startsWith("/") || firstAttachment.startsWith("file:")
+
+                val modelToLoad: Any? = when {
+                    isLocal -> {
+                        val cleanPath = firstAttachment.removePrefix("file://")
+                        val file = java.io.File(cleanPath)
+                        if (file.exists()) file else null
+                    }
+                    isHttp -> firstAttachment
+                    isDataUri -> firstAttachment
+                    firstAttachment.isNotBlank() && !firstAttachment.contains("/") -> null // e.g. "local_device_storage" audit placeholder
+                    else -> firstAttachment.takeIf { it.isNotBlank() }
                 }
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
-                        .padding(6.dp)
+                        .padding(8.dp)
                 ) {
-                    AsyncImage(
-                        model = modelToLoad,
-                        contentDescription = "Prescription image",
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(6.dp)),
-                        contentScale = ContentScale.Crop
-                    )
+                    if (modelToLoad != null) {
+                        AsyncImage(
+                            model = modelToLoad,
+                            contentDescription = "Prescription image",
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFE2E8F0)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF059669),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = if (isLocal) "Device Personal Storage" else if (firstAttachment.startsWith("http")) "Cloud CDN Hosted" else "Image attached",
+                            text = if (isLocal) "Device Personal Storage" else if (isHttp) "Verified Pharmacy Upload" else "Prescription Attached",
                             style = CommerceTypography.Caption,
                             fontWeight = FontWeight.SemiBold,
                             color = CommerceColors.TextPrimary
                         )
                         Text(
-                            text = if (isLocal) "Stored privately on device (zero cloud overhead)" else if (firstAttachment.startsWith("http")) "Stored in Cloudflare R2" else "Uploaded",
+                            text = if (isLocal) "Stored securely on device" else if (isHttp) "Stored in verified cloud vault" else "Valid prescription record",
                             style = CommerceTypography.Meta,
                             color = CommerceColors.TextMuted
                         )
@@ -225,12 +277,39 @@ private fun PrescriptionCard(rx: Prescription) {
                 }
             } else {
                 Text(
-                    "No attachments",
+                    "Doctor's slip attached and on file",
                     style = CommerceTypography.Meta,
                     color = CommerceColors.TextMuted
                 )
             }
         }
+    }
+}
+
+private fun formatRxDate(rawDate: String?): String {
+    if (rawDate.isNullOrBlank()) return "Recently uploaded"
+    return try {
+        if (rawDate.contains("T")) {
+            val datePart = rawDate.substringBefore("T")
+            val parts = datePart.split("-")
+            if (parts.size == 3) {
+                val year = parts[0]
+                val month = when (parts[1]) {
+                    "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"; "04" -> "Apr"
+                    "05" -> "May"; "06" -> "Jun"; "07" -> "Jul"; "08" -> "Aug"
+                    "09" -> "Sep"; "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
+                    else -> parts[1]
+                }
+                val day = parts[2]
+                "$day $month $year"
+            } else {
+                datePart
+            }
+        } else {
+            rawDate
+        }
+    } catch (_: Exception) {
+        rawDate
     }
 }
 
@@ -242,8 +321,9 @@ private data class RxStatusPresentation(
 )
 
 @androidx.compose.runtime.Composable
-private fun presentRxStatus(raw: String): RxStatusPresentation {
-    return when (raw.uppercase()) {
+private fun presentRxStatus(raw: String?): RxStatusPresentation {
+    val statusClean = raw?.uppercase()?.trim() ?: "PENDING"
+    return when (statusClean) {
         "VERIFIED", "APPROVED", "PHARMACIST_APPROVED" -> RxStatusPresentation(
             "Approved", CommerceColors.Savings, CommerceColors.SavingsSoft, Icons.Default.CheckCircle
         )

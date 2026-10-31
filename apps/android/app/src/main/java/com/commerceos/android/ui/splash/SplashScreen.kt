@@ -23,6 +23,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -135,9 +138,11 @@ fun SplashScreen(
                     modifier = Modifier.size(80.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "💊",
-                            fontSize = 38.sp
+                        Icon(
+                            Icons.Default.MedicalServices,
+                            contentDescription = null,
+                            tint = Color(0xFF059669),
+                            modifier = Modifier.size(40.dp)
                         )
                     }
                 }
@@ -179,9 +184,11 @@ fun SplashScreen(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "⚡",
-                        fontSize = 13.sp
+                    Icon(
+                        Icons.Default.Bolt,
+                        contentDescription = null,
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -210,11 +217,11 @@ fun SplashScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
             ) {
-                TrustBadgePill(icon = "🛡️", text = "100% Genuine")
+                TrustBadgePill(icon = Icons.Default.Verified, text = "100% Genuine")
                 Spacer(modifier = Modifier.width(8.dp))
-                TrustBadgePill(icon = "🩺", text = "Rx Verified")
+                TrustBadgePill(icon = Icons.Default.HealthAndSafety, text = "Rx Verified")
                 Spacer(modifier = Modifier.width(8.dp))
-                TrustBadgePill(icon = "❄️", text = "Cold-Chain")
+                TrustBadgePill(icon = Icons.Default.AcUnit, text = "Cold-Chain")
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -232,7 +239,7 @@ fun SplashScreen(
 
 @Composable
 private fun TrustBadgePill(
-    icon: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     text: String
 ) {
     Surface(
@@ -245,7 +252,7 @@ private fun TrustBadgePill(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(icon, fontSize = 10.sp)
+            Icon(icon, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(12.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = text,

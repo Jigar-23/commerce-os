@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -590,7 +591,11 @@ fun CommerceEntityRenderer(
                 modifier = modifier.clickable { onEntityClick(entity) }
             ) {
                 Column(modifier = Modifier.padding(Spacing.md)) {
-                    Text("🏪 ${entity.name}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storefront, contentDescription = null, tint = CommerceColors.Primary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(entity.name, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+                    }
                     if (!entity.address.isNullOrBlank()) {
                         Text(entity.address, style = CommerceTypography.Meta, color = CommerceColors.TextMuted, maxLines = 1)
                     }
@@ -605,7 +610,11 @@ fun CommerceEntityRenderer(
                 modifier = modifier.clickable { onEntityClick(entity) }
             ) {
                 Column(modifier = Modifier.padding(Spacing.md)) {
-                    Text("📦 ${entity.title}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Inventory2, contentDescription = null, tint = CommerceColors.Primary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(entity.title, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+                    }
                     if (!entity.description.isNullOrBlank()) {
                         Text(entity.description, style = CommerceTypography.Meta, color = CommerceColors.TextMuted, maxLines = 1)
                     }
@@ -633,7 +642,11 @@ fun CommerceEntityRenderer(
                 modifier = modifier.clickable { onEntityClick(entity) }
             ) {
                 Column(modifier = Modifier.padding(Spacing.md)) {
-                    Text("🏷️ ${entity.title}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Discount, maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocalOffer, contentDescription = null, tint = CommerceColors.Discount, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(entity.title, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Discount, maxLines = 1)
+                    }
                     if (!entity.discountText.isNullOrBlank()) {
                         Text(entity.discountText, style = CommerceTypography.Meta, color = CommerceColors.TextMuted, maxLines = 1)
                     }
@@ -648,7 +661,11 @@ fun CommerceEntityRenderer(
                 modifier = modifier.clickable { onEntityClick(entity) }
             ) {
                 Column(modifier = Modifier.padding(Spacing.md)) {
-                    Text("👤 ${entity.name}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Person, contentDescription = null, tint = CommerceColors.Primary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(entity.name, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary, maxLines = 1)
+                    }
                 }
             }
         }
@@ -659,7 +676,11 @@ fun CommerceEntityRenderer(
                 modifier = modifier.clickable { onEntityClick(entity) }
             ) {
                 Column(modifier = Modifier.padding(Spacing.md)) {
-                    Text("📄 Prescription #${entity.prescription.id.take(8)}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Verification)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Description, contentDescription = null, tint = CommerceColors.Verification, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Prescription #${entity.prescription.id.take(8)}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.Verification)
+                    }
                 }
             }
         }
@@ -670,7 +691,11 @@ fun CommerceEntityRenderer(
                 modifier = modifier.clickable { onEntityClick(entity) }
             ) {
                 Column(modifier = Modifier.padding(Spacing.md)) {
-                    Text("📅 ${entity.serviceName}", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Event, contentDescription = null, tint = CommerceColors.Primary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(entity.serviceName, style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
+                    }
                     Text("${entity.providerName} • ${entity.dateTimeText}", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
                 }
             }
