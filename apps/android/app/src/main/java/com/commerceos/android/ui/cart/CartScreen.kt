@@ -156,11 +156,6 @@ fun CartScreen(
                 )
             }
 
-            // Tip partner widget
-            item {
-                DeliveryPartnerTipWidget()
-            }
-
             // Bill breakdown
             item {
                 SummaryCard(
@@ -189,73 +184,6 @@ fun CartScreen(
             onProceed = onProceedToAddress,
             onUploadPrescription = onUploadPrescription
         )
-    }
-}
-
-@Composable
-private fun DeliveryPartnerTipWidget() {
-    var selectedTip by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    val tipOptions = listOf(10, 20, 30, 50)
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        shape = RoundedCornerShape(Radius.Card),
-        border = androidx.compose.foundation.BorderStroke(1.dp, CommerceColors.Border),
-        elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Raised),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(Spacing.md)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    color = Color(0xFFF59E0B).copy(alpha = 0.15f),
-                    shape = androidx.compose.foundation.shape.CircleShape,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("🛵", fontSize = 16.sp)
-                    }
-                }
-                Spacer(modifier = Modifier.width(Spacing.sm))
-                Column {
-                    Text("Tip your delivery partner", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                    Text("100% of the tip goes to your partner", style = CommerceTypography.Meta, color = CommerceColors.TextMuted)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.md))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-            ) {
-                tipOptions.forEach { tip ->
-                    val isSelected = selectedTip == tip
-                    Surface(
-                        color = if (isSelected) Color(0xFF10B981).copy(alpha = 0.15f) else CommerceColors.SurfaceSubtle,
-                        shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isSelected) Color(0xFF10B981) else CommerceColors.Border
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { selectedTip = if (isSelected) 0 else tip }
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "₹$tip",
-                                style = CommerceTypography.BodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color(0xFF10B981) else CommerceColors.TextPrimary
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
