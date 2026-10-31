@@ -40,6 +40,7 @@ object MedicineImageResolver {
     )
 
     private val KEYWORD_PHOTOS = listOf(
+        "para" to "https://cdn01.pharmeasy.in/dam/products_otc/H45820/crocin-650mg-strip-of-15-tablets-6.1-1775911968.jpg",
         "dolo" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
         "paracetamol" to "https://cdn01.pharmeasy.in/dam/products_otc/H45820/crocin-650mg-strip-of-15-tablets-6.1-1775911968.jpg",
         "crocin" to "https://cdn01.pharmeasy.in/dam/products_otc/H45820/crocin-650mg-strip-of-15-tablets-6.1-1775911968.jpg",

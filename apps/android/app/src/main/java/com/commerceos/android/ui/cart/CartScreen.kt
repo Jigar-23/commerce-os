@@ -1,6 +1,7 @@
 package com.commerceos.android.ui.cart
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -78,8 +79,9 @@ fun CartScreen(
                     fontWeight = FontWeight.Bold,
                     color = CommerceColors.TextPrimary
                 )
+                val totalItemCount = cartItems.sumOf { it.quantity }
                 Text(
-                    text = "${cartItems.sumOf { it.quantity }} items • 10-Min Express Delivery",
+                    text = "$totalItemCount ${if (totalItemCount == 1) "item" else "items"} • 10-Min Express Delivery",
                     style = CommerceTypography.Meta,
                     color = CommerceColors.TextMuted
                 )
@@ -88,8 +90,8 @@ fun CartScreen(
 
         LazyColumn(
             modifier = Modifier.weight(1f).padding(horizontal = Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
-            contentPadding = PaddingValues(top = 2.dp, bottom = Spacing.lg)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 2.dp, bottom = 28.dp)
         ) {
             item {
                 FreeDeliveryBanner(
@@ -283,24 +285,58 @@ private fun FreeDeliveryBanner(
             (current.toDouble() / threshold.toDouble()).toFloat().coerceIn(0f, 1f)
         } else 0f
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = if (unlocked) CommerceColors.SavingsSoft else CommerceColors.Surface),
-            shape = RoundedCornerShape(Radius.Card),
-            elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Flat)
+        Surface(
+            color = if (unlocked) Color(0xFFECFDF5) else Color.White,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, if (unlocked) Color(0xFF86EFAC) else Color(0xFFE2E8F0)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                Text(
-                    if (unlocked) "🎉 Free delivery unlocked!"
-                    else "Add ${MoneyFormatter.format(rem)} more for FREE Express Delivery",
-                    style = CommerceTypography.BodySmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (unlocked) CommerceColors.Savings else CommerceColors.TextPrimary
-                )
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (unlocked) "🎉" else "⚡",
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    if (unlocked) {
+                        Text(
+                            text = "Free Express Delivery unlocked!",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF166534)
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Add ", fontSize = 12.sp, color = Color(0xFF334155))
+                            Text(
+                                MoneyFormatter.format(rem),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF059669)
+                            )
+                            Text(" more for ", fontSize = 12.sp, color = Color(0xFF334155))
+                            Text(
+                                "FREE Delivery",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+                    }
+                }
                 LinearProgressIndicator(
                     progress = { progress },
-                    color = if (unlocked) CommerceColors.Savings else CommerceColors.Primary,
-                    trackColor = CommerceColors.Placeholder,
-                    modifier = Modifier.fillMaxWidth().height(6.dp)
+                    color = if (unlocked) Color(0xFF10B981) else Color(0xFF059669),
+                    trackColor = Color(0xFFF1F5F9),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
                 )
             }
         }
@@ -315,10 +351,14 @@ private fun CartItemCard(
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        shape = RoundedCornerShape(Radius.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Raised)
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
     ) {
-        Row(modifier = Modifier.padding(Spacing.md)) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             val resolvedImage = remember(item.sku, item.name, item.image) {
                 item.image?.takeIf { it.isNotBlank() } ?: MedicineImageResolver.resolve(item.sku, item.name)
             }
@@ -326,23 +366,39 @@ private fun CartItemCard(
                 imageUrl = resolvedImage,
                 contentDescription = item.name,
                 contentScale = ContentScale.Fit,
-                shape = RoundedCornerShape(Radius.ImageTile),
-                modifier = Modifier.size(76.dp)
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .size(68.dp)
+                    .background(Color(0xFFF8FAFC), shape = RoundedCornerShape(10.dp))
             )
 
-            Spacer(modifier = Modifier.width(Spacing.md))
+            Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.Top) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
                     Text(
                         text = item.name.orEmpty().ifBlank { "Medicine Item" },
-                        style = CommerceTypography.Body,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CommerceColors.TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    IconButton(onClick = { onRemoveItem(item.sku) }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Remove", tint = CommerceColors.NeutralLight, modifier = Modifier.size(18.dp))
+                    IconButton(
+                        onClick = { onRemoveItem(item.sku) },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove",
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
 
@@ -350,40 +406,61 @@ private fun CartItemCard(
                 if (identity.isNotEmpty()) {
                     Text(
                         identity.joinToString(" • "),
-                        style = CommerceTypography.Meta,
-                        color = CommerceColors.TextMuted,
-                        maxLines = 1
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B),
+                        maxLines = 1,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
 
                 if (item.prescriptionRequired) {
                     Text(
                         "Prescription required",
-                        style = CommerceTypography.Meta,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CommerceColors.Rx
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE11D48),
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(Spacing.sm))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 val mrpVal = item.mrp ?: item.unitPrice
                 val lineSavings = (mrpVal - item.unitPrice).multiply(BigDecimal.valueOf(item.quantity.toLong())).coerceAtLeast(BigDecimal.ZERO)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(MoneyFormatter.format(item.unitPrice), style = CommerceTypography.Body, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                    if (mrpVal > item.unitPrice) {
-                        Spacer(modifier = Modifier.width(Spacing.xs))
-                        Text("MRP ${MoneyFormatter.format(mrpVal)}", style = CommerceTypography.Meta, color = CommerceColors.TextMuted, textDecoration = TextDecoration.LineThrough)
-                    }
-                    if (lineSavings > BigDecimal.ZERO) {
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Save ${MoneyFormatter.format(lineSavings)}", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold, color = CommerceColors.Savings)
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(Spacing.sm))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                MoneyFormatter.format(item.unitPrice),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF0F172A)
+                            )
+                            if (mrpVal > item.unitPrice) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    MoneyFormatter.format(mrpVal),
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF94A3B8),
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            }
+                        }
+                        if (lineSavings > BigDecimal.ZERO) {
+                            Text(
+                                "Save ${MoneyFormatter.format(lineSavings)}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF059669)
+                            )
+                        }
+                    }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     QuantityControls(
                         quantity = item.quantity,
                         onDecrease = {
@@ -392,15 +469,6 @@ private fun CartItemCard(
                         },
                         onIncrease = { onQuantityChange(item.sku, item.quantity + 1) }
                     )
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    Text(
-                        MoneyFormatter.format(item.unitPrice.multiply(BigDecimal.valueOf(item.quantity.toLong()))),
-                        style = CommerceTypography.Body,
-                        fontWeight = FontWeight.Bold,
-                        color = CommerceColors.TextPrimary
-                    )
                 }
             }
         }
@@ -408,48 +476,51 @@ private fun CartItemCard(
 }
 
 @Composable
-private fun QuantityControls(quantity: Int, onDecrease: () -> Unit, onIncrease: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Surface(
-            color = Color(0xFFF1F5F9),
-            shape = RoundedCornerShape(8.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
-            modifier = Modifier.size(36.dp)
+private fun QuantityControls(
+    quantity: Int,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit
+) {
+    Surface(
+        color = Color(0xFFECFDF5),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.height(30.dp)
         ) {
-            IconButton(
-                onClick = onDecrease,
-                modifier = Modifier.fillMaxSize()
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clickable { onDecrease() },
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "−",
-                    style = CommerceTypography.BodyLarge,
+                    text = "−",
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
-                    color = CommerceColors.TextPrimary
+                    color = Color(0xFF059669)
                 )
             }
-        }
-        Text(
-            quantity.toString(),
-            style = CommerceTypography.Body,
-            fontWeight = FontWeight.Bold,
-            color = CommerceColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = Spacing.md)
-        )
-        Surface(
-            color = Color(0xFFF1F5F9),
-            shape = RoundedCornerShape(8.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
-            modifier = Modifier.size(36.dp)
-        ) {
-            IconButton(
-                onClick = onIncrease,
-                modifier = Modifier.fillMaxSize()
+            Text(
+                text = quantity.toString(),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF059669),
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clickable { onIncrease() },
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "+",
-                    style = CommerceTypography.BodyLarge,
+                    text = "+",
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
-                    color = CommerceColors.TextPrimary
+                    color = Color(0xFF059669)
                 )
             }
         }
@@ -659,14 +730,19 @@ private fun OptionalPrescriptionCard(
                                     modifier = Modifier.size(18.dp)
                                 )
                             } else {
-                                Text("📄", fontSize = 16.sp)
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "Doctor's Prescription",
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
                     )
@@ -707,50 +783,39 @@ private fun OptionalPrescriptionCard(
                                 color = Color(0xFF0F172A)
                             )
                             Text(
-                                text = "Rx #${attachedRx.id.takeLast(6).uppercase()} • Pharmacist will verify during packing",
+                                text = "Rx #${attachedRx.id.takeLast(6).uppercase()} • Pharmacist will verify",
                                 fontSize = 11.sp,
                                 color = Color(0xFF059669)
                             )
                         }
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = { previewPrescription = attachedRx },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    painter = painterResource(com.commerceos.android.R.drawable.ic_visibility),
-                                    contentDescription = "Quick view prescription",
-                                    tint = Color(0xFF0284C7),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                             TextButton(
                                 onClick = { showSavedRxSheet = true },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                             ) {
-                                Text("Change", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0284C7))
+                                Text("Change", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
                             }
                             TextButton(
                                 onClick = { onAttachPrescription(null) },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                             ) {
-                                Text("Remove", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFDC2626))
+                                Text("Remove", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
                             }
                         }
                     }
                 }
             } else {
                 Text(
-                    text = "Add a prescription for licensed pharmacist verification. Not mandatory — you can proceed without it and our pharmacist will contact you if needed.",
+                    text = "Upload prescription for licensed pharmacist verification (optional). You can still proceed without it.",
                     fontSize = 12.sp,
                     color = Color(0xFF64748B),
-                    lineHeight = 17.sp
+                    lineHeight = 16.sp
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -766,10 +831,15 @@ private fun OptionalPrescriptionCard(
                         },
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                        modifier = Modifier.weight(1f).height(38.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("📁", fontSize = 14.sp)
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = null,
+                            tint = Color(0xFF475569),
+                            modifier = Modifier.size(15.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (savedPrescriptions.isNotEmpty()) "From Vault (${savedPrescriptions.size})" else "Select Saved",
@@ -783,8 +853,8 @@ private fun OptionalPrescriptionCard(
                         onClick = onUploadPrescription,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                        modifier = Modifier.weight(1f).height(38.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Icon(
                             Icons.Default.Add,
@@ -1107,57 +1177,65 @@ private fun StickyCheckoutBar(
     onUploadPrescription: () -> Unit
 ) {
     Surface(
-        color = CommerceColors.Surface,
-        shadowElevation = CommerceElevation.Floating,
-        shape = RoundedCornerShape(topStart = Radius.CardLarge, topEnd = Radius.CardLarge)
+        color = Color.White,
+        shadowElevation = 8.dp,
+        border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Surface(
-                        color = Color(0xFF10B981).copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(6.dp)
+                        color = Color(0xFFECFDF5),
+                        shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
                             "⚡ 10 MINS",
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Black,
                             color = Color(0xFF059669),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                    totalSavings?.takeIf { it != "₹0.00" && it != "₹0" }?.let {
+                        Text(
+                            "Saved $it",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A)
                         )
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    grandTotal ?: "₹0.00",
-                    style = CommerceTypography.Price,
+                    text = grandTotal ?: "₹0.00",
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
-                    color = CommerceColors.TextPrimary
+                    color = Color(0xFF0F172A)
                 )
-                totalSavings?.takeIf { it != "₹0.00" }?.let {
-                    Text(
-                        "Saved $it",
-                        style = CommerceTypography.Meta,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF16A34A)
-                    )
-                }
             }
+
             if (rxBlocked) {
                 Button(
                     onClick = onUploadPrescription,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CommerceColors.Rx,
-                        contentColor = CommerceColors.OnPrimary
+                        containerColor = Color(0xFFE11D48),
+                        contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md),
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+                    modifier = Modifier.height(46.dp)
                 ) {
-                    Text("Upload Prescription", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+                    Text("Upload Prescription", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             } else if (!hasSavedAddress) {
                 Button(
@@ -1166,11 +1244,11 @@ private fun StickyCheckoutBar(
                         containerColor = Color(0xFF059669),
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md),
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+                    modifier = Modifier.height(46.dp)
                 ) {
-                    Text("Select Address ➔", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Select Address ➔", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             } else {
                 Button(
@@ -1179,11 +1257,11 @@ private fun StickyCheckoutBar(
                         containerColor = Color(0xFF059669),
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = Spacing.xl, vertical = Spacing.md),
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+                    modifier = Modifier.height(46.dp)
                 ) {
-                    Text("Continue ➔", style = CommerceTypography.Label, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Continue ➔", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
@@ -1216,7 +1294,7 @@ private fun CartDeliveryAddressCard(
                 color = if (isCompleteAddress) Color(0xFFF0FDF4) else Color(0xFFFEF3C7),
                 shape = CircleShape,
                 border = BorderStroke(1.dp, if (isCompleteAddress) Color(0xFFBBF7D0) else Color(0xFFFCD34D)),
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(38.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -1231,14 +1309,18 @@ private fun CartDeliveryAddressCard(
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text(
                         text = if (isCompleteAddress) "Deliver to ${deliveryAddress?.tag?.ifBlank { "Home" }}" else "Add Delivery Address",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
                     if (isCompleteAddress) {
                         Surface(
                             color = Color(0xFFDCFCE7),
@@ -1249,6 +1331,8 @@ private fun CartDeliveryAddressCard(
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF166534),
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                             )
                         }
@@ -1262,7 +1346,9 @@ private fun CartDeliveryAddressCard(
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFB45309),
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                     }
@@ -1276,29 +1362,43 @@ private fun CartDeliveryAddressCard(
                         ).joinToString(", ")
                         fullLine.ifBlank { "Selected delivery location" }
                     } else if (deliveryAddress != null && deliveryAddress.addressLine.isNotBlank()) {
-                        "Near ${deliveryAddress.addressLine} • Add house/flat details to place order"
+                        "Near ${deliveryAddress.addressLine} • Add house/flat details"
                     } else {
                         "Tap to choose or enter your complete address"
                     },
                     fontSize = 12.sp,
                     color = if (isCompleteAddress) Color(0xFF64748B) else Color(0xFFB45309),
                     maxLines = 2,
+                    lineHeight = 16.sp,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
 
             if (onChangeAddress != null) {
                 Spacer(modifier = Modifier.width(8.dp))
-                TextButton(
-                    onClick = onChangeAddress,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                Surface(
+                    color = if (isCompleteAddress) Color(0xFFF1F5F9) else Color(0xFFFEF3C7),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.clickable { onChangeAddress() }
                 ) {
-                    Text(
-                        text = if (isCompleteAddress) "Change" else "Add",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isCompleteAddress) Color(0xFF059669) else Color(0xFFD97706)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = if (isCompleteAddress) "Change" else "Add",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isCompleteAddress) Color(0xFF0F172A) else Color(0xFFD97706)
+                        )
+                        Icon(
+                            Icons.Default.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = if (isCompleteAddress) Color(0xFF64748B) else Color(0xFFD97706),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
         }
