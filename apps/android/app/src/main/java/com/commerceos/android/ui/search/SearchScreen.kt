@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import com.commerceos.android.R
+import com.commerceos.android.model.MedicineImageResolver
 import com.commerceos.android.model.SearchEntityType
 import com.commerceos.android.model.SearchResult
 import com.commerceos.android.model.UniversalSearchQuery
@@ -968,10 +969,16 @@ private fun ModernSearchResultCard(
     onClick: () -> Unit,
     onAddToCart: ((SearchResult) -> Unit)?
 ) {
+    val resolvedImage = MedicineImageResolver.resolve(
+        sku = result.sku ?: result.entityId,
+        name = result.title,
+        rawImage = result.image
+    )
+
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -986,27 +993,27 @@ private fun ModernSearchResultCard(
                 modifier = Modifier
                     .size(84.dp)
                     .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
-                    .border(0.5.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp)),
+                    .border(0.5.dp, Color(0xFFE5E7EB), RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 SubcomposeAsyncImage(
-                    model = result.image,
+                    model = resolvedImage,
                     contentDescription = result.title,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().padding(4.dp)
                 )
                 if (result.isExpressEligible == true) {
                     Surface(
-                        color = Color(0xFFDCFCE7),
-                        shape = RoundedCornerShape(topStart = 8.dp, bottomEnd = 4.dp),
+                        color = Color(0xFFE8F5E9),
+                        shape = RoundedCornerShape(topStart = 8.dp, bottomEnd = 6.dp),
                         modifier = Modifier.align(Alignment.TopStart)
                     ) {
                         Text(
                             "⚡ 10 MINS",
                             fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF166534),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0C831F),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                         )
                     }
                 }
@@ -1019,7 +1026,7 @@ private fun ModernSearchResultCard(
                     text = result.title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
+                    color = Color(0xFF111827),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1028,7 +1035,7 @@ private fun ModernSearchResultCard(
                     Text(
                         text = result.subtitle,
                         fontSize = 12.sp,
-                        color = Color(0xFF64748B),
+                        color = Color(0xFF4B5563),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp)
@@ -1047,8 +1054,8 @@ private fun ModernSearchResultCard(
                             Text(
                                 text = MoneyFormatter.format(result.price),
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF111827)
                             )
                         }
                     }
@@ -1056,15 +1063,15 @@ private fun ModernSearchResultCard(
                     if (onAddToCart != null) {
                         Button(
                             onClick = { onAddToCart(result) },
-                            shape = RoundedCornerShape(6.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                            modifier = Modifier.height(30.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F)),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
                         ) {
                             Text(
                                 "ADD",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.ExtraBold,
                                 color = Color.White
                             )
                         }

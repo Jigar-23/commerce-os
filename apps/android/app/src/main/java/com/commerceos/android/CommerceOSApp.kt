@@ -283,6 +283,7 @@ fun CommerceOSApp(
                 currentScreen is Screen.OrderHistory ||
                 currentScreen is Screen.OrderTracking ||
                 currentScreen is Screen.Cart ||
+                currentScreen is Screen.PaymentGateway ||
                 currentScreen is Screen.Account ||
                 currentScreen is Screen.Prescriptions ||
                 currentScreen is Screen.AddressSelection ||
