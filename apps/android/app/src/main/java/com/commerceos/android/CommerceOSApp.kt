@@ -598,6 +598,7 @@ fun CommerceOSApp(
                         ?: addressViewModel.addresses.firstOrNull { it.isDefault }
                         ?: addressViewModel.addresses.firstOrNull(),
                     onChangeAddress = {
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
                         addressViewModel.init(authenticatedCustomerId, force = true)
                         navigate(Screen.AddressSelection(fromCheckout = true))
                     },
@@ -614,8 +615,9 @@ fun CommerceOSApp(
                             !currentSelected.id.startsWith("temp_gps_") &&
                             !currentSelected.tag.equals("Current Location", ignoreCase = true)
 
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+
                         if (isCompleteSavedAddress) {
-                            checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
                             checkoutViewModel.selectAddress(currentSelected!!)
                             navigate(Screen.PaymentGateway)
                         } else {
@@ -638,6 +640,9 @@ fun CommerceOSApp(
                         directAddFlow = isDirectAddFlow,
                         onSelectAddress = { address ->
                             if (isFromCheckout) {
+                                if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
+                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                                }
                                 checkoutViewModel.selectAddress(address)
                             } else if (isFromProfile) {
                                 addressViewModel.setDefaultAddress(address.id)
@@ -652,6 +657,9 @@ fun CommerceOSApp(
                         },
                         onProceedToPayment = if (isFromCheckout) {
                             {
+                                if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
+                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                                }
                                 val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
                                 if (addr != null) {
                                     checkoutViewModel.selectAddress(addr)
@@ -665,6 +673,9 @@ fun CommerceOSApp(
                                 addressViewModel.select(saved)
                             }
                             if (isFromCheckout) {
+                                if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
+                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                                }
                                 if (saved != null) checkoutViewModel.selectAddress(saved)
                                 if (backStack.lastOrNull() is Screen.PaymentGateway) {
                                     goBack()
@@ -677,16 +688,26 @@ fun CommerceOSApp(
                         }
                     )
                 }
-                is Screen.PaymentGateway -> PaymentScreen(
-                    checkoutUiState = checkoutViewModel.uiState,
-                    onAuthorize = { method ->
-                        checkoutViewModel.executeCheckout(method)
-                    },
-                    onChangeAddress = {
-                        addressViewModel.init(authenticatedCustomerId, force = true)
-                        navigate(Screen.AddressSelection(fromCheckout = true))
+                is Screen.PaymentGateway -> {
+                    if ((checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) ||
+                        checkoutViewModel.customerId.isBlank()) {
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                        val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                        if (activeAddr != null && checkoutViewModel.uiState.address == null) {
+                            checkoutViewModel.selectAddress(activeAddr)
+                        }
                     }
-                )
+                    PaymentScreen(
+                        checkoutUiState = checkoutViewModel.uiState,
+                        onAuthorize = { method ->
+                            checkoutViewModel.executeCheckout(method)
+                        },
+                        onChangeAddress = {
+                            addressViewModel.init(authenticatedCustomerId, force = true)
+                            navigate(Screen.AddressSelection(fromCheckout = true))
+                        }
+                    )
+                }
                 is Screen.OrderTracking -> OrderTrackingScreen(
                     detail = orderViewModel.detail,
                     liveTracking = orderViewModel.liveTracking,
