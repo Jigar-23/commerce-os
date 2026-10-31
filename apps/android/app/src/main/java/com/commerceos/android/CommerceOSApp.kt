@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +44,7 @@ import com.commerceos.android.ui.home.HomeScreen
 import com.commerceos.android.ui.home.VerticalHomeScreen
 import com.commerceos.android.ui.navigation.Screen
 import com.commerceos.android.ui.orders.OrderHistoryScreen
+import com.commerceos.android.ui.splash.SplashScreen
 import com.commerceos.android.ui.orders.OrderTrackingScreen
 import com.commerceos.android.ui.payment.PaymentScreen
 import com.commerceos.android.ui.prescriptions.PrescriptionVaultScreen
@@ -103,7 +105,9 @@ fun CommerceOSApp(
         }
     }
 
-    BackHandler(enabled = currentScreen !is Screen.Auth) { goBack() }
+    var isSplashVisible by rememberSaveable { mutableStateOf(true) }
+
+    BackHandler(enabled = !isSplashVisible && currentScreen !is Screen.Auth) { goBack() }
 
     fun openUniversalSearch(query: UniversalSearchQuery) {
         val targetScreen = router.resolveSearch(query)
@@ -267,8 +271,13 @@ fun CommerceOSApp(
         unselectedTextColor = CommerceColors.TextMuted
     )
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    if (isSplashVisible) {
+        SplashScreen(
+            onDismiss = { isSplashVisible = false }
+        )
+    } else {
+        Scaffold(
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val hideTopBar = currentScreen is Screen.Home ||
                 currentScreen is Screen.OrderHistory ||
@@ -800,6 +809,7 @@ fun CommerceOSApp(
                             )
                         )
                     },
+                    onUploadPrescription = { showRxUploadDialog = true },
                     onBack = { goBack() }
                 )
                 is Screen.FeatureDisabled -> {
@@ -923,4 +933,5 @@ fun CommerceOSApp(
             }
         }
     }
+}
 }

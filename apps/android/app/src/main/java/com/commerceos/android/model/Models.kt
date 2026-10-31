@@ -23,7 +23,8 @@ data class ApiMedicine(
     val image: String? = null,
     val mrp: Double? = null,
     val discountPercentage: Int? = null,
-    val therapeuticCategory: String? = null
+    val therapeuticCategory: String? = null,
+    val description: String? = null
 )
 
 data class PageResponse<T>(

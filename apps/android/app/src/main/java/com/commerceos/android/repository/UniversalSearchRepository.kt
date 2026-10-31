@@ -58,17 +58,21 @@ open class UniversalSearchRepository(
                 val cat = (med.therapeuticCategory ?: "").lowercase()
                 val sku = (med.sku ?: "").lowercase()
                 val mfg = (med.manufacturer ?: "").lowercase()
+                val desc = (med.description ?: "").lowercase()
 
                 if (queryTokens.isEmpty()) {
                     true
                 } else {
                     queryTokens.any { token ->
-                        name.contains(token) || brand.contains(token) || cat.contains(token) || sku.contains(token) || mfg.contains(token)
-                    } || (queryLower.contains("fever") && (cat.contains("fever") || name.contains("dolo") || name.contains("paracetamol") || name.contains("paracip")))
-                      || (queryLower.contains("pain") && (cat.contains("pain") || name.contains("dolo") || name.contains("paracetamol") || name.contains("paracip")))
-                      || (queryLower.contains("cold") && (cat.contains("cold") || cat.contains("cough") || name.contains("cold") || name.contains("cetrizet")))
-                      || (queryLower.contains("cough") && (cat.contains("cough") || cat.contains("cold") || name.contains("relief") || name.contains("cetrizet")))
-                      || (queryLower.contains("diabet") && (cat.contains("diabet") || name.contains("glycomet") || name.contains("insulin")))
+                        name.contains(token) || brand.contains(token) || cat.contains(token) || sku.contains(token) || mfg.contains(token) || desc.contains(token)
+                    } || (queryLower.contains("fever") && (cat.contains("fever") || name.contains("dolo") || name.contains("paracetamol") || name.contains("para") || desc.contains("fever") || desc.contains("paracetamol")))
+                      || (queryLower.contains("pain") && (cat.contains("pain") || name.contains("dolo") || name.contains("paracetamol") || name.contains("para") || desc.contains("pain") || desc.contains("relief")))
+                      || (queryLower.contains("dolo") && (name.contains("para") || desc.contains("paracetamol") || desc.contains("fever")))
+                      || (queryLower.contains("crocin") && (name.contains("para") || desc.contains("paracetamol") || desc.contains("fever")))
+                      || (queryLower.contains("headache") && (name.contains("para") || desc.contains("pain") || desc.contains("relief")))
+                      || (queryLower.contains("cold") && (cat.contains("cold") || cat.contains("cough") || name.contains("cold") || name.contains("cetrizet") || desc.contains("cold")))
+                      || (queryLower.contains("cough") && (cat.contains("cough") || cat.contains("cold") || name.contains("relief") || name.contains("cetrizet") || desc.contains("cough")))
+                      || (queryLower.contains("diabet") && (cat.contains("diabet") || name.contains("glycomet") || name.contains("insulin") || desc.contains("diabet")))
                       || (queryLower.contains("antibiotic") && (cat.contains("antibiotic") || name.contains("amox") || name.contains("azithral")))
                       || (queryLower.contains("vitamin") && (cat.contains("vitamin") || name.contains("becosules") || name.contains("vitamin")))
                       || (queryLower.contains("acid") && (cat.contains("acid") || cat.contains("gas") || name.contains("digene")))
@@ -88,7 +92,11 @@ open class UniversalSearchRepository(
                         rating = med.rating,
                         sku = med.sku,
                         isExpressEligible = med.expressDeliverySlaMins > 0,
-                        image = if (!med.image.isNullOrBlank()) med.image else com.commerceos.android.model.MedicineImageResolver.resolve(med.name ?: "", med.therapeuticCategory ?: "")
+                        image = com.commerceos.android.model.MedicineImageResolver.resolve(
+                            sku = med.sku,
+                            name = med.name,
+                            rawImage = med.image
+                        )
                     )
                 }
                 return@withContext ApiResult.Success(searchResults)
