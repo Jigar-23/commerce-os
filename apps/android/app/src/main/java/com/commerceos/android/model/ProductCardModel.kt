@@ -61,7 +61,16 @@ object MedicineImageResolver {
         "shelcal" to "https://cdn01.pharmeasy.in/dam/products_otc/K78299/shelcal-500mg-bottle-of-30-tablets-6.1-1787223246.jpg",
         "becosules" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg",
         "volini" to "https://cdn01.pharmeasy.in/dam/products_otc/I00392/volini-pain-relief-gel-tube-of-100-g-6.1-1712725504.jpg",
-        "digene" to "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
+        "digene" to "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg",
+        "pan d" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/130198/pan-d-capsule-strip-of-15-capsules-front-2-1756897184-non-watermarked.jpg",
+        "electral" to "https://cdn01.pharmeasy.in/dam/products_otc/065110/electral-powder-218g-2-1671741180.jpg",
+        "neurobion" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/119934/neurobion-forte-tablet-30s-front-2-1756897143-non-watermarked.jpg",
+        "telma" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/163836/telma-40mg-strip-of-30-tablets-front-2-1756884638-non-watermarked.jpg",
+        "ecosprin" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/066348/ecosprin-75mg-strip-of-14-tablets-front-2-1756897534-non-watermarked.jpg",
+        "saridon" to "https://cdn01.pharmeasy.in/dam/products_otc/156565/saridon-headache-relief-tablet-strip-of-10-tablets-2-1671741035.jpg",
+        "supradyn" to "https://cdn01.pharmeasy.in/dam/products_otc/164500/supradyn-daily-multivitamin-tablet-with-essential-zinc-15s-2-1671741088.jpg",
+        "limcee" to "https://cdn01.pharmeasy.in/dam/products_otc/105900/limcee-vitamin-c-500mg-chewable-tablets-orange-flavour-strip-of-15-tablets-2-1671741085.jpg",
+        "vicks" to "https://cdn01.pharmeasy.in/dam/products_otc/182140/vicks-vaporub-50ml-relief-from-cold-cough-headache-and-body-pain-2-1671741087.jpg"
     )
 
     fun resolve(sku: String?, name: String? = null, rawImage: String? = null): String {

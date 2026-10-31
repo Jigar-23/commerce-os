@@ -794,6 +794,8 @@ fun CommerceOSApp(
                     viewModel = universalSearchViewModel,
                     trendingSuggestions = homeViewModel.storefrontSuggestions,
                     liveVerticals = homeViewModel.verticals.filter { it.isLive }.map { it.label },
+                    cartQuantityMap = cartViewModel.cartItems.associate { it.sku to it.quantity },
+                    cartItemCount = cartViewModel.cartItems.sumOf { it.quantity },
                     onPerformSearch = { searchQuery ->
                         openUniversalSearch(searchQuery)
                     },
@@ -813,6 +815,11 @@ fun CommerceOSApp(
                             )
                         )
                     },
+                    onUpdateQuantity = { sku, qty ->
+                        if (qty <= 0) cartViewModel.removeItem(sku)
+                        else cartViewModel.updateQuantity(sku, qty)
+                    },
+                    onViewCart = { navigate(Screen.Cart) },
                     onUploadPrescription = { showRxUploadDialog = true },
                     onBack = { goBack() }
                 )
