@@ -20,15 +20,15 @@
   ],
   "products": [],
   "carts": {
-    "usr_383700": [],
-    "usr_220692": [],
-    "usr_550326": []
+    "cust_9991416180": [],
+    "cust_9811998877": [],
+    "cust_9876500001": []
   },
   "orders": [
     {
       "id": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
       "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "addressId": "temp_gps_1789372360716",
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
@@ -180,7 +180,7 @@
     {
       "id": "ord_67d77341-1614-4067-9c45-799beaa59b77",
       "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "addressId": "temp_gps_1789370112320",
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
@@ -339,7 +339,7 @@
     {
       "id": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
       "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "addressId": null,
       "customerPhone": "9876500001",
       "customerName": "Aarav Sharma",
@@ -451,7 +451,7 @@
     {
       "id": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
       "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "addressId": null,
       "customerPhone": "9876500001",
       "customerName": "Aarav Sharma",
@@ -563,7 +563,7 @@
     {
       "id": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
       "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "addressId": null,
       "customerPhone": "9876500001",
       "customerName": "Aarav Sharma",
@@ -689,7 +689,7 @@
     {
       "id": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
       "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "addressId": null,
       "customerPhone": "9876500001",
       "customerName": "Aarav Sharma",
@@ -798,7 +798,7 @@
     {
       "id": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
       "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "addressId": "addr_home",
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
@@ -937,7 +937,7 @@
     {
       "id": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
       "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
-      "customerId": "usr_220692",
+      "customerId": "cust_9811998877",
       "customerPhone": "9811998877",
       "customerName": null,
       "orderType": "QUICK_COMMERCE_10MIN",
@@ -1053,7 +1053,7 @@
     {
       "id": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
       "orderId": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
       "orderType": "QUICK_COMMERCE_10MIN",
@@ -1178,7 +1178,7 @@
     {
       "id": "ord_057e5c4e-cac3-485c-b072-bdc2af4b9636",
       "orderId": "ord_057e5c4e-cac3-485c-b072-bdc2af4b9636",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerPhone": "+919991416180",
       "customerName": "Customer 6180",
       "orderType": "QUICK_COMMERCE_10MIN",
@@ -1431,7 +1431,7 @@
       "id": "notif_1789372570782_788",
       "type": "ORDER_PLACED",
       "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "recipientType": "CUSTOMER",
       "message": "New order ord_8f8abe0e-310e-4cff-b636-a4055fb2557d placed (COD Rs 7)",
       "read": false,
@@ -1441,7 +1441,7 @@
       "id": "notif_1789370308262_365",
       "type": "ORDER_PLACED",
       "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "recipientType": "CUSTOMER",
       "message": "New order ord_67d77341-1614-4067-9c45-799beaa59b77 placed (COD Rs 7)",
       "read": false,
@@ -1451,7 +1451,7 @@
       "id": "notif_1789365353875_994",
       "type": "ORDER_PLACED",
       "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "recipientType": "CUSTOMER",
       "message": "New order ord_dd824906-f11a-4dcd-8c60-099dd8c592c0 placed (COD Rs 240)",
       "read": false,
@@ -1461,7 +1461,7 @@
       "id": "notif_1789365181829_82",
       "type": "ORDER_PLACED",
       "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "recipientType": "CUSTOMER",
       "message": "New order ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b placed (COD Rs 240)",
       "read": false,
@@ -1471,7 +1471,7 @@
       "id": "notif_1789365175067_550",
       "type": "ORDER_PLACED",
       "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "recipientType": "CUSTOMER",
       "message": "New order ord_650992ea-3aa8-4170-bc42-2720894576d6 placed (COD Rs 240)",
       "read": false,
@@ -1481,7 +1481,7 @@
       "id": "notif_1789365159743_382",
       "type": "ORDER_PLACED",
       "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "recipientType": "CUSTOMER",
       "message": "New order ord_574de457-4c39-41e5-8d47-239d88a3ae1e placed (COD Rs 240)",
       "read": false,
@@ -1491,7 +1491,7 @@
       "id": "notif_1789361581464_41",
       "type": "ORDER_PLACED",
       "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "recipientType": "CUSTOMER",
       "message": "New order ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7 placed (COD Rs 12)",
       "read": false,
@@ -1501,7 +1501,7 @@
       "id": "notif_1788522431115_383",
       "type": "ORDER_PLACED",
       "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
-      "customerId": "usr_220692",
+      "customerId": "cust_9811998877",
       "recipientType": "CUSTOMER",
       "message": "New order ord_8f348822-8c5f-43ef-acdb-6834548004be placed (COD Rs 32.5)",
       "read": false,
@@ -1511,7 +1511,7 @@
       "id": "notif_1787666722772_168",
       "type": "ORDER_PLACED",
       "orderId": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "recipientType": "CUSTOMER",
       "message": "New order ord_e366329c-3c31-4223-af9a-0ada1dd21699 placed (COD Rs 850)",
       "read": false,
@@ -1521,7 +1521,7 @@
       "id": "notif_1787666653715_489",
       "type": "ORDER_PLACED",
       "orderId": "ord_057e5c4e-cac3-485c-b072-bdc2af4b9636",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "recipientType": "CUSTOMER",
       "message": "New order ord_057e5c4e-cac3-485c-b072-bdc2af4b9636 placed (COD Rs 7)",
       "read": false,
@@ -2453,7 +2453,7 @@
   ],
   "pushTokens": [],
   "addresses": {
-    "usr_383700": [
+    "cust_9991416180": [
       {
         "id": "addr_1787666270421",
         "tag": "Home",
@@ -2475,13 +2475,13 @@
       }
     ],
     "8f921ab0-0012-4412-9901-112233445566": [],
-    "usr_239810": []
+    "cust_9876543210": []
   },
   "payments": [],
   "prescriptions": [],
   "users": [
     {
-      "id": "usr_383700",
+      "id": "cust_9991416180",
       "phone": "+919991416180",
       "fullName": "Customer 6180",
       "email": "user_9991416180@commerceos.io",
@@ -2490,7 +2490,7 @@
       "lastOtpChallenge": null
     },
     {
-      "id": "usr_239810",
+      "id": "cust_9876543210",
       "phone": "+919876543210",
       "fullName": "Customer 3210",
       "email": "user_9876543210@commerceos.io",
@@ -2498,7 +2498,7 @@
       "lastOtpChallenge": "otp_1786603763111_5904"
     },
     {
-      "id": "usr_874164",
+      "id": "cust_9811223344",
       "name": "Customer 3344",
       "phone": "+919811223344",
       "email": "user_9811223344@commerceos.io",
@@ -2506,7 +2506,7 @@
       "createdAt": "2026-08-18T11:31:10.547Z"
     },
     {
-      "id": "usr_279361",
+      "id": "cust_9988776655",
       "name": "Customer 6655",
       "phone": "+919988776655",
       "email": "user_9988776655@commerceos.io",
@@ -2514,31 +2514,31 @@
       "createdAt": "2026-08-18T12:54:35.675Z"
     },
     {
-      "id": "usr_896568",
+      "id": "cust_9888877777",
       "name": "Customer 7777",
-      "phone": "9888877777",
+      "phone": "+919888877777",
       "email": "user_9888877777@commerceos.io",
       "role": "ROLE_CUSTOMER",
       "createdAt": "2026-08-24T11:15:26.448Z"
     },
     {
-      "id": "usr_220692",
+      "id": "cust_9811998877",
       "name": "Customer 8877",
-      "phone": "9811998877",
+      "phone": "+919811998877",
       "email": "user_9811998877@commerceos.io",
       "role": "ROLE_CUSTOMER",
       "createdAt": "2026-09-04T11:46:53.775Z"
     },
     {
-      "id": "usr_550326",
+      "id": "cust_9876500001",
       "name": "Customer 0001",
-      "phone": "9876500001",
+      "phone": "+919876500001",
       "email": "user_9876500001@commerceos.io",
       "role": "ROLE_CUSTOMER",
       "createdAt": "2026-09-14T05:52:39.696Z"
     },
     {
-      "id": "usr_231803",
+      "id": "cust_9817916180",
       "name": "Customer 6180",
       "phone": "+919817916180",
       "email": "user_9817916180@commerceos.io",
@@ -2552,71 +2552,71 @@
       "phone": "+1 (555) 234-5678",
       "issuedAt": 1786479478263
     },
-    "refresh_usr_383700_877261192222": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_877261192222": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "issuedAt": 1786482113419
     },
-    "refresh_usr_383700_293692420901": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_293692420901": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786635876271
     },
-    "refresh_usr_383700_746860523928": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_746860523928": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786885105658
     },
-    "refresh_usr_239810_581898753666": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_581898753666": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": {
         "role": "CUSTOMER"
       },
       "issuedAt": 1786885575217
     },
-    "refresh_usr_239810_241527630962": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_241527630962": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": {
         "role": "CUSTOMER"
       },
       "issuedAt": 1786885583380
     },
-    "refresh_usr_239810_785882422560": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_785882422560": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786885625583
     },
-    "refresh_usr_239810_830668187940": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_830668187940": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786885823850
     },
-    "refresh_usr_383700_560073354820": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_560073354820": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786885932874
     },
-    "refresh_usr_239810_167192333022": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_167192333022": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786886697455
     },
-    "refresh_usr_239810_879197602117": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_879197602117": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1786887124267
     },
-    "refresh_usr_383700_373479355618": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_373479355618": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787036471495
@@ -2631,8 +2631,8 @@
       },
       "issuedAt": 1787042257605
     },
-    "refresh_usr_383700_734798042263": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_734798042263": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787043354826
@@ -2783,8 +2783,8 @@
       "role": "SELLER",
       "issuedAt": 1787052884242
     },
-    "refresh_usr_874164_965659495404": {
-      "userId": "usr_874164",
+    "refresh_cust_9811223344_965659495404": {
+      "userId": "cust_9811223344",
       "phone": "+919811223344",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787053103196
@@ -2807,8 +2807,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787053118222
     },
-    "refresh_usr_383700_547633454853": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_547633454853": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787053512625
@@ -2819,8 +2819,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787053721472
     },
-    "refresh_usr_383700_571547447596": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_571547447596": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787053866242
@@ -2843,8 +2843,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787053878416
     },
-    "refresh_usr_383700_740821958641": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_740821958641": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787054108473
@@ -2861,8 +2861,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787054108548
     },
-    "refresh_usr_383700_165363909881": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_165363909881": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787054275713
@@ -2879,8 +2879,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787054275785
     },
-    "refresh_usr_383700_879245844328": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_879245844328": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787054589164
@@ -2915,8 +2915,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787057632171
     },
-    "refresh_usr_279361_730866421189": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_730866421189": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787057675692
@@ -2927,14 +2927,14 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787057675738
     },
-    "refresh_usr_279361_642173429420": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_642173429420": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787057695540
     },
-    "refresh_usr_279361_769787647747": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_769787647747": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787057726006
@@ -2945,8 +2945,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787057726060
     },
-    "refresh_usr_279361_175328811631": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_175328811631": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787057798088
@@ -2963,8 +2963,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787057798180
     },
-    "refresh_usr_279361_298477471488": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_298477471488": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787057851091
@@ -2981,8 +2981,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787057851196
     },
-    "refresh_usr_279361_145355591253": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_145355591253": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787058312780
@@ -2999,8 +2999,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787058421684
     },
-    "refresh_usr_279361_196155157134": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_196155157134": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787058444634
@@ -3011,8 +3011,8 @@
       "role": "SELLER",
       "issuedAt": 1787058444702
     },
-    "refresh_usr_279361_594745162033": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_594745162033": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787058509066
@@ -3029,8 +3029,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787058705212
     },
-    "refresh_usr_279361_639574813788": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_639574813788": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787058705238
@@ -3047,8 +3047,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787059260161
     },
-    "refresh_usr_279361_557272826218": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_557272826218": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787059260184
@@ -3071,8 +3071,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787059649450
     },
-    "refresh_usr_279361_594303624269": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_594303624269": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787059649480
@@ -3089,8 +3089,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787063074820
     },
-    "refresh_usr_279361_557840439558": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_557840439558": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787064160902
@@ -3107,14 +3107,14 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787064160997
     },
-    "refresh_usr_279361_248008509926": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_248008509926": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787064363203
     },
-    "refresh_usr_279361_551763290286": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_551763290286": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787064371034
@@ -3131,8 +3131,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1787072497416
     },
-    "refresh_usr_279361_725262554912": {
-      "userId": "usr_279361",
+    "refresh_cust_9988776655_725262554912": {
+      "userId": "cust_9988776655",
       "phone": "+919988776655",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787075126154
@@ -3185,32 +3185,32 @@
       "role": "SELLER",
       "issuedAt": 1787421251416
     },
-    "refresh_usr_383700_460004411916": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_460004411916": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787424027458
     },
-    "refresh_usr_239810_811565144598": {
-      "userId": "usr_239810",
+    "refresh_cust_9876543210_811565144598": {
+      "userId": "cust_9876543210",
       "phone": "+919876543210",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787568294835
     },
-    "refresh_usr_896568_135286785540": {
-      "userId": "usr_896568",
+    "refresh_cust_9888877777_135286785540": {
+      "userId": "cust_9888877777",
       "phone": "9888877777",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787570126534
     },
-    "refresh_usr_383700_409983660695": {
-      "userId": "usr_383700",
+    "refresh_cust_9991416180_409983660695": {
+      "userId": "cust_9991416180",
       "phone": "+919991416180",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1787666646602
     },
-    "refresh_usr_220692_374408670928": {
-      "userId": "usr_220692",
+    "refresh_cust_9811998877_374408670928": {
+      "userId": "cust_9811998877",
       "phone": "9811998877",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1788522422295
@@ -3233,8 +3233,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1789365159695
     },
-    "refresh_usr_550326_409410345567": {
-      "userId": "usr_550326",
+    "refresh_cust_9876500001_409410345567": {
+      "userId": "cust_9876500001",
       "phone": "9876500001",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1789365159717
@@ -3245,8 +3245,8 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1789365175033
     },
-    "refresh_usr_550326_996374032775": {
-      "userId": "usr_550326",
+    "refresh_cust_9876500001_996374032775": {
+      "userId": "cust_9876500001",
       "phone": "9876500001",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1789365175047
@@ -3257,14 +3257,14 @@
       "role": "ROLE_RIDER",
       "issuedAt": 1789365181790
     },
-    "refresh_usr_550326_246707432555": {
-      "userId": "usr_550326",
+    "refresh_cust_9876500001_246707432555": {
+      "userId": "cust_9876500001",
       "phone": "9876500001",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1789365181805
     },
-    "refresh_usr_550326_331324921455": {
-      "userId": "usr_550326",
+    "refresh_cust_9876500001_331324921455": {
+      "userId": "cust_9876500001",
       "phone": "9876500001",
       "role": "ROLE_CUSTOMER",
       "issuedAt": 1789365353857
@@ -3315,7 +3315,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "hiiiiiiii, Company Bagh, Rewari",
@@ -3352,7 +3352,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "hiiiiiiii, Company Bagh, Rewari",
@@ -3389,7 +3389,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "hiiiiiiii, Company Bagh, Rewari",
@@ -3426,7 +3426,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "hiiiiiiii, Company Bagh, Rewari",
@@ -3463,7 +3463,7 @@
       "riderName": "Partner 6180",
       "riderPhone": "+919817916180",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_220692",
+      "customerId": "cust_9811998877",
       "customerName": null,
       "customerPhone": "9811998877",
       "customerAddress": "Flat 402, Green Glen Heights, Bellandur, Bengaluru",
@@ -3521,7 +3521,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_220692",
+      "customerId": "cust_9811998877",
       "customerName": null,
       "customerPhone": "9811998877",
       "customerAddress": "Flat 402, Green Glen Heights, Bellandur, Bengaluru",
@@ -3554,7 +3554,7 @@
       "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
       "id": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
       "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
@@ -3619,7 +3619,7 @@
       "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
       "id": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
       "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
@@ -3671,7 +3671,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3708,7 +3708,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3745,7 +3745,7 @@
       "riderName": "Vikram Singh",
       "riderPhone": "+919876543210",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3790,7 +3790,7 @@
       "riderName": "Vikram Singh",
       "riderPhone": "+919876543210",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3835,7 +3835,7 @@
       "riderName": "Vikram Singh",
       "riderPhone": "+919876543210",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3872,7 +3872,7 @@
       "riderName": "Vikram Singh",
       "riderPhone": "+919876543210",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3909,7 +3909,7 @@
       "riderName": "Partner 6180",
       "riderPhone": "+919817916180",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3957,7 +3957,7 @@
       "riderName": null,
       "riderPhone": null,
       "riderVehicle": null,
-      "customerId": "usr_550326",
+      "customerId": "cust_9876500001",
       "customerName": "Aarav Sharma",
       "customerPhone": "9876500001",
       "customerAddress": "Customer Delivery Location",
@@ -3994,7 +3994,7 @@
       "riderName": "Partner 6180",
       "riderPhone": "+919817916180",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
@@ -4064,7 +4064,7 @@
       "riderName": "Partner 6180",
       "riderPhone": "+919817916180",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
@@ -4134,7 +4134,7 @@
       "riderName": "Partner 6180",
       "riderPhone": "+919817916180",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
@@ -4205,7 +4205,7 @@
       "riderName": "Partner 6180",
       "riderPhone": "+919817916180",
       "riderVehicle": "HR-26-AB-1234",
-      "customerId": "usr_383700",
+      "customerId": "cust_9991416180",
       "customerName": "Customer 6180",
       "customerPhone": "+919991416180",
       "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",
@@ -5008,7 +5008,7 @@
         "orderId": "ord_057e5c4e-cac3-485c-b072-bdc2af4b9636",
         "deliveryId": "del_8b8e99ba-d8ba-4352-9a0c-31e3a3fe300d",
         "storeId": "STORE_REWARI_01",
-        "customerId": "usr_383700",
+        "customerId": "cust_9991416180",
         "sellerApprovalRequired": true,
         "sellerApprovalStatus": "PENDING",
         "totalAmount": 7,
@@ -5027,7 +5027,7 @@
         "orderId": "ord_e366329c-3c31-4223-af9a-0ada1dd21699",
         "deliveryId": "del_774caf3b-fc08-40b3-a6db-930eb1933d71",
         "storeId": "STORE_REWARI_01",
-        "customerId": "usr_383700",
+        "customerId": "cust_9991416180",
         "sellerApprovalRequired": true,
         "sellerApprovalStatus": "PENDING",
         "totalAmount": 850,
@@ -5046,7 +5046,7 @@
         "orderId": "ord_8f348822-8c5f-43ef-acdb-6834548004be",
         "deliveryId": "del_5f3341ad-26cc-4672-811b-5584414682de",
         "storeId": "STORE_REWARI_01",
-        "customerId": "usr_220692",
+        "customerId": "cust_9811998877",
         "sellerApprovalRequired": true,
         "sellerApprovalStatus": "PENDING",
         "totalAmount": 32.5,
@@ -5065,7 +5065,7 @@
         "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
         "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_383700",
+        "customerId": "cust_9991416180",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 12,
@@ -5079,7 +5079,7 @@
           "riderName": null,
           "riderPhone": null,
           "riderVehicle": null,
-          "customerId": "usr_383700",
+          "customerId": "cust_9991416180",
           "customerName": "Customer 6180",
           "customerPhone": "+919991416180",
           "customerAddress": "hiiiiiiii, Company Bagh, Rewari",
@@ -5121,7 +5121,7 @@
         "orderId": "ord_574de457-4c39-41e5-8d47-239d88a3ae1e",
         "deliveryId": "del_2d2caf89-c0ca-4f29-9e1e-c56fbf668138",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_550326",
+        "customerId": "cust_9876500001",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 240,
@@ -5135,7 +5135,7 @@
           "riderName": null,
           "riderPhone": null,
           "riderVehicle": null,
-          "customerId": "usr_550326",
+          "customerId": "cust_9876500001",
           "customerName": "Aarav Sharma",
           "customerPhone": "9876500001",
           "customerAddress": "Customer Delivery Location",
@@ -5177,7 +5177,7 @@
         "orderId": "ord_650992ea-3aa8-4170-bc42-2720894576d6",
         "deliveryId": "del_f1d625c9-5fdc-454a-8cd8-c7aab1057657",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_550326",
+        "customerId": "cust_9876500001",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 240,
@@ -5191,7 +5191,7 @@
           "riderName": "Vikram Singh",
           "riderPhone": "+919876543210",
           "riderVehicle": "HR-26-AB-1234",
-          "customerId": "usr_550326",
+          "customerId": "cust_9876500001",
           "customerName": "Aarav Sharma",
           "customerPhone": "9876500001",
           "customerAddress": "Customer Delivery Location",
@@ -5241,7 +5241,7 @@
         "orderId": "ord_fd98b41d-7dad-47ab-b8b9-f0061f7c768b",
         "deliveryId": "del_b53a12ea-ee78-4ba1-a53f-70f2769cbe6b",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_550326",
+        "customerId": "cust_9876500001",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 240,
@@ -5255,7 +5255,7 @@
           "riderName": "Vikram Singh",
           "riderPhone": "+919876543210",
           "riderVehicle": "HR-26-AB-1234",
-          "customerId": "usr_550326",
+          "customerId": "cust_9876500001",
           "customerName": "Aarav Sharma",
           "customerPhone": "9876500001",
           "customerAddress": "Customer Delivery Location",
@@ -5297,7 +5297,7 @@
         "orderId": "ord_dd824906-f11a-4dcd-8c60-099dd8c592c0",
         "deliveryId": "del_9617860e-e5fa-4974-934b-8fa31f8376a6",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_550326",
+        "customerId": "cust_9876500001",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 240,
@@ -5311,7 +5311,7 @@
           "riderName": null,
           "riderPhone": null,
           "riderVehicle": null,
-          "customerId": "usr_550326",
+          "customerId": "cust_9876500001",
           "customerName": "Aarav Sharma",
           "customerPhone": "9876500001",
           "customerAddress": "Customer Delivery Location",
@@ -5357,7 +5357,7 @@
           "deliveryId": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
           "id": "del_0c8a9331-01de-4aad-9196-863fc30b62a2",
           "orderId": "ord_409a0f86-cbbe-4583-a057-f6dd8b4c93b7",
-          "customerId": "usr_383700",
+          "customerId": "cust_9991416180",
           "customerName": "Customer 6180",
           "customerPhone": "+919991416180",
           "customerAddress": "hiiiiiiii, Company Bagh, Rewari, Haryana, 123401",
@@ -5448,7 +5448,7 @@
         "orderId": "ord_67d77341-1614-4067-9c45-799beaa59b77",
         "deliveryId": "del_80527d72-a471-4523-bc01-cc0bcefda569",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_383700",
+        "customerId": "cust_9991416180",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 7,
@@ -5462,7 +5462,7 @@
           "riderName": "Partner 6180",
           "riderPhone": "+919817916180",
           "riderVehicle": "HR-26-AB-1234",
-          "customerId": "usr_383700",
+          "customerId": "cust_9991416180",
           "customerName": "Customer 6180",
           "customerPhone": "+919991416180",
           "customerAddress": "Ganpat Nagar, Rewari, Rewari, Rewari",
@@ -5537,7 +5537,7 @@
         "orderId": "ord_8f8abe0e-310e-4cff-b636-a4055fb2557d",
         "deliveryId": "del_9ddb5efe-4d47-4652-a9a0-06378183e206",
         "storeId": "STORE_MASTER_001",
-        "customerId": "usr_383700",
+        "customerId": "cust_9991416180",
         "sellerApprovalRequired": false,
         "sellerApprovalStatus": "NOT_REQUIRED",
         "totalAmount": 7,
@@ -5551,7 +5551,7 @@
           "riderName": "Partner 6180",
           "riderPhone": "+919817916180",
           "riderVehicle": "HR-26-AB-1234",
-          "customerId": "usr_383700",
+          "customerId": "cust_9991416180",
           "customerName": "Customer 6180",
           "customerPhone": "+919991416180",
           "customerAddress": "Kayasthwara Mohalla, Rewari, Rewari, Rewari",

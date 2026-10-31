@@ -474,7 +474,7 @@ public final class AddressViewModel: ObservableObject {
 
         Task { @MainActor in
             self.isLoading = true
-            let targetCustId = !self.customerId.isEmpty ? self.customerId : (UserDefaults.standard.string(forKey: "customer_id") ?? "usr_383700")
+            let targetCustId = !self.customerId.isEmpty ? self.customerId : (UserDefaults.standard.string(forKey: "customer_id") ?? "cust_9991416180")
 
             if self.platformUiState.isEditingExisting, let addressId = self.platformUiState.editingAddressId, !addressId.isEmpty {
                 do {
@@ -573,7 +573,7 @@ public final class AddressViewModel: ObservableObject {
 
         // 2. Server Synchronization
         Task { @MainActor in
-            let targetCustId = !self.customerId.isEmpty ? self.customerId : (UserDefaults.standard.string(forKey: "customer_id") ?? "usr_383700")
+            let targetCustId = !self.customerId.isEmpty ? self.customerId : (UserDefaults.standard.string(forKey: "customer_id") ?? "cust_9991416180")
             do {
                 try await AddressRepository.shared.deleteAddress(customerId: targetCustId, addressId: addressId)
                 if wasDefault && !remaining.isEmpty, let newDefaultId = self.addresses.first?.id {
@@ -604,7 +604,7 @@ public final class AddressViewModel: ObservableObject {
         }
 
         Task { @MainActor in
-            let targetCustId = !self.customerId.isEmpty ? self.customerId : (UserDefaults.standard.string(forKey: "customer_id") ?? "usr_383700")
+            let targetCustId = !self.customerId.isEmpty ? self.customerId : (UserDefaults.standard.string(forKey: "customer_id") ?? "cust_9991416180")
             try? await AddressRepository.shared.setDefaultAddress(customerId: targetCustId, addressId: addressId)
         }
     }

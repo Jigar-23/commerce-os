@@ -687,7 +687,7 @@ class AddressViewModel(
         viewModelScope.launch {
             isLoading = true
             val targetCustId = customerId.ifBlank {
-                profile?.id?.takeIf { it.isNotBlank() } ?: "usr_383700"
+                profile?.id?.takeIf { it.isNotBlank() } ?: "cust_9991416180"
             }
             if (platformUiState.isEditingExisting && !platformUiState.editingAddressId.isNullOrBlank()) {
                 val addressId = platformUiState.editingAddressId!!
@@ -840,7 +840,9 @@ class AddressViewModel(
 
         // 2. Server Synchronization
         viewModelScope.launch {
-            val targetCustId = customerId.ifBlank { "usr_383700" }
+            val targetCustId = customerId.ifBlank {
+                profile?.id?.takeIf { it.isNotBlank() } ?: "cust_9991416180"
+            }
             when (val result = repository.deleteAddress(targetCustId, addressId)) {
                 is ApiResult.Success -> {
                     // If the deleted address was default and there is a new default, sync with server

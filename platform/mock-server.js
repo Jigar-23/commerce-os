@@ -3605,11 +3605,12 @@ async function handleRequest(port, req, res) {
             role: 'ROLE_CUSTOMER'
           });
         } else {
-          const id = 'usr_' + String(Math.floor(100000 + Math.random() * 900000));
+          const clean10 = String(phone).replace(/\D/g, '').slice(-10);
+          const id = clean10.length === 10 ? `cust_${clean10}` : `cust_${Date.now()}`;
           user = {
             id: id,
-            phone: phone,
-            email: body.email || `user_${id}@commerceos.io`,
+            phone: clean10.length === 10 ? `+91${clean10}` : phone,
+            email: body.email || `customer_${clean10 || id}@commerceos.io`,
             fullName: body.fullName || 'Registered User',
             createdAt: nowIso()
           };
@@ -8215,7 +8216,9 @@ async function handleRequest(port, req, res) {
     if (port === 8084) {
       const authClaims = verifyAndDecodeJwt(req);
       const pathCustomerId = path.split('/')[4];
-      const customerId = (authClaims && (authClaims.sub || authClaims.subject)) || (pathCustomerId && pathCustomerId !== 'profile' && pathCustomerId !== 'addresses' ? pathCustomerId : null) || req.headers['x-customer-id'] || 'usr_383700';
+      const fallbackClean10 = (authClaims && authClaims.phone) ? String(authClaims.phone).replace(/\D/g, '').slice(-10) : '';
+      const fallbackCustId = fallbackClean10.length === 10 ? `cust_${fallbackClean10}` : 'cust_9991416180';
+      const customerId = (authClaims && (authClaims.sub || authClaims.subject)) || (pathCustomerId && pathCustomerId !== 'profile' && pathCustomerId !== 'addresses' ? pathCustomerId : null) || req.headers['x-customer-id'] || fallbackCustId;
 
       let customer = null;
       if (appRepositories && appRepositories.customerRepo) {
@@ -8233,8 +8236,46 @@ async function handleRequest(port, req, res) {
       db.addresses = db.addresses || {};
       const addrBook = (cId = customerId) => (db.addresses[cId] = db.addresses[cId] || []);
 
+      const activePgPool = (appRepositories && appRepositories.addressRepo && appRepositories.addressRepo.pool) || productionPgPool;
+
       if (path.endsWith('/addresses') && req.method === 'GET') {
         const targetCId = pathCustomerId && pathCustomerId !== 'addresses' && pathCustomerId !== 'profile' ? pathCustomerId : customerId;
+        if (activePgPool) {
+          try {
+            const clean10 = String(targetCId).replace(/\D/g, '').slice(-10);
+            const queryCustIds = [targetCId];
+            if (clean10.length === 10) queryCustIds.push(`cust_${clean10}`);
+            const pgAddrs = await activePgPool.query(
+              `SELECT * FROM customer_addresses 
+               WHERE customer_id = ANY($1) 
+                  OR (contact_phone IS NOT NULL AND contact_phone LIKE '%' || $2)
+               ORDER BY is_default DESC, created_at DESC`,
+              [queryCustIds, clean10]
+            );
+            if (pgAddrs.rows.length > 0) {
+              return json(res, 200, pgAddrs.rows.map(r => ({
+                id: r.id,
+                customerId: r.customer_id,
+                tag: r.address_type === 'WORK' ? 'Work' : (r.address_type === 'OTHER' ? 'Other' : 'Home'),
+                addressType: r.address_type || 'HOME',
+                addressLine: r.address_line,
+                city: r.city || 'Rewari',
+                state: 'Haryana',
+                postalCode: r.postal_code || '123401',
+                country: 'India',
+                landmark: '',
+                contactName: 'Customer',
+                contactPhone: r.contact_phone || '',
+                latitude: Number(r.latitude) || 28.1970,
+                longitude: Number(r.longitude) || 76.6190,
+                isDefault: Boolean(r.is_default),
+                createdAt: r.created_at
+              })));
+            }
+          } catch (err) {
+            console.warn('[MockServer] PG addresses GET error:', err.message);
+          }
+        }
         return json(res, 200, addrBook(targetCId));
       }
 
@@ -8242,8 +8283,8 @@ async function handleRequest(port, req, res) {
         const targetCId = pathCustomerId && pathCustomerId !== 'addresses' && pathCustomerId !== 'profile' ? pathCustomerId : customerId;
         const body = await parseBody(req);
         const addressLine = body.addressLine || (body.street ? `${body.houseNumber || ''} ${body.street}, ${body.city || ''}`.trim() : 'Selected Delivery Address');
-        const city = body.city || 'NCR';
-        const postalCode = body.postalCode || '122002';
+        const city = body.city || 'Rewari';
+        const postalCode = body.postalCode || '123401';
 
         const lat = (body.latitude != null && !isNaN(Number(body.latitude)))
           ? Number(body.latitude)
@@ -8252,7 +8293,12 @@ async function handleRequest(port, req, res) {
           ? Number(body.longitude)
           : (Number(process.env.STORE_MASTER_LNG) || 76.6190);
 
-        const list = addrBook(targetCId);
+        const rawPhone = String(body.contactPhone || (customer && customer.phone) || targetCId || '').trim();
+        const clean10 = rawPhone.replace(/\D/g, '').slice(-10);
+        const formattedPhone = clean10.length === 10 ? `+91${clean10}` : '+919991416180';
+        const authCustId = clean10.length === 10 ? `cust_${clean10}` : (targetCId || 'cust_9991416180');
+
+        const list = addrBook(authCustId);
         const isDef = body.isDefault === true || list.length === 0;
         if (isDef) {
           list.forEach((a) => (a.isDefault = false));
@@ -8268,7 +8314,7 @@ async function handleRequest(port, req, res) {
           country: body.country || 'India',
           landmark: body.landmark || '',
           contactName: body.contactName || (customer && customer.fullName) || 'Customer',
-          contactPhone: body.contactPhone || (customer && customer.phone) || '',
+          contactPhone: formattedPhone,
           isDefault: isDef,
           latitude: lat,
           longitude: lng,
@@ -8278,19 +8324,39 @@ async function handleRequest(port, req, res) {
           createdAt: nowIso(),
         };
         list.unshift(entry);
-        if (appRepositories && appRepositories.addressRepo && appRepositories.addressRepo.pool) {
+
+        if (activePgPool) {
           try {
-            await appRepositories.addressRepo.pool.query(
-              `INSERT INTO customers (id, full_name, phone, is_active, created_at, updated_at)
+            await activePgPool.query(
+              `INSERT INTO customers (id, phone, full_name, is_active, created_at, updated_at)
                VALUES ($1, $2, $3, TRUE, NOW(), NOW())
-               ON CONFLICT (id) DO UPDATE SET is_active = TRUE, updated_at = NOW()`,
-              [targetCId, entry.contactName || 'Customer', entry.contactPhone || '+919991416180']
+               ON CONFLICT (phone) DO UPDATE SET updated_at = NOW(), full_name = COALESCE(customers.full_name, EXCLUDED.full_name)
+               RETURNING id`,
+              [authCustId, formattedPhone, entry.contactName || 'Customer']
             );
-            await appRepositories.addressRepo.pool.query(
-              `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-               ON CONFLICT (id) DO UPDATE SET is_default = $9, updated_at = NOW()`,
-              [entry.id, targetCId, (entry.tag || 'HOME').toUpperCase(), entry.addressLine, entry.city, entry.postalCode, entry.latitude, entry.longitude, entry.isDefault, entry.contactPhone]
+
+            if (entry.isDefault) {
+              await activePgPool.query(
+                `UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1 OR customer_id = $2`,
+                [authCustId, targetCId]
+              );
+            }
+
+            await activePgPool.query(
+              `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+               ON CONFLICT (id) DO UPDATE SET 
+                 customer_id = EXCLUDED.customer_id,
+                 address_type = EXCLUDED.address_type,
+                 address_line = EXCLUDED.address_line,
+                 city = EXCLUDED.city,
+                 postal_code = EXCLUDED.postal_code,
+                 latitude = EXCLUDED.latitude,
+                 longitude = EXCLUDED.longitude,
+                 is_default = EXCLUDED.is_default,
+                 contact_phone = EXCLUDED.contact_phone,
+                 updated_at = NOW()`,
+              [entry.id, authCustId, (entry.tag || 'HOME').toUpperCase(), entry.addressLine, entry.city, entry.postalCode, entry.latitude, entry.longitude, entry.isDefault, formattedPhone]
             );
           } catch (err) {
             console.error('[MockServer] Failed to insert customer address to PostgreSQL:', err.message);
@@ -8327,6 +8393,21 @@ async function handleRequest(port, req, res) {
           placeId: body.placeId ?? entry.placeId,
           accuracyMeters: body.accuracyMeters != null ? Number(body.accuracyMeters) : entry.accuracyMeters
         });
+        if (activePgPool) {
+          try {
+            if (entry.isDefault) {
+              await activePgPool.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [targetCustomerId]);
+            }
+            await activePgPool.query(
+              `UPDATE customer_addresses SET
+                 address_line = $1, city = $2, postal_code = $3, latitude = $4, longitude = $5, is_default = $6, updated_at = NOW()
+               WHERE id = $7`,
+              [entry.addressLine, entry.city, entry.postalCode, entry.latitude, entry.longitude, entry.isDefault, targetAddrId]
+            );
+          } catch (err) {
+            console.error('[MockServer] PG Address update error:', err.message);
+          }
+        }
         saveDb();
         return json(res, 200, entry);
       }
@@ -8338,6 +8419,13 @@ async function handleRequest(port, req, res) {
             if (Array.isArray(db.addresses[key])) {
               db.addresses[key] = db.addresses[key].filter((a) => a.id !== targetAddrId);
             }
+          }
+        }
+        if (activePgPool) {
+          try {
+            await activePgPool.query(`DELETE FROM customer_addresses WHERE id = $1`, [targetAddrId]);
+          } catch (err) {
+            console.error('[MockServer] PG Address delete error:', err.message);
           }
         }
         saveDb();
@@ -8353,6 +8441,14 @@ async function handleRequest(port, req, res) {
         if (!entry) return json(res, 404, { error: 'Address not found' });
         list.forEach((a) => (a.isDefault = (a.id === entry.id)));
         entry.isDefault = true;
+        if (activePgPool) {
+          try {
+            await activePgPool.query(`UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`, [targetCustomerId]);
+            await activePgPool.query(`UPDATE customer_addresses SET is_default = TRUE, updated_at = NOW() WHERE id = $1`, [targetAddrId]);
+          } catch (err) {
+            console.error('[MockServer] PG Address default error:', err.message);
+          }
+        }
         saveDb();
         return json(res, 200, entry);
       }

@@ -3003,6 +3003,7 @@ const server = http.createServer(async (req, res) => {
 
     if (addrListMatch && method === 'POST') {
       const customerId = addrListMatch[1];
+      const authClaims = verifyAndDecodeJwt(req);
       const body = await parseJsonBody(req);
       const addrLine = String(body.addressLine || body.street || body.formattedAddress || '').trim();
       const city = String(body.city || 'Rewari').trim();
@@ -3032,13 +3033,14 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const formattedPhone = `+91${phoneDigits}`;
+      const authoritativeCustId = `cust_${phoneDigits}`;
 
       // Ensure customer exists in customers table without unique phone constraint conflict
-      let effectiveDbCustomerId = customerId;
+      let effectiveDbCustomerId = authoritativeCustId;
       if (pool) {
         const custCheck = await pool.query(
           `SELECT id FROM customers WHERE id = $1 OR phone = $2 OR phone = $3 LIMIT 1`,
-          [customerId, formattedPhone, phoneDigits]
+          [authoritativeCustId, formattedPhone, phoneDigits]
         );
         if (custCheck.rows.length > 0) {
           effectiveDbCustomerId = custCheck.rows[0].id;
@@ -3046,9 +3048,9 @@ const server = http.createServer(async (req, res) => {
           const insCust = await pool.query(
             `INSERT INTO customers (id, phone, full_name, created_at, updated_at)
              VALUES ($1, $2, $3, NOW(), NOW())
-             ON CONFLICT (phone) DO UPDATE SET updated_at = NOW()
+             ON CONFLICT (phone) DO UPDATE SET updated_at = NOW(), full_name = COALESCE(customers.full_name, EXCLUDED.full_name)
              RETURNING id`,
-            [customerId, formattedPhone, body.contactName || 'Customer']
+            [authoritativeCustId, formattedPhone, body.contactName || 'Customer']
           );
           if (insCust.rows.length > 0) {
             effectiveDbCustomerId = insCust.rows[0].id;
@@ -3326,7 +3328,7 @@ const server = http.createServer(async (req, res) => {
     const orderCustMatch = pathname.match(/^\/api\/v1\/orders\/customer(?:\/([^/]+))?$/);
     if (orderCustMatch && method === 'GET') {
       const authClaims = verifyAndDecodeJwt(req);
-      const customerId = orderCustMatch[1] || (authClaims && (authClaims.sub || authClaims.id || authClaims.userId)) || req.headers['x-customer-id'] || 'usr_383700';
+      const customerId = orderCustMatch[1] || (authClaims && (authClaims.sub || authClaims.id || authClaims.userId)) || req.headers['x-customer-id'] || 'cust_9991416180';
       if (!customerId) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or customerId path param is required.' });
       }
