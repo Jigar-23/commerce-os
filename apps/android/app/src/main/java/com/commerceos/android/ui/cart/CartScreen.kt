@@ -2,6 +2,7 @@ package com.commerceos.android.ui.cart
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,6 +22,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -58,41 +62,71 @@ fun CartScreen(
     onUploadPrescription: () -> Unit,
     onAttachPrescription: (String?) -> Unit,
     onProceedToAddress: () -> Unit,
-    onStartShopping: () -> Unit
+    onStartShopping: () -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     if (cartItems.isEmpty()) {
-        EmptyCart(onStartShopping = onStartShopping)
+        EmptyCart(onStartShopping = onStartShopping, onBack = onBack)
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+    val totalItemCount = cartItems.sumOf { it.quantity }
+    val rxRequiredInCart = cartItems.any { it.prescriptionRequired }
+    val isRxBlocked = rxRequiredInCart && attachedPrescriptionId.isNullOrBlank()
+    val isAddressSaved = deliveryAddress != null &&
+        !deliveryAddress.id.startsWith("temp_gps_") &&
+        !deliveryAddress.tag.equals("Current Location", ignoreCase = true)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
+    ) {
+        // Top Header with Back button and Item count
+        Surface(
+            color = Color.White,
+            shadowElevation = 0.5.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column {
-                Text(
-                    text = "My Cart",
-                    style = CommerceTypography.Heading,
-                    fontWeight = FontWeight.Bold,
-                    color = CommerceColors.TextPrimary
-                )
-                val totalItemCount = cartItems.sumOf { it.quantity }
-                Text(
-                    text = "$totalItemCount ${if (totalItemCount == 1) "item" else "items"} • 10-Min Express Delivery",
-                    style = CommerceTypography.Meta,
-                    color = CommerceColors.TextMuted
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { onBack?.invoke() ?: onStartShopping() }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFF0F172A)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Column {
+                    Text(
+                        text = "Checkout",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "$totalItemCount ${if (totalItemCount == 1) "item" else "items"} in cart",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
             }
         }
+        HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.5.dp)
 
         LazyColumn(
-            modifier = Modifier.weight(1f).padding(horizontal = Spacing.lg),
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(top = 2.dp, bottom = 28.dp)
+            contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
         ) {
+            // Server-authoritative Free Delivery Progress
             item {
                 FreeDeliveryBanner(
                     subtotal = cartSubtotal,
@@ -102,17 +136,17 @@ fun CartScreen(
                 )
             }
 
+            // Blinkit-style Unified Shipment Card
             item {
-                CartDeliveryAddressCard(
-                    deliveryAddress = deliveryAddress,
-                    onChangeAddress = onChangeAddress
+                CartShipmentCard(
+                    cartItems = cartItems,
+                    onQuantityChange = onQuantityChange,
+                    onRemoveItem = onRemoveItem,
+                    onAddMoreItems = onStartShopping
                 )
             }
 
-            items(cartItems) { item ->
-                CartItemCard(item = item, onQuantityChange = onQuantityChange, onRemoveItem = onRemoveItem)
-            }
-
+            // Prescription verification card
             item {
                 OptionalPrescriptionCard(
                     attachedRx = prescriptions.firstOrNull { it.id == attachedPrescriptionId },
@@ -122,6 +156,12 @@ fun CartScreen(
                 )
             }
 
+            // Tip partner widget
+            item {
+                DeliveryPartnerTipWidget()
+            }
+
+            // Bill breakdown
             item {
                 SummaryCard(
                     itemsSubtotal = itemsSubtotal,
@@ -131,19 +171,21 @@ fun CartScreen(
                     grandTotal = grandTotal
                 )
             }
+
+            // Cancellation Policy widget
+            item {
+                CancellationPolicyWidget()
+            }
         }
 
-        val rxRequiredInCart = cartItems.any { it.prescriptionRequired }
-        val isRxBlocked = rxRequiredInCart && attachedPrescriptionId.isNullOrBlank()
-        val isAddressSaved = deliveryAddress != null &&
-            !deliveryAddress.id.startsWith("temp_gps_") &&
-            !deliveryAddress.tag.equals("Current Location", ignoreCase = true)
-
+        // Pinned sticky bottom checkout bar (Address strip + Total + CTA)
         StickyCheckoutBar(
             grandTotal = grandTotal,
             totalSavings = totalSavings,
             rxBlocked = isRxBlocked,
             hasSavedAddress = isAddressSaved,
+            deliveryAddress = deliveryAddress,
+            onChangeAddress = onChangeAddress,
             onProceed = onProceedToAddress,
             onUploadPrescription = onUploadPrescription
         )
@@ -247,20 +289,56 @@ private fun CancellationPolicyWidget() {
 }
 
 @Composable
-private fun EmptyCart(onStartShopping: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize().padding(Spacing.xxl), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = CommerceColors.NeutralLight, modifier = Modifier.size(64.dp))
-            Spacer(modifier = Modifier.height(Spacing.lg))
-            Text("Your cart is empty", style = CommerceTypography.Title, fontWeight = FontWeight.SemiBold, color = CommerceColors.TextPrimary)
-            Text("Add medicines to your cart to start your order", style = CommerceTypography.BodySmall, color = CommerceColors.TextMuted)
-            Spacer(modifier = Modifier.height(Spacing.lg))
-            Button(
-                onClick = onStartShopping,
-                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary, contentColor = CommerceColors.OnPrimary),
-                shape = RoundedCornerShape(Radius.Button)
+private fun EmptyCart(
+    onStartShopping: () -> Unit,
+    onBack: (() -> Unit)? = null
+) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8FAFC))) {
+        Surface(
+            color = Color.White,
+            shadowElevation = 0.5.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Start shopping", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+                if (onBack != null) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF0F172A)
+                        )
+                    }
+                }
+                Text(
+                    text = "Checkout",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A),
+                    modifier = Modifier.padding(start = if (onBack != null) 4.dp else 16.dp)
+                )
+            }
+        }
+        HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.5.dp)
+
+        Box(modifier = Modifier.fillMaxSize().padding(Spacing.xxl), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = CommerceColors.NeutralLight, modifier = Modifier.size(64.dp))
+                Spacer(modifier = Modifier.height(Spacing.lg))
+                Text("Your cart is empty", style = CommerceTypography.Title, fontWeight = FontWeight.SemiBold, color = CommerceColors.TextPrimary)
+                Text("Add medicines to your cart to start your order", style = CommerceTypography.BodySmall, color = CommerceColors.TextMuted)
+                Spacer(modifier = Modifier.height(Spacing.lg))
+                Button(
+                    onClick = onStartShopping,
+                    colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary, contentColor = CommerceColors.OnPrimary),
+                    shape = RoundedCornerShape(Radius.Button)
+                ) {
+                    Text("Start shopping", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -344,134 +422,219 @@ private fun FreeDeliveryBanner(
 }
 
 @Composable
-private fun CartItemCard(
+private fun CartShipmentCard(
+    cartItems: List<CartItem>,
+    onQuantityChange: (String, Int) -> Unit,
+    onRemoveItem: (String) -> Unit,
+    onAddMoreItems: () -> Unit
+) {
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 0.5.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Shipment Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFF8FAFC))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = Color(0xFFECFDF5),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text("⚡", fontSize = 11.sp)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            "10 MINS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF059669)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                val totalQty = cartItems.sumOf { it.quantity }
+                Text(
+                    text = "Delivery in 10 minutes • $totalQty ${if (totalQty == 1) "item" else "items"}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF334155)
+                )
+            }
+
+            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+            // Items List
+            cartItems.forEachIndexed { index, item ->
+                CartItemRow(
+                    item = item,
+                    onQuantityChange = onQuantityChange,
+                    onRemoveItem = onRemoveItem
+                )
+                if (index < cartItems.size - 1) {
+                    HorizontalDivider(
+                        color = Color(0xFFF1F5F9),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(horizontal = 14.dp)
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+            // Footer: Add more items
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onAddMoreItems() }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Add more items",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = Color(0xFF94A3B8),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CartItemRow(
     item: CartItem,
     onQuantityChange: (String, Int) -> Unit,
     onRemoveItem: (String) -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val resolvedImage = remember(item.sku, item.name, item.image) {
-                item.image?.takeIf { it.isNotBlank() } ?: MedicineImageResolver.resolve(item.sku, item.name)
-            }
-            ProductImage(
-                imageUrl = resolvedImage,
-                contentDescription = item.name,
-                contentScale = ContentScale.Fit,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .size(68.dp)
-                    .background(Color(0xFFF8FAFC), shape = RoundedCornerShape(10.dp))
+        val resolvedImage = remember(item.sku, item.name, item.image) {
+            item.image?.takeIf { it.isNotBlank() } ?: MedicineImageResolver.resolve(item.sku, item.name)
+        }
+        ProductImage(
+            imageUrl = resolvedImage,
+            contentDescription = item.name,
+            contentScale = ContentScale.Fit,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .size(56.dp)
+                .background(Color(0xFFF8FAFC), shape = RoundedCornerShape(8.dp))
+                .border(BorderStroke(0.5.dp, Color(0xFFE2E8F0)), shape = RoundedCornerShape(8.dp))
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.name.orEmpty().ifBlank { "Medicine Item" },
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF0F172A),
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            val identity = listOfNotNull(item.brand, item.packSize).filter { it.isNotBlank() }
+            if (identity.isNotEmpty()) {
+                Text(
+                    identity.joinToString(" • "),
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+            if (item.prescriptionRequired) {
+                Surface(
+                    color = Color(0xFFFFE4E6),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.padding(top = 3.dp)
                 ) {
                     Text(
-                        text = item.name.orEmpty().ifBlank { "Medicine Item" },
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A),
-                        maxLines = 2,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = { onRemoveItem(item.sku) },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Remove",
-                            tint = Color(0xFF94A3B8),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                val identity = listOfNotNull(item.brand, item.packSize).filter { it.isNotBlank() }
-                if (identity.isNotEmpty()) {
-                    Text(
-                        identity.joinToString(" • "),
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B),
-                        maxLines = 1,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-
-                if (item.prescriptionRequired) {
-                    Text(
-                        "Prescription required",
-                        fontSize = 10.sp,
+                        "Rx Required",
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFE11D48),
-                        modifier = Modifier.padding(top = 2.dp)
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                     )
                 }
+            }
 
-                Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-                val mrpVal = item.mrp ?: item.unitPrice
-                val lineSavings = (mrpVal - item.unitPrice).multiply(BigDecimal.valueOf(item.quantity.toLong())).coerceAtLeast(BigDecimal.ZERO)
+            val mrpVal = item.mrp
+            val lineSavings = (mrpVal - item.unitPrice).multiply(BigDecimal.valueOf(item.quantity.toLong())).coerceAtLeast(BigDecimal.ZERO)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                MoneyFormatter.format(item.unitPrice),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF0F172A)
-                            )
-                            if (mrpVal > item.unitPrice) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    MoneyFormatter.format(mrpVal),
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF94A3B8),
-                                    textDecoration = TextDecoration.LineThrough
-                                )
-                            }
-                        }
-                        if (lineSavings > BigDecimal.ZERO) {
-                            Text(
-                                "Save ${MoneyFormatter.format(lineSavings)}",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF059669)
-                            )
-                        }
-                    }
-
-                    QuantityControls(
-                        quantity = item.quantity,
-                        onDecrease = {
-                            if (item.quantity <= 1) onRemoveItem(item.sku)
-                            else onQuantityChange(item.sku, item.quantity - 1)
-                        },
-                        onIncrease = { onQuantityChange(item.sku, item.quantity + 1) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    MoneyFormatter.format(item.unitPrice),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                if (mrpVal > item.unitPrice) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        MoneyFormatter.format(mrpVal),
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8),
+                        textDecoration = TextDecoration.LineThrough
+                    )
+                }
+                if (lineSavings > BigDecimal.ZERO) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Save ${MoneyFormatter.format(lineSavings)}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
                     )
                 }
             }
         }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        QuantityControls(
+            quantity = item.quantity,
+            onDecrease = {
+                if (item.quantity <= 1) onRemoveItem(item.sku)
+                else onQuantityChange(item.sku, item.quantity - 1)
+            },
+            onIncrease = { onQuantityChange(item.sku, item.quantity + 1) }
+        )
     }
 }
 
@@ -1173,105 +1336,10 @@ private fun StickyCheckoutBar(
     totalSavings: String?,
     rxBlocked: Boolean,
     hasSavedAddress: Boolean = true,
+    deliveryAddress: ApiAddress? = null,
+    onChangeAddress: (() -> Unit)? = null,
     onProceed: () -> Unit,
     onUploadPrescription: () -> Unit
-) {
-    Surface(
-        color = Color.White,
-        shadowElevation = 8.dp,
-        border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Surface(
-                        color = Color(0xFFECFDF5),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            "⚡ 10 MINS",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFF059669),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
-                    totalSavings?.takeIf { it != "₹0.00" && it != "₹0" }?.let {
-                        Text(
-                            "Saved $it",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16A34A)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = grandTotal ?: "₹0.00",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF0F172A)
-                )
-            }
-
-            if (rxBlocked) {
-                Button(
-                    onClick = onUploadPrescription,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE11D48),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-                    modifier = Modifier.height(46.dp)
-                ) {
-                    Text("Upload Prescription", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-            } else if (!hasSavedAddress) {
-                Button(
-                    onClick = onProceed,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF059669),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-                    modifier = Modifier.height(46.dp)
-                ) {
-                    Text("Select Address ➔", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            } else {
-                Button(
-                    onClick = onProceed,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF059669),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
-                    modifier = Modifier.height(46.dp)
-                ) {
-                    Text("Continue ➔", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CartDeliveryAddressCard(
-    deliveryAddress: ApiAddress?,
-    onChangeAddress: (() -> Unit)?
 ) {
     val isCompleteAddress = deliveryAddress != null &&
         !deliveryAddress.id.startsWith("temp_gps_") &&
@@ -1279,125 +1347,166 @@ private fun CartDeliveryAddressCard(
 
     Surface(
         color = Color.White,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (isCompleteAddress) Color(0xFFE2E8F0) else Color(0xFFFDE68A)),
-        shadowElevation = 0.5.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (onChangeAddress != null) Modifier.clickable { onChangeAddress() } else Modifier)
+        shadowElevation = 12.dp,
+        border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                color = if (isCompleteAddress) Color(0xFFF0FDF4) else Color(0xFFFEF3C7),
-                shape = CircleShape,
-                border = BorderStroke(1.dp, if (isCompleteAddress) Color(0xFFBBF7D0) else Color(0xFFFCD34D)),
-                modifier = Modifier.size(38.dp)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Blinkit-style pinned address strip directly above the CTA
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFF8FAFC))
+                    .then(if (onChangeAddress != null) Modifier.clickable { onChangeAddress() } else Modifier)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Place,
-                        contentDescription = "Delivery Location",
-                        tint = if (isCompleteAddress) Color(0xFF059669) else Color(0xFFD97706),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = if (isCompleteAddress) "Deliver to ${deliveryAddress?.tag?.ifBlank { "Home" }}" else "Add Delivery Address",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A),
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (isCompleteAddress) {
-                        Surface(
-                            color = Color(0xFFDCFCE7),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "⚡ 10 Mins",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF166534),
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
-                    } else {
-                        Surface(
-                            color = Color(0xFFFEF3C7),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "Required",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFB45309),
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    Surface(
+                        color = if (isCompleteAddress) Color(0xFFECFDF5) else Color(0xFFFEF3C7),
+                        shape = CircleShape,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (isCompleteAddress) Icons.Default.Place else Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = if (isCompleteAddress) Color(0xFF059669) else Color(0xFFD97706),
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isCompleteAddress) {
+                                    "Delivering to ${deliveryAddress?.tag?.ifBlank { "Home" }}"
+                                } else {
+                                    "Select delivery address"
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                        val addressText = if (isCompleteAddress) {
+                            listOfNotNull(
+                                deliveryAddress?.addressLine?.takeIf { it.isNotBlank() },
+                                deliveryAddress?.city?.takeIf { it.isNotBlank() }
+                            ).joinToString(", ").ifBlank { "Saved address" }
+                        } else {
+                            "Tap to choose or enter your address"
+                        }
+                        Text(
+                            text = addressText,
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(3.dp))
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Text(
-                    text = if (isCompleteAddress) {
-                        val fullLine = listOfNotNull(
-                            deliveryAddress?.addressLine?.takeIf { it.isNotBlank() },
-                            deliveryAddress?.city?.takeIf { it.isNotBlank() }
-                        ).joinToString(", ")
-                        fullLine.ifBlank { "Selected delivery location" }
-                    } else if (deliveryAddress != null && deliveryAddress.addressLine.isNotBlank()) {
-                        "Near ${deliveryAddress.addressLine} • Add house/flat details"
-                    } else {
-                        "Tap to choose or enter your complete address"
-                    },
+                    text = if (isCompleteAddress) "Change ›" else "Add ›",
                     fontSize = 12.sp,
-                    color = if (isCompleteAddress) Color(0xFF64748B) else Color(0xFFB45309),
-                    maxLines = 2,
-                    lineHeight = 16.sp,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF059669)
                 )
             }
 
-            if (onChangeAddress != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Surface(
-                    color = if (isCompleteAddress) Color(0xFFF1F5F9) else Color(0xFFFEF3C7),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.clickable { onChangeAddress() }
-                ) {
+            HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.5.dp)
+
+            // Checkout CTA Action row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = if (isCompleteAddress) "Change" else "Add",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isCompleteAddress) Color(0xFF0F172A) else Color(0xFFD97706)
-                        )
-                        Icon(
-                            Icons.Default.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = if (isCompleteAddress) Color(0xFF64748B) else Color(0xFFD97706),
-                            modifier = Modifier.size(14.dp)
-                        )
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                "⚡ 10 MINS",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF059669),
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                        totalSavings?.takeIf { it != "₹0.00" && it != "₹0" }?.let {
+                            Text(
+                                "Saved $it",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF16A34A)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = grandTotal ?: "₹0.00",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+
+                if (rxBlocked) {
+                    Button(
+                        onClick = onUploadPrescription,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE11D48),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+                        modifier = Modifier.height(46.dp)
+                    ) {
+                        Text("Upload Prescription", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else if (!hasSavedAddress) {
+                    Button(
+                        onClick = onProceed,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF059669),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+                        modifier = Modifier.height(46.dp)
+                    ) {
+                        Text("Select Address ➔", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                } else {
+                    Button(
+                        onClick = onProceed,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF059669),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+                        modifier = Modifier.height(46.dp)
+                    ) {
+                        Text("Continue ➔", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }

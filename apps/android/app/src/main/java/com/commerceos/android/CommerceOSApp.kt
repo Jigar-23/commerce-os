@@ -238,7 +238,6 @@ fun CommerceOSApp(
     val isPrimary = currentScreen is Screen.Home ||
         currentScreen is Screen.Categories ||
         currentScreen is Screen.OrderHistory ||
-        currentScreen is Screen.Cart ||
         currentScreen is Screen.Account
 
     val headerTitle = when (val screen = currentScreen) {
@@ -363,7 +362,7 @@ fun CommerceOSApp(
                         )
                         NavigationBarItem(
                             selected = currentScreen is Screen.Cart,
-                            onClick = { navigateRoot(Screen.Cart); cartViewModel.loadCart() },
+                            onClick = { navigate(Screen.Cart); cartViewModel.loadCart() },
                             icon = {
                                 BadgedBox(badge = {
                                     val count = cartViewModel.itemCount
@@ -624,7 +623,8 @@ fun CommerceOSApp(
                             navigate(Screen.AddressSelection(fromCheckout = true))
                         }
                     },
-                    onStartShopping = { navigateRoot(Screen.Catalog(CatalogQuery())) }
+                    onStartShopping = { navigateRoot(Screen.Catalog(CatalogQuery())) },
+                    onBack = { goBack() }
                 )
                 is Screen.AddressSelection -> {
                     val isFromCheckout = screen.fromCheckout
