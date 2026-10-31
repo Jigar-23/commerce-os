@@ -727,6 +727,7 @@ fun CommerceOSApp(
                     }
                 )
                 is Screen.Account -> AccountScreen(
+                    customerId = authenticatedCustomerId,
                     profile = addressViewModel.profile,
                     fallbackPhone = session.phone,
                     orderCount = (orderViewModel.history as? OrderHistoryUiState.Content)?.orders?.size ?: 0,

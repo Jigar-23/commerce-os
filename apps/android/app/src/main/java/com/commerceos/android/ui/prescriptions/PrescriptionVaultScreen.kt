@@ -185,6 +185,14 @@ private fun PrescriptionCard(rx: Prescription) {
             }
             if (rx.attachments.isNotEmpty()) {
                 val firstAttachment = rx.attachments.first()
+                val isLocal = firstAttachment.startsWith("/") || firstAttachment.startsWith("file:") || firstAttachment.startsWith("local:")
+                val modelToLoad: Any = if (firstAttachment.startsWith("/")) {
+                    java.io.File(firstAttachment)
+                } else if (firstAttachment.startsWith("file:")) {
+                    java.io.File(firstAttachment.removePrefix("file://"))
+                } else {
+                    firstAttachment
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -193,7 +201,7 @@ private fun PrescriptionCard(rx: Prescription) {
                         .padding(6.dp)
                 ) {
                     AsyncImage(
-                        model = firstAttachment,
+                        model = modelToLoad,
                         contentDescription = "Prescription image",
                         modifier = Modifier
                             .size(48.dp)
@@ -203,13 +211,13 @@ private fun PrescriptionCard(rx: Prescription) {
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = if (firstAttachment.startsWith("http")) "Cloud CDN Hosted" else "Image attached",
+                            text = if (isLocal) "Device Personal Storage" else if (firstAttachment.startsWith("http")) "Cloud CDN Hosted" else "Image attached",
                             style = CommerceTypography.Caption,
                             fontWeight = FontWeight.SemiBold,
                             color = CommerceColors.TextPrimary
                         )
                         Text(
-                            text = if (firstAttachment.startsWith("http")) "Stored in Cloudflare R2" else "Uploaded",
+                            text = if (isLocal) "Stored privately on device (zero cloud overhead)" else if (firstAttachment.startsWith("http")) "Stored in Cloudflare R2" else "Uploaded",
                             style = CommerceTypography.Meta,
                             color = CommerceColors.TextMuted
                         )

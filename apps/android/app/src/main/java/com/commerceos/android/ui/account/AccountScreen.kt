@@ -1,9 +1,16 @@
 package com.commerceos.android.ui.account
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,21 +24,28 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
+import com.commerceos.android.data.local.LocalProfileManager
 import com.commerceos.android.model.CustomerProfile
+import java.io.File
 
 /**
  * Clean, production pharmacy account & profile management screen.
- * Displays customer identification, core service pillars (Orders, Prescriptions, Saved Addresses),
+ * Displays customer identification with on-device photo & name editing, core service pillars,
  * medicine refill schedules, and store pharmacy helpdesk contact.
  */
 @Composable
 fun AccountScreen(
+    customerId: String = "",
     profile: CustomerProfile?,
     fallbackPhone: String,
     orderCount: Int,
@@ -45,10 +59,24 @@ fun AccountScreen(
     onNotifications: () -> Unit = {},
     onLogout: () -> Unit
 ) {
-    val displayName = profile?.displayName?.trim()?.takeIf { it.isNotBlank() } ?: "Customer"
-    val phone = profile?.phone?.trim()?.takeIf { it.isNotBlank() } ?: fallbackPhone.trim()
     val context = LocalContext.current
+    val effectiveCustomerId = customerId.ifBlank {
+        profile?.id?.takeIf { it.isNotBlank() } ?: fallbackPhone.filter { it.isDigit() }.ifBlank { "default_user" }
+    }
+
+    var localName by remember(effectiveCustomerId) {
+        mutableStateOf(LocalProfileManager.getCustomName(context, effectiveCustomerId))
+    }
+    var avatarFile by remember(effectiveCustomerId) {
+        mutableStateOf(LocalProfileManager.getAvatarFile(context, effectiveCustomerId))
+    }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
     var showRefillDialog by remember { mutableStateOf(false) }
+
+    val displayName = localName?.takeIf { it.isNotBlank() }
+        ?: profile?.displayName?.trim()?.takeIf { it.isNotBlank() }
+        ?: "Customer"
+    val phone = profile?.phone?.trim()?.takeIf { it.isNotBlank() } ?: fallbackPhone.trim()
 
     Column(
         modifier = Modifier
@@ -104,7 +132,7 @@ fun AccountScreen(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // 1. Clean Customer Identification Card (No hardcoded fake medical data!)
+            // 1. Customer Identification Card with Edit Button & On-Device Avatar
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(16.dp),
@@ -118,20 +146,57 @@ fun AccountScreen(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color(0xFFECFDF5),
-                        border = BorderStroke(1.5.dp, Color(0xFF10B981)),
-                        modifier = Modifier.size(54.dp)
+                    // Profile Avatar with on-device photo & camera badge
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clickable { showEditProfileDialog = true }
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            val initial = displayName.trim().firstOrNull()?.uppercaseChar() ?: 'C'
-                            Text(
-                                text = "$initial",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF065F46)
+                        if (avatarFile != null && avatarFile!!.exists()) {
+                            AsyncImage(
+                                model = avatarFile,
+                                contentDescription = "Profile Photo",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .border(1.5.dp, Color(0xFF10B981), CircleShape),
+                                contentScale = ContentScale.Crop
                             )
+                        } else {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFECFDF5),
+                                border = BorderStroke(1.5.dp, Color(0xFF10B981)),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    val initial = displayName.trim().firstOrNull()?.uppercaseChar() ?: 'C'
+                                    Text(
+                                        text = "$initial",
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color(0xFF065F46)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Edit overlay badge
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF059669),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .align(Alignment.BottomEnd)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit photo",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
                         }
                     }
 
@@ -178,11 +243,32 @@ fun AccountScreen(
                             }
                         }
                     }
+
+                    // Edit Profile Button
+                    OutlinedButton(
+                        onClick = { showEditProfileDialog = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0F172A))
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = Color(0xFF059669)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Edit",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
             // 2. Core Management Pillars (3 Pillars: Your Orders, Prescriptions, Saved Addresses)
-            // No Family Profiles!
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -214,7 +300,6 @@ fun AccountScreen(
             }
 
             // 3. Store & Pharmacy Services (Refill Reminders + Store Helpdesk Contact)
-            // No GST Invoices, No 24x7 Consultation!
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(16.dp),
@@ -249,15 +334,11 @@ fun AccountScreen(
                                 val cleanPhone = storeContactPhone.replace(" ", "").replace("-", "")
                                 val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
                                 context.startActivity(dialIntent)
-                            } catch (e: Exception) {
-                                // Fallback
-                            }
+                            } catch (_: Exception) {}
                         }
                     )
                 }
             }
-
-            // (No Payments & Safety, No Wallet, No Discreet packaging!)
 
             // 4. Pharmacy Hub License Footer
             Column(
@@ -294,6 +375,29 @@ fun AccountScreen(
         }
     }
 
+    if (showEditProfileDialog) {
+        EditProfileDialog(
+            currentName = displayName,
+            currentAvatarFile = avatarFile,
+            onDismiss = { showEditProfileDialog = false },
+            onSave = { newName, newBitmap, newUri, removePhoto ->
+                if (removePhoto) {
+                    LocalProfileManager.removeAvatar(context, effectiveCustomerId)
+                    avatarFile = null
+                } else if (newBitmap != null) {
+                    val saved = LocalProfileManager.saveAvatarBitmap(context, effectiveCustomerId, newBitmap)
+                    avatarFile = saved
+                } else if (newUri != null) {
+                    val saved = LocalProfileManager.saveAvatarUri(context, effectiveCustomerId, newUri)
+                    avatarFile = saved
+                }
+                LocalProfileManager.saveCustomName(context, effectiveCustomerId, newName)
+                localName = newName.trim().takeIf { it.isNotBlank() }
+                showEditProfileDialog = false
+            }
+        )
+    }
+
     if (showRefillDialog) {
         AlertDialog(
             onDismissRequest = { showRefillDialog = false },
@@ -322,6 +426,227 @@ fun AccountScreen(
             }
         )
     }
+}
+
+/**
+ * Clean on-device Profile Editor Dialog.
+ * User can update their display name and profile picture.
+ * The photo remains 100% on-device in app-private storage, incurring zero backend memory/hosting overhead.
+ */
+@Composable
+private fun EditProfileDialog(
+    currentName: String,
+    currentAvatarFile: File?,
+    onDismiss: () -> Unit,
+    onSave: (newName: String, newBitmap: Bitmap?, newUri: Uri?, removePhoto: Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    var nameInput by remember { mutableStateOf(currentName) }
+    var pickedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    var removePhotoFlag by remember { mutableStateOf(false) }
+
+    val takeCameraPhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            pickedBitmap = bitmap
+            pickedUri = null
+            removePhotoFlag = false
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            takeCameraPhoto.launch(null)
+        }
+    }
+
+    val pickGalleryImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            pickedUri = uri
+            pickedBitmap = null
+            removePhotoFlag = false
+        }
+    }
+
+    val hasPhoto = !removePhotoFlag && (pickedBitmap != null || pickedUri != null || (currentAvatarFile != null && currentAvatarFile.exists()))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Edit Profile",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Large Avatar Preview
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .border(2.dp, Color(0xFF10B981), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        removePhotoFlag -> {
+                            Surface(color = Color(0xFFECFDF5), modifier = Modifier.fillMaxSize()) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    val initial = nameInput.trim().firstOrNull()?.uppercaseChar() ?: 'C'
+                                    Text("$initial", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF065F46))
+                                }
+                            }
+                        }
+                        pickedBitmap != null -> {
+                            AsyncImage(
+                                model = pickedBitmap,
+                                contentDescription = "Preview",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        pickedUri != null -> {
+                            AsyncImage(
+                                model = pickedUri,
+                                contentDescription = "Preview",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        currentAvatarFile != null && currentAvatarFile.exists() -> {
+                            AsyncImage(
+                                model = currentAvatarFile,
+                                contentDescription = "Current Photo",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        else -> {
+                            Surface(color = Color(0xFFECFDF5), modifier = Modifier.fillMaxSize()) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    val initial = nameInput.trim().firstOrNull()?.uppercaseChar() ?: 'C'
+                                    Text("$initial", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF065F46))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Photo action buttons: Camera & Gallery
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val hasCamera = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.CAMERA
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasCamera) {
+                                takeCameraPhoto.launch(null)
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Camera", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = { pickGalleryImage.launch("image/*") },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Gallery", fontSize = 12.sp)
+                    }
+
+                    if (hasPhoto) {
+                        TextButton(
+                            onClick = {
+                                removePhotoFlag = true
+                                pickedBitmap = null
+                                pickedUri = null
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text("Remove", color = Color(0xFFDC2626), fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Full Name input field
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Full Name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Privacy / On-Device Storage Notice
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(0.5.dp, Color(0xFFCBD5E1)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = Color(0xFF475569),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Photo stays securely on device — zero cloud memory overhead.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(nameInput.trim(), pickedBitmap, pickedUri, removePhotoFlag)
+                },
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+            ) {
+                Text("Save Changes", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF64748B))
+            }
+        }
+    )
 }
 
 @Composable

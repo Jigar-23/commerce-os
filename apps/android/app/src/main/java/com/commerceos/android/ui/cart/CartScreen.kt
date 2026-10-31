@@ -1038,6 +1038,13 @@ private fun PrescriptionQuickViewDialog(
                 // Prescription Image or Clinical Certificate
                 val firstAttachment = prescription.attachments.firstOrNull()?.takeIf { it.isNotBlank() }
                 if (firstAttachment != null) {
+                    val modelToLoad: Any = if (firstAttachment.startsWith("/")) {
+                        java.io.File(firstAttachment)
+                    } else if (firstAttachment.startsWith("file:")) {
+                        java.io.File(firstAttachment.removePrefix("file://"))
+                    } else {
+                        firstAttachment
+                    }
                     Surface(
                         color = Color(0xFF0F172A),
                         shape = RoundedCornerShape(12.dp),
@@ -1047,7 +1054,7 @@ private fun PrescriptionQuickViewDialog(
                             .heightIn(min = 200.dp, max = 340.dp)
                     ) {
                         SubcomposeAsyncImage(
-                            model = firstAttachment,
+                            model = modelToLoad,
                             contentDescription = "Prescription Image",
                             contentScale = ContentScale.Fit,
                             loading = {

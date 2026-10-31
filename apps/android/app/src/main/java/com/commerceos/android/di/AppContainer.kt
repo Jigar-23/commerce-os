@@ -70,7 +70,7 @@ class AppContainer(context: Context) {
                 modelClass.isAssignableFrom(OrderViewModel::class.java) ->
                     OrderViewModel(repo) as T
                 modelClass.isAssignableFrom(PrescriptionViewModel::class.java) ->
-                    PrescriptionViewModel(repo) as T
+                    PrescriptionViewModel(repo, context.applicationContext) as T
                 modelClass.isAssignableFrom(ProductDetailViewModel::class.java) ->
                     ProductDetailViewModel(repo) as T
                 modelClass.isAssignableFrom(CatalogViewModel::class.java) ->
