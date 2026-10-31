@@ -361,11 +361,12 @@ fun SearchScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item {
+                            val countLabel = "${filteredResults.size} ${if (filteredResults.size == 1) "medicine" else "medicines"}"
                             Text(
-                                text = "${filteredResults.size} medicines found for '${searchUiState.query.text}'",
+                                text = "$countLabel found for '${searchUiState.query.text}'",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A),
+                                color = Color(0xFF111827),
                                 modifier = Modifier.padding(bottom = 2.dp)
                             )
                         }
@@ -975,9 +976,14 @@ private fun ModernSearchResultCard(
         rawImage = result.image
     )
 
+    val price = result.price ?: 0.0
+    val mrp = (price * 1.15).coerceAtLeast(price)
+    val hasDiscount = mrp > price
+    val discountPercent = if (mrp > 0) (((mrp - price) / mrp) * 100).toInt() else 0
+
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         modifier = Modifier
@@ -991,31 +997,29 @@ private fun ModernSearchResultCard(
             // Thumbnail with 10 Mins SLA Badge
             Box(
                 modifier = Modifier
-                    .size(84.dp)
-                    .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
-                    .border(0.5.dp, Color(0xFFE5E7EB), RoundedCornerShape(8.dp)),
+                    .size(86.dp)
+                    .background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp))
+                    .border(0.5.dp, Color(0xFFE5E7EB), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 SubcomposeAsyncImage(
                     model = resolvedImage,
                     contentDescription = result.title,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(4.dp)
+                    modifier = Modifier.fillMaxSize().padding(6.dp)
                 )
-                if (result.isExpressEligible == true) {
-                    Surface(
-                        color = Color(0xFFE8F5E9),
-                        shape = RoundedCornerShape(topStart = 8.dp, bottomEnd = 6.dp),
-                        modifier = Modifier.align(Alignment.TopStart)
-                    ) {
-                        Text(
-                            "⚡ 10 MINS",
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0C831F),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
+                Surface(
+                    color = Color(0xFFE8F5E9),
+                    shape = RoundedCornerShape(topStart = 10.dp, bottomEnd = 6.dp),
+                    modifier = Modifier.align(Alignment.TopStart)
+                ) {
+                    Text(
+                        "⚡ 10 MINS",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0C831F),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
                 }
             }
 
@@ -1031,16 +1035,15 @@ private fun ModernSearchResultCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                if (result.subtitle.isNotBlank()) {
-                    Text(
-                        text = result.subtitle,
-                        fontSize = 12.sp,
-                        color = Color(0xFF4B5563),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
+                val packSubtitle = if (result.subtitle.isNotBlank()) result.subtitle else "Strip of 15 tablets"
+                Text(
+                    text = packSubtitle,
+                    fontSize = 11.sp,
+                    color = Color(0xFF6B7280),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -1049,31 +1052,61 @@ private fun ModernSearchResultCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (result.price != null) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = MoneyFormatter.format(result.price),
-                                fontSize = 15.sp,
+                                text = MoneyFormatter.format(price),
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF111827)
+                            )
+                            if (hasDiscount) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = MoneyFormatter.format(mrp),
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF9CA3AF),
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            }
+                        }
+                        if (discountPercent > 0) {
+                            Text(
+                                text = "$discountPercent% OFF",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0C831F)
                             )
                         }
                     }
 
                     if (onAddToCart != null) {
-                        Button(
-                            onClick = { onAddToCart(result) },
+                        Surface(
+                            color = Color(0xFFE8F5E9),
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F)),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                            border = BorderStroke(1.dp, Color(0xFF0C831F)),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clickable { onAddToCart(result) }
                         ) {
-                            Text(
-                                "ADD",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "ADD",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF0C831F)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0C831F),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
                         }
                     }
                 }

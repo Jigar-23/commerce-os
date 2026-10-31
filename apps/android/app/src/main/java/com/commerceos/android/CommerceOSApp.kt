@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -266,9 +267,9 @@ fun CommerceOSApp(
     val bottomNavColors = NavigationBarItemDefaults.colors(
         selectedIconColor = CommerceColors.PrimaryDark,
         selectedTextColor = CommerceColors.PrimaryDark,
-        indicatorColor = CommerceColors.SuccessSoft,
-        unselectedIconColor = CommerceColors.TextMuted,
-        unselectedTextColor = CommerceColors.TextMuted
+        indicatorColor = Color.Transparent,
+        unselectedIconColor = Color(0xFF64748B),
+        unselectedTextColor = Color(0xFF64748B)
     )
 
     if (isSplashVisible) {
@@ -348,6 +349,7 @@ fun CommerceOSApp(
                     )
                 }
                 if (isPrimary) {
+                    HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
                     NavigationBar(containerColor = CommerceColors.Surface, tonalElevation = 0.dp) {
                         NavigationBarItem(
                             selected = currentScreen is Screen.Home,

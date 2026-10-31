@@ -146,6 +146,12 @@ fun HomeScreen(
             }
 
             item {
+                PrescriptionQuickStrip(
+                    onUploadPrescription = onUploadPrescription
+                )
+            }
+
+            item {
                 MedicineCategoryRail(
                     onSelectCategory = { categoryQuery -> onSearchClick(categoryQuery) }
                 )
@@ -230,57 +236,112 @@ private fun MedicineCategoryRail(
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "Popular Categories",
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFF0F172A),
-            modifier = Modifier.padding(bottom = 8.dp)
+            color = Color(0xFF111827),
+            modifier = Modifier.padding(bottom = 10.dp)
         )
 
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(horizontal = 2.dp)
         ) {
             items(categories) { cat ->
-                Surface(
-                    onClick = { onSelectCategory(cat.query) },
-                    color = Color.White,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    shadowElevation = 0.5.dp,
-                    modifier = Modifier.width(96.dp)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .width(80.dp)
+                        .clickable { onSelectCategory(cat.query) }
                 ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        shape = RoundedCornerShape(18.dp),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.size(72.dp)
                     ) {
-                        Surface(
-                            color = Color(0xFFF8FAFC),
-                            shape = CircleShape,
-                            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.size(46.dp)
-                        ) {
-                            ProductImage(
-                                imageUrl = cat.imageUrl,
-                                contentDescription = cat.name,
-                                contentScale = ContentScale.Fit,
-                                shape = CircleShape,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(4.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = cat.name,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF1E293B),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        ProductImage(
+                            imageUrl = cat.imageUrl,
+                            contentDescription = cat.name,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(10.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = cat.name,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF1E293B),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 1-Tap Prescription Quick Upload Strip (Tata 1mg / PharmEasy / Truemeds pattern).
+ */
+@Composable
+private fun PrescriptionQuickStrip(
+    onUploadPrescription: () -> Unit
+) {
+    Surface(
+        color = Color(0xFFECFDF5),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0)),
+        shadowElevation = 0.5.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onUploadPrescription)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = Color.White,
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF6EE7B7)),
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("📄", fontSize = 18.sp)
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Order with Prescription",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF065F46)
+                )
+                Spacer(modifier = Modifier.height(1.dp))
+                Text(
+                    text = "Upload doctor's slip & get 10-min delivery",
+                    fontSize = 11.sp,
+                    color = Color(0xFF047857)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+                color = Color(0xFF0C831F),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.clickable(onClick = onUploadPrescription)
+            ) {
+                Text(
+                    text = "Upload",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
             }
         }
     }
@@ -468,9 +529,10 @@ private fun UniversalSearchBar(
     }
 
     Surface(
-        color = Color(0xFFF8FAFC),
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
+        shadowElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
@@ -482,7 +544,7 @@ private fun UniversalSearchBar(
             Icon(
                 Icons.Default.Search,
                 contentDescription = "Search",
-                tint = Color(0xFF64748B),
+                tint = Color(0xFF0C831F),
                 modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
@@ -510,6 +572,13 @@ private fun UniversalSearchBar(
                 tint = Color(0xFF64748B),
                 modifier = Modifier.size(18.dp)
             )
+            Spacer(modifier = Modifier.width(10.dp))
+            Icon(
+                painter = painterResource(id = R.drawable.ic_camera),
+                contentDescription = "Camera Search",
+                tint = Color(0xFF64748B),
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
@@ -522,48 +591,46 @@ private fun UniversalSearchBar(
 
 @Composable
 fun HeroCampaignWidget(hero: HomeHeroDto, onCta: () -> Unit) {
-    val accent = when (hero.themeKey) {
-        "wellness" -> CommerceColors.Success
-        "care" -> CommerceColors.Primary
-        "pulse" -> CommerceColors.ColdChain
-        else -> CommerceColors.Primary
-    }
-    val base = CommerceColors.HeroDark
-    val deep = Color(
-        red = base.red * 0.72f,
-        green = base.green * 0.72f,
-        blue = base.blue * 0.72f,
-        alpha = 1f
-    )
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
-            .background(Brush.verticalGradient(listOf(base, deep)), RoundedCornerShape(Radius.Hero))
+            .height(180.dp)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF064E3B),
+                        Color(0xFF047857),
+                        Color(0xFF0C831F)
+                    )
+                ),
+                RoundedCornerShape(18.dp)
+            )
     ) {
         // Editorial Campaign Photography / Backdrop
         if (!hero.imageUrl.isNullOrBlank()) {
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(0.55f)
+                    .fillMaxWidth(0.52f)
                     .align(Alignment.CenterEnd)
             ) {
                 ProductImage(
                     imageUrl = hero.imageUrl,
                     contentDescription = hero.title,
                     contentScale = ContentScale.Crop,
-                    shape = RoundedCornerShape(topEnd = Radius.Hero, bottomEnd = Radius.Hero),
+                    shape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
                     modifier = Modifier.fillMaxSize()
                 )
-                // Smooth gradient overlay to protect text readability on left
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.horizontalGradient(
-                                colors = listOf(deep, deep.copy(alpha = 0.6f), Color.Transparent)
+                                colors = listOf(
+                                    Color(0xFF064E3B),
+                                    Color(0xFF064E3B).copy(alpha = 0.7f),
+                                    Color.Transparent
+                                )
                             )
                         )
                 )
@@ -573,43 +640,53 @@ fun HeroCampaignWidget(hero: HomeHeroDto, onCta: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxHeight()
-                .fillMaxWidth(0.68f)
-                .padding(Spacing.lg),
+                .fillMaxWidth(0.70f)
+                .padding(18.dp),
             verticalArrangement = Arrangement.Center
         ) {
-            Surface(color = accent, shape = RoundedCornerShape(Radius.Micro)) {
+            Surface(
+                color = Color.White.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(6.dp)
+            ) {
                 Text(
-                    hero.badge,
-                    style = CommerceTypography.Meta,
-                    fontWeight = FontWeight.Bold,
-                    color = CommerceColors.OnPrimary,
-                    modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 3.dp)
+                    text = hero.badge.ifBlank { "⚡ 10-MIN PHARMACY" },
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(Spacing.xs))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
-                hero.title,
-                style = CommerceTypography.HeroTitle,
+                text = hero.title,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
-                color = CommerceColors.Surface,
+                color = Color.White,
+                lineHeight = 22.sp,
                 maxLines = 2
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
-                hero.subtitle,
-                style = CommerceTypography.BodySmall,
-                color = CommerceColors.HeroOnDark,
-                maxLines = 2
+                text = hero.subtitle,
+                fontSize = 11.sp,
+                color = Color(0xFFD1FAE5),
+                maxLines = 2,
+                lineHeight = 15.sp
             )
-            Spacer(modifier = Modifier.height(Spacing.md))
+            Spacer(modifier = Modifier.height(10.dp))
             Button(
                 onClick = onCta,
-                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
-                shape = RoundedCornerShape(Radius.Button),
-                contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.xs),
-                modifier = Modifier.height(36.dp)
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
             ) {
-                Text(hero.ctaText, style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
+                Text(
+                    text = hero.ctaText.ifBlank { "Shop now" },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF064E3B)
+                )
             }
         }
     }
