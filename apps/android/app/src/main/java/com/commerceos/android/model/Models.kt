@@ -244,7 +244,19 @@ data class CartCheckoutRequest(
     val prescriptionId: String?,
     val paymentMethod: String,
     val idempotencyKey: String,
-    val deliveryAddress: ApiAddress? = null
+    val deliveryAddress: ApiAddress? = null,
+    val deliveryFee: BigDecimal? = null,
+    val discountAmount: BigDecimal? = null,
+    val packagingFee: BigDecimal? = null
+)
+
+data class BillSummaryDto(
+    val itemsSubtotal: BigDecimal = BigDecimal.ZERO,
+    val discountAmount: BigDecimal = BigDecimal.ZERO,
+    val deliveryFee: BigDecimal = BigDecimal.ZERO,
+    val handlingFee: BigDecimal = BigDecimal.ZERO,
+    val taxAmount: BigDecimal = BigDecimal.ZERO,
+    val grandTotal: BigDecimal = BigDecimal.ZERO
 )
 
 // Prescription upload / pharmacist verification (port 8089)
@@ -370,6 +382,11 @@ data class CustomerOrderApiResponse(
     val delivery_fee: BigDecimal? = null,
     val taxAmount: BigDecimal? = null,
     val tax_amount: BigDecimal? = null,
+    val discountAmount: BigDecimal? = null,
+    val packagingFee: BigDecimal? = null,
+    val handlingFee: BigDecimal? = null,
+    val billSummary: BillSummaryDto? = null,
+    val bill_summary: BillSummaryDto? = null,
     val paymentMethod: String = "COD",
     val paymentStatus: String = "COD_PENDING",
     val deliverySlaMins: Int = 15,
@@ -385,15 +402,18 @@ data class CustomerOrderApiResponse(
     val pharmacistVerification: PharmacistVerification? = null,
     val storeName: String? = null,
     val storeId: String? = null,
+    val storePhone: String? = null,
+    val merchantPhone: String? = null,
     val riderName: String? = null,
     val riderPhone: String? = null,
     val riderVehicle: String? = null
 ) {
     val effectiveTotalAmount: BigDecimal
-        get() = if (totalAmount > BigDecimal.ZERO) totalAmount else (total_amount ?: BigDecimal.ZERO)
+        get() = (billSummary?.grandTotal ?: bill_summary?.grandTotal)?.takeIf { it > BigDecimal.ZERO }
+            ?: (if (totalAmount > BigDecimal.ZERO) totalAmount else (total_amount ?: BigDecimal.ZERO))
 
     val effectiveDeliveryFee: BigDecimal
-        get() = deliveryFee ?: delivery_fee ?: BigDecimal("2.00")
+        get() = billSummary?.deliveryFee ?: bill_summary?.deliveryFee ?: deliveryFee ?: delivery_fee ?: BigDecimal("2.00")
 
     val effectiveDeliveryPin: String?
         get() = deliveryOtp?.takeIf { it.isNotBlank() } ?: deliverySession?.otp?.takeIf { it.isNotBlank() }

@@ -150,12 +150,12 @@ export default function FleetRidersPage() {
           {/* TOP ACTION HEADER */}
           <header className="h-16 bg-white border-b border-border-default px-8 flex items-center justify-between shrink-0 shadow-sm">
             <div className="flex items-center space-x-4">
-              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
-                <Bike className="w-5 h-5" />
+              <div className="p-2.5 rounded-xl bg-slate-100 text-slate-800 border border-slate-200">
+                <Bike className="w-5 h-5 text-slate-700" />
               </div>
               <div>
-                <h1 className="text-base font-black text-content-primary tracking-tight">Fleet & Delivery Partners</h1>
-                <p className="text-2xs font-semibold text-content-muted">Hyperlocal Dispatch & Dark Store Rider Operations</p>
+                <h1 className="text-base font-black text-content-primary tracking-tight">Fleet &amp; Delivery Partners</h1>
+                <p className="text-2xs font-semibold text-content-muted">Hyperlocal Dispatch &amp; Dark Store Rider Operations</p>
               </div>
             </div>
 
@@ -164,7 +164,7 @@ export default function FleetRidersPage() {
               
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all hover:shadow"
+                className="flex items-center space-x-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
               >
                 <Plus className="w-4 h-4" />
                 <span>Enroll New Rider</span>
@@ -191,7 +191,7 @@ export default function FleetRidersPage() {
               <div className="bg-white p-5 rounded-2xl border border-border-default shadow-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-content-muted">Total Enrolled Fleet</span>
-                  <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+                  <div className="p-2 rounded-xl bg-slate-100 text-slate-700">
                     <Bike className="w-4 h-4" />
                   </div>
                 </div>
@@ -202,11 +202,11 @@ export default function FleetRidersPage() {
               <div className="bg-white p-5 rounded-2xl border border-border-default shadow-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-content-muted">Active / On-Duty</span>
-                  <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
-                    <CheckCircle2 className="w-4 h-4" />
+                  <div className="p-2 rounded-xl bg-slate-100 text-slate-700">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-black text-emerald-600 mt-2">{activeCount}</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">{activeCount}</p>
                 <p className="text-2xs text-content-muted mt-1">Ready to receive delivery orders</p>
               </div>
 
@@ -218,7 +218,7 @@ export default function FleetRidersPage() {
                   </div>
                 </div>
                 <p className="text-2xl font-black text-content-primary mt-2">100%</p>
-                <p className="text-2xs text-content-muted mt-1">Aadhaar & Vehicle Registered</p>
+                <p className="text-2xs text-content-muted mt-1">Aadhaar &amp; Vehicle Registered</p>
               </div>
             </div>
 
@@ -233,7 +233,7 @@ export default function FleetRidersPage() {
 
               {isLoading ? (
                 <div className="p-12 text-center text-content-muted">
-                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-emerald-600" />
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-slate-700" />
                   <p className="mt-2 text-xs font-semibold">Loading fleet registry...</p>
                 </div>
               ) : error ? (
@@ -265,7 +265,7 @@ export default function FleetRidersPage() {
                         <tr key={rider.id || rider.rider_id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="py-4 px-6">
                             <div className="flex items-center space-x-3">
-                              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 font-black text-xs flex items-center justify-center">
+                              <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center">
                                 {rider.full_name?.charAt(0) || 'R'}
                               </div>
                               <div>
@@ -315,7 +315,7 @@ export default function FleetRidersPage() {
                               className={`px-3 py-1.5 rounded-lg text-2xs font-bold transition-all ${
                                 rider.status === 'ACTIVE'
                                   ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-900 hover:bg-slate-800 text-white'
                               }`}
                             >
                               {rider.status === 'ACTIVE' ? 'Set Inactive' : 'Activate Rider'}
@@ -337,7 +337,7 @@ export default function FleetRidersPage() {
             <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
               <div className="px-6 py-4 border-b border-border-default flex items-center justify-between bg-surface-subtle">
                 <div className="flex items-center space-x-2">
-                  <Bike className="w-5 h-5 text-emerald-600" />
+                  <Bike className="w-5 h-5 text-slate-800" />
                   <h3 className="text-sm font-black text-content-primary">Enroll Delivery Partner</h3>
                 </div>
                 <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-700">
@@ -364,7 +364,7 @@ export default function FleetRidersPage() {
                       placeholder="e.g. Vikram Singh"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border-default text-xs font-semibold focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border-default text-xs font-semibold focus:outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
                     />
                   </div>
                 </div>
@@ -382,7 +382,7 @@ export default function FleetRidersPage() {
                       placeholder="9991416180"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                      className="w-full pl-12 pr-4 py-2.5 rounded-xl border border-border-default text-xs font-semibold focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                      className="w-full pl-12 pr-4 py-2.5 rounded-xl border border-border-default text-xs font-semibold focus:outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
                     />
                   </div>
                   <p className="text-3xs text-content-muted mt-1">Rider will use this phone number to log into the Rider App.</p>
@@ -399,7 +399,7 @@ export default function FleetRidersPage() {
                       placeholder="HR-26-AB-6180"
                       value={vehicleNumber}
                       onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-border-default text-xs font-mono font-bold uppercase focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border-default text-xs font-mono font-bold uppercase focus:outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
                     />
                   </div>
 
@@ -410,7 +410,7 @@ export default function FleetRidersPage() {
                     <select
                       value={vehicleType}
                       onChange={(e) => setVehicleType(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-border-default text-xs font-semibold bg-white focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                      className="w-full px-3 py-2.5 rounded-xl border border-border-default text-xs font-semibold bg-white focus:outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
                     >
                       <option value="TWO_WHEELER">Motorcycle / Scooter</option>
                       <option value="EV_SCOOTER">Electric Scooter</option>
@@ -431,7 +431,7 @@ export default function FleetRidersPage() {
                       placeholder="XXXX-XXXX-1234"
                       value={aadhaarNumber}
                       onChange={(e) => setAadhaarNumber(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border-default text-xs font-mono focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border-default text-xs font-mono focus:outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
                     />
                   </div>
                 </div>
@@ -447,7 +447,7 @@ export default function FleetRidersPage() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                    className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
                   >
                     {isSubmitting ? 'Enrolling...' : 'Enroll & Activate Partner'}
                   </button>

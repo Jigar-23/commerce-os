@@ -76,11 +76,11 @@ fun DeliveryCompletionDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Order Bill:", fontSize = 13.sp, color = Color(0xFF94A3B8))
+                            Text("Payment / Bill:", fontSize = 13.sp, color = Color(0xFF94A3B8))
                             Text(
-                                text = session.payoutFormatted ?: (session.codAmount?.let { "₹${it.toInt()}" } ?: "₹60"),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black,
+                                text = session.codAmount?.takeIf { it > 0.0 }?.let { "₹${it.toInt()} (COD)" } ?: session.payoutFormatted ?: "Paid Online",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = Color(0xFF10B981)
                             )
                         }

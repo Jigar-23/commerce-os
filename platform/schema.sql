@@ -279,6 +279,7 @@ CREATE TABLE IF NOT EXISTS orders (
     request_hash VARCHAR(64),
     delivery_address JSONB NOT NULL,
     items JSONB NOT NULL,
+    bill_summary JSONB,
     delivery_otp_hash VARCHAR(128) NOT NULL,
     otp_expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '45 minutes',
     otp_attempts INT NOT NULL DEFAULT 0,

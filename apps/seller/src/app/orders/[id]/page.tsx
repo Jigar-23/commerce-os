@@ -275,7 +275,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                 <span>Back to Orders List</span>
               </button>
               <span className="text-content-muted">/</span>
-              <span className="px-2.5 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-xs font-bold font-mono border border-border-brandSubtle">
+              <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-bold font-mono border border-slate-200">
                 {orderId}
               </span>
             </div>
@@ -283,17 +283,17 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
             <div className="flex items-center space-x-3">
               <button
                 onClick={() => fetchOrderDetails(true)}
-                className="p-2 text-content-secondary hover:text-content-brand hover:bg-surface-subtle rounded-xl transition-all cursor-pointer"
+                className="p-2 text-content-secondary hover:text-slate-900 hover:bg-surface-subtle rounded-xl transition-all cursor-pointer"
                 title="Refresh Order Data"
               >
-                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-content-brand' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-slate-700' : ''}`} />
               </button>
             </div>
           </header>
 
           {isLoading ? (
             <div className="flex-1 flex items-center justify-center p-12">
-              <div className="w-8 h-8 border-4 border-border-brand border-t-transparent rounded-full animate-spin" />
+              <div className="w-8 h-8 border-4 border-slate-700 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : !order ? (
             <div className="p-8 text-center text-content-secondary font-bold text-sm">Order not found in Database.</div>
@@ -302,7 +302,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
               {/* Top Banner */}
               <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <span className="text-2xs font-bold bg-surface-brandSubtle text-content-brand px-2.5 py-1 rounded-full uppercase border border-border-brandSubtle">
+                  <span className="text-2xs font-bold bg-slate-100 text-slate-800 px-2.5 py-1 rounded-full uppercase border border-slate-200">
                     Live Order Control &amp; Lifecycle Dispatch
                   </span>
                   <h1 className="text-2xl font-black text-content-primary font-mono mt-1">{order.id}</h1>
@@ -312,7 +312,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                 <div className="flex items-center space-x-3">
                   <span className={`px-4 py-1.5 rounded-full text-xs font-extrabold ${
                     order.orderStatus === 'DELIVERED'
-                      ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                       : order.orderStatus === 'CANCELLED'
                       ? 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
                       : 'bg-surface-warningSubtle text-content-warning border border-border-warning'
@@ -329,10 +329,10 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
               <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm space-y-5">
                 <div className="flex items-center justify-between border-b border-border-default pb-3">
                   <h3 className="text-base font-black text-content-primary flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-content-brand" />
+                    <Clock className="w-5 h-5 text-slate-800" />
                     <span>Real-Time Order Lifecycle &amp; Delivery Milestones</span>
                   </h3>
-                  <span className="text-xs font-mono font-bold bg-surface-brandSubtle text-content-brand px-3 py-1 rounded-full border border-border-brandSubtle">
+                  <span className="text-xs font-mono font-bold bg-slate-100 text-slate-800 px-3 py-1 rounded-full border border-slate-200">
                     Live Updates Active
                   </span>
                 </div>
@@ -342,9 +342,9 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     {/* Connecting line to Step 2 */}
                     <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
-                      isStageDone(2) ? 'bg-action-primaryBg' : 'bg-border-default'
+                      isStageDone(2) ? 'bg-slate-900' : 'bg-border-default'
                     }`} />
-                    <span className="absolute -left-6 top-0.5 w-5 h-5 rounded-full bg-action-primaryBg text-white flex items-center justify-center text-xs font-bold shadow-sm z-10">
+                    <span className="absolute -left-6 top-0.5 w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold shadow-sm z-10">
                       ✓
                     </span>
                     <div className="flex-1 bg-surface-subtle p-3.5 rounded-xl border border-border-default">
@@ -366,13 +366,13 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     {/* Connecting line to Step 3 */}
                     <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
-                      isStageDone(3) ? 'bg-action-primaryBg' : 'bg-border-default'
+                      isStageDone(3) ? 'bg-slate-900' : 'bg-border-default'
                     }`} />
                     <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
                       isStageDone(2)
-                        ? 'bg-action-primaryBg text-white'
+                        ? 'bg-slate-900 text-white'
                         : order.sellerApprovalStatus === 'PENDING'
-                        ? 'bg-surface-warning text-white animate-pulse'
+                        ? 'bg-amber-500 text-white animate-pulse'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
                       {isStageDone(2) ? '✓' : order.sellerApprovalStatus === 'PENDING' ? '•' : '2'}
@@ -402,9 +402,9 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                         <div className="mt-3 flex items-center gap-2 pt-2 border-t border-border-warning">
                           <button
                             onClick={() => handleDomainTransition('accept')}
-                            className="px-4 py-2 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
+                            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                             <span>Accept Order &amp; Broadcast to Riders</span>
                           </button>
                           <button
@@ -435,11 +435,11 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     {/* Connecting line to Step 4 */}
                     <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
-                      isStageDone(4) ? 'bg-action-primaryBg' : 'bg-border-default'
+                      isStageDone(4) ? 'bg-slate-900' : 'bg-border-default'
                     }`} />
                     <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
                       isStageDone(3)
-                        ? 'bg-action-primaryBg text-white'
+                        ? 'bg-slate-900 text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
                       {isStageDone(3) ? '✓' : '3'}
@@ -450,8 +450,8 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                           <p className="font-extrabold text-xs text-content-primary">3. Delivery Partner Assigned</p>
                           {rider ? (
                             <div className="mt-1 space-y-0.5 text-2xs text-content-secondary">
-                              <p className="font-bold text-content-brand flex items-center gap-1">
-                                <Bike className="w-3.5 h-3.5" />
+                              <p className="font-bold text-slate-900 flex items-center gap-1">
+                                <Bike className="w-3.5 h-3.5 text-indigo-600" />
                                 <span>{rider.name} ({rider.phone})</span>
                               </p>
                               <p className="font-mono text-content-muted">Vehicle: {rider.vehicle} • ID: {rider.riderId}</p>
@@ -475,11 +475,11 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     {/* Connecting line to Step 5 */}
                     <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
-                      isStageDone(5) ? 'bg-action-primaryBg' : 'bg-border-default'
+                      isStageDone(5) ? 'bg-slate-900' : 'bg-border-default'
                     }`} />
                     <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
                       isStageDone(4)
-                        ? 'bg-action-primaryBg text-white'
+                        ? 'bg-slate-900 text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
                       {isStageDone(4) ? '✓' : '4'}
@@ -505,11 +505,11 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     {/* Connecting line to Step 6 */}
                     <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
-                      isStageDone(6) ? 'bg-action-primaryBg' : 'bg-border-default'
+                      isStageDone(6) ? 'bg-slate-900' : 'bg-border-default'
                     }`} />
                     <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
                       isStageDone(5)
-                        ? 'bg-action-primaryBg text-white'
+                        ? 'bg-slate-900 text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
                       {isStageDone(5) ? '✓' : '5'}
@@ -535,11 +535,11 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     {/* Connecting line to Step 7 */}
                     <div className={`absolute -left-[15px] top-5 bottom-[-24px] w-0.5 transition-colors duration-300 ${
-                      isStageDone(7) ? 'bg-action-primaryBg' : 'bg-border-default'
+                      isStageDone(7) ? 'bg-slate-900' : 'bg-border-default'
                     }`} />
                     <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
                       isStageDone(6)
-                        ? 'bg-action-primaryBg text-white'
+                        ? 'bg-slate-900 text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
                       {isStageDone(6) ? '✓' : '6'}
@@ -565,7 +565,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="relative flex items-start space-x-3">
                     <span className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
                       isStageDone(7)
-                        ? 'bg-action-primaryBg text-white'
+                        ? 'bg-emerald-600 text-white'
                         : 'bg-surface-muted text-content-muted'
                     }`}>
                       {isStageDone(7) ? '✓' : '7'}
@@ -591,8 +591,8 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
 
               {/* 2. CUSTOMER & DELIVERY LOCATION DETAILS */}
               <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex items-center space-x-2 text-content-brand border-b border-border-default pb-3">
-                  <User className="w-5 h-5" />
+                <div className="flex items-center space-x-2 text-slate-800 border-b border-border-default pb-3">
+                  <User className="w-5 h-5 text-slate-700" />
                   <h3 className="text-base font-black text-content-primary">Customer &amp; Delivery Destination</h3>
                 </div>
 
@@ -605,14 +605,14 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                   <div className="bg-surface-subtle p-4 rounded-xl border border-border-default space-y-1">
                     <span className="text-content-muted font-bold uppercase text-2xs">Contact Phone</span>
                     <p className="font-bold text-content-primary text-sm flex items-center space-x-1">
-                      <Phone className="w-3.5 h-3.5 text-content-brand" />
+                      <Phone className="w-3.5 h-3.5 text-slate-500" />
                       <span>{order.customerPhone || '—'}</span>
                     </p>
                   </div>
 
                   <div className="bg-surface-subtle p-4 rounded-xl border border-border-default space-y-1">
                     <span className="text-content-muted font-bold uppercase text-2xs">Delivery Verification OTP</span>
-                    <p className="font-mono font-black text-content-brand text-base">{order.deliveryOtp || '••••••'}</p>
+                    <p className="font-mono font-black text-slate-900 text-base">{order.deliveryOtp || '••••••'}</p>
                   </div>
                 </div>
 
@@ -634,7 +634,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
               <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-border-default pb-3">
                   <h3 className="text-base font-black text-content-primary flex items-center gap-2">
-                    <IndianRupee className="w-5 h-5 text-content-brand" />
+                    <IndianRupee className="w-5 h-5 text-slate-800" />
                     <span>Itemized Purchased Items &amp; Complete Bill Breakdown</span>
                   </h3>
                   <span className="text-xs font-bold text-content-secondary">
@@ -649,7 +649,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                       <div>
                         <p className="font-bold text-content-primary text-sm">{item.name}</p>
                         <p className="text-2xs text-content-muted">
-                          SKU: <code className="font-mono text-content-brand font-bold">{item.sku}</code> • Pack: {item.packSize || 'Standard'}
+                          SKU: <code className="font-mono text-slate-900 font-bold">{item.sku}</code> • Pack: {item.packSize || 'Standard'}
                         </p>
                       </div>
                       <div className="text-right">
@@ -661,38 +661,73 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                 </div>
 
                 {/* Financial Summary Table */}
-                <div className="bg-surface-subtle rounded-xl p-4 border border-border-default space-y-2 text-xs">
-                  <div className="flex justify-between text-content-secondary">
-                    <span>Items Subtotal:</span>
-                    <span className="font-semibold text-content-primary">
-                      ₹{order.items?.reduce((acc: number, it: any) => acc + (it.total || (it.unitPrice * it.quantity)), 0) || order.totalAmount}
-                    </span>
-                  </div>
+                {(() => {
+                  const bill = order.billSummary || order.bill_summary;
+                  const calculatedSubtotal = bill?.itemsSubtotal != null
+                    ? Number(bill.itemsSubtotal)
+                    : (order.items?.reduce((acc: number, it: any) => acc + (Number(it.total) || (Number(it.unitPrice || it.price || 0) * Number(it.quantity || 1))), 0) || Number(order.totalAmount || order.total_amount || 0));
+                  const grandTotal = bill?.grandTotal != null
+                    ? Number(bill.grandTotal)
+                    : Number(order.totalAmount || order.total_amount || calculatedSubtotal);
+                  const effectiveDelivery = bill?.deliveryFee != null
+                    ? Number(bill.deliveryFee)
+                    : (order.deliveryFee != null ? Number(order.deliveryFee) : (order.delivery_fee != null ? Number(order.delivery_fee) : 2.0));
+                  const discount = bill?.discountAmount != null
+                    ? Number(bill.discountAmount)
+                    : ((calculatedSubtotal + effectiveDelivery) > grandTotal
+                      ? Math.round(((calculatedSubtotal + effectiveDelivery) - grandTotal) * 100) / 100
+                      : 0);
+                  const handling = bill?.handlingFee != null
+                    ? Number(bill.handlingFee)
+                    : Number(order.packagingFee || order.handlingFee || 0);
+                  const tax = bill?.taxAmount != null
+                    ? Number(bill.taxAmount)
+                    : Number(order.taxAmount || 0);
 
-                  <div className="flex justify-between text-content-secondary">
-                    <span>GST / Estimated Tax (5%):</span>
-                    <span className="font-semibold text-content-primary">
-                      ₹{order.taxAmount || Math.round((order.totalAmount * 0.05) * 100) / 100}
-                    </span>
-                  </div>
+                  return (
+                    <div className="bg-surface-subtle rounded-xl p-4 border border-border-default space-y-2 text-xs">
+                      <div className="flex justify-between text-content-secondary">
+                        <span>Items Subtotal:</span>
+                        <span className="font-semibold text-content-primary">
+                          ₹{calculatedSubtotal}
+                        </span>
+                      </div>
 
-                  <div className="flex justify-between text-content-secondary">
-                    <span>Express Delivery &amp; Logistics:</span>
-                    <span className="font-semibold text-content-primary">
-                      ₹{order.deliveryFee || 25}
-                    </span>
-                  </div>
+                      {discount > 0 && (
+                        <div className="flex justify-between text-emerald-600 font-medium">
+                          <span>Product Discount:</span>
+                          <span className="font-semibold">-₹{discount}</span>
+                        </div>
+                      )}
 
-                  <div className="flex justify-between text-content-secondary">
-                    <span>Handling &amp; Packaging:</span>
-                    <span className="font-semibold text-content-primary">₹5</span>
-                  </div>
+                      <div className="flex justify-between text-content-secondary">
+                        <span>Delivery Partner Fee:</span>
+                        <span className="font-semibold text-content-primary">
+                          {effectiveDelivery <= 0 ? 'FREE' : `₹${effectiveDelivery}`}
+                        </span>
+                      </div>
 
-                  <div className="border-t border-border-default pt-2 flex justify-between items-center text-sm font-black text-content-primary">
-                    <span>Total Amount:</span>
-                    <span className="text-content-brand text-xl font-mono">₹{order.totalAmount}</span>
-                  </div>
-                </div>
+                      {tax > 0 && (
+                        <div className="flex justify-between text-content-secondary">
+                          <span>Taxes &amp; GST:</span>
+                          <span className="font-semibold text-content-primary">₹{tax}</span>
+                        </div>
+                      )}
+
+                      {handling > 0 && (
+                        <div className="flex justify-between text-content-secondary">
+                          <span>Handling &amp; Packaging:</span>
+                          <span className="font-semibold text-content-primary">₹{handling}</span>
+                        </div>
+                      )}
+
+                      <div className="border-t border-border-default pt-2 flex justify-between items-center text-sm font-black text-content-primary">
+                        <span>Grand Total:</span>
+                        <span className="text-slate-900 text-xl font-mono font-black">₹{grandTotal}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 4. ACTIONS & CONTROLS */}
@@ -765,8 +800,8 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                 className="w-full p-3 bg-surface-subtle border rounded-xl font-black text-base outline-none"
               />
               <div className="flex justify-end space-x-2">
-                <button onClick={() => setCodModal(false)} className="px-4 py-2 border rounded-xl text-xs font-bold cursor-pointer">Cancel</button>
-                <button onClick={handleConfirmCodCollection} className="px-5 py-2 bg-action-primaryBg text-white rounded-xl font-bold text-xs cursor-pointer">Confirm COD Cash</button>
+                <button onClick={() => setCodModal(false)} className="px-4 py-2 border border-border-default rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer">Cancel</button>
+                <button onClick={handleConfirmCodCollection} className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs cursor-pointer shadow-sm">Confirm COD Cash</button>
               </div>
             </div>
           </div>

@@ -2352,10 +2352,22 @@ class TransactionalOfferRepository {
       const offer = offerRes.rows[0];
 
       // 2. Strict Rider Ownership Verification (supports claiming unassigned pool offer or accepting assigned offer)
-      if (offer.rider_id && offer.rider_id !== riderId) {
-        await client.query('ROLLBACK');
-        return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
-      } else if (!offer.rider_id) {
+      const cleanOfferRider = String(offer.rider_id || '').toLowerCase();
+      const isPoolOffer = !offer.rider_id || ['all', 'broadcast', 'pool', 'unassigned', 'open'].includes(cleanOfferRider) || Boolean(offer.is_broadcast || offer.broadcast);
+      if (!isPoolOffer && offer.rider_id !== riderId) {
+        // Also check if delivery session is unassigned (LOOKING_FOR_RIDER)
+        const dsCheck = await client.query(
+          `SELECT rider_id, state FROM delivery_sessions WHERE (delivery_id = $1 OR order_id = $1) LIMIT 1`,
+          [offer.delivery_id]
+        );
+        const dsRow = dsCheck.rows[0];
+        const isSessionUnassigned = !dsRow?.rider_id || dsRow?.state === 'LOOKING_FOR_RIDER';
+        if (!isSessionUnassigned) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
+        }
+      }
+      if (isPoolOffer || offer.rider_id !== riderId) {
         const canClaim = ['CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED'].includes(offer.status);
         if (canClaim) {
           await client.query('UPDATE offers SET rider_id = $1 WHERE (offer_id = $2 OR id = $2)', [riderId, offerId]);
@@ -2614,9 +2626,10 @@ class LocalDevelopmentOfferRepository {
       return { ok: false, httpStatus: 404, error: 'OFFER_NOT_FOUND', message: `Offer ${offerId} does not exist.` };
     }
 
-    if (offer.riderId && offer.riderId !== riderId) {
+    const isPoolOffer = !offer.riderId || ['all', 'ALL', 'broadcast', 'pool', 'unassigned'].includes(String(offer.riderId).toLowerCase());
+    if (!isPoolOffer && offer.riderId !== riderId) {
       return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
-    } else if (!offer.riderId) {
+    } else if (isPoolOffer) {
       offer.riderId = riderId;
     }
 
@@ -3572,7 +3585,11 @@ class TransactionalOrderRepository {
         itemsSubtotal: calculatedItemsSubtotal,
         distanceKm,
         isCod,
-        tip: data.tip || data.selectedTip || 0
+        tip: data.tip || data.selectedTip || 0,
+        customDeliveryFee: data.deliveryFee != null ? data.deliveryFee : (data.delivery_fee != null ? data.delivery_fee : null),
+        discountAmount: data.discountAmount || data.discount || data.productDiscount || 0,
+        packagingFee: data.packagingFee || data.handlingFee || 0,
+        taxAmount: data.taxAmount || 0
       });
       const deliveryFee = pricingResult.deliveryFee;
       const taxAmount = pricingResult.taxAmount;
@@ -3602,8 +3619,8 @@ class TransactionalOrderRepository {
           id, order_id, customer_id, store_id, prescription_id, order_type,
           status, seller_approval_status, total_amount, tax_amount, delivery_fee, payment_method, payment_status,
           is_cod, cod_amount, idempotency_key, request_hash, delivery_address, items, delivery_otp_hash,
-          otp_expires_at, otp_attempts, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 0, NOW(), NOW())
+          otp_expires_at, otp_attempts, bill_summary, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 0, $22, NOW(), NOW())
         RETURNING *;
       `;
       const orderValues = [
@@ -3627,7 +3644,8 @@ class TransactionalOrderRepository {
         JSON.stringify(resolvedAddress),
         JSON.stringify(resolvedItemSnapshots),
         otpHash,
-        otpExpiresAt
+        otpExpiresAt,
+        JSON.stringify(pricingResult)
       ];
       const orderRes = await client.query(orderInsertQuery, orderValues);
 
@@ -3784,8 +3802,11 @@ class TransactionalOrderRepository {
         order: {
           ...orderRes.rows[0],
           rawDeliveryPin: rawOtp,
-          deliveryOtp: rawOtp
+          deliveryOtp: rawOtp,
+          bill_summary: pricingResult,
+          billSummary: pricingResult
         },
+        pricingResult,
         session: sessionRes.rows[0]
       };
     } catch (err) {

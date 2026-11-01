@@ -955,11 +955,15 @@ fun OrderTrackingContent(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val itemSubtotal = items.sumOf { (it.unitPrice.toDouble() * it.quantity) }
-                    val effectiveDeliveryFee = order.deliveryFee?.toDouble() ?: order.delivery_fee?.toDouble() ?: (if (itemSubtotal > 300.0) 0.0 else 25.0)
+                    val bill = order.billSummary ?: order.bill_summary
+                    val itemSubtotal = bill?.itemsSubtotal?.toDouble() ?: items.sumOf { (it.unitPrice.toDouble() * it.quantity) }
+                    val effectiveDeliveryFee = bill?.deliveryFee?.toDouble() ?: order.deliveryFee?.toDouble() ?: order.delivery_fee?.toDouble() ?: (if (itemSubtotal >= 199.0) 0.0 else 2.0)
                     val isFreeDelivery = effectiveDeliveryFee <= 0.0
-                    val handlingFee = 5.0
-                    val effectiveTotal = order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 } ?: (itemSubtotal + (if (isFreeDelivery) 0.0 else effectiveDeliveryFee) + handlingFee)
+                    val handlingFee = bill?.handlingFee?.toDouble() ?: (order.packagingFee?.toDouble() ?: order.handlingFee?.toDouble() ?: 0.0)
+                    val effectiveTotal = bill?.grandTotal?.toDouble() ?: order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 } ?: (itemSubtotal + (if (isFreeDelivery) 0.0 else effectiveDeliveryFee) + handlingFee)
+                    val productDiscount = bill?.discountAmount?.toDouble() ?: (order.discountAmount?.toDouble() ?: (if ((itemSubtotal + effectiveDeliveryFee + handlingFee) > effectiveTotal) {
+                        Math.round(((itemSubtotal + effectiveDeliveryFee + handlingFee) - effectiveTotal) * 100.0) / 100.0
+                    } else 0.0))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -974,19 +978,20 @@ fun OrderTrackingContent(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("10-Min Express Delivery Fee", fontSize = 13.sp, color = Color(0xFF64748B))
-                        Text(
-                            text = if (isFreeDelivery) "FREE" else (if (effectiveDeliveryFee % 1.0 == 0.0) "₹${effectiveDeliveryFee.toInt()}" else "₹${"%.2f".format(effectiveDeliveryFee)}"),
-                            fontSize = 13.sp,
-                            color = if (isFreeDelivery) Color(0xFF059669) else Color(0xFF0F172A),
-                            fontWeight = FontWeight.Medium
-                        )
+                    if (productDiscount > 0.0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Product Discount", fontSize = 13.sp, color = Color(0xFF059669), fontWeight = FontWeight.Medium)
+                            Text(
+                                text = "- ₹${if (productDiscount % 1.0 == 0.0) productDiscount.toInt() else "%.2f".format(productDiscount)}",
+                                fontSize = 13.sp,
+                                color = Color(0xFF059669),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -995,8 +1000,29 @@ fun OrderTrackingContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Handling & Packaging Fee", fontSize = 13.sp, color = Color(0xFF64748B))
-                        Text("₹5.00", fontSize = 13.sp, color = Color(0xFF0F172A), fontWeight = FontWeight.Medium)
+                        Text("Delivery Partner Fee", fontSize = 13.sp, color = Color(0xFF64748B))
+                        Text(
+                            text = if (isFreeDelivery) "FREE" else (if (effectiveDeliveryFee % 1.0 == 0.0) "₹${effectiveDeliveryFee.toInt()}" else "₹${"%.2f".format(effectiveDeliveryFee)}"),
+                            fontSize = 13.sp,
+                            color = if (isFreeDelivery) Color(0xFF059669) else Color(0xFF0F172A),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    if (handlingFee > 0.0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Handling & Packaging", fontSize = 13.sp, color = Color(0xFF64748B))
+                            Text(
+                                text = if (handlingFee % 1.0 == 0.0) "₹${handlingFee.toInt()}" else "₹${"%.2f".format(handlingFee)}",
+                                fontSize = 13.sp,
+                                color = Color(0xFF0F172A),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -1008,7 +1034,7 @@ fun OrderTrackingContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Total Amount", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        Text("Grand Total", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                         Text(
                             text = if (effectiveTotal % 1.0 == 0.0) "₹${effectiveTotal.toInt()}" else "₹${"%.2f".format(effectiveTotal)}",
                             fontSize = 18.sp,
@@ -1067,7 +1093,18 @@ fun OrderTrackingContent(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         OutlinedButton(
-                            onClick = onContactSupport,
+                            onClick = {
+                                val storePhone = order.storePhone?.takeIf { it.isNotBlank() }
+                                    ?: order.merchantPhone?.takeIf { it.isNotBlank() }
+                                    ?: "+919991416180"
+                                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${storePhone.replace(" ", "")}"))
+                                try {
+                                    context.startActivity(dialIntent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Cannot launch dialer: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                                onContactSupport()
+                            },
                             shape = RoundedCornerShape(10.dp),
                             border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF334155)),

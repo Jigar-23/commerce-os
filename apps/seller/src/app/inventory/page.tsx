@@ -237,8 +237,8 @@ export default function DedicatedInventoryPage() {
           {/* Top Header */}
           <header className="h-16 bg-white border-b border-border-default px-8 flex items-center justify-between shrink-0">
             <div className="flex items-center space-x-3">
-              <span className="px-3 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-xs font-black border border-border-brandSubtle flex items-center space-x-1.5">
-                <Layers className="w-3.5 h-3.5" />
+              <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200 flex items-center space-x-1.5">
+                <Layers className="w-3.5 h-3.5 text-slate-700" />
                 <span>Stock Inventory</span>
               </span>
               <span className="text-content-muted">/</span>

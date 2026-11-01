@@ -105,8 +105,18 @@ class MainActivity : ComponentActivity() {
     private fun initFirebaseMessagingToken() {
         try {
             if (com.google.firebase.FirebaseApp.getApps(applicationContext).isEmpty()) {
-                android.util.Log.d("MainActivity", "FirebaseApp not initialized yet; skipping FCM token fetch.")
-                return
+                try {
+                    val options = com.google.firebase.FirebaseOptions.Builder()
+                        .setApplicationId("1:586430398048:android:cf343d44537786ec2b0d05")
+                        .setApiKey("AIzaSyAhNxuYlXoKy_Zq0yl5j1iJmOW1BCLkm8k")
+                        .setProjectId("commerce-os-9f737")
+                        .setGcmSenderId("586430398048")
+                        .build()
+                    com.google.firebase.FirebaseApp.initializeApp(applicationContext, options)
+                    android.util.Log.d("MainActivity", "FirebaseApp initialized programmatically with production credentials.")
+                } catch (initErr: Exception) {
+                    android.util.Log.w("MainActivity", "FirebaseApp init fallback warning: ${initErr.message}")
+                }
             }
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnCompleteListener { task ->

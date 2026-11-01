@@ -241,7 +241,10 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                 prescriptionId = uiState.prescriptionId,
                 paymentMethod = paymentMethod,
                 idempotencyKey = idempotencyKey,
-                deliveryAddress = address
+                deliveryAddress = address,
+                deliveryFee = uiState.deliveryFee,
+                discountAmount = uiState.couponDiscount,
+                packagingFee = uiState.coldChainFee
             )
             when (val result = repository.checkoutFromCart(customerId, request)) {
                 is ApiResult.Success -> {

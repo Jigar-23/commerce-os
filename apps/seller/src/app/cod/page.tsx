@@ -118,8 +118,8 @@ export default function CodPage() {
               <p className="text-2xs text-content-muted mt-1">Awaiting Doorstep Cash Reconciliation</p>
             </div>
             <div className="bg-white border border-border-default rounded-2xl p-6 shadow-sm">
-              <p className="text-xs font-bold text-content-muted">Total COD Collected & Settled</p>
-              <h3 className="text-3xl font-black text-content-brand mt-2">₹{Number(collectedCodAmount || 0).toFixed(2)}</h3>
+              <p className="text-xs font-bold text-content-muted">Total COD Collected &amp; Settled</p>
+              <h3 className="text-3xl font-black text-slate-900 mt-2">₹{Number(collectedCodAmount || 0).toFixed(2)}</h3>
               <p className="text-2xs text-content-muted mt-1">Reconciled Cash In Hand</p>
             </div>
           </div>
@@ -144,10 +144,10 @@ export default function CodPage() {
                   <div key={order.id} className="p-6 hover:bg-surface-subtle transition-all flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="space-y-1.5">
                       <div className="flex items-center space-x-3">
-                        <span className="font-mono text-sm font-black text-content-accent">{order.id}</span>
+                        <span className="font-mono text-sm font-black text-slate-900">{order.id}</span>
                         <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
                           order.paymentStatus === 'COD_COLLECTED'
-                            ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : 'bg-surface-warningSubtle text-content-warning border border-border-warning'
                         }`}>
                           {order.paymentStatus}

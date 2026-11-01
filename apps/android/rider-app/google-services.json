@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "586430398048",
+    "project_id": "commerce-os-9f737",
+    "storage_bucket": "commerce-os-9f737.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:586430398048:android:cf343d44537786ec2b0d05",
+        "android_client_info": {
+          "package_name": "com.commerceos.android"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhNxuYlXoKy_Zq0yl5j1iJmOW1BCLkm8k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:586430398048:android:cf343d44537786ec2b0d06",
+        "android_client_info": {
+          "package_name": "com.commerceos.rider"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhNxuYlXoKy_Zq0yl5j1iJmOW1BCLkm8k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

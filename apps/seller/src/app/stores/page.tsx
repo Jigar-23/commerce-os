@@ -306,14 +306,14 @@ export default function StoresManagementPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center space-x-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-2xs font-bold bg-action-primaryBg text-white uppercase tracking-wider">
+                  <span className="px-2.5 py-0.5 rounded-full text-2xs font-bold bg-slate-900 text-white uppercase tracking-wider">
                     Network Hubs
                   </span>
                   <span className="text-content-muted text-xs">• Instant Geo-Routing</span>
                 </div>
                 <h1 className="text-2xl font-black text-content-primary mt-1 flex items-center gap-2">
-                  <Store className="w-7 h-7 text-action-primaryBg" />
-                  Stores & Fulfillment Hubs
+                  <Store className="w-7 h-7 text-slate-900" />
+                  Stores &amp; Fulfillment Hubs
                 </h1>
                 <p className="text-xs text-content-secondary mt-1">
                   Manage dark stores, fulfillment centers, exact GPS pinpoint locations, and automatic customer proximity-capture routing.
@@ -325,12 +325,12 @@ export default function StoresManagementPage() {
                   onClick={fetchStores}
                   className="px-4 py-2 text-xs font-bold text-content-secondary bg-white border border-border-default rounded-xl hover:bg-surface-subtle transition-all flex items-center gap-2 shadow-sm"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-action-primaryBg' : ''}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-slate-700' : ''}`} />
                   Refresh
                 </button>
                 <button
                   onClick={openAddStoreModal}
-                  className="px-4 py-2 text-xs font-bold text-white bg-action-primaryBg rounded-xl hover:bg-action-primaryBg/90 transition-all flex items-center gap-2 shadow-md shadow-action-primaryBg/20"
+                  className="px-4 py-2 text-xs font-bold text-white bg-slate-900 rounded-xl hover:bg-slate-800 transition-all flex items-center gap-2 shadow-sm"
                 >
                   <Plus className="w-4 h-4" />
                   Add Fulfillment Hub
@@ -362,11 +362,11 @@ export default function StoresManagementPage() {
               <div className="bg-white p-5 rounded-2xl border border-border-default shadow-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-content-muted uppercase">Active Serving</span>
-                  <div className="w-8 h-8 rounded-xl bg-surface-subtle text-action-successBg flex items-center justify-center">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-black text-emerald-600 mt-2">{stores.filter((s) => s.isActive).length}</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">{stores.filter((s) => s.isActive).length}</p>
                 <p className="text-2xs text-content-muted mt-1">Ready for instant dispatch</p>
               </div>
 
@@ -400,8 +400,8 @@ export default function StoresManagementPage() {
               <div className="relative z-10 space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-action-primaryBg/20 border border-action-primaryBg/40 text-action-primaryBg text-2xs font-black uppercase tracking-wider">
-                      <Crosshair className="w-3.5 h-3.5 animate-pulse" />
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-2xs font-bold uppercase tracking-wider">
+                      <Crosshair className="w-3.5 h-3.5 animate-pulse text-indigo-400" />
                       Automatic Proximity-Capture Engine
                     </div>
                     <h2 className="text-lg font-black text-white mt-1.5 flex items-center gap-2">
@@ -434,7 +434,7 @@ export default function StoresManagementPage() {
                       value={simLat}
                       onChange={(e) => setSimLat(e.target.value)}
                       placeholder="e.g. 28.1989"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-action-primaryBg"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
                     />
                   </div>
 
@@ -448,14 +448,14 @@ export default function StoresManagementPage() {
                       value={simLng}
                       onChange={(e) => setSimLng(e.target.value)}
                       placeholder="e.g. 76.6186"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-action-primaryBg"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
                     />
                   </div>
 
                   <div className="flex items-end">
                     <button
                       onClick={() => handleResolveNearestStore()}
-                      className="w-full py-2.5 px-4 bg-action-primaryBg hover:bg-action-primaryBg/90 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-action-primaryBg/30"
+                      className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"
                     >
                       <Navigation className="w-4 h-4" />
                       Resolve Nearest Store
@@ -540,7 +540,7 @@ export default function StoresManagementPage() {
                     placeholder="Search stores or addresses..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-action-primaryBg"
+                    className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-slate-800"
                   />
                 </div>
               </div>
@@ -559,7 +559,7 @@ export default function StoresManagementPage() {
                   {stores.length === 0 && (
                     <button
                       onClick={openAddStoreModal}
-                      className="mt-4 px-4 py-2 text-xs font-bold text-white bg-action-primaryBg rounded-xl hover:bg-action-primaryBg/90 transition-all inline-flex items-center gap-2 shadow-md shadow-action-primaryBg/20"
+                      className="mt-4 px-4 py-2 text-xs font-bold text-white bg-slate-900 rounded-xl hover:bg-slate-800 transition-all inline-flex items-center gap-2 shadow-sm"
                     >
                       <Plus className="w-4 h-4" />
                       Add Your First Hub
@@ -587,7 +587,7 @@ export default function StoresManagementPage() {
                           <tr key={store.id} className="hover:bg-surface-subtle/60 transition-colors">
                             <td className="py-4 px-5">
                               <div className="flex items-center space-x-3">
-                                <div className="w-9 h-9 rounded-xl bg-action-primaryBg/10 text-action-primaryBg flex items-center justify-center font-black shrink-0">
+                                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold shrink-0">
                                   <Store className="w-4 h-4" />
                                 </div>
                                 <div>
@@ -608,7 +608,7 @@ export default function StoresManagementPage() {
                                     href={mapsUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-2xs text-action-primaryBg hover:underline inline-flex items-center gap-1 font-semibold"
+                                    className="text-2xs text-slate-700 hover:text-indigo-600 hover:underline inline-flex items-center gap-1 font-semibold"
                                   >
                                     View in Maps <ExternalLink className="w-2.5 h-2.5" />
                                   </a>
@@ -649,7 +649,7 @@ export default function StoresManagementPage() {
                             <td className="py-4 px-5 text-right space-x-2">
                               <button
                                 onClick={() => openEditStoreModal(store)}
-                                className="px-3 py-1.5 text-xs font-bold text-content-accent bg-surface-accentSubtle hover:bg-action-primaryBg hover:text-white rounded-lg transition-colors"
+                                className="px-3 py-1.5 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-900 hover:text-white rounded-lg transition-colors border border-slate-200"
                               >
                                 Edit Pinpoint
                               </button>
@@ -671,7 +671,7 @@ export default function StoresManagementPage() {
             <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-border-default space-y-5 animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between border-b border-border-default pb-4">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-action-primaryBg text-white flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center">
                     <MapPin className="w-4 h-4" />
                   </div>
                   <div>
@@ -707,7 +707,7 @@ export default function StoresManagementPage() {
                     placeholder="e.g. Rewari Model Town Dark Store"
                     value={formStoreName}
                     onChange={(e) => setFormStoreName(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-action-primaryBg"
+                    className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-slate-800"
                   />
                 </div>
 
@@ -721,7 +721,7 @@ export default function StoresManagementPage() {
                     placeholder="Full street address, landmark, city, and pincode"
                     value={formAddress}
                     onChange={(e) => setFormAddress(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-action-primaryBg"
+                    className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-slate-800"
                   />
                 </div>
 
@@ -729,16 +729,16 @@ export default function StoresManagementPage() {
                 <div className="p-4 rounded-2xl bg-surface-subtle border border-border-default space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-2xs font-black uppercase tracking-wider text-content-primary flex items-center gap-1.5">
-                      <Crosshair className="w-3.5 h-3.5 text-action-primaryBg" />
+                      <Crosshair className="w-3.5 h-3.5 text-indigo-600" />
                       Pinpoint GPS Coordinates *
                     </span>
                     <button
                       type="button"
                       onClick={handleUseCurrentLocationForForm}
                       disabled={isLocatingUser}
-                      className="text-2xs font-bold text-action-primaryBg hover:underline flex items-center gap-1"
+                      className="text-2xs font-bold text-slate-800 hover:text-indigo-600 hover:underline flex items-center gap-1"
                     >
-                      <Crosshair className={`w-3 h-3 ${isLocatingUser ? 'animate-spin' : ''}`} />
+                      <Crosshair className={`w-3 h-3 ${isLocatingUser ? 'animate-spin text-indigo-600' : ''}`} />
                       {isLocatingUser ? 'Acquiring...' : 'Pinpoint My Current GPS'}
                     </button>
                   </div>
@@ -753,7 +753,7 @@ export default function StoresManagementPage() {
                         placeholder="e.g. 20.593722"
                         value={formLatitude}
                         onChange={(e) => setFormLatitude(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-border-default bg-white text-content-primary font-mono text-xs focus:outline-none focus:border-action-primaryBg"
+                        className="w-full px-3 py-2 rounded-lg border border-border-default bg-white text-content-primary font-mono text-xs focus:outline-none focus:border-slate-800"
                       />
                     </div>
                     <div>
@@ -765,7 +765,7 @@ export default function StoresManagementPage() {
                         placeholder="e.g. 78.962911"
                         value={formLongitude}
                         onChange={(e) => setFormLongitude(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-border-default bg-white text-content-primary font-mono text-xs focus:outline-none focus:border-action-primaryBg"
+                        className="w-full px-3 py-2 rounded-lg border border-border-default bg-white text-content-primary font-mono text-xs focus:outline-none focus:border-slate-800"
                       />
                     </div>
                   </div>
@@ -782,7 +782,7 @@ export default function StoresManagementPage() {
                       max={60}
                       value={formSlaMinutes}
                       onChange={(e) => setFormSlaMinutes(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-action-primaryBg"
+                      className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-slate-800"
                     />
                   </div>
 
@@ -796,7 +796,7 @@ export default function StoresManagementPage() {
                       max={50}
                       value={formServiceRadiusKm}
                       onChange={(e) => setFormServiceRadiusKm(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-action-primaryBg"
+                      className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-slate-800"
                     />
                   </div>
                 </div>
@@ -807,7 +807,7 @@ export default function StoresManagementPage() {
                       type="checkbox"
                       checked={formIsActive}
                       onChange={(e) => setFormIsActive(e.target.checked)}
-                      className="w-4 h-4 rounded text-action-primaryBg focus:ring-action-primaryBg"
+                      className="w-4 h-4 rounded text-slate-900 focus:ring-slate-800"
                     />
                     <span className="font-semibold text-content-primary">
                       Active Store (Receives live customer orders)
@@ -819,7 +819,7 @@ export default function StoresManagementPage() {
                       type="checkbox"
                       checked={formSellerApproval}
                       onChange={(e) => setFormSellerApproval(e.target.checked)}
-                      className="w-4 h-4 rounded text-action-primaryBg focus:ring-action-primaryBg"
+                      className="w-4 h-4 rounded text-slate-900 focus:ring-slate-800"
                     />
                     <span className="font-semibold text-content-primary">
                       Require manual seller approval before dispatch
@@ -838,7 +838,7 @@ export default function StoresManagementPage() {
                   <button
                     type="submit"
                     disabled={isSaving}
-                    className="px-5 py-2 font-bold text-white bg-action-primaryBg hover:bg-action-primaryBg/90 rounded-xl transition-all shadow-md shadow-action-primaryBg/20 disabled:opacity-50"
+                    className="px-5 py-2 font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-50"
                   >
                     {isSaving ? 'Saving...' : editingStore ? 'Update Store Pinpoint' : 'Create Fulfillment Hub'}
                   </button>

@@ -36,7 +36,7 @@ export default function PromotionsPage() {
           {/* Promotions Header & List */}
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold">Active Coupon Codes & Deals ({promotions.length})</h2>
-            <button className="px-4 py-2 bg-action-primaryBg hover:bg-action-primaryHover rounded-xl text-sm font-bold text-white transition">
+            <button className="px-4 py-2 bg-slate-900 hover:bg-slate-800 rounded-xl text-sm font-bold text-white transition shadow-sm">
               + Create Promotion
             </button>
           </div>

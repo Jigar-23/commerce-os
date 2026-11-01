@@ -91,21 +91,27 @@ function calculateCustomerOrderPricing({
   itemsSubtotal,
   distanceKm = 1.0,
   isCod = false,
-  tip = 0
+  tip = 0,
+  customDeliveryFee = null,
+  discountAmount = 0,
+  packagingFee = 0,
+  taxAmount = 0
 }) {
   const subtotal = Math.round(Number(itemsSubtotal || 0) * 100) / 100;
-  const deliveryFee = subtotal > 300.0 ? 0.0 : 25.0;
-  const handlingFee = 5.0;
-  const taxAmount = 0.0;
+  const discount = Math.max(0, Math.round(Number(discountAmount || 0) * 100) / 100);
+  const deliveryFee = customDeliveryFee !== null ? Math.max(0, Number(customDeliveryFee)) : (subtotal >= 199.0 ? 0.0 : 2.0);
+  const handlingFee = Math.max(0, Number(packagingFee || 0));
+  const tax = Math.max(0, Number(taxAmount || 0));
   const tipAmount = Math.max(0, Number(tip) || 0);
   const codFee = 0.0;
-  const totalAmount = Math.round((subtotal + deliveryFee + handlingFee + taxAmount + tipAmount + codFee) * 100) / 100;
+  const totalAmount = Math.max(0, Math.round((subtotal - discount + deliveryFee + handlingFee + tax + tipAmount + codFee) * 100) / 100);
 
   return {
     itemsSubtotal: subtotal,
+    discountAmount: discount,
     deliveryFee,
     handlingFee,
-    taxAmount,
+    taxAmount: tax,
     tipAmount,
     codFee,
     totalAmount

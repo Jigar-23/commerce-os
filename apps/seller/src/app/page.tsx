@@ -150,8 +150,8 @@ export default function MerchantOperationsPage() {
         {/* HEADER BAR */}
         <header className="h-16 border-b border-border-default bg-white px-8 flex items-center justify-between shrink-0 gap-4">
           <div className="flex items-center space-x-3">
-            <span className="px-3 py-1 rounded-full bg-surface-brandSubtle text-content-brand text-xs font-black border border-border-brandSubtle flex items-center space-x-1.5">
-              <Activity className="w-3.5 h-3.5" />
+            <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200 flex items-center space-x-1.5">
+              <Activity className="w-3.5 h-3.5 text-slate-600" />
               <span>Store Operations & Overview</span>
             </span>
             <span className="text-content-muted">/</span>
@@ -162,17 +162,17 @@ export default function MerchantOperationsPage() {
             <HeaderQuickSearch />
             <button
               onClick={() => fetchOverviewData()}
-              className="p-2 text-content-secondary hover:text-content-brand hover:bg-surface-subtle rounded-xl transition-all"
+              className="p-2 text-content-secondary hover:text-slate-900 hover:bg-surface-subtle rounded-xl transition-all"
               title="Refresh Dashboard"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-content-brand' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-slate-700' : ''}`} />
             </button>
           </div>
         </header>
 
         {toastMessage && (
-          <div className="fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl shadow-2xl font-bold text-xs flex items-center space-x-2 transition-all bg-action-speedBg text-white border border-border-brand">
-            <CheckCircle2 className="w-4 h-4" />
+          <div className="fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl shadow-2xl font-bold text-xs flex items-center space-x-2 transition-all bg-slate-900 text-white border border-slate-700">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             <span>{toastMessage}</span>
           </div>
         )}
@@ -182,7 +182,7 @@ export default function MerchantOperationsPage() {
           <div className="bg-gradient-to-r from-navy-950 via-surface-inverse to-navy-950 text-white rounded-3xl p-8 shadow-xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6 border border-border-strong">
             <div className="space-y-2 relative z-10">
               <div className="flex items-center space-x-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-surface-brandSubtle text-content-brand border border-border-brand text-2xs font-black uppercase tracking-wider">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-2xs font-bold uppercase tracking-wider">
                   Store Status: Online
                 </span>
                 <span className="text-content-muted text-xs">• 10-Minute Instant Fulfilment Engine Ready</span>
@@ -196,9 +196,9 @@ export default function MerchantOperationsPage() {
             <div className="flex items-center space-x-3 relative z-10 shrink-0">
               <Link
                 href="/inventory"
-                className="px-5 py-3 bg-action-primaryBg hover:bg-action-primaryHover text-white font-extrabold text-xs rounded-2xl shadow-md transition-all flex items-center space-x-2 active:scale-95"
+                className="px-5 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs rounded-2xl shadow-md transition-all flex items-center space-x-2 active:scale-95"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4 text-slate-700" />
                 <span>Manage Inventory</span>
               </Link>
             </div>
@@ -207,10 +207,10 @@ export default function MerchantOperationsPage() {
           {/* EXECUTIVE KPI PODS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {/* Pod 1: Orders */}
-            <div className="bg-white border border-border-default rounded-2xl p-5 shadow-card space-y-3 hover:border-border-brandSubtle transition-all">
+            <div className="bg-white border border-border-default rounded-2xl p-5 shadow-card space-y-3 hover:border-slate-300 transition-all">
               <div className="flex items-center justify-between">
                 <span className="text-2xs font-bold text-content-muted uppercase tracking-wider">Live Active Orders</span>
-                <div className="p-2 bg-surface-accentSubtle text-content-accent rounded-xl">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
                   <Package className="w-4 h-4" />
                 </div>
               </div>
@@ -218,25 +218,25 @@ export default function MerchantOperationsPage() {
                 <span className="text-3xl font-black text-content-primary">{activeOrders.length}</span>
                 <span className="text-xs font-bold text-content-secondary">Total: {orders.length}</span>
               </div>
-              <Link href="/orders" className="text-xs font-bold text-content-brand hover:underline flex items-center justify-between pt-2 border-t border-border-subtle">
+              <Link href="/orders" className="text-xs font-bold text-slate-800 hover:text-indigo-600 hover:underline flex items-center justify-between pt-2 border-t border-border-subtle">
                 <span>View Order Pipeline</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
             {/* Pod 2: Inventory */}
-            <div className="bg-white border border-border-default rounded-2xl p-5 shadow-card space-y-3 hover:border-border-brandSubtle transition-all">
+            <div className="bg-white border border-border-default rounded-2xl p-5 shadow-card space-y-3 hover:border-slate-300 transition-all">
               <div className="flex items-center justify-between">
                 <span className="text-2xs font-bold text-content-muted uppercase tracking-wider">Catalog Inventory</span>
-                <div className="p-2 bg-surface-brandSubtle text-content-brand rounded-xl">
+                <div className="p-2 bg-slate-100 text-slate-700 rounded-xl">
                   <Layers className="w-4 h-4" />
                 </div>
               </div>
               <div className="flex items-baseline justify-between">
                 <span className="text-3xl font-black text-content-primary">{inventory.length} SKU</span>
-                <span className="text-xs font-bold text-content-brand">Stock Qty: {totalStockCount}</span>
+                <span className="text-xs font-bold text-slate-600">Stock Qty: {totalStockCount}</span>
               </div>
-              <Link href="/inventory" className="text-xs font-bold text-content-brand hover:underline flex items-center justify-between pt-2 border-t border-border-subtle">
+              <Link href="/inventory" className="text-xs font-bold text-slate-800 hover:text-indigo-600 hover:underline flex items-center justify-between pt-2 border-t border-border-subtle">
                 <span>View Stock Ledger</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
@@ -284,63 +284,77 @@ export default function MerchantOperationsPage() {
             <div className="bg-white border border-border-default rounded-2xl p-6 shadow-card space-y-4">
               <div className="flex items-center justify-between border-b border-border-default pb-3">
                 <div className="flex items-center space-x-2">
-                  <Package className="w-5 h-5 text-content-brand" />
+                  <Package className="w-5 h-5 text-slate-800" />
                   <h2 className="text-lg font-black text-content-primary">Live Incoming Orders &amp; Dispatch Queue</h2>
                 </div>
-                <Link href="/orders" className="text-xs font-bold text-content-brand hover:underline flex items-center gap-1">
+                <Link href="/orders" className="text-xs font-bold text-slate-800 hover:text-indigo-600 hover:underline flex items-center gap-1">
                   <span>View All Orders ({orders.length})</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
 
               <div className="divide-y divide-border-subtle">
-                {orders.slice(0, 5).map((order) => (
-                  <div
-                    key={order.id}
-                    onClick={() => router.push(`/orders/${order.id}`)}
-                    className="py-4 hover:bg-surface-subtle transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group px-3 rounded-xl"
-                    role="button"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-3">
-                        <span className="font-mono font-black text-sm text-content-brand group-hover:underline">{order.id}</span>
-                        <span className={`px-2.5 py-0.5 rounded-full text-2xs font-black ${
-                          order.sellerApprovalStatus === 'PENDING'
-                            ? 'bg-surface-warningSubtle text-content-warning border border-border-warning animate-pulse'
-                            : 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
-                        }`}>
-                          {order.sellerApprovalStatus === 'PENDING' ? '⏳ PENDING REVIEW' : order.orderStatus || order.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-content-secondary">
-                        Customer: <strong className="text-content-primary">{order.customerName || order.customerId}</strong> • Total: <strong className="text-content-brand">₹{order.totalAmount}</strong> ({order.paymentMethod})
-                      </p>
-                    </div>
+                {orders.slice(0, 5).map((order) => {
+                  const status = (order.orderStatus || order.status || '').toUpperCase();
+                  const isDelivered = status === 'DELIVERED';
+                  const isCancelled = status === 'CANCELLED';
+                  const isPending = order.sellerApprovalStatus === 'PENDING' || status === 'PLACED' || status === 'PENDING_APPROVAL';
+                  const isTransit = status === 'OUT_FOR_DELIVERY' || status === 'PICKED_UP' || status === 'RIDER_ASSIGNED';
 
-                    <div className="flex items-center space-x-2 shrink-0">
-                      {(order.sellerApprovalStatus === 'PENDING' || order.status === 'PLACED' || order.status === 'PENDING_APPROVAL') && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleAcceptOrder(e, order.id)}
-                          disabled={actionLoadingId === order.id}
-                          className="px-3.5 py-1.5 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
-                        >
-                          {actionLoadingId === order.id ? (
-                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          )}
-                          <span>Accept &amp; Dispatch</span>
-                        </button>
-                      )}
+                  const badgeClass = isDelivered
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : isCancelled
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : isPending
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
+                    : isTransit
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200';
 
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-content-brand group-hover:translate-x-1 transition-transform px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-surface-muted border border-border-default">
-                        <span>Details</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
+                  return (
+                    <div
+                      key={order.id}
+                      onClick={() => router.push(`/orders/${order.id}`)}
+                      className="py-4 hover:bg-surface-subtle transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group px-3 rounded-xl"
+                      role="button"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-3">
+                          <span className="font-mono font-black text-sm text-slate-900 group-hover:text-indigo-600 group-hover:underline">{order.id}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-2xs font-bold ${badgeClass}`}>
+                            {isPending ? '⏳ PENDING REVIEW' : order.orderStatus || order.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-content-secondary">
+                          Customer: <strong className="text-content-primary">{order.customerName || order.customerId}</strong> • Total: <strong className="text-slate-900 font-bold">₹{order.totalAmount}</strong> ({order.paymentMethod})
+                        </p>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        {isPending && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleAcceptOrder(e, order.id)}
+                            disabled={actionLoadingId === order.id}
+                            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1.5 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                          >
+                            {actionLoadingId === order.id ? (
+                              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                            <span>Accept &amp; Dispatch</span>
+                          </button>
+                        )}
+
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 group-hover:text-slate-900 group-hover:translate-x-1 transition-all px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-surface-muted border border-border-default">
+                          <span>Details</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -350,41 +364,41 @@ export default function MerchantOperationsPage() {
             <h2 className="text-lg font-black text-content-primary">Operational Workflows</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {/* Card 1: Orders */}
-              <Link href="/orders" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-brand/40 transition-all group space-y-3">
-                <div className="p-3 bg-surface-accentSubtle text-content-accent rounded-2xl w-fit">
+              <Link href="/orders" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-slate-300 transition-all group space-y-3">
+                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl w-fit">
                   <Package className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-extrabold text-content-primary group-hover:text-content-brand transition-colors">Order Fulfilment Pipeline</h3>
+                <h3 className="text-base font-extrabold text-content-primary group-hover:text-indigo-600 transition-colors">Order Fulfilment Pipeline</h3>
                 <p className="text-xs text-content-secondary font-medium leading-relaxed">
                   Accept incoming orders, verify cold-chain items, pack bags, and dispatch with real-time OTP tracking.
                 </p>
-                <div className="text-xs font-bold text-content-brand flex items-center space-x-1 pt-2">
+                <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 flex items-center space-x-1 pt-2">
                   <span>Open Orders</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </Link>
 
               {/* Card 2: Inventory */}
-              <Link href="/inventory" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-brand/40 transition-all group space-y-3">
-                <div className="p-3 bg-surface-brandSubtle text-content-brand rounded-2xl w-fit">
+              <Link href="/inventory" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-slate-300 transition-all group space-y-3">
+                <div className="p-3 bg-slate-100 text-slate-700 rounded-2xl w-fit">
                   <Layers className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-extrabold text-content-primary group-hover:text-content-brand transition-colors">Stock Inventory & Sync</h3>
+                <h3 className="text-base font-extrabold text-content-primary group-hover:text-indigo-600 transition-colors">Stock Inventory & Sync</h3>
                 <p className="text-xs text-content-secondary font-medium leading-relaxed">
                   Adjust stock levels, audit low-stock thresholds, register new SKUs, and manage real-time inventory reservations.
                 </p>
-                <div className="text-xs font-bold text-content-brand flex items-center space-x-1 pt-2">
+                <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 flex items-center space-x-1 pt-2">
                   <span>Open Inventory</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </Link>
 
               {/* Card 3: COD Ledger */}
-              <Link href="/cod" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-brand/40 transition-all group space-y-3">
+              <Link href="/cod" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-warning transition-all group space-y-3">
                 <div className="p-3 bg-surface-warningSubtle text-content-warning rounded-2xl w-fit">
                   <IndianRupee className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-extrabold text-content-primary group-hover:text-content-brand transition-colors">Cash on Delivery Reconciliation</h3>
+                <h3 className="text-base font-extrabold text-content-primary group-hover:text-amber-600 transition-colors">Cash on Delivery Reconciliation</h3>
                 <p className="text-xs text-content-secondary font-medium leading-relaxed">
                   Reconcile cash collected by delivery partners at customer doorsteps and track bank settlement status.
                 </p>
@@ -395,11 +409,11 @@ export default function MerchantOperationsPage() {
               </Link>
 
               {/* Card 4: Cancelled */}
-              <Link href="/cancelled" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-brand/40 transition-all group space-y-3">
+              <Link href="/cancelled" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-slate-300 transition-all group space-y-3">
                 <div className="p-3 bg-surface-dangerSubtle text-content-danger rounded-2xl w-fit">
                   <XCircle className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-extrabold text-content-primary group-hover:text-content-brand transition-colors">Cancellation & Stock Release Logs</h3>
+                <h3 className="text-base font-extrabold text-content-primary group-hover:text-rose-600 transition-colors">Cancellation &amp; Stock Release Logs</h3>
                 <p className="text-xs text-content-secondary font-medium leading-relaxed">
                   Review cancelled orders, verify reason codes, and confirm immediate DB inventory restoration.
                 </p>
@@ -410,30 +424,30 @@ export default function MerchantOperationsPage() {
               </Link>
 
               {/* Card 5: Audit Trail */}
-              <Link href="/audit" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-brand/40 transition-all group space-y-3">
-                <div className="p-3 bg-surface-editorialSubtle text-content-editorial rounded-2xl w-fit">
+              <Link href="/audit" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-slate-300 transition-all group space-y-3">
+                <div className="p-3 bg-slate-100 text-slate-700 rounded-2xl w-fit">
                   <ShieldCheck className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-extrabold text-content-primary group-hover:text-content-brand transition-colors">Security & System Audit Trail</h3>
+                <h3 className="text-base font-extrabold text-content-primary group-hover:text-indigo-600 transition-colors">Security &amp; System Audit Trail</h3>
                 <p className="text-xs text-content-secondary font-medium leading-relaxed">
                   Trace all atomic inventory movements, price overrides, stock reservations, and pharmacist approvals.
                 </p>
-                <div className="text-xs font-bold text-content-editorial flex items-center space-x-1 pt-2">
+                <div className="text-xs font-bold text-slate-700 group-hover:text-indigo-600 flex items-center space-x-1 pt-2">
                   <span>Open Audit Trail</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </Link>
 
               {/* Card 6: Products & SKUs */}
-              <Link href="/products" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-border-brand/40 transition-all group space-y-3">
-                <div className="p-3 bg-surface-accentSubtle text-content-accent rounded-2xl w-fit">
+              <Link href="/products" className="bg-white border border-border-default rounded-2xl p-6 shadow-card hover:shadow-card-hover hover:border-slate-300 transition-all group space-y-3">
+                <div className="p-3 bg-slate-100 text-slate-700 rounded-2xl w-fit">
                   <Store className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-extrabold text-content-primary group-hover:text-content-brand transition-colors">Catalog & Master SKUs</h3>
+                <h3 className="text-base font-extrabold text-content-primary group-hover:text-indigo-600 transition-colors">Catalog &amp; Master SKUs</h3>
                 <p className="text-xs text-content-secondary font-medium leading-relaxed">
                   Manage active listings, Schedule H clinical requirements, cold-chain temperature flags, and MRPs.
                 </p>
-                <div className="text-xs font-bold text-content-accent flex items-center space-x-1 pt-2">
+                <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 flex items-center space-x-1 pt-2">
                   <span>Open Product Catalog</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>

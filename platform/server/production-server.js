@@ -164,6 +164,7 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_ref_id VARCHAR(128);`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);`).catch(() => {});
+  pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_summary JSONB;`).catch(() => {});
 
   // ---------------------------------------------------------------------------
   // 2b. Authoritative Database Keep-Alive Pulse (Prevents Cloud Hibernation)
@@ -3767,6 +3768,44 @@ const server = http.createServer(async (req, res) => {
       const rawAddr = typeof order.delivery_address === 'string' ? (() => { try { return JSON.parse(order.delivery_address); } catch(e) { return {}; } })() : (order.delivery_address || {});
       const resolvedCustName = order.customer_name || (rawAddr && (rawAddr.contactName || rawAddr.contact_name || rawAddr.name)) || 'Customer';
       const resolvedCustPhone = order.customer_phone || (rawAddr && (rawAddr.contactPhone || rawAddr.contact_phone || rawAddr.phone)) || null;
+      const rawBillSummary = typeof order.bill_summary === 'string'
+        ? JSON.parse(order.bill_summary)
+        : (order.bill_summary || order.billSummary || null);
+
+      const resolvedItemsSubtotal = rawBillSummary?.itemsSubtotal != null
+        ? Number(rawBillSummary.itemsSubtotal)
+        : rawItems.reduce((acc, it) => acc + (Number(it.lineTotal || it.total) || (Number(it.unitPrice || it.price || 0) * Number(it.quantity || 1))), 0);
+
+      const resolvedDeliveryFee = rawBillSummary?.deliveryFee != null
+        ? Number(rawBillSummary.deliveryFee)
+        : Number(order.delivery_fee || order.deliveryFee || 0);
+
+      const resolvedHandlingFee = rawBillSummary?.handlingFee != null
+        ? Number(rawBillSummary.handlingFee)
+        : Number(order.packaging_fee || order.packagingFee || 0);
+
+      const resolvedTaxAmount = rawBillSummary?.taxAmount != null
+        ? Number(rawBillSummary.taxAmount)
+        : Number(order.tax_amount || order.taxAmount || 0);
+
+      const resolvedDiscountAmount = rawBillSummary?.discountAmount != null
+        ? Number(rawBillSummary.discountAmount)
+        : Number(order.discount_amount || order.discountAmount || 0);
+
+      const resolvedTotalAmount = rawBillSummary?.totalAmount != null
+        ? Number(rawBillSummary.totalAmount)
+        : Number(order.total_amount || order.totalAmount || 0);
+
+      const authoritativeBillSummary = rawBillSummary || {
+        itemsSubtotal: resolvedItemsSubtotal,
+        discountAmount: resolvedDiscountAmount,
+        deliveryFee: resolvedDeliveryFee,
+        handlingFee: resolvedHandlingFee,
+        taxAmount: resolvedTaxAmount,
+        grandTotal: resolvedTotalAmount,
+        totalAmount: resolvedTotalAmount
+      };
+
       const singleOrderDto = {
         id: orderIdVal,
         orderId: orderIdVal,
@@ -3788,14 +3827,20 @@ const server = http.createServer(async (req, res) => {
         order_status: order.status,
         sellerApprovalStatus: order.seller_approval_status || order.sellerApprovalStatus || 'NOT_REQUIRED',
         seller_approval_status: order.seller_approval_status || order.sellerApprovalStatus || 'NOT_REQUIRED',
-        totalAmount: Number(order.total_amount || order.totalAmount || 0),
-        total_amount: Number(order.total_amount || order.totalAmount || 0),
-        taxAmount: Number(order.tax_amount || order.taxAmount || 0),
-        tax_amount: Number(order.tax_amount || order.taxAmount || 0),
-        deliveryFee: Number(order.delivery_fee || order.deliveryFee || 0),
-        delivery_fee: Number(order.delivery_fee || order.deliveryFee || 0),
-        handlingFee: 5.0,
-        handling_fee: 5.0,
+        totalAmount: resolvedTotalAmount,
+        total_amount: resolvedTotalAmount,
+        taxAmount: resolvedTaxAmount,
+        tax_amount: resolvedTaxAmount,
+        deliveryFee: resolvedDeliveryFee,
+        delivery_fee: resolvedDeliveryFee,
+        handlingFee: resolvedHandlingFee,
+        handling_fee: resolvedHandlingFee,
+        packagingFee: resolvedHandlingFee,
+        discountAmount: resolvedDiscountAmount,
+        discount_amount: resolvedDiscountAmount,
+        itemsSubtotal: resolvedItemsSubtotal,
+        billSummary: authoritativeBillSummary,
+        bill_summary: authoritativeBillSummary,
         paymentMethod: order.payment_method || order.paymentMethod || 'COD',
         payment_method: order.payment_method || order.paymentMethod || 'COD',
         paymentStatus: order.payment_status || order.paymentStatus || 'COD_PENDING',
@@ -4024,7 +4069,10 @@ const server = http.createServer(async (req, res) => {
         paymentMethod: requestedPaymentMethod,
         items: rawCartItems,
         fulfillmentDecision: fulfillmentDecision.decision,
-        idempotencyKey
+        idempotencyKey,
+        deliveryFee: body.deliveryFee != null ? Number(body.deliveryFee) : (body.delivery_fee != null ? Number(body.delivery_fee) : null),
+        discountAmount: body.discountAmount != null ? Number(body.discountAmount) : (body.discount_amount != null ? Number(body.discount_amount) : 0),
+        packagingFee: body.packagingFee != null ? Number(body.packagingFee) : (body.coldChainFee != null ? Number(body.coldChainFee) : 0)
       });
 
       if (!placeResult.ok) {
@@ -4038,12 +4086,28 @@ const server = http.createServer(async (req, res) => {
       // Clear server cart upon successful order placement
       await appRepositories.cartRepo.clearCart(customerId);
 
+      const finalBillSummary = placeResult.order.bill_summary || placeResult.order.billSummary || placeResult.pricingResult || {
+        itemsSubtotal: placeResult.pricingResult?.itemsSubtotal ?? Number(placeResult.order.total_amount),
+        discountAmount: placeResult.pricingResult?.discountAmount ?? 0,
+        deliveryFee: Number(placeResult.order.delivery_fee || 0),
+        handlingFee: placeResult.pricingResult?.handlingFee ?? 0,
+        taxAmount: Number(placeResult.order.tax_amount || 0),
+        grandTotal: Number(placeResult.order.total_amount)
+      };
+
       const customerOrderDto = {
+        id: placeResult.order.order_id || placeResult.order.id,
         orderId: placeResult.order.order_id || placeResult.order.id,
         status: placeResult.order.status,
+        orderStatus: placeResult.order.status,
         totalAmount: Number(placeResult.order.total_amount),
         taxAmount: Number(placeResult.order.tax_amount || 0),
         deliveryFee: Number(placeResult.order.delivery_fee || 0),
+        packagingFee: Number(finalBillSummary.handlingFee || 0),
+        handlingFee: Number(finalBillSummary.handlingFee || 0),
+        discountAmount: Number(finalBillSummary.discountAmount || 0),
+        billSummary: finalBillSummary,
+        bill_summary: finalBillSummary,
         paymentMethod: placeResult.order.payment_method,
         paymentStatus: placeResult.order.payment_status,
         isCod: Boolean(placeResult.order.is_cod),
@@ -4717,6 +4781,51 @@ const server = http.createServer(async (req, res) => {
 
       const orderId = acceptMatch[1];
       const result = await appRepositories.orderRepo.acceptOrderBySeller(orderId, authorizedStoreId, authClaims.sub);
+
+      if (result.ok && pool && !isLocalMode) {
+        try {
+          // Ensure delivery session is in LOOKING_FOR_RIDER and broadcast offer is active for fleet riders
+          const dsRes = await pool.query(`SELECT * FROM delivery_sessions WHERE order_id = $1 OR id = $1 LIMIT 1`, [orderId]);
+          const session = dsRes.rows[0];
+          if (session) {
+            const delId = session.delivery_id || session.id;
+            await pool.query(
+              `UPDATE delivery_sessions SET state = 'LOOKING_FOR_RIDER', updated_at = NOW() WHERE (id = $1 OR delivery_id = $1) AND rider_id IS NULL`,
+              [delId]
+            );
+            const offerRes = await pool.query(
+              `SELECT * FROM offers WHERE order_id = $1 OR delivery_id = $2 LIMIT 1`,
+              [orderId, delId]
+            );
+            const expAt = Date.now() + 1800000;
+            if (offerRes.rows.length === 0) {
+              const offId = 'off_' + crypto.randomUUID();
+              await pool.query(
+                `INSERT INTO offers (id, offer_id, delivery_id, order_id, rider_id, status, offer_expires_at, is_broadcast, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, 'broadcast', 'CREATED', $5, TRUE, NOW(), NOW())`,
+                [offId, offId, delId, orderId, expAt]
+              );
+            } else {
+              await pool.query(
+                `UPDATE offers SET rider_id = 'broadcast', status = 'CREATED', is_broadcast = TRUE, offer_expires_at = $3, updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`,
+                [orderId, delId, expAt]
+              );
+            }
+
+            if (sseBroadcasterInstance) {
+              sseBroadcasterInstance.broadcast('riders_broadcast', 'NEW_OFFER_AVAILABLE', {
+                orderId,
+                deliveryId: delId,
+                storeId: session.store_id || authorizedStoreId,
+                broadcast: true
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[SellerAccept] Failed to ensure broadcast offer:', err.message);
+        }
+      }
+
       return sendJson(res, result.httpStatus || (result.ok ? 200 : 400), result);
     }
 
@@ -6917,13 +7026,20 @@ const server = http.createServer(async (req, res) => {
 
       // Ownership authorization: Customer owner, Assigned rider, Store seller, or Admin
       let customerId = delivery.customer_id || delivery.customerId;
-      if (!customerId && delivery.order_id && pool) {
+      let customerPhone = delivery.customer_phone || delivery.customerPhone;
+      if ((!customerId || !customerPhone) && delivery.order_id && pool) {
         try {
-          const oRes = await pool.query('SELECT customer_id FROM orders WHERE order_id = $1 OR id = $1', [delivery.order_id]);
-          if (oRes.rows.length > 0) customerId = oRes.rows[0].customer_id;
+          const oRes = await pool.query('SELECT customer_id, delivery_address FROM orders WHERE order_id = $1 OR id = $1', [delivery.order_id]);
+          if (oRes.rows.length > 0) {
+            customerId = customerId || oRes.rows[0].customer_id;
+            const parsedAddr = typeof oRes.rows[0].delivery_address === 'string' ? JSON.parse(oRes.rows[0].delivery_address) : oRes.rows[0].delivery_address;
+            customerPhone = customerPhone || parsedAddr?.contactPhone || parsedAddr?.phone;
+          }
         } catch (_) {}
       }
-      const isCustomerOwner = customerId === authClaims.sub;
+      const cleanAuthPhone = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const cleanCustPhone = String(customerPhone || '').replace(/\D/g, '').slice(-10);
+      const isCustomerOwner = (customerId && customerId === authClaims.sub) || (cleanAuthPhone && cleanCustPhone && cleanAuthPhone === cleanCustPhone);
       const isAssignedRider = delivery.rider_id === authClaims.sub || delivery.riderId === authClaims.sub || delivery.rider_id === authClaims.riderId;
       let isStoreSeller = Boolean(authClaims.storeId && (authClaims.storeId === delivery.store_id || authClaims.storeId === delivery.storeId));
       const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);

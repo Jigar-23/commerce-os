@@ -49,10 +49,15 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
 
         val sessionMgr = RiderSessionManager.getInstance(applicationContext)
         val authenticatedRiderId = sessionMgr.getRiderId().takeIf { it.isNotBlank() }
-        val authToken = sessionMgr.getAuthToken().takeIf { it.isNotBlank() }
+        val targetRiderId = data["riderId"] ?: data["rider_id"] ?: ""
+        val isBroadcastOffer = targetRiderId.equals("ALL", ignoreCase = true) ||
+            targetRiderId.equals("broadcast", ignoreCase = true) ||
+            targetRiderId.equals("pool", ignoreCase = true) ||
+            targetRiderId.isBlank()
 
-        if (authenticatedRiderId == null || authToken == null) {
-            Log.w(TAG, "DROPPED_FCM_OFFER: Device is logged out or unauthenticated. Discarding incoming delivery push.")
+        // Allow delivery push notification if rider is authenticated OR if it's a broadcast offer from the store
+        if (authenticatedRiderId == null && !isBroadcastOffer) {
+            Log.w(TAG, "DROPPED_FCM_OFFER: Device is logged out and offer is not broadcast. Discarding incoming delivery push.")
             return
         }
 

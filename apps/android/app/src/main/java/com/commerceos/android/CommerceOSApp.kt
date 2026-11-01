@@ -381,8 +381,8 @@ fun CommerceOSApp(
                         NavigationBarItem(
                             selected = currentScreen is Screen.Categories,
                             onClick = { navigateRoot(Screen.Categories) },
-                            icon = { Icon(Icons.Default.Category, contentDescription = "Categories") },
-                            label = { Text("Categories", fontSize = 11.sp) },
+                            icon = { Icon(Icons.Default.GridView, contentDescription = "Categories") },
+                            label = { Text("Categories", fontSize = 11.sp, fontWeight = if (currentScreen is Screen.Categories) FontWeight.Bold else FontWeight.Normal) },
                             colors = bottomNavColors
                         )
                         NavigationBarItem(
@@ -622,6 +622,7 @@ fun CommerceOSApp(
                     remainingForFreeDelivery = cartViewModel.remainingForFreeDelivery,
                     itemsSubtotal = MoneyFormatter.format(cartViewModel.effectiveSubtotal),
                     totalSavings = MoneyFormatter.format(cartViewModel.totalSavings),
+                    couponDiscount = if (cartViewModel.couponDiscountAmount > java.math.BigDecimal.ZERO) MoneyFormatter.format(cartViewModel.couponDiscountAmount) else null,
                     expressFee = MoneyFormatter.format(cartViewModel.effectiveExpressFee),
                     coldChainFee = if (cartViewModel.containsColdChain) MoneyFormatter.format(cartViewModel.effectiveColdChainFee) else null,
                     grandTotal = MoneyFormatter.format(cartViewModel.effectiveGrandTotal),

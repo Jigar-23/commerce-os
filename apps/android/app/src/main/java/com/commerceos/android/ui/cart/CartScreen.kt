@@ -51,6 +51,7 @@ fun CartScreen(
     remainingForFreeDelivery: BigDecimal?,
     itemsSubtotal: String?,
     totalSavings: String?,
+    couponDiscount: String? = null,
     expressFee: String?,
     coldChainFee: String?,
     grandTotal: String?,
@@ -162,6 +163,7 @@ fun CartScreen(
                 SummaryCard(
                     itemsSubtotal = itemsSubtotal,
                     totalSavings = totalSavings,
+                    couponDiscount = couponDiscount,
                     expressFee = expressFee,
                     coldChainFee = coldChainFee,
                     grandTotal = grandTotal
@@ -1214,6 +1216,7 @@ private fun ClinicalPrescriptionCard(prescription: Prescription) {
 private fun SummaryCard(
     itemsSubtotal: String?,
     totalSavings: String?,
+    couponDiscount: String? = null,
     expressFee: String?,
     coldChainFee: String?,
     grandTotal: String?
@@ -1257,10 +1260,10 @@ private fun SummaryCard(
 
             Text("Bill Summary", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
             SummaryRow(label = "Item total", value = itemsSubtotal ?: "₹0.00")
-            if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00") {
-                SummaryRow(label = "Product discount", value = "- $totalSavings", valueColor = CommerceColors.Savings)
+            if (!couponDiscount.isNullOrBlank() && couponDiscount != "₹0.00") {
+                SummaryRow(label = "Coupon discount", value = "- $couponDiscount", valueColor = CommerceColors.Savings)
             }
-            SummaryRow(label = "Delivery partner fee", value = expressFee ?: "FREE", valueColor = if (expressFee == "FREE" || expressFee == null) Color(0xFF16A34A) else CommerceColors.TextPrimary)
+            SummaryRow(label = "Delivery partner fee", value = expressFee ?: "FREE", valueColor = if (expressFee == "FREE" || expressFee == null || expressFee == "₹0.00") Color(0xFF16A34A) else CommerceColors.TextPrimary)
             if (!coldChainFee.isNullOrBlank()) {
                 SummaryRow(label = "Handling & packaging", value = coldChainFee)
             }

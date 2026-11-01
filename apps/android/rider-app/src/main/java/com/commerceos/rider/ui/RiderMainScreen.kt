@@ -359,19 +359,6 @@ fun RiderMainScreen(
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Star, contentDescription = "Earnings") },
-                    label = { Text("Earnings") },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        unselectedIconColor = Color(0xFF94A3B8),
-                        unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF262933)
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -395,8 +382,8 @@ fun RiderMainScreen(
                     )
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
                     label = { Text("Profile") },
                     colors = NavigationBarItemDefaults.colors(
@@ -640,7 +627,7 @@ fun RiderMainScreen(
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            // Hero Earnings Summary Card
+                            // Store Delivery Operations Summary Card
                             Card(
                                 shape = RoundedCornerShape(20.dp),
                                 colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
@@ -654,29 +641,26 @@ fun RiderMainScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column {
-                                            Text("Today's Earnings", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                                            Text("Today's Deliveries", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
                                             Text(
-                                                text = liveProfile?.earningsTodayFormatted ?: "Loading…",
+                                                text = "${liveProfile?.completedToday ?: 0}",
                                                 fontSize = 32.sp,
                                                 fontWeight = FontWeight.Black,
                                                 color = Color(0xFF10B981)
                                             )
                                         }
 
-                                        val currentProfile = liveProfile
-                                        if (currentProfile != null) {
-                                            Surface(
-                                                color = Color(0xFF10B981).copy(alpha = 0.15f),
-                                                shape = RoundedCornerShape(12.dp)
-                                            ) {
-                                                Text(
-                                                    text = "${currentProfile.completedToday ?: 0} deliveries",
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF10B981),
-                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                                )
-                                            }
+                                        Surface(
+                                            color = (if (isOnline) Color(0xFF10B981) else Color(0xFF64748B)).copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isOnline) "🟢 Online & Ready" else "⚪ Offline",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isOnline) Color(0xFF10B981) else Color(0xFF94A3B8),
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
                                         }
                                     }
 
@@ -748,8 +732,7 @@ fun RiderMainScreen(
                         selectedOrderForDetail = orderSession
                     }
                 )
-                2 -> EarningsView(profile = liveProfile)
-                3 -> {
+                2 -> {
                     var selectedNotifCategory by remember { mutableStateOf("ALL") }
                     RiderNotificationCenterScreen(
                         notifications = notificationsList,
@@ -763,11 +746,6 @@ fun RiderMainScreen(
                                     if (it.notificationId == notif.notificationId) it.copy(readAt = "read") else it
                                 }
                                 unreadNotifCount = notificationsList.count { it.readAt == null }
-
-                                if (notif.category == "EARNINGS" || notif.title.contains("Payout Settled", ignoreCase = true) || notif.title.contains("Wallet Credited", ignoreCase = true)) {
-                                    selectedTab = 2
-                                    return@launch
-                                }
 
                                 // 0. If marked as unavailable/claimed, immediately notify rider
                                 if (notif.isAvailable == false || notif.offerStatus in listOf("ACCEPTED", "CLAIMED_BY_OTHER")) {
@@ -892,7 +870,7 @@ fun RiderMainScreen(
                         onBack = { selectedTab = 0 }
                     )
                 }
-                4 -> RiderProfileView(
+                3 -> RiderProfileView(
                     profile = liveProfile,
                     isOnline = isOnline,
                     onToggleShift = { newStatus ->

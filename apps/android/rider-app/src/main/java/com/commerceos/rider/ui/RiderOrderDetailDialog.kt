@@ -31,7 +31,7 @@ fun ActiveDeliveryDetailDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val earningsText = session.payoutFormatted ?: (session.codAmount?.let { "₹${it.toInt()}" } ?: "₹60")
+    val billText = session.codAmount?.takeIf { it > 0.0 }?.let { "₹${it.toInt()} COD" } ?: session.payoutFormatted ?: "Paid Online"
     val isCompleted = session.state in listOf("DELIVERED", "COMPLETED", "CANCELLED")
     val statusLabel = if (isCompleted) "ORDER COMPLETED • ${session.state}" else "ACTIVE DELIVERY • ${session.state}"
     val statusColor = if (session.state == "CANCELLED") Color(0xFFEF4444) else Color(0xFF10B981)
@@ -75,8 +75,8 @@ fun ActiveDeliveryDetailDialog(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            text = earningsText,
-                            fontSize = 15.sp,
+                            text = billText,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF10B981),
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
@@ -497,13 +497,14 @@ fun RiderOrderDetailDialog(
                         )
                     }
 
+                    val billVal = offer.orderTotal ?: offer.codAmount ?: 0.0
                     Surface(
                         color = Color(0xFF10B981).copy(alpha = 0.15f),
                         border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            text = "₹${offer.earningsAmount.toInt()}",
+                            text = if (billVal > 0.0) "₹${billVal.toInt()}" else "Store Order",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF10B981),
@@ -691,7 +692,7 @@ fun RiderOrderDetailDialog(
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Accept Offer • ₹${offer.earningsAmount.toInt()}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                        Text("Accept Delivery", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
                     }
 
                     Row(

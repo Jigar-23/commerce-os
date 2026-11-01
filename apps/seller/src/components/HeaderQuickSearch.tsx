@@ -194,7 +194,7 @@ export default function HeaderQuickSearch({
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-base font-black text-content-primary font-mono">{selectedResult.id}</h3>
-                    <span className="px-2.5 py-0.5 rounded-full bg-surface-brandSubtle text-content-brand text-2xs font-black border border-border-brandSubtle">
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-2xs font-bold border border-slate-200">
                       Quick View Card
                     </span>
                   </div>

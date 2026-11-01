@@ -280,7 +280,7 @@ export default function OrdersPage() {
                   >
                     <div className="space-y-2 flex-1">
                       <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-base font-black text-content-accent group-hover:text-content-brand font-mono underline flex items-center space-x-1">
+                        <span className="text-base font-black text-slate-900 group-hover:text-indigo-600 font-mono underline flex items-center space-x-1">
                           <span>{order.id}</span>
                         </span>
 
@@ -290,18 +290,18 @@ export default function OrdersPage() {
 
                         <span className={`px-3 py-1 rounded-full text-xs font-black ${
                           order.orderStatus === 'DELIVERED'
-                            ? 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : order.orderStatus === 'CANCELLED'
-                            ? 'bg-surface-dangerSubtle text-content-danger border border-border-danger'
+                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
                             : order.sellerApprovalStatus === 'PENDING' || order.orderStatus === 'PLACED'
-                            ? 'bg-surface-warningSubtle text-content-warning border border-border-warning animate-pulse'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
                             : order.orderStatus === 'RIDER_ASSIGNED'
                             ? 'bg-blue-50 text-blue-700 border border-blue-200'
                             : order.orderStatus === 'ARRIVED_STORE' || order.orderStatus === 'ARRIVED_PICKUP'
                             ? 'bg-amber-50 text-amber-700 border border-amber-200'
                             : order.orderStatus === 'OUT_FOR_DELIVERY' || order.orderStatus === 'PICKED_UP'
                             ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                            : 'bg-surface-brandSubtle text-content-brand border border-border-brandSubtle'
+                            : 'bg-slate-100 text-slate-700 border border-slate-200'
                         }`}>
                           {order.sellerApprovalStatus === 'PENDING' || order.orderStatus === 'PLACED'
                             ? '⏳ PENDING SELLER ACCEPTANCE'
@@ -333,7 +333,7 @@ export default function OrdersPage() {
                       <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-content-primary pt-1">
                         <span>Items: {order.items?.length || 1}</span>
                         <span>•</span>
-                        <span className="text-content-brand text-sm font-black">Total: ₹{order.totalAmount}</span>
+                        <span className="text-slate-900 text-sm font-black">Total: ₹{order.totalAmount}</span>
                         {order.deliveryOtp && (
                           <>
                             <span>•</span>
@@ -350,7 +350,7 @@ export default function OrdersPage() {
                           type="button"
                           onClick={(e) => handleAcceptOrder(e, order.id)}
                           disabled={actionLoadingId === order.id}
-                          className="px-4 py-2.5 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-2 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                          className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-2 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
                         >
                           {actionLoadingId === order.id ? (
                             <>
@@ -359,7 +359,7 @@ export default function OrdersPage() {
                             </>
                           ) : (
                             <>
-                              <CheckCircle2 className="w-4 h-4" />
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                               <span>Accept &amp; Broadcast to Riders</span>
                             </>
                           )}
@@ -398,7 +398,7 @@ export default function OrdersPage() {
                           type="button"
                           onClick={(e) => handleReadyForPickup(e, order.id)}
                           disabled={actionLoadingId === order.id}
-                          className="px-4 py-2.5 bg-action-primaryBg hover:bg-action-primaryHover text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-2 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                          className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-2 transition-all transform hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
                         >
                           {actionLoadingId === order.id ? (
                             <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -411,8 +411,8 @@ export default function OrdersPage() {
 
                       {/* 3. Rider Broadcast Status Badge */}
                       {order.status === 'READY_FOR_PICKUP' && !order.riderId && (
-                        <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-surface-brandSubtle text-content-brand text-xs font-bold border border-border-brandSubtle">
-                          <Bike className="w-4 h-4 text-content-brand" />
+                        <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">
+                          <Bike className="w-4 h-4 text-indigo-600" />
                           <span>Broadcast Active</span>
                         </div>
                       )}

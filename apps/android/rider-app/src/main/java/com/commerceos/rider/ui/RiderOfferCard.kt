@@ -122,69 +122,49 @@ fun RiderOfferCard(
                     }
                 }
 
-                // Distinct Side-by-Side Comparison: Rider Payout vs Customer Bill
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Customer Order Bill Card (Value of cart package)
+                val cartVal = offer.orderTotal ?: offer.codAmount ?: 0.0
+                val totalItemCount = offer.items.sumOf { it.quantity }.takeIf { it > 0 } ?: 1
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF22252E),
+                    border = BorderStroke(1.dp, Color(0xFF2F3340)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    // 1. Rider Earnings Card (What rider pockets)
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF10B981).copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
-                        modifier = Modifier.weight(1f)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                        Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("💵", fontSize = 13.sp)
+                                Text("🛍️", fontSize = 14.sp)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("YOUR EARNING", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color(0xFF10B981), letterSpacing = 0.5.sp)
+                                Text(
+                                    text = "ORDER BILL",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF9CA3AF),
+                                    letterSpacing = 0.5.sp
+                                )
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "₹${offer.earningsAmount.toInt()}",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF10B981)
-                            )
-                            Text(
-                                text = "Direct to wallet",
-                                fontSize = 11.sp,
-                                color = Color(0xFF6EE7B7),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    // 2. Customer Order Bill Card (Value of cart package)
-                    val cartVal = offer.orderTotal ?: offer.codAmount ?: 0.0
-                    val totalItemCount = offer.items.sumOf { it.quantity }.takeIf { it > 0 } ?: 1
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF22252E),
-                        border = BorderStroke(1.dp, Color(0xFF2F3340)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("🛍️", fontSize = 13.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("ORDER BILL", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color(0xFF9CA3AF), letterSpacing = 0.5.sp)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (cartVal > 0.0) "₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else "₹0",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
-                            )
                             Text(
                                 text = "$totalItemCount item(s) • ${if (offer.isCod) "Collect COD" else "Paid Online"}",
-                                fontSize = 11.sp,
-                                color = if (offer.isCod) Color(0xFFFBBF24) else Color(0xFF9CA3AF),
-                                fontWeight = FontWeight.Medium
+                                fontSize = 12.sp,
+                                color = if (offer.isCod) Color(0xFFFBBF24) else Color(0xFF10B981),
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
+
+                        Text(
+                            text = if (cartVal > 0.0) "₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else "₹0",
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
+                        )
                     }
                 }
 
@@ -332,7 +312,7 @@ fun RiderOfferCard(
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                     ) {
                         Text(
-                            text = "ACCEPT DELIVERY • ₹${offer.earningsAmount.toInt()}",
+                            text = "ACCEPT DELIVERY",
                             color = Color.White,
                             fontWeight = FontWeight.Black,
                             fontSize = 16.sp

@@ -44,7 +44,8 @@ object OfferPayloadValidator {
             val riderId = json.optString("riderId").takeIf { it.isNotBlank() }
                 ?: return logReject("riderId missing")
 
-            if (authenticatedRiderId != null && riderId != authenticatedRiderId && riderId != "ALL") {
+            val isPoolOffer = riderId.equals("ALL", ignoreCase = true) || riderId.equals("broadcast", ignoreCase = true) || riderId.equals("pool", ignoreCase = true)
+            if (authenticatedRiderId != null && riderId != authenticatedRiderId && !isPoolOffer) {
                 return logReject("Offer targeted to rider '$riderId' does not match authenticated rider '$authenticatedRiderId'")
             }
 
@@ -187,7 +188,8 @@ object OfferPayloadValidator {
             val riderId = data["riderId"]?.takeIf { it.isNotBlank() }
                 ?: return logReject("FCM riderId missing")
 
-            if (authenticatedRiderId != null && riderId != authenticatedRiderId && riderId != "ALL") {
+            val isPoolOffer = riderId.equals("ALL", ignoreCase = true) || riderId.equals("broadcast", ignoreCase = true) || riderId.equals("pool", ignoreCase = true)
+            if (authenticatedRiderId != null && riderId != authenticatedRiderId && !isPoolOffer) {
                 return logReject("FCM offer targeted to rider '$riderId' does not match authenticated rider '$authenticatedRiderId'")
             }
 
