@@ -253,6 +253,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                     _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
                 }
                 is ApiResult.Failure -> {
+                    checkoutIdempotencyKey = null
                     uiState = uiState.copy(
                         state = CheckoutState.Failed("CHECKOUT_FAILED", result.error.message),
                         errorMessage = result.error.message,
