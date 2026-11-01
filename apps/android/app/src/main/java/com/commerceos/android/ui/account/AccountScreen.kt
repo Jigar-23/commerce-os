@@ -227,71 +227,19 @@ fun AccountScreen(
                                 color = Color(0xFF0F172A)
                             )
                             Spacer(modifier = Modifier.height(3.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = formattedPhone,
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF475569),
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Surface(
-                                    color = Color(0xFFDCFCE7),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.CheckCircle,
-                                            contentDescription = null,
-                                            tint = Color(0xFF166534),
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text(
-                                            "Verified",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF166534)
-                                        )
-                                    }
-                                }
-                            }
+                            Text(
+                                text = formattedPhone,
+                                fontSize = 13.sp,
+                                color = Color(0xFF475569),
+                                fontWeight = FontWeight.Medium
+                            )
                         } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = formattedPhone,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    color = Color(0xFFDCFCE7),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.CheckCircle,
-                                            contentDescription = null,
-                                            tint = Color(0xFF166534),
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(2.dp))
-                                        Text(
-                                            "Verified",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF166534)
-                                        )
-                                    }
-                                }
-                            }
+                            Text(
+                                text = formattedPhone,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = "+ Add your name",

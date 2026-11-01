@@ -477,7 +477,7 @@ data class CustomerProfile(
         val digits = p.filter { it.isDigit() }
         return if (digits.length >= 10) {
             "+91 ${digits.take(5)} ${digits.takeLast(5)}"
-        } else if (p.isNotBlank()) p else "Verified Phone"
+        } else if (p.isNotBlank()) p else ""
     }
 }
 

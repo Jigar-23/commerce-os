@@ -741,9 +741,9 @@ private fun OptionalPrescriptionCard(
                                             color = Color(0xFF0F172A)
                                         )
                                         Text(
-                                            text = "Rx #${rx.id.takeLast(6).uppercase()} • ${if (rx.status == "APPROVED") "Verified Doctor Rx" else "Uploaded for Pharmacist"}",
+                                            text = "Rx #${rx.id.takeLast(6).uppercase()} • Attached for Pharmacy",
                                             fontSize = 12.sp,
-                                            color = if (rx.status == "APPROVED") Color(0xFF059669) else Color(0xFF64748B)
+                                            color = Color(0xFF059669)
                                         )
                                     }
                                     IconButton(
@@ -1042,12 +1042,22 @@ private fun PrescriptionQuickViewDialog(
                 // Prescription Image or Clinical Certificate
                 val firstAttachment = prescription.attachments.firstOrNull()?.takeIf { it.isNotBlank() }
                 if (firstAttachment != null) {
-                    val modelToLoad: Any = if (firstAttachment.startsWith("/")) {
-                        java.io.File(firstAttachment)
-                    } else if (firstAttachment.startsWith("file:")) {
-                        java.io.File(firstAttachment.removePrefix("file://"))
-                    } else {
-                        firstAttachment
+                    val modelToLoad: Any? = when {
+                        firstAttachment.startsWith("data:") -> {
+                            remember(firstAttachment) {
+                                try {
+                                    val b64 = if (firstAttachment.contains(",")) firstAttachment.substringAfter(",") else firstAttachment
+                                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            }
+                        }
+                        firstAttachment.startsWith("/") -> java.io.File(firstAttachment)
+                        firstAttachment.startsWith("file:") -> java.io.File(firstAttachment.removePrefix("file://"))
+                        firstAttachment.startsWith("http://") || firstAttachment.startsWith("https://") -> firstAttachment
+                        else -> null
                     }
                     Surface(
                         color = Color(0xFF0F172A),
@@ -1097,16 +1107,16 @@ private fun PrescriptionQuickViewDialog(
                             }
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Pharmacist Status", fontSize = 12.sp, color = Color(0xFF64748B))
+                            Text("Vendor Status", fontSize = 12.sp, color = Color(0xFF64748B))
                             Surface(
-                                color = if (prescription.status == "APPROVED") Color(0xFFECFDF5) else Color(0xFFFEF3C7),
+                                color = Color(0xFFECFDF5),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = if (prescription.status == "APPROVED") "VERIFIED & VALID" else "PHARMACIST VERIFICATION PENDING",
+                                    text = "ATTACHED FOR PHARMACY VENDOR",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (prescription.status == "APPROVED") Color(0xFF059669) else Color(0xFFB45309),
+                                    color = Color(0xFF059669),
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
