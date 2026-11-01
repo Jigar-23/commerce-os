@@ -2115,7 +2115,7 @@ async function newOrder(customerId, payload, cartItems) {
         };
       }
     }
-    const serverPrice = Number(product.discountedPrice ?? product.price ?? 0);
+    const serverPrice = Number(product.discountedPrice ?? product.discounted_price ?? product.price ?? 0);
     if (serverPrice <= 0) {
       return {
         error: `Catalog price for '${product.name}' is invalid (${serverPrice}). Order placement rejected.`,
@@ -2123,18 +2123,20 @@ async function newOrder(customerId, payload, cartItems) {
         sku: product.sku || sku
       };
     }
+    const rxReq = product.rxRequirement || product.rx_requirement;
+    const isCold = Boolean(product.coldChainRequired ?? product.cold_chain_required);
     items.push({
       productId: product.id || product.productId || sku,
       name: product.name,
-      packSize: product.packSize || i.packSize || '',
+      packSize: product.packSize || product.pack_size || i.packSize || '',
       sku: product.sku || sku,
-      mrp: Number(product.mrp || product.price || serverPrice),
+      mrp: Number(product.mrp ?? product.price ?? serverPrice),
       price: serverPrice,
       unitPrice: serverPrice,
       quantity: Number(i.quantity) || 1,
       total: Math.round(serverPrice * (Number(i.quantity) || 1) * 100) / 100,
-      rxRequired: Boolean(product.rxRequirement && product.rxRequirement !== 'OTC'),
-      coldChain: Boolean(product.coldChainRequired),
+      rxRequired: Boolean(rxReq && rxReq !== 'OTC'),
+      coldChain: isCold,
     });
   }
 
@@ -4299,7 +4301,9 @@ async function handleRequest(port, req, res) {
         if (appRepositories && appRepositories.cartRepo) {
           try {
             const dbCart = await appRepositories.cartRepo.getCart(customerId);
-            if (dbCart && Array.isArray(dbCart.items) && dbCart.items.length > 0) {
+            if (Array.isArray(dbCart) && dbCart.length > 0) {
+              cartItems = dbCart;
+            } else if (dbCart && Array.isArray(dbCart.items) && dbCart.items.length > 0) {
               cartItems = dbCart.items;
             }
           } catch (_) {}
@@ -4307,15 +4311,16 @@ async function handleRequest(port, req, res) {
         if (!cartItems || cartItems.length === 0) {
           cartItems = cartFor(customerId);
         }
-        if (!cartItems || cartItems.length === 0) {
-          cartItems = [
-            { sku: 'SKU-PARA-500', name: 'Paracetamol 500mg IP', quantity: 2, unitPrice: 15.0, rxRequired: false, coldChain: false }
-          ];
+        if ((!cartItems || cartItems.length === 0) && (!payload.items || payload.items.length === 0)) {
+          return json(res, 400, { error: 'CART_EMPTY', message: 'Cannot checkout with an empty cart.' });
         }
         const existingIdem = findOrderByIdempotencyKey(payload.idempotencyKey, customerId);
         if (existingIdem) return json(res, 200, existingIdem);
 
         let targetAddressId = payload.addressId || (payload.deliveryAddress && payload.deliveryAddress.id) || null;
+        if (targetAddressId && String(targetAddressId).startsWith('temp_')) {
+          targetAddressId = null;
+        }
         if (!targetAddressId && appRepositories && appRepositories.addressRepo) {
           try {
             const def = await appRepositories.addressRepo.getDefaultAddress(authenticatedCustomerId);
@@ -4333,23 +4338,30 @@ async function handleRequest(port, req, res) {
         }
 
         // Resolve delivery address from payload or addressId
-        let address = (payload.deliveryAddress && typeof payload.deliveryAddress === 'object') ? payload.deliveryAddress : null;
-        if (!address && targetAddressId) {
+        let address = (payload.deliveryAddress && typeof payload.deliveryAddress === 'object') ? { ...payload.deliveryAddress } : null;
+        if (targetAddressId) {
           if (appRepositories && appRepositories.addressRepo) {
-            address = await appRepositories.addressRepo.findAddressById(authenticatedCustomerId, targetAddressId);
+            const dbAddr = await appRepositories.addressRepo.findAddressById(authenticatedCustomerId, targetAddressId);
+            if (dbAddr) {
+              address = { ...dbAddr, ...address, id: targetAddressId };
+            }
           }
           if (!address && db.addresses) {
             for (const cId in db.addresses) {
               const found = (db.addresses[cId] || []).find(a => a.id === targetAddressId);
               if (found) {
-                address = found;
+                address = { ...found, ...address, id: targetAddressId };
                 break;
               }
             }
           }
           if (!address) {
-            address = findAddress(authenticatedCustomerId, targetAddressId);
+            const found = findAddress(authenticatedCustomerId, targetAddressId);
+            if (found) address = { ...found, ...address, id: targetAddressId };
           }
+        }
+        if (address && targetAddressId && !address.id) {
+          address.id = targetAddressId;
         }
 
         if (!address) {
@@ -4600,7 +4612,9 @@ async function handleRequest(port, req, res) {
         if (appRepositories && appRepositories.cartRepo) {
           try {
             const dbCart = await appRepositories.cartRepo.getCart(customerId);
-            if (dbCart && Array.isArray(dbCart.items) && dbCart.items.length > 0) {
+            if (Array.isArray(dbCart) && dbCart.length > 0) {
+              checkoutCart = dbCart;
+            } else if (dbCart && Array.isArray(dbCart.items) && dbCart.items.length > 0) {
               checkoutCart = dbCart.items;
             }
           } catch (_) {}

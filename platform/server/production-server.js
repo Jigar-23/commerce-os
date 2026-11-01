@@ -3942,7 +3942,8 @@ const server = http.createServer(async (req, res) => {
       }
 
       const body = await parseJsonBody(req);
-      const rawCartItems = await appRepositories.cartRepo.getCart(customerId);
+      const rawRes = await appRepositories.cartRepo.getCart(customerId);
+      const rawCartItems = Array.isArray(rawRes) ? rawRes : (rawRes && Array.isArray(rawRes.items) ? rawRes.items : []);
       if (!rawCartItems || rawCartItems.length === 0) {
         return sendJson(res, 400, { error: 'CART_EMPTY', message: 'Cannot checkout with an empty cart.' });
       }
