@@ -1,5 +1,10 @@
 package com.commerceos.android.ui.notifications
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,43 +23,63 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.commerceos.android.ui.theme.CommerceColors
-import com.commerceos.android.ui.theme.CommerceTypography
-
-data class PharmacyNotification(
-    val id: String,
-    val title: String,
-    val message: String,
-    val category: String, // "Orders", "Prescriptions", "Refills", "Offers"
-    val timestamp: String,
-    val isRead: Boolean = false,
-    val icon: ImageVector,
-    val iconTint: Color,
-    val iconBg: Color
-)
+import androidx.core.content.ContextCompat
+import com.commerceos.android.notifications.InAppNotificationItem
+import com.commerceos.android.notifications.LocalNotificationStorage
+import com.commerceos.android.notifications.NotificationPreferenceManager
 
 @Composable
 fun NotificationsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToOrders: () -> Unit = {},
+    onNavigateToPrescriptions: () -> Unit = {},
+    onNavigateToCart: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var selectedCategory by remember { mutableStateOf("All") }
-    val categories = listOf("All", "Orders", "Prescriptions", "Refills", "Offers")
+    val categories = listOf("All", "Orders", "Prescriptions", "Refills")
 
+    // In-App Notification Center History (Local Device Storage)
     var notificationsList by remember {
-        mutableStateOf(emptyList<PharmacyNotification>())
+        mutableStateOf(LocalNotificationStorage.getNotifications(context))
     }
 
-    var orderAlertsEnabled by remember { mutableStateOf(true) }
-    var rxAlertsEnabled by remember { mutableStateOf(true) }
-    var refillAlertsEnabled by remember { mutableStateOf(true) }
+    // User Preference Toggles (Local SharedPreferences via NotificationPreferenceManager)
+    var orderAlertsEnabled by remember {
+        mutableStateOf(NotificationPreferenceManager.isOrderAlertsEnabled(context))
+    }
+    var rxAlertsEnabled by remember {
+        mutableStateOf(NotificationPreferenceManager.isRxAlertsEnabled(context))
+    }
+    var refillAlertsEnabled by remember {
+        mutableStateOf(NotificationPreferenceManager.isRefillAlertsEnabled(context))
+    }
+
+    // Android 13+ Runtime Permission Request for POST_NOTIFICATIONS
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     val filteredList = if (selectedCategory == "All") {
         notificationsList
     } else {
-        notificationsList.filter { it.category == selectedCategory }
+        notificationsList.filter { it.category.equals(selectedCategory, ignoreCase = true) }
     }
 
     Column(
@@ -63,7 +88,7 @@ fun NotificationsScreen(
             .background(Color(0xFFF4F5F7))
             .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)
     ) {
-        // Top Bar matching other screens
+        // Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -103,17 +128,20 @@ fun NotificationsScreen(
                 )
             }
 
-            TextButton(
-                onClick = {
-                    notificationsList = notificationsList.map { it.copy(isRead = true) }
+            if (notificationsList.isNotEmpty()) {
+                TextButton(
+                    onClick = {
+                        LocalNotificationStorage.markAllAsRead(context)
+                        notificationsList = LocalNotificationStorage.getNotifications(context)
+                    }
+                ) {
+                    Text(
+                        text = "Mark all read",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF059669)
+                    )
                 }
-            ) {
-                Text(
-                    text = "Mark all read",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF059669)
-                )
             }
         }
 
@@ -179,7 +207,7 @@ fun NotificationsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Real-time delivery status, prescription approvals, and medicine refill alerts will appear here.",
+                    text = "Real-time delivery status, prescription updates, and medicine refill alerts will appear here.",
                     fontSize = 12.sp,
                     color = Color(0xFF64748B),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -188,6 +216,7 @@ fun NotificationsScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
+                // On-Device Notification Channel Preferences Card
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(14.dp),
@@ -205,23 +234,32 @@ fun NotificationsScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         NotificationToggleRow(
                             title = "Order Dispatch & Live Rider SLA",
-                            subtitle = "Push alerts when rider departs store",
+                            subtitle = "Push alerts when warehouse packs order & rider departs",
                             checked = orderAlertsEnabled,
-                            onCheckedChange = { orderAlertsEnabled = it }
+                            onCheckedChange = {
+                                orderAlertsEnabled = it
+                                NotificationPreferenceManager.setOrderAlertsEnabled(context, it)
+                            }
                         )
                         HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
                         NotificationToggleRow(
                             title = "Pharmacist Prescription Review",
-                            subtitle = "Immediate status on uploaded Rx slips",
+                            subtitle = "Real-time updates on uploaded prescription slips",
                             checked = rxAlertsEnabled,
-                            onCheckedChange = { rxAlertsEnabled = it }
+                            onCheckedChange = {
+                                rxAlertsEnabled = it
+                                NotificationPreferenceManager.setRxAlertsEnabled(context, it)
+                            }
                         )
                         HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
                         NotificationToggleRow(
-                            title = "Refill Reminders",
-                            subtitle = "Advance 3-day chronic medicine alert",
+                            title = "Chronic Refill Reminders",
+                            subtitle = "3-day advance on-device alert for chronic medicines",
                             checked = refillAlertsEnabled,
-                            onCheckedChange = { refillAlertsEnabled = it }
+                            onCheckedChange = {
+                                refillAlertsEnabled = it
+                                NotificationPreferenceManager.setRefillAlertsEnabled(context, it)
+                            }
                         )
                     }
                 }
@@ -235,11 +273,77 @@ fun NotificationsScreen(
                     NotificationCard(
                         notification = notif,
                         onClick = {
-                            notificationsList = notificationsList.map {
-                                if (it.id == notif.id) it.copy(isRead = true) else it
+                            LocalNotificationStorage.markAsRead(context, notif.id)
+                            notificationsList = LocalNotificationStorage.getNotifications(context)
+
+                            // Deep Link Execution
+                            when (notif.deepLinkAction?.uppercase()?.trim()) {
+                                "ORDERS", "ORDER_HISTORY" -> onNavigateToOrders()
+                                "PRESCRIPTIONS", "RX" -> onNavigateToPrescriptions()
+                                "CART", "CHECKOUT" -> onNavigateToCart()
+                                else -> {
+                                    if (notif.category.equals("Orders", ignoreCase = true)) {
+                                        onNavigateToOrders()
+                                    } else if (notif.category.equals("Prescriptions", ignoreCase = true)) {
+                                        onNavigateToPrescriptions()
+                                    } else if (notif.category.equals("Refills", ignoreCase = true)) {
+                                        onNavigateToCart()
+                                    }
+                                }
                             }
                         }
                     )
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "NOTIFICATION SETTINGS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF94A3B8),
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            NotificationToggleRow(
+                                title = "Order Dispatch & Live Rider SLA",
+                                subtitle = "Push alerts when rider departs store",
+                                checked = orderAlertsEnabled,
+                                onCheckedChange = {
+                                    orderAlertsEnabled = it
+                                    NotificationPreferenceManager.setOrderAlertsEnabled(context, it)
+                                }
+                            )
+                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
+                            NotificationToggleRow(
+                                title = "Pharmacist Prescription Review",
+                                subtitle = "Immediate status on uploaded Rx slips",
+                                checked = rxAlertsEnabled,
+                                onCheckedChange = {
+                                    rxAlertsEnabled = it
+                                    NotificationPreferenceManager.setRxAlertsEnabled(context, it)
+                                }
+                            )
+                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
+                            NotificationToggleRow(
+                                title = "Chronic Refill Reminders",
+                                subtitle = "Advance 3-day chronic medicine alert",
+                                checked = refillAlertsEnabled,
+                                onCheckedChange = {
+                                    refillAlertsEnabled = it
+                                    NotificationPreferenceManager.setRefillAlertsEnabled(context, it)
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
         }
@@ -248,9 +352,16 @@ fun NotificationsScreen(
 
 @Composable
 private fun NotificationCard(
-    notification: PharmacyNotification,
+    notification: InAppNotificationItem,
     onClick: () -> Unit
 ) {
+    val (icon, iconTint, iconBg) = when (notification.category.lowercase().trim()) {
+        "orders", "order" -> Triple(Icons.Default.LocalShipping, Color(0xFF2563EB), Color(0xFFEFF6FF))
+        "prescriptions", "prescription", "rx" -> Triple(Icons.Default.MedicalServices, Color(0xFF059669), Color(0xFFECFDF5))
+        "refills", "refill" -> Triple(Icons.Default.EventRepeat, Color(0xFFD97706), Color(0xFFFFFBEB))
+        else -> Triple(Icons.Default.Notifications, Color(0xFF7C3AED), Color(0xFFF5F3FF))
+    }
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (notification.isRead) Color.White else Color(0xFFF8FAFC)
@@ -269,17 +380,16 @@ private fun NotificationCard(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // Colored icon container
             Surface(
-                color = notification.iconBg,
+                color = iconBg,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = notification.icon,
+                        imageVector = icon,
                         contentDescription = null,
-                        tint = notification.iconTint,
+                        tint = iconTint,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -337,7 +447,7 @@ private fun NotificationCard(
                         )
                     }
                     Text(
-                        text = notification.timestamp,
+                        text = notification.formattedTime,
                         fontSize = 11.sp,
                         color = Color(0xFF94A3B8)
                     )

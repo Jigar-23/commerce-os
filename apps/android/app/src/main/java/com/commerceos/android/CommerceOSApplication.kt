@@ -2,6 +2,7 @@ package com.commerceos.android
 
 import android.app.Application
 import com.commerceos.android.di.AppContainer
+import com.commerceos.android.notifications.NotificationChannelHelper
 import com.google.android.gms.maps.MapsInitializer
 
 /**
@@ -16,6 +17,9 @@ class CommerceOSApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        try {
+            NotificationChannelHelper.createChannels(this)
+        } catch (_: Exception) {}
         try {
             MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LATEST, null)
         } catch (_: Exception) {}

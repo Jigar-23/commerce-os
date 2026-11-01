@@ -90,6 +90,15 @@ class PrescriptionViewModel(
             LocalPrescriptionManager.savePrescription(appContext, localRx)
             prescriptions = listOf(localRx) + prescriptions.filterNot { it.id == rxId }
             errorMessage = null
+            com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
+                appContext,
+                com.commerceos.android.notifications.InAppNotificationItem(
+                    title = "Prescription Uploaded",
+                    message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Ready to share with pharmacy vendor.",
+                    category = "Prescriptions",
+                    deepLinkAction = "PRESCRIPTIONS"
+                )
+            )
             onUploaded?.invoke(localRx)
 
             // Lightweight server audit record — avoids multi-megabyte base64 storage/bandwidth overhead

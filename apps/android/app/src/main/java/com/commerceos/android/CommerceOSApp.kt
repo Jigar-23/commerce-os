@@ -204,6 +204,26 @@ fun CommerceOSApp(
                     if (!pin.isNullOrBlank()) {
                         orderViewModel.setKnownOrderPin(event.orderId, pin)
                     }
+                    val orderCode = event.orderId.takeLast(6).uppercase()
+                    com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
+                        context,
+                        com.commerceos.android.notifications.InAppNotificationItem(
+                            title = "Order #$orderCode Placed",
+                            message = "Your order is confirmed and being prepared at the fulfillment hub. Express 10-15 min delivery guaranteed.",
+                            category = "Orders",
+                            deepLinkAction = "ORDERS"
+                        )
+                    )
+                    event.order?.items?.forEach { item ->
+                        if (com.commerceos.android.notifications.ChronicRefillReminderManager.isChronicMedication(item.name, item.sku)) {
+                            com.commerceos.android.notifications.ChronicRefillReminderManager.scheduleRefillReminder(
+                                context,
+                                medicineName = item.name,
+                                sku = item.sku,
+                                totalSupplyDays = 30
+                            )
+                        }
+                    }
                     orderViewModel.loadDetail(event.orderId)
                     navigateRoot(Screen.OrderTracking(event.orderId))
                 }
@@ -780,7 +800,18 @@ fun CommerceOSApp(
                     }
                 )
                 is Screen.Notifications -> com.commerceos.android.ui.notifications.NotificationsScreen(
-                    onBack = { goBack() }
+                    onBack = { goBack() },
+                    onNavigateToOrders = {
+                        navigateRoot(Screen.OrderHistory)
+                        orderViewModel.loadHistory(authenticatedCustomerId)
+                    },
+                    onNavigateToPrescriptions = {
+                        prescriptionViewModel.load(authenticatedCustomerId)
+                        navigate(Screen.Prescriptions)
+                    },
+                    onNavigateToCart = {
+                        navigate(Screen.Cart)
+                    }
                 )
                 is Screen.Prescriptions -> PrescriptionVaultScreen(
                     prescriptions = prescriptionViewModel.prescriptions,
