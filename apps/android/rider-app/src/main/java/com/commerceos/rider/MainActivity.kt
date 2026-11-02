@@ -97,6 +97,8 @@ class MainActivity : ComponentActivity() {
 
     private fun checkIntentOfferAck(intent: android.content.Intent?) {
         val offerId = intent?.getStringExtra("offerId")
+            ?: intent?.getStringExtra("orderId")
+            ?: intent?.getStringExtra("deliveryId")
         if (!offerId.isNullOrBlank()) {
             pendingIntentOfferId = offerId
             val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)

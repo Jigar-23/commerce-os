@@ -138,13 +138,14 @@ object RiderNotificationManager {
             }
         }
 
+        val offerKey = "offer_${offer.offerId}"
         val dedupKey = if (offer.eventId.isNotBlank()) {
             if (offer.eventId.startsWith("evt_")) offer.eventId else "evt_${offer.eventId}"
         } else {
-            "offer_${offer.offerId}"
+            offerKey
         }
-        if (isEventSuccessfullyPosted(context, dedupKey)) {
-            Log.d(TAG, "Notification already posted for $dedupKey. Skipping duplicate alert.")
+        if (isEventSuccessfullyPosted(context, dedupKey) || isEventSuccessfullyPosted(context, offerKey)) {
+            Log.d(TAG, "Notification already posted for $dedupKey ($offerKey). Skipping duplicate alert.")
             return NotificationPostResult.POSTED
         }
 
@@ -188,13 +189,14 @@ object RiderNotificationManager {
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setContentIntent(pendingIntent)
                 .setFullScreenIntent(pendingIntent, true)
-                .setAutoCancel(false)
-                .setOngoing(true)
+                .setAutoCancel(true)
+                .setOngoing(false)
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(offer.offerId.hashCode(), builder.build())
 
             markEventSuccessfullyPosted(context, dedupKey)
+            markEventSuccessfullyPosted(context, offerKey)
 
             // Audible alert tone and vibration pulse (played exactly once per unique order/offer)
             RiderAlertNotifier.playNewJobAlert(context, offer.offerId)
@@ -211,6 +213,7 @@ object RiderNotificationManager {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (!offerId.isNullOrBlank()) {
                 manager.cancel(offerId.hashCode())
+                markEventSuccessfullyPosted(context, "offer_$offerId")
             }
         } catch (e: Exception) {
             // Ignore

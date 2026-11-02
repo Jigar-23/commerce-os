@@ -6555,6 +6555,8 @@ async function handleRequest(port, req, res) {
                 return {
                   id: o.offer_id || o.id,
                   offerId: o.offer_id || o.id,
+                  eventId: o.event_id || ('evt_' + (o.offer_id || o.id)),
+                  notificationId: o.notification_id || ('notif_' + (o.offer_id || o.id)),
                   deliveryId: o.delivery_id,
                   orderId: o.order_id,
                   riderId: o.rider_id || 'rdr_9817916180',

@@ -2113,7 +2113,7 @@ class TransactionalOfferRepository {
        FROM offers o
        LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
        LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
-       WHERE (o.offer_id = $1 OR o.id = $1)
+       WHERE (o.offer_id = $1 OR o.id = $1 OR o.order_id = $1 OR o.delivery_id = $1)
        LIMIT 1`,
       [offerId]
     );

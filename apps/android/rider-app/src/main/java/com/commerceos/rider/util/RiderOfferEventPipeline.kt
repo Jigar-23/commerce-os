@@ -108,7 +108,13 @@ object RiderOfferEventPipeline {
         // 3. Online State: Emit into live in-app SharedFlow so RiderMainScreen renders interactive card
         _incomingOfferEvents.tryEmit(offer)
 
-        // 4. Deduplicate system tray notifications
+        // 4. Reconciliation Suppression: Periodic polling MUST NEVER post system notifications or buzz the device
+        if (source == OfferEventSource.RECONCILIATION) {
+            Log.d(TAG, "[$source] Reconciliation offer synced silently: ${offer.offerId}")
+            return offer
+        }
+
+        // 5. Deduplicate system tray notifications
         // Deduplicate per distinct event/offer instance to filter duplicate network packets (FCM retry or SSE race),
         // while allowing deliberate merchant re-broadcasts to alert the fleet.
         val dedupKey = if (offer.eventId.isNotBlank()) {
@@ -118,12 +124,13 @@ object RiderOfferEventPipeline {
         }
         val isAlreadyPosted = RiderNotificationManager.isEventSuccessfullyPosted(context, dedupKey)
         if (isAlreadyPosted) {
+            Log.d(TAG, "[$source] Notification already posted for $dedupKey. Suppressing duplicate.")
             return offer
         }
 
         Log.d(TAG, "[$source] Authoritative new offer event processing: $dedupKey (OfferId: ${offer.offerId}, Expires in ${offer.remainingSeconds}s)")
 
-        // 5. Strict Telemetry: Report DEVICE_RECEIVED exactly once per unique eventId upon genuine FCM reception
+        // 6. Strict Telemetry: Report DEVICE_RECEIVED exactly once per unique eventId upon genuine FCM reception
         if (source == OfferEventSource.FCM) {
             if (!RiderNotificationManager.isDeviceReceiptAcked(context, offer.eventId)) {
                 RiderNotificationManager.markDeviceReceiptAcked(context, offer.eventId)
@@ -131,12 +138,13 @@ object RiderOfferEventPipeline {
             }
         }
 
-        // 6. Post scannable high-priority system tray notification with audio alert
+        // 7. Post scannable high-priority system tray notification with audio alert
         val notifResult = RiderNotificationManager.postDirectOfferNotification(context, offer)
 
-        // 7. Strict Telemetry & Dedup: Mark permanently consumed only if notification posting succeeded
+        // 8. Strict Telemetry & Dedup: Mark permanently consumed only if notification posting succeeded
         if (notifResult == NotificationPostResult.POSTED) {
             RiderNotificationManager.markEventSuccessfullyPosted(context, dedupKey)
+            RiderNotificationManager.markEventSuccessfullyPosted(context, "offer_${offer.offerId}")
             sendAckTelemetry(context, offer.offerId, "NOTIFICATION_POSTED")
         } else {
             Log.w(TAG, "[$source] Notification posting failed ($notifResult). Event $dedupKey kept retryable.")

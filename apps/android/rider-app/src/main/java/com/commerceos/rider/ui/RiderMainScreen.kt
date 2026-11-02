@@ -76,20 +76,45 @@ fun RiderMainScreen(
     var jobAlreadyAssignedDialogMessage by remember { mutableStateOf<String?>(null) }
     var actionLoading by remember { mutableStateOf(false) }
 
-    // Direct Notification Click Deep-Link: Navigate to Order Acceptance on Home Page
+    // Direct Notification Click Deep-Link: Navigate to Order on Home Page if active, otherwise route to Alerts
     LaunchedEffect(intentOfferId) {
         val targetId = intentOfferId ?: sessionManager.getPendingOfferId()
         if (!targetId.isNullOrBlank()) {
-            selectedTab = 0
-            selectedOfferForDetail = null
-            selectedOrderForDetail = null
             scope.launch {
-                val offerRes = repository.fetchOfferById(targetId)
-                if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
-                    activeOffer = offerRes.offer
-                }
                 sessionManager.savePendingOfferId(null)
                 onClearIntentOfferId()
+
+                // 1. Immediately cancel the notification in the status bar for this offer
+                com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(context, targetId)
+
+                // 2. Fetch the target offer or check if it's currently available
+                var foundOffer: ServerOffer? = null
+                val offerRes = repository.fetchOfferById(targetId)
+                if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success &&
+                    offerRes.offer.status in listOf("CREATED", "OFFERED", "DISPATCHED", "NOTIFIED", "DISPLAYED")) {
+                    foundOffer = offerRes.offer
+                }
+
+                // Fallback check against general active offer
+                if (foundOffer == null) {
+                    val activeRes = repository.fetchActiveOffer()
+                    if (activeRes is com.commerceos.rider.model.ActiveOfferResult.Success &&
+                        (activeRes.offer.offerId == targetId || activeRes.offer.orderId == targetId)) {
+                        foundOffer = activeRes.offer
+                    }
+                }
+
+                if (foundOffer != null) {
+                    // Job is currently on homepage! Reflect it there.
+                    activeOffer = foundOffer
+                    selectedTab = 0
+                    selectedOfferForDetail = null
+                    selectedOrderForDetail = null
+                } else {
+                    // Job is no longer available on homepage -> Put in Alerts!
+                    selectedTab = 2
+                    Toast.makeText(context, "This job is no longer available. Showing Alerts.", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -238,9 +263,10 @@ fun RiderMainScreen(
                         is com.commerceos.rider.model.ActiveOfferResult.Success -> {
                             val prevId = activeOffer?.offerId
                             activeOffer = offerResult.offer
-                            if (prevId != offerResult.offer.offerId && isOnline) {
+                            // Do NOT post a system tray notification while rider is actively inside the app on RiderMainScreen.
+                            // Only play subtle audio alert if it's a genuine new offer that was not just opened from a notification.
+                            if (prevId != null && prevId != offerResult.offer.offerId && isOnline) {
                                 com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offerResult.offer.offerId)
-                                com.commerceos.rider.util.RiderNotificationManager.postDirectOfferNotification(context, offerResult.offer)
                             }
                         }
                         is com.commerceos.rider.model.ActiveOfferResult.None -> {
