@@ -37,6 +37,7 @@ import com.commerceos.android.R
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -898,35 +899,70 @@ private fun CanopyLocationBar(
         Spacer(modifier = Modifier.width(8.dp))
 
         val localCtx = LocalContext.current
-        val unreadCount = remember(localCtx) {
-            com.commerceos.android.notifications.LocalNotificationStorage.getNotifications(localCtx).count { !it.isRead }
+        var unreadCount by remember {
+            mutableIntStateOf(com.commerceos.android.notifications.LocalNotificationStorage.getNotifications(localCtx).count { !it.isRead })
+        }
+        val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    unreadCount = com.commerceos.android.notifications.LocalNotificationStorage.getNotifications(localCtx).count { !it.isRead }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
         }
 
-        // Notification Bell Button with live unread badge
-        Surface(
-            color = Color.White.copy(alpha = 0.18f),
-            shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-            modifier = Modifier
-                .size(38.dp)
-                .clickable(onClick = onNotificationsClick)
+        // Notification Bell Button with live unread count badge (Properly layered outside circle)
+        Box(
+            modifier = Modifier.size(44.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Notifications,
-                    contentDescription = "Notifications",
-                    tint = Color.White,
-                    modifier = Modifier.size(19.dp)
-                )
-                if (unreadCount > 0) {
-                    Surface(
-                        color = Color(0xFFEF4444),
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .size(8.dp)
-                            .align(Alignment.TopEnd)
-                            .padding(top = 1.dp, end = 1.dp)
-                    ) {}
+            Surface(
+                onClick = onNotificationsClick,
+                color = Color.White.copy(alpha = 0.18f),
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                modifier = Modifier
+                    .size(38.dp)
+                    .align(Alignment.Center)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Notifications,
+                        contentDescription = "Notifications",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            if (unreadCount > 0) {
+                Surface(
+                    color = Color(0xFFEF4444),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF0E675E)),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .clickable(onClick = onNotificationsClick)
+                        .sizeIn(minWidth = 18.dp, minHeight = 18.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 11.sp
+                        )
+                    }
                 }
             }
         }
