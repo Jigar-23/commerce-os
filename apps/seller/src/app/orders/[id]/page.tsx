@@ -46,13 +46,18 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
         if (showSpinner) setIsLoading(false);
         return;
       }
+      if (!orderId || orderId === 'undefined' || orderId === 'null') {
+        if (showSpinner) setIsLoading(false);
+        showToast('Invalid Order ID', 'error');
+        return;
+      }
       if (showSpinner) setIsLoading(true);
-      const res = await sellerApi.get(`/api/v1/orders/${orderId}`);
+      const res = await sellerApi.get(`/api/v1/orders/${encodeURIComponent(orderId)}`);
       if (res.ok && res.data) {
         const raw = res.data;
         const normalized = {
           ...raw,
-          id: raw.id || raw.order_id,
+          id: raw.id || raw.order_id || raw.orderId || orderId,
           orderStatus: raw.orderStatus || raw.status,
           status: raw.status || raw.orderStatus,
           totalAmount: raw.totalAmount || raw.total_amount || '0.00',
@@ -296,7 +301,23 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
               <div className="w-8 h-8 border-4 border-slate-700 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : !order ? (
-            <div className="p-8 text-center text-content-secondary font-bold text-sm">Order not found in Database.</div>
+            <div className="flex-1 flex flex-col items-center justify-center p-12 space-y-4">
+              <div className="p-4 rounded-full bg-slate-100 text-slate-500">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <div className="text-center space-y-1">
+                <h3 className="text-base font-black text-slate-800">Order not found in Database</h3>
+                <p className="text-xs text-content-secondary max-w-md">
+                  Order <span className="font-mono font-bold text-slate-900">{orderId}</span> was not found. It may have been cancelled, placed under another store, or has an invalid ID format.
+                </p>
+              </div>
+              <button
+                onClick={() => router.push('/orders')}
+                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
+              >
+                Back to Orders List
+              </button>
+            </div>
           ) : (
             <main className="p-8 space-y-6 max-w-5xl">
               {/* Top Banner */}

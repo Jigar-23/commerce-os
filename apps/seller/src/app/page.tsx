@@ -80,7 +80,8 @@ export default function MerchantOperationsPage() {
         const rawList = Array.isArray(ordRes.data) ? ordRes.data : (ordRes.data?.orders || []);
         const normalized = rawList.map((o: any) => ({
           ...o,
-          id: o.id || o.order_id,
+          id: o.id || o.orderId || o.order_id || '',
+          orderId: o.orderId || o.id || o.order_id || '',
           orderStatus: o.orderStatus || o.status,
           status: o.status || o.orderStatus,
           totalAmount: o.totalAmount || o.total_amount || '0.00',

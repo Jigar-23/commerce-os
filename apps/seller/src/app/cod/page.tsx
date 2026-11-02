@@ -25,7 +25,13 @@ export default function CodPage() {
     try {
       const res = await sellerApi.get('/api/v1/orders/seller');
       if (res.ok && res.data) {
-        setOrders(Array.isArray(res.data) ? res.data : (res.data.orders || []));
+        const raw = Array.isArray(res.data) ? res.data : (res.data?.orders || []);
+        const normalized = raw.map((o: any) => ({
+          ...o,
+          id: o.id || o.orderId || o.order_id || '',
+          orderId: o.orderId || o.id || o.order_id || '',
+        }));
+        setOrders(normalized);
       }
     } catch (e) {
       console.error(e);

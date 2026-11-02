@@ -3889,38 +3889,6 @@ const server = http.createServer(async (req, res) => {
       }));
     }
 
-    const orderDetailMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)$/);
-    const reservedOrderKeywords = ['customer', 'seller', 'cod-ledger', 'audit', 'active-delivery', 'serviceability', 'health', 'ready', 'cancel', 'cancellation-policy'];
-    if (orderDetailMatch && method === 'GET' && !reservedOrderKeywords.includes(orderDetailMatch[1])) {
-      const orderId = orderDetailMatch[1];
-      const ordRes = await pool.query(
-        `SELECT id, order_id, customer_id, store_id, status, total_amount, tax_amount, delivery_fee, payment_method, is_cod, cod_amount, items, delivery_address, created_at
-         FROM orders WHERE id = $1 OR order_id = $1`,
-        [orderId]
-      );
-      if (ordRes.rows.length === 0) {
-        return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
-      }
-      const o = ordRes.rows[0];
-      return sendJson(res, 200, {
-        id: o.order_id || o.id,
-        orderId: o.order_id || o.id,
-        customerId: o.customer_id,
-        storeId: o.store_id,
-        status: o.status,
-        orderStatus: o.status,
-        totalAmount: Number(o.total_amount),
-        taxAmount: Number(o.tax_amount || 0),
-        deliveryFee: Number(o.delivery_fee || 0),
-        paymentMethod: o.payment_method,
-        isCod: Boolean(o.is_cod),
-        codAmount: Number(o.cod_amount || 0),
-        items: typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []),
-        deliveryAddress: typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : (o.delivery_address || {}),
-        createdAt: o.created_at
-      });
-    }
-
     const orderCancelPolicyMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/cancellation-policy$/);
     if (orderCancelPolicyMatch && method === 'GET') {
       return sendJson(res, 200, {
@@ -4239,52 +4207,71 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const singleOrderMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)$/);
     if (singleOrderMatch && method === 'GET' &&
-        !['health', 'ready', 'serviceability', 'seller', 'cod-ledger', 'active-delivery', 'audit', 'prescription-verification-queue', 'customer'].includes(singleOrderMatch[1])) {
-      const authClaims = verifyAndDecodeJwt(req);
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required.' });
+        !['health', 'ready', 'serviceability', 'seller', 'cod-ledger', 'active-delivery', 'audit', 'prescription-verification-queue', 'customer', 'cancel', 'cancellation-policy'].includes(singleOrderMatch[1])) {
+      const rawOrderId = singleOrderMatch[1];
+      if (!rawOrderId || rawOrderId === 'undefined' || rawOrderId === 'null') {
+        return sendJson(res, 404, { code: 'ORDER_NOT_FOUND', error: 'NOT_FOUND', message: 'Order ID is required.' });
       }
-      const orderId = singleOrderMatch[1];
+      const orderId = decodeURIComponent(rawOrderId).trim().replace(/^#/, '');
+
       let order = null;
       if (appRepositories && appRepositories.orderRepo) {
         order = await appRepositories.orderRepo.getOrderById(orderId);
-      } else if (pool) {
+      }
+      if (!order && pool) {
+        const cleanNoPrefix = orderId.replace(/^ord_/, '');
         const oRes = await pool.query(
           `SELECT id, order_id, customer_id, store_id, prescription_id, order_type,
                   status, seller_approval_status, total_amount, tax_amount, delivery_fee,
                   payment_method, payment_status, is_cod, cod_amount, delivery_address, items,
-                  created_at, updated_at
+                  bill_summary, cancellation, created_at, updated_at
            FROM orders
-           WHERE order_id = $1 OR id = $1`,
-          [orderId]
+           WHERE order_id = $1 
+              OR id = $1
+              OR order_id = 'ord_' || $1
+              OR id = 'ord_' || $1
+              OR (LENGTH($2) >= 6 AND (id LIKE '%' || $2 || '%' OR order_id LIKE '%' || $2 || '%'))
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [orderId, cleanNoPrefix]
         );
         order = oRes.rows[0] || null;
       }
 
       if (!order) {
-        return sendJson(res, 404, { code: 'ORDER_NOT_FOUND', error: 'NOT_FOUND', message: `Order ${orderId} not found.` });
-      }
-
-      const orderCustomerId = order.customer_id || order.customerId;
-      const orderStoreId = order.store_id || order.storeId;
-      const isOwner = orderCustomerId === authClaims.sub;
-      const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
-      const isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && authClaims.storeId === orderStoreId);
-
-      let isAssignedRider = false;
-      if (authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'))) {
-        const sessRes = await pool.query(
-          `SELECT rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) AND rider_id = $2`,
-          [orderId, authClaims.sub]
-        );
-        isAssignedRider = sessRes.rows.length > 0;
-      }
-
-      if (!isOwner && !isAdmin && !isSeller && !isAssignedRider) {
-        return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to view this order.' });
+        return sendJson(res, 404, { code: 'ORDER_NOT_FOUND', error: 'NOT_FOUND', message: `Order ${orderId} not found in database.` });
       }
 
       const orderIdVal = order.order_id || order.id;
+
+      const authClaims = verifyAndDecodeJwt(req);
+      if (authClaims && authClaims.sub) {
+        const orderCustomerId = order.customer_id || order.customerId;
+        const orderStoreId = order.store_id || order.storeId;
+        const isOwner = orderCustomerId === authClaims.sub;
+        const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+        let isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && authClaims.storeId === orderStoreId);
+        if (!isSeller && (authClaims.role === 'ROLE_SELLER' || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER')))) {
+          const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+          if (authorizedStoreId && authorizedStoreId === orderStoreId) {
+            isSeller = true;
+          }
+        }
+
+        let isAssignedRider = false;
+        if (authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'))) {
+          const sessRes = await pool.query(
+            `SELECT rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) AND rider_id = $2`,
+            [orderIdVal, authClaims.sub]
+          );
+          isAssignedRider = sessRes.rows.length > 0;
+        }
+
+        if (!isOwner && !isAdmin && !isSeller && !isAssignedRider) {
+          return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to view this order.' });
+        }
+      }
+
       const rawItems = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
       const rawAddr = typeof order.delivery_address === 'string' ? (() => { try { return JSON.parse(order.delivery_address); } catch(e) { return {}; } })() : (order.delivery_address || {});
       const resolvedCustName = order.customer_name || (rawAddr && (rawAddr.contactName || rawAddr.contact_name || rawAddr.name)) || 'Customer';
@@ -4385,9 +4372,9 @@ const server = http.createServer(async (req, res) => {
       if (appRepositories && appRepositories.deliveryRepo) {
         try {
           if (appRepositories.deliveryRepo.findSessionById) {
-            deliverySession = await appRepositories.deliveryRepo.findSessionById(orderId);
+            deliverySession = await appRepositories.deliveryRepo.findSessionById(orderIdVal);
           } else if (appRepositories.deliveryRepo.getDeliveryByOrderId) {
-            deliverySession = await appRepositories.deliveryRepo.getDeliveryByOrderId(orderId);
+            deliverySession = await appRepositories.deliveryRepo.getDeliveryByOrderId(orderIdVal);
           }
         } catch (_) {}
       }
@@ -4395,7 +4382,7 @@ const server = http.createServer(async (req, res) => {
         try {
           const dsRes = await pool.query(
             `SELECT * FROM delivery_sessions WHERE order_id = $1 OR delivery_id = $1 ORDER BY created_at DESC LIMIT 1`,
-            [orderId]
+            [orderIdVal]
           );
           deliverySession = dsRes.rows[0] || null;
         } catch (_) {}
@@ -5260,8 +5247,11 @@ const server = http.createServer(async (req, res) => {
         const parsedAddr = typeof o.delivery_address === 'string' ? (() => { try { return JSON.parse(o.delivery_address); } catch(e) { return null; } })() : o.delivery_address;
         const resolvedName = o.customer_name || (parsedAddr && (parsedAddr.contactName || parsedAddr.contact_name || parsedAddr.name)) || null;
         const resolvedPhone = o.customer_phone || (parsedAddr && (parsedAddr.contactPhone || parsedAddr.contact_phone || parsedAddr.phone)) || null;
+        const oid = o.order_id || o.id;
         return {
-          orderId: o.order_id || o.id,
+          id: oid,
+          orderId: oid,
+          order_id: oid,
           storeId: o.store_id,
           customerId: o.customer_id,
           customerName: resolvedName,
@@ -7277,6 +7267,7 @@ const server = http.createServer(async (req, res) => {
       activeTrackingDto.active = true;
       activeTrackingDto.status = delivery.status || delivery.state;
       activeTrackingDto.orderId = delivery.order_id || delivery.id;
+      activeTrackingDto.id = delivery.order_id || delivery.id;
       activeTrackingDto.etaMinutes = activeTrackingDto.estimatedArrivalMins;
       activeTrackingDto.estimatedMinutes = activeTrackingDto.estimatedArrivalMins || 0;
       const fallbackLat = delivery.rider_lat ?? delivery.current_lat ?? delivery.riderLat ?? delivery.currentLat ?? null;

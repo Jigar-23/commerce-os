@@ -3840,9 +3840,37 @@ class TransactionalOrderRepository {
   }
 
   async findOrderById(orderId) {
-    if (!this.pool) return null;
-    const res = await this.pool.query(`SELECT * FROM orders WHERE order_id = $1 OR id = $1`, [orderId]);
-    return res.rows[0] || null;
+    if (!this.pool || !orderId || typeof orderId !== 'string') return null;
+    const cleanId = orderId.trim().replace(/^#/, '');
+    if (!cleanId || cleanId === 'undefined' || cleanId === 'null') return null;
+    const noPrefix = cleanId.replace(/^ord_/, '');
+
+    // 1. Direct authoritative exact match
+    let res = await this.pool.query(
+      `SELECT * FROM orders WHERE order_id = $1 OR id = $1`,
+      [cleanId]
+    );
+    if (res.rows.length > 0) return res.rows[0];
+
+    // 2. Prefixed match (if client omitted 'ord_')
+    res = await this.pool.query(
+      `SELECT * FROM orders WHERE order_id = $1 OR id = $1`,
+      ['ord_' + cleanId]
+    );
+    if (res.rows.length > 0) return res.rows[0];
+
+    // 3. Suffix/Substring match (for 6+ character display hashes like ad139e15 or e2bebb38)
+    if (noPrefix.length >= 6) {
+      res = await this.pool.query(
+        `SELECT * FROM orders 
+         WHERE id LIKE '%' || $1 || '%' OR order_id LIKE '%' || $1 || '%'
+         ORDER BY created_at DESC LIMIT 1`,
+        [noPrefix]
+      );
+      if (res.rows.length > 0) return res.rows[0];
+    }
+
+    return null;
   }
 
   async getOrderById(orderId) {

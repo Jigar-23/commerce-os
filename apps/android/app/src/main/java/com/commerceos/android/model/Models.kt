@@ -392,6 +392,8 @@ data class CustomerDeliverySessionDto(
 
 data class CustomerOrderApiResponse(
     val id: String = "",
+    val orderId: String? = null,
+    val order_id: String? = null,
     val orderStatus: String = "PLACED",
     val status: String? = null,
     val totalAmount: BigDecimal = BigDecimal.ZERO,
@@ -445,9 +447,16 @@ data class CustomerOrderApiResponse(
     val effectiveDeliveryPin: String?
         get() = deliveryOtp?.takeIf { it.isNotBlank() } ?: deliverySession?.otp?.takeIf { it.isNotBlank() }
 
+    val resolvedId: String
+        get() = id.takeIf { it.isNotBlank() }
+            ?: orderId?.takeIf { it.isNotBlank() }
+            ?: order_id?.takeIf { it.isNotBlank() }
+            ?: ""
+
     val displayOrderId: String
         get() {
-            if (id.isNotBlank()) return id
+            val rid = resolvedId
+            if (rid.isNotBlank()) return rid
             return "ord_${System.currentTimeMillis()}"
         }
 

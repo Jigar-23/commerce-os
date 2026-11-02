@@ -9,6 +9,8 @@ import { sellerApi } from '@/lib/apiClient';
 
 interface SearchResult {
   id: string;
+  orderId?: string;
+  order_id?: string;
   customerId?: string;
   customerPhone?: string;
   orderStatus: string;
@@ -42,7 +44,13 @@ export default function HeaderQuickSearch({
     try {
       const res = await sellerApi.get('/api/v1/orders/seller');
       if (res.ok && res.data) {
-        setAllOrders(Array.isArray(res.data) ? res.data : (res.data?.orders || []));
+        const raw = Array.isArray(res.data) ? res.data : (res.data?.orders || []);
+        const normalized = raw.map((o: any) => ({
+          ...o,
+          id: o.id || o.orderId || o.order_id || '',
+          orderId: o.orderId || o.id || o.order_id || '',
+        }));
+        setAllOrders(normalized);
       }
     } catch (e) {
       console.error('Quick search order load error:', e);
@@ -73,9 +81,10 @@ export default function HeaderQuickSearch({
   const cleanQuery = query.trim().toLowerCase();
 
   const filteredResults = cleanQuery.length > 0 ? allOrders.filter(order => {
-    const matchesId = order.id.toLowerCase().includes(cleanQuery);
-    const matchesPhone = order.customerPhone ? order.customerPhone.toLowerCase().includes(cleanQuery) || order.customerPhone.replaceAll(/[^0-9]/g, '').includes(cleanQuery.replaceAll(/[^0-9]/g, '')) : false;
-    const matchesUser = order.customerId ? order.customerId.toLowerCase().includes(cleanQuery) : false;
+    const orderIdStr = String(order.id || order.orderId || order.order_id || '').toLowerCase();
+    const matchesId = orderIdStr.includes(cleanQuery);
+    const matchesPhone = order.customerPhone ? String(order.customerPhone).toLowerCase().includes(cleanQuery) || String(order.customerPhone).replaceAll(/[^0-9]/g, '').includes(cleanQuery.replaceAll(/[^0-9]/g, '')) : false;
+    const matchesUser = order.customerId ? String(order.customerId).toLowerCase().includes(cleanQuery) : false;
     return matchesId || matchesPhone || matchesUser;
   }) : [];
 

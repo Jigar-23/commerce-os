@@ -874,8 +874,9 @@ fun CommerceOSApp(
                         navigate(Screen.Cart)
                     },
                     onTrackOrder = { order ->
-                        orderViewModel.loadDetail(order.id)
-                        navigate(Screen.OrderTracking(order.id))
+                        val targetId = order.resolvedId.ifBlank { order.id }
+                        orderViewModel.loadDetail(targetId)
+                        navigate(Screen.OrderTracking(targetId))
                     }
                 )
                 is Screen.Account -> AccountScreen(
