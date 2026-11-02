@@ -573,15 +573,16 @@ fun CategoriesScreen(
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(26.dp),
-                shadowElevation = 4.dp,
-                modifier = Modifier.fillMaxWidth()
+                shadowElevation = 3.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
             ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         Icons.Default.Search,
@@ -589,33 +590,36 @@ fun CategoriesScreen(
                         tint = Color(0xFF007E65),
                         modifier = Modifier.size(20.dp)
                     )
-
-                    TextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search medicines, health concerns...",
+                                text = "Search medicines, symptoms...",
                                 fontSize = 13.sp,
                                 fontFamily = PlusJakartaSans,
-                                color = Color(0xFF94A3B8)
+                                color = Color(0xFF94A3B8),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                        },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        ),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
+                        }
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 13.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0F172A)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
 
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { searchQuery = "" },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
                                 Icons.Default.Close,
@@ -625,20 +629,19 @@ fun CategoriesScreen(
                             )
                         }
                     } else {
-                        // Vertical divider before Rx trigger
+                        Spacer(modifier = Modifier.width(6.dp))
                         VerticalDivider(
                             modifier = Modifier
-                                .height(22.dp)
+                                .height(20.dp)
                                 .width(1.dp),
                             color = Color(0xFFE2E8F0)
                         )
-
-                        // Camera / Upload Rx trigger
+                        Spacer(modifier = Modifier.width(6.dp))
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .clickable { handleTrigger("Upload Prescription") }
-                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {

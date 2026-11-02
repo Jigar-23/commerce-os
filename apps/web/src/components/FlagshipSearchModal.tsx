@@ -17,6 +17,8 @@ import {
 import { MedicineProduct } from '@/lib/api-client';
 import { useCart } from '@/lib/cart-store';
 import { CommerceQuantityControl } from '@commerce-os/ui';
+import SearchMicroLoading from '@/components/search/SearchMicroLoading';
+import GenericSubstituteCard from '@/components/search/GenericSubstituteCard';
 
 interface FlagshipSearchModalProps {
   isOpen: boolean;
@@ -45,8 +47,21 @@ export default function FlagshipSearchModal({
   onSelectProduct,
 }: FlagshipSearchModalProps) {
   const [query, setQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      setIsSearching(false);
+    }, 550);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const cartLines = useCart((s) => s.lines);
   const addToCart = useCart((s) => s.addItem);
@@ -271,15 +286,40 @@ export default function FlagshipSearchModal({
             </div>
           )}
 
-          {/* STATE 2: SEARCH RESULTS */}
+          {/* STATE 2: SEARCH RESULTS OR MICRO-LOADING */}
           {query.trim() && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-content-secondary">
-                <span>{filteredProducts.length} items found for &quot;{query}&quot;</span>
-                <span className="text-2xs text-content-brand uppercase font-extrabold">⚡ 10-Min Delivery</span>
-              </div>
+              {isSearching ? (
+                <SearchMicroLoading />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-xs font-bold text-content-secondary">
+                    <span>{filteredProducts.length} items found for &quot;{query}&quot;</span>
+                    <span className="text-2xs text-[#0E675E] uppercase font-extrabold">⚡ 10-Min Delivery</span>
+                  </div>
 
-              {filteredProducts.length === 0 ? (
+                  {/* Generic Substitute Strip */}
+                  {(query.toLowerCase().includes('dolo') || query.toLowerCase().includes('paracetamol')) && (
+                    <GenericSubstituteCard
+                      onApplySubstitute={() => {
+                        addToCart({
+                          sku: 'paracip-650',
+                          productId: 'paracip-650',
+                          name: 'Paracip 650mg Tablet',
+                          brand: 'Cipla Ltd',
+                          packSize: '15 Tablets',
+                          unitPrice: 18,
+                          mrp: 30,
+                          rxRequired: false,
+                          coldChain: false,
+                          expressDeliverySlaMins: 10,
+                        });
+                        onClose();
+                      }}
+                    />
+                  )}
+
+                  {filteredProducts.length === 0 ? (
                 <div className="py-12 text-center space-y-3">
                   <div className="w-14 h-14 rounded-2xl bg-surface-subtle flex items-center justify-center text-content-muted mx-auto">
                     <Search className="h-6 w-6" />
@@ -376,6 +416,8 @@ export default function FlagshipSearchModal({
                     );
                   })}
                 </div>
+              )}
+                </>
               )}
             </div>
           )}

@@ -81,7 +81,7 @@ fun AccountScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F5F7))
+            .background(Color(0xFFF4F6F8))
             .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)
     ) {
         // Top Header matching Home & Orders
@@ -94,14 +94,14 @@ fun AccountScreen(
         ) {
             Column {
                 Text(
-                    text = "My Account",
+                    text = "Profile & Account",
                     fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF0F172A)
                 )
                 Text(
-                    text = "Manage your pharmacy profile, orders & addresses",
-                    fontSize = 12.sp,
+                    text = "Manage your healthcare orders, addresses & prescriptions",
+                    fontSize = 11.5.sp,
                     color = Color(0xFF64748B)
                 )
             }
@@ -116,14 +116,14 @@ fun AccountScreen(
                     Icon(
                         Icons.Default.Notifications,
                         contentDescription = "Alerts",
-                        tint = Color(0xFF059669),
+                        tint = Color(0xFF0E675E),
                         modifier = Modifier.size(20.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Column(
             modifier = Modifier
@@ -133,196 +133,437 @@ fun AccountScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // 1. Customer Identification Card with Edit Button & On-Device Avatar
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+            Surface(
+                color = Color.White,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                shadowElevation = 0.5.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Profile Avatar with on-device photo & camera badge
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clickable { showEditProfileDialog = true }
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (avatarFile != null && avatarFile!!.exists()) {
-                            AsyncImage(
-                                model = avatarFile,
-                                contentDescription = "Profile Photo",
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                                    .border(1.5.dp, Color(0xFF10B981), CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else if (hasCustomName) {
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xFFECFDF5),
-                                border = BorderStroke(1.5.dp, Color(0xFF10B981)),
-                                modifier = Modifier.fillMaxSize()
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    val initial = displayName.trim().firstOrNull()?.uppercaseChar() ?: 'U'
-                                    Text(
-                                        text = "$initial",
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color(0xFF065F46)
-                                    )
+                        // Profile Avatar with on-device photo & camera badge
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clickable { showEditProfileDialog = true }
+                        ) {
+                            if (avatarFile != null && avatarFile!!.exists()) {
+                                AsyncImage(
+                                    model = avatarFile,
+                                    contentDescription = "Profile Photo",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                        .border(1.5.dp, Color(0xFF0E675E), CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else if (hasCustomName) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFFECFDF5),
+                                    border = BorderStroke(1.5.dp, Color(0xFF0E675E)),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        val initial = displayName.trim().firstOrNull()?.uppercaseChar() ?: 'U'
+                                        Text(
+                                            text = "$initial",
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color(0xFF0E675E)
+                                        )
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFFECFDF5),
+                                    border = BorderStroke(1.5.dp, Color(0xFF0E675E)),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Person,
+                                            contentDescription = "Profile",
+                                            tint = Color(0xFF0E675E),
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
                                 }
                             }
-                        } else {
+
+                            // Edit overlay badge
                             Surface(
                                 shape = CircleShape,
-                                color = Color(0xFFECFDF5),
-                                border = BorderStroke(1.5.dp, Color(0xFF10B981)),
-                                modifier = Modifier.fillMaxSize()
+                                color = Color(0xFF0E675E),
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .align(Alignment.BottomEnd)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.Default.Person,
-                                        contentDescription = "Profile",
-                                        tint = Color(0xFF059669),
-                                        modifier = Modifier.size(28.dp)
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit photo",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(11.dp)
                                     )
                                 }
                             }
                         }
 
-                        // Edit overlay badge
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFF059669),
-                            modifier = Modifier
-                                .size(20.dp)
-                                .align(Alignment.BottomEnd)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.Edit,
-                                    contentDescription = "Edit photo",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(11.dp)
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (hasCustomName) {
+                                Text(
+                                    text = displayName,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = formattedPhone,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF64748B),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            } else {
+                                Text(
+                                    text = formattedPhone,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "+ Add your name",
+                                    fontSize = 12.5.sp,
+                                    color = Color(0xFF0E675E),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { showEditProfileDialog = true }
                                 )
                             }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        if (hasCustomName) {
-                            Text(
-                                text = displayName,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
+                        // Edit Profile Button
+                        OutlinedButton(
+                            onClick = { showEditProfileDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0F172A))
+                        ) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = Color(0xFF0E675E)
                             )
-                            Spacer(modifier = Modifier.height(3.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = formattedPhone,
-                                fontSize = 13.sp,
-                                color = Color(0xFF475569),
-                                fontWeight = FontWeight.Medium
-                            )
-                        } else {
-                            Text(
-                                text = formattedPhone,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = "+ Add your name",
-                                fontSize = 13.sp,
-                                color = Color(0xFF059669),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.clickable { showEditProfileDialog = true }
+                                text = "Edit",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
 
-                    // Edit Profile Button
-                    OutlinedButton(
-                        onClick = { showEditProfileDialog = true },
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0F172A))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // PharmEasy Style Inner Savings Banner
+                    Surface(
+                        color = Color(0xFFEFF6FF),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFDBEAFE)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("⚡", fontSize = 13.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "CommerceOS Fast Pharmacy",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E40AF)
+                                    )
+                                    Text(
+                                        text = "10-Minute SLA Delivery • Certified Pharmacists",
+                                        fontSize = 10.5.sp,
+                                        color = Color(0xFF3B82F6)
+                                    )
+                                }
+                            }
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = Color(0xFF1E40AF),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 2. Dual Hero Action Tiles (My Orders vs Need Help? — PharmEasy Benchmark)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Tile 1: My Orders
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(onClick = onOrders),
+                    color = Color.White,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = Color(0xFFEFF6FF),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.ShoppingBag,
+                                    contentDescription = null,
+                                    tint = Color(0xFF2563EB),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "My Orders",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = if (orderCount > 0) "$orderCount placed" else "Track & reorder",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+                }
+
+                // Tile 2: Need Help?
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            try {
+                                val cleanPhone = storeContactPhone.replace(" ", "").replace("-", "")
+                                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
+                                context.startActivity(dialIntent)
+                            } catch (_: Exception) {}
+                        },
+                    color = Color.White,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.HeadsetMic,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0E675E),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Need Help?",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "24×7 support",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Healthcare Hub Grouped Features (Wallet & Prescriptions)
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                shadowElevation = 0.5.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    // CommerceOS Wallet row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showRefillDialog = true }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = Color(0xFFFEF3C7),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.AccountBalanceWallet,
+                                        contentDescription = null,
+                                        tint = Color(0xFFD97706),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "CommerceOS Wallet",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Instant refunds & cashbacks",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
+                        Surface(
+                            color = Color(0xFFFEF3C7),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFFDE68A))
+                        ) {
+                            Text(
+                                text = "🪙 ₹0",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF92400E),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.8.dp)
+
+                    // Prescriptions Vault row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onPrescriptions)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = Color(0xFFECFDF5),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0E675E),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Prescriptions Vault",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = if (prescriptionCount > 0) "$prescriptionCount doctor slip(s) uploaded" else "Manage verified doctor slips",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
                         Icon(
-                            Icons.Default.Edit,
+                            Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                            tint = Color(0xFF059669)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Edit",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
             }
 
-            // 2. Core Management Pillars (3 Pillars: Your Orders, Prescriptions, Saved Addresses)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                HealthcarePillarCard(
-                    icon = Icons.Default.ShoppingCart,
-                    title = "Your Orders",
-                    subtitle = "$orderCount Placed",
-                    badgeColor = Color(0xFF2563EB),
-                    onClick = onOrders,
-                    modifier = Modifier.weight(1f)
-                )
-                HealthcarePillarCard(
-                    icon = Icons.Default.Create,
-                    title = "Prescriptions",
-                    subtitle = if (prescriptionCount > 0) "$prescriptionCount Uploaded" else "Upload Rx",
-                    badgeColor = Color(0xFF059669),
-                    onClick = onPrescriptions,
-                    modifier = Modifier.weight(1f)
-                )
-                HealthcarePillarCard(
-                    icon = Icons.Default.LocationOn,
-                    title = "Addresses",
-                    subtitle = if (isLoadingAddresses) "Syncing..." else "$addressCount Saved",
-                    badgeColor = Color(0xFFD97706),
-                    onClick = onAddresses,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // 3. Store & Pharmacy Services (Refill Reminders + Store Helpdesk Contact)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+            // 4. Manage Account & Preferences (Addresses, Notifications, Refill Reminders, Contact)
+            Surface(
+                color = Color.White,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                shadowElevation = 0.5.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     Text(
-                        text = "PHARMACY SERVICES & STORE HELPDESK",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = "MANAGE ACCOUNT & HEALTHCARE",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF94A3B8),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.6.sp
                     )
+
+                    ProfileMenuRow(
+                        icon = Icons.Default.Place,
+                        title = "Manage Addresses",
+                        subtitle = if (isLoadingAddresses) "Syncing..." else "$addressCount delivery address(es) saved",
+                        onClick = onAddresses
+                    )
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp)
+
+                    ProfileMenuRow(
+                        icon = Icons.Default.Notifications,
+                        title = "Notification Preferences",
+                        subtitle = "Order updates, OTP & delivery SMS",
+                        onClick = onNotifications
+                    )
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp)
 
                     ProfileMenuRow(
                         icon = Icons.Default.DateRange,
@@ -334,8 +575,8 @@ fun AccountScreen(
 
                     ProfileMenuRow(
                         icon = Icons.Default.Phone,
-                        title = "Pharmacy Help & Store Contact",
-                        subtitle = "Call store directly: $storeContactPhone",
+                        title = "Pharmacy Helpdesk",
+                        subtitle = "Call registered pharmacist: $storeContactPhone",
                         onClick = {
                             try {
                                 val cleanPhone = storeContactPhone.replace(" ", "").replace("-", "")
@@ -347,25 +588,25 @@ fun AccountScreen(
                 }
             }
 
-            // 4. Pharmacy Hub License Footer
+            // 5. Central Licensed Pharmacy Footer
             Column(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     text = "CommerceOS Health • Central Licensed Pharmacy",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = Color(0xFF64748B)
                 )
                 Text(
-                    text = "Drug License: DL-HR-2024-009182 • WHO-GMP Certified Hub",
+                    text = "Drug License: DL-HR-2024-009182 • WHO-GMP Certified Quality",
                     fontSize = 10.sp,
                     color = Color(0xFF94A3B8)
                 )
             }
 
-            // 5. Professional Logout Button
+            // 6. Professional Logout Button
             OutlinedButton(
                 onClick = onLogout,
                 shape = RoundedCornerShape(12.dp),

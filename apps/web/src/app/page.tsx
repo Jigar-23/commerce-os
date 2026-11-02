@@ -34,6 +34,13 @@ import {
 import { useCart } from '@/lib/cart-store';
 import DeliveryAddressMapModal from '@/components/DeliveryAddressMapModal';
 import FlagshipSearchModal from '@/components/FlagshipSearchModal';
+import LocationLockinModal from '@/components/splash/LocationLockinModal';
+import CanopyHeader from '@/components/home/CanopyHeader';
+import HeroDualActionCards from '@/components/home/HeroDualActionCards';
+import AssistedCommerceRibbon from '@/components/home/AssistedCommerceRibbon';
+import GenericSubstituteCard from '@/components/search/GenericSubstituteCard';
+import FloatingCartBar from '@/components/cart/FloatingCartBar';
+import MobileBottomNav from '@/components/navigation/MobileBottomNav';
 import {
   CommerceNavbar,
   CommerceProductCard,
@@ -55,6 +62,7 @@ export default function StorefrontHomePage() {
   const [query, setQuery] = useState('');
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isLocationLockinVisible, setIsLocationLockinVisible] = useState(true);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [currentAddress, setCurrentAddress] = useState<SavedAddress | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -192,25 +200,66 @@ export default function StorefrontHomePage() {
     : 'Select delivery location';
 
   return (
-    <div className="min-h-screen bg-surface-canvas text-content-primary font-sans antialiased pb-24 selection:bg-surface-brandSubtle selection:text-content-brand">
-      {/* 1. CANONICAL COMMERCE NAVBAR */}
-      <CommerceNavbar
-        locationAddress={locationDisplay}
-        onOpenLocationModal={() => setIsMapModalOpen(true)}
-        searchQuery={query}
-        onSearchChange={(q) => {
-          setQuery(q);
-          if (q.trim().length > 0) setIsSearchModalOpen(true);
+    <div className="min-h-screen bg-[#F4F6F8] text-content-primary font-sans antialiased pb-28 selection:bg-emerald-100 selection:text-emerald-900">
+      {/* 0. TATA 1MG BENCHMARK LOCATION LOCK-IN INTERSTITIAL */}
+      {isLocationLockinVisible && (
+        <LocationLockinModal
+          locality={currentAddress?.city || currentAddress?.tag || 'Rewari'}
+          onDismiss={() => setIsLocationLockinVisible(false)}
+        />
+      )}
+
+      {/* 1. DEEP MEDICAL TEAL CANOPY HEADER (ANDROID REPLICA) */}
+      <CanopyHeader
+        locationLabel={locationDisplay}
+        etaMinutes={10}
+        onLocationClick={() => setIsMapModalOpen(true)}
+        onProfileClick={() => router.push('/profile')}
+        onSearchClick={(initialQ) => {
+          if (initialQ) setQuery(initialQ);
+          setIsSearchModalOpen(true);
         }}
-        showSearchBar={true}
-        cartItemCount={cartCount}
-        cartTotalAmount={cartSubtotal}
-        onOpenCart={() => setIsCartOpen(true)}
-        ordersHref="/orders"
-        profileHref="/profile"
+        onUploadRxClick={() => router.push('/checkout')}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 space-y-6 sm:space-y-8">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 pt-4 space-y-5">
+        {/* 2. DUAL ACTION HERO TILES (MEDICINES VS LAB TESTS) */}
+        <section>
+          <HeroDualActionCards
+            onMedicinesClick={() => router.push('/categories')}
+            onLabTestsClick={() => {
+              setQuery('Lab Tests');
+              setIsSearchModalOpen(true);
+            }}
+          />
+        </section>
+
+        {/* 3. ASSISTED COMMERCE RIBBON (UPLOAD RX / WHATSAPP / CALL 24X7) */}
+        <section>
+          <AssistedCommerceRibbon
+            onUploadRx={() => router.push('/checkout')}
+          />
+        </section>
+
+        {/* 4. GENERIC MEDICINE EQUIVALENT REASSURANCE STRIP */}
+        <section>
+          <GenericSubstituteCard
+            onApplySubstitute={() => {
+              addToCart({
+                sku: 'paracip-650',
+                productId: 'paracip-650',
+                name: 'Paracip 650mg Tablet',
+                brand: 'Cipla Ltd',
+                packSize: '15 Tablets',
+                unitPrice: 18,
+                mrp: 30,
+                rxRequired: false,
+                coldChain: false,
+                expressDeliverySlaMins: 10,
+              });
+            }}
+          />
+        </section>
         {/* 3. CATEGORY SHOWCASE STRIP */}
         <section>
           <CommerceSectionHeader
@@ -363,30 +412,11 @@ export default function StorefrontHomePage() {
         </section>
       </main>
 
-      {/* 7. FLOATING QUICK-CART BAR (WHEN ITEMS IN CART) */}
-      {cartCount > 0 && (
-        <aside aria-label="Cart Summary" className="fixed bottom-4 inset-x-4 max-w-md mx-auto z-40 animate-slide-up">
-          <div className="bg-surface-inverse text-white rounded-2xl p-3 px-4 shadow-floating flex items-center justify-between gap-3 border border-border-strong">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-action-primaryBg flex items-center justify-center text-white font-extrabold text-sm shadow-xs">
-                {cartCount}
-              </div>
-              <div>
-                <p className="text-2xs font-bold text-content-muted uppercase tracking-wider">Cart Total</p>
-                <p className="text-base font-extrabold text-white">₹{cartSubtotal.toFixed(0)}</p>
-              </div>
-            </div>
+      {/* 7. FLOATING QUICK-CART CAPSULE BAR (EXACT ANDROID REPLICA) */}
+      <FloatingCartBar onOpenCart={() => setIsCartOpen(true)} />
 
-            <button
-              onClick={() => setIsCartOpen(true)}
-              className="flex items-center gap-2 bg-action-primaryBg hover:bg-action-primaryHover active:bg-action-primaryBg text-action-primaryText font-black text-xs sm:text-sm px-4 py-2.5 rounded-xl transition-all active:scale-95 shadow-md shadow-subtle cursor-pointer"
-            >
-              <span>View Cart</span>
-              <ChevronRight className="h-4 w-4 stroke-[3]" />
-            </button>
-          </div>
-        </aside>
-      )}
+      {/* 8. MOBILE BOTTOM NAVIGATION BAR */}
+      <MobileBottomNav />
 
       {/* 8. FLAGSHIP SEARCH MODAL */}
       <FlagshipSearchModal

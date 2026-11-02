@@ -45,7 +45,7 @@ fun OrderHistoryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F5F7))
+            .background(Color(0xFFF4F6F8))
             .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)
     ) {
         // Top Header at exact same height as HomePage top row
@@ -60,12 +60,12 @@ fun OrderHistoryScreen(
                 Text(
                     text = "Your Orders",
                     fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF0F172A)
                 )
                 Text(
                     text = "Track deliveries & view past medicines",
-                    fontSize = 12.sp,
+                    fontSize = 11.5.sp,
                     color = Color(0xFF64748B)
                 )
             }
@@ -80,7 +80,7 @@ fun OrderHistoryScreen(
                     Icon(
                         Icons.Default.Refresh,
                         contentDescription = "Refresh Orders",
-                        tint = Color(0xFF059669),
+                        tint = Color(0xFF0E675E),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -89,7 +89,7 @@ fun OrderHistoryScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Filter Pills
+        // Filter Pills matching Tata 1mg Benchmark
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -97,9 +97,9 @@ fun OrderHistoryScreen(
             listOf("ALL" to "All Orders", "ACTIVE" to "Active", "DELIVERED" to "Delivered").forEach { (tabKey, label) ->
                 val isSelected = selectedFilterTab == tabKey
                 Surface(
-                    color = if (isSelected) Color(0xFF059669) else Color.White,
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF059669) else Color(0xFFE2E8F0)),
+                    color = if (isSelected) Color(0xFF0E675E) else Color.White,
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF0E675E) else Color(0xFFE2E8F0)),
                     modifier = Modifier.clickable { selectedFilterTab = tabKey }
                 ) {
                     Text(
@@ -107,7 +107,7 @@ fun OrderHistoryScreen(
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSelected) Color.White else Color(0xFF475569),
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
                     )
                 }
             }
@@ -226,297 +226,266 @@ private fun OrderHistoryCard(
         else -> java.math.BigDecimal.ZERO
     }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+    val (headerBg, headerPillBg, headerTextColor) = when {
+        isDelivered -> Triple(Color(0xFFF0F7FF), Color(0xFFDBEAFE), Color(0xFF1D4ED8))
+        isCancelled -> Triple(Color(0xFFFFF5F5), Color(0xFFFEE2E2), Color(0xFFDC2626))
+        isActive -> Triple(Color(0xFFF0FDF4), Color(0xFFDCFCE7), Color(0xFF0E675E))
+        else -> Triple(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFF475569))
+    }
+
+    Surface(
+        color = Color.White,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(
             if (isActive) 1.5.dp else 1.dp,
-            if (isActive) Color(0xFF059669).copy(alpha = 0.5f) else Color(0xFFE2E8F0)
+            if (isActive) Color(0xFF0E675E).copy(alpha = 0.6f) else Color(0xFFE2E8F0)
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 2.dp else 1.dp),
+        shadowElevation = if (isActive) 2.dp else 0.5.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onTrackOrder)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header Row: Order Number & Status Pill
+        Column {
+            // Tata 1mg Benchmark Header Ribbon
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(headerBg)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "Order #${order.displayOrderId}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Placed on ${order.displayOrderDateTime}",
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF64748B),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                val (chipBg, chipTextColor) = when {
-                    isDelivered -> Color(0xFFEFF6FF) to Color(0xFF1D4ED8)
-                    isCancelled -> Color(0xFFFEF2F2) to Color(0xFFDC2626)
-                    isActive -> Color(0xFFECFDF5) to Color(0xFF059669)
-                    else -> Color(0xFFF1F5F9) to Color(0xFF475569)
-                }
-
-                Surface(
-                    color = chipBg,
-                    shape = RoundedCornerShape(8.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = presented.presentedLabel,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = chipTextColor,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Items List with REAL Medicine Photos
-            if (items.isNotEmpty()) {
-                val displayItems = items.take(2)
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    displayItems.forEach { item ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // High-Res Medicine Thumbnail Tile
-                            ProductThumbTile(item = item)
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            // Item Description & Pricing
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.name,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF1E293B),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "Qty: ${item.quantity}",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF64748B),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = " • ₹${item.unitPrice.toInt()} each",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF94A3B8)
-                                    )
-                                }
-                            }
-
-                            // Line total
-                            Text(
-                                text = "₹${item.unitPrice.toInt() * item.quantity}",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                        }
-                    }
-
-                    if (items.size > displayItems.size) {
+                    Surface(
+                        color = headerPillBg,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
                         Text(
-                            text = "+${items.size - displayItems.size} more items",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF059669),
-                            modifier = Modifier.padding(start = 66.dp)
+                            text = presented.presentedLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = headerTextColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
-                }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-
-            // Summary Row: Total amount and payment status
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "${items.sumOf { it.quantity }} ${if (items.sumOf { it.quantity } == 1) "item" else "items"} • Total ₹${if (effectiveTotal.remainder(java.math.BigDecimal.ONE).compareTo(java.math.BigDecimal.ZERO) == 0) effectiveTotal.toInt() else effectiveTotal}",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-                    Text(
-                        text = "${if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Paid Online"} • ${if (order.paymentStatus == "PAID") "Paid" else "Payment pending"}",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-
-                Surface(
-                    color = when {
-                        isCancelled -> Color(0xFFFEF2F2)
-                        isDelivered -> Color(0xFFEFF6FF)
-                        else -> Color(0xFFECFDF5)
-                    },
-                    shape = RoundedCornerShape(6.dp)
-                ) {
                     Text(
                         text = when {
                             isDelivered -> "Delivered on ${order.displayOrderDate}"
-                            isCancelled -> "Cancelled"
-                            else -> "In Progress"
+                            isCancelled -> "Placed on ${order.displayOrderDateTime}"
+                            else -> "⚡ 10 Mins Delivery"
                         },
-                        fontSize = 11.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = when {
-                            isDelivered -> Color(0xFF1D4ED8)
-                            isCancelled -> Color(0xFFDC2626)
-                            else -> Color(0xFF059669)
-                        },
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = "View Details",
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
-            // Delivery PIN Badge for Active Orders
-            val pin = order.effectiveDeliveryPin
-            if (isActive && !pin.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Surface(
-                    color = Color(0xFFFEF3C7),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Delivery PIN",
-                                tint = Color(0xFFB45309),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Items List with Medicine Photos
+                if (items.isNotEmpty()) {
+                    val displayItems = items.take(2)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        displayItems.forEach { item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // High-Res Medicine Thumbnail Tile
+                                ProductThumbTile(item = item)
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                // Item Description & Pricing
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.name,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF1E293B),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Qty: ${item.quantity}",
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF64748B),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = " • ₹${item.unitPrice.toInt()} each",
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF94A3B8)
+                                        )
+                                    }
+                                }
+
+                                // Line total
+                                Text(
+                                    text = "₹${item.unitPrice.toInt() * item.quantity}",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                            }
+                        }
+
+                        if (items.size > displayItems.size) {
                             Text(
-                                "Delivery PIN to give rider:",
+                                text = "+${items.size - displayItems.size} more items",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF92400E)
+                                color = Color(0xFF0E675E),
+                                modifier = Modifier.padding(start = 66.dp)
                             )
                         }
-                        Text(
-                            text = pin,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFFB45309),
-                            letterSpacing = 2.sp
-                        )
                     }
-                }
-            }
 
-            // Reorder Option for Delivered or Cancelled Orders (Tata 1mg Benchmark)
-            if ((isDelivered || isCancelled) && items.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-                Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                // Summary Row: Total amount and payment status
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = {
-                        if (items.isNotEmpty()) {
-                            onReorderOrder(order)
-                        } else {
-                            items.firstOrNull()?.let { onReorderItem(it) }
+                    Column {
+                        Text(
+                            text = "${items.sumOf { it.quantity }} ${if (items.sumOf { it.quantity } == 1) "item" else "items"} • Total ₹${if (effectiveTotal.remainder(java.math.BigDecimal.ONE).compareTo(java.math.BigDecimal.ZERO) == 0) effectiveTotal.toInt() else effectiveTotal}",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "${if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Paid Online"} • ${if (order.paymentStatus == "PAID") "Paid" else "Payment pending"}",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+
+                    Text(
+                        text = "Order #${order.displayOrderId.takeLast(8)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+
+                // Delivery PIN Badge for Active Orders
+                val pin = order.effectiveDeliveryPin
+                if (isActive && !pin.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = Color(0xFFFEF3C7),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Delivery PIN",
+                                    tint = Color(0xFFB45309),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "Delivery PIN to give rider:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
+                            Text(
+                                text = pin,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFB45309),
+                                letterSpacing = 2.sp
+                            )
                         }
-                    }) {
+                    }
+                }
+
+                // Action Footer
+                if (isActive) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = onTrackOrder,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("⚡ Track Live", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                        }
+                        if (presented.hasCancelAction) {
+                            OutlinedButton(
+                                onClick = onCancelOrder,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                                border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.4f)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(0.7f)
+                            ) {
+                                Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                } else if (items.isNotEmpty()) {
+                    // Tata 1mg Benchmark Clean Reorder Strip
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onReorderOrder(order)
+                            }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = Color(0xFF0E675E),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Reorder",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE11D48)
+                            color = Color(0xFF0E675E)
                         )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Action Buttons
-            if (isActive) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = onTrackOrder,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("⚡ Track Order", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                    }
-                    if (presented.hasCancelAction) {
-                        OutlinedButton(
-                            onClick = onCancelOrder,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
-                            border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.4f)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(0.7f)
-                        ) {
-                            Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onTrackOrder,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Color(0xFF059669)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF059669)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("View Complete Details", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
-                    if (items.isNotEmpty() && !isCancelled) {
-                        Button(
-                            onClick = { items.forEach { onReorderItem(it) } },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                            modifier = Modifier.weight(0.8f)
-                        ) {
-                            Text("Order Again", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                        }
                     }
                 }
             }

@@ -33,6 +33,8 @@ import com.commerceos.android.model.MedicineImageResolver
 import com.commerceos.android.model.Prescription
 import com.commerceos.android.ui.components.ProductImage
 import com.commerceos.android.ui.components.formatHealthcareTitle
+import com.commerceos.android.ui.components.formatHealthcareBrand
+import com.commerceos.android.ui.components.formatPackSize
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceElevation
 import com.commerceos.android.ui.theme.CommerceTypography
@@ -82,40 +84,85 @@ fun CartScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(Color(0xFFF4F6F8))
     ) {
         // Top Header with Back button and Item count
         Surface(
             color = Color.White,
-            shadowElevation = 0.5.dp,
+            shadowElevation = 1.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                IconButton(onClick = { onBack?.invoke() ?: onStartShopping() }) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color(0xFF0F172A)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onBack?.invoke() ?: onStartShopping() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF0F172A)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Review Order",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = Color(0xFFECFDF5),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "$totalItemCount ${if (totalItemCount == 1) "item" else "items"}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF065F46),
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "⚡ Instant 10-min fulfillment",
+                            fontSize = 11.sp,
+                            color = Color(0xFF059669),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                Column {
-                    Text(
-                        text = "Checkout",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-                    Text(
-                        text = "$totalItemCount ${if (totalItemCount == 1) "item" else "items"} in cart",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
+
+                Surface(
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.padding(end = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = null,
+                            tint = Color(0xFF059669),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "100% Genuine",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF334155)
+                        )
+                    }
                 }
             }
         }
@@ -498,16 +545,17 @@ private fun CartItemRow(
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
 
-            val identity = listOfNotNull(item.brand, item.packSize).filter { it.isNotBlank() }
-            if (identity.isNotEmpty()) {
-                Text(
-                    identity.joinToString(" • "),
-                    fontSize = 11.sp,
-                    color = Color(0xFF64748B),
-                    maxLines = 1,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
+            val brandFormatted = formatHealthcareBrand(item.brand, item.name)
+            val packFormatted = formatPackSize(item.packSize)
+            val identity = "$brandFormatted • $packFormatted"
+            Text(
+                identity,
+                fontSize = 11.5.sp,
+                color = Color(0xFF64748B),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp)
+            )
 
             if (item.prescriptionRequired) {
                 Surface(
@@ -579,7 +627,7 @@ private fun QuantityControls(
     onIncrease: () -> Unit
 ) {
     Surface(
-        color = Color(0xFF047857),
+        color = Color(0xFF0E675E),
         shape = RoundedCornerShape(8.dp),
         shadowElevation = 0.5.dp
     ) {
@@ -1221,54 +1269,155 @@ private fun SummaryCard(
     coldChainFee: String?,
     grandTotal: String?
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = CommerceColors.Surface),
-        shape = RoundedCornerShape(Radius.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = CommerceElevation.Raised),
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            // Domino's / Blinkit Style Savings Banner
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Receipt,
+                        contentDescription = null,
+                        tint = Color(0xFF0E675E),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Bill Summary",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "Verified Prices",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF475569),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+            // Items MRP / Total
+            SummaryRow(
+                label = "Item total (MRP)",
+                value = itemsSubtotal ?: "₹0.00",
+                labelColor = Color(0xFF475569),
+                valueColor = Color(0xFF0F172A)
+            )
+
+            // Total Savings / Price Discount
+            if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00" && totalSavings != "₹0") {
+                SummaryRow(
+                    label = "Price discount",
+                    value = "- $totalSavings",
+                    labelColor = Color(0xFF059669),
+                    valueColor = Color(0xFF059669),
+                    boldValue = true
+                )
+            }
+
+            // Coupon discount
+            if (!couponDiscount.isNullOrBlank() && couponDiscount != "₹0.00") {
+                SummaryRow(
+                    label = "Coupon discount",
+                    value = "- $couponDiscount",
+                    labelColor = Color(0xFF059669),
+                    valueColor = Color(0xFF059669),
+                    boldValue = true
+                )
+            }
+
+            // Delivery Fee
+            val isFreeDelivery = expressFee == "FREE" || expressFee == null || expressFee == "₹0.00" || expressFee == "₹0"
+            SummaryRow(
+                label = "Delivery partner fee",
+                value = if (isFreeDelivery) "FREE" else expressFee,
+                labelColor = Color(0xFF475569),
+                valueColor = if (isFreeDelivery) Color(0xFF16A34A) else Color(0xFF0F172A),
+                boldValue = isFreeDelivery
+            )
+
+            // Cold chain / handling fee
+            if (!coldChainFee.isNullOrBlank() && coldChainFee != "₹0.00" && coldChainFee != "₹0") {
+                SummaryRow(
+                    label = "Handling & packaging",
+                    value = coldChainFee,
+                    labelColor = Color(0xFF475569),
+                    valueColor = Color(0xFF0F172A)
+                )
+            }
+
+            HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+
+            // Grand Total / To Pay
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "To Pay",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "Inclusive of all taxes",
+                        fontSize = 10.5.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+                Text(
+                    text = grandTotal ?: itemsSubtotal ?: "₹0.00",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF0F172A)
+                )
+            }
+
+            // Signature PharmEasy / 1mg Bottom Savings Ribbon inside the Card
             if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00" && totalSavings != "₹0") {
                 Surface(
                     color = Color(0xFFDCFCE7),
-                    shape = RoundedCornerShape(10.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC).copy(alpha = 0.8f)),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF86EFAC)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalOffer,
-                            contentDescription = "Savings",
-                            tint = Color(0xFF166534),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("🎉", fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "You are saving $totalSavings on this order!",
-                            style = CommerceTypography.BodySmall,
+                            text = "Yay! You are saving $totalSavings on this order",
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF166534)
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(2.dp))
             }
-
-            Text("Bill Summary", style = CommerceTypography.BodySmall, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-            SummaryRow(label = "Item total", value = itemsSubtotal ?: "₹0.00")
-            if (!couponDiscount.isNullOrBlank() && couponDiscount != "₹0.00") {
-                SummaryRow(label = "Coupon discount", value = "- $couponDiscount", valueColor = CommerceColors.Savings)
-            }
-            SummaryRow(label = "Delivery partner fee", value = expressFee ?: "FREE", valueColor = if (expressFee == "FREE" || expressFee == null || expressFee == "₹0.00") Color(0xFF16A34A) else CommerceColors.TextPrimary)
-            if (!coldChainFee.isNullOrBlank()) {
-                SummaryRow(label = "Handling & packaging", value = coldChainFee)
-            }
-            HorizontalDivider(color = CommerceColors.Border, thickness = 0.5.dp)
-            SummaryRow(label = "Grand Total", value = grandTotal ?: itemsSubtotal ?: "₹0.00", boldValue = true, labelColor = CommerceColors.TextPrimary)
         }
     }
 }
@@ -1277,13 +1426,26 @@ private fun SummaryCard(
 private fun SummaryRow(
     label: String,
     value: String?,
-    valueColor: androidx.compose.ui.graphics.Color = CommerceColors.TextPrimary,
+    valueColor: androidx.compose.ui.graphics.Color = Color(0xFF0F172A),
     boldValue: Boolean = false,
-    labelColor: androidx.compose.ui.graphics.Color = CommerceColors.TextMuted
+    labelColor: androidx.compose.ui.graphics.Color = Color(0xFF475569)
 ) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = CommerceTypography.BodySmall, color = labelColor)
-        Text(value ?: "₹0.00", style = CommerceTypography.BodySmall, fontWeight = if (boldValue) FontWeight.Bold else FontWeight.SemiBold, color = valueColor)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            color = labelColor
+        )
+        Text(
+            text = value ?: "₹0.00",
+            fontSize = 13.5.sp,
+            fontWeight = if (boldValue) FontWeight.Bold else FontWeight.SemiBold,
+            color = valueColor
+        )
     }
 }
 
@@ -1443,27 +1605,27 @@ private fun StickyCheckoutBar(
                     Button(
                         onClick = onProceed,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF059669),
+                            containerColor = Color(0xFF0E675E),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-                        modifier = Modifier.height(46.dp)
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        modifier = Modifier.height(48.dp)
                     ) {
-                        Text("Select Address ➔", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Select Address ➔", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 } else {
                     Button(
                         onClick = onProceed,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF059669),
+                            containerColor = Color(0xFF0E675E),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
-                        modifier = Modifier.height(46.dp)
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                        modifier = Modifier.height(48.dp)
                     ) {
-                        Text("Continue ➔", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Continue ➔", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }

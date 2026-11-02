@@ -334,18 +334,24 @@ fun OrderTrackingContent(
                         }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "ORDER #${order.displayOrderId}",
+                                text = "#${order.displayOrderId.takeLast(10)}",
                                 color = Color(0xFF0F172A),
-                                fontSize = 11.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("⧉", color = Color(0xFF64748B), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = "Copy",
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(13.dp)
+                            )
                         }
                     }
                 }
