@@ -2,6 +2,7 @@ package com.commerceos.android
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -350,7 +351,7 @@ fun CommerceOSApp(
         val isCategoryScreen = currentScreen is Screen.Categories
         val isHomeScreen = currentScreen is Screen.Home
         Scaffold(
-            containerColor = if (isCategoryScreen) Color(0xFF005844) else if (isHomeScreen) Color(0xFF0E675E) else CommerceColors.Background,
+            containerColor = CommerceColors.Background,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val hideTopBar = currentScreen is Screen.Home ||
@@ -412,7 +413,9 @@ fun CommerceOSApp(
             }
         },
         bottomBar = {
-            Column {
+            Column(
+                modifier = Modifier.background(CommerceColors.Background)
+            ) {
                 if (cartViewModel.itemCount > 0 && currentScreen !is Screen.Cart && currentScreen !is Screen.PaymentGateway && currentScreen !is Screen.OrderTracking && currentScreen !is Screen.Account && currentScreen !is Screen.ProductDetail) {
                     GlobalCartBar(
                         itemCount = cartViewModel.itemCount,
@@ -477,9 +480,34 @@ fun CommerceOSApp(
                     bottom = padding.calculateBottomPadding()
                 )
         ) {
+            val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+            val currentHomeContext = activeAddr?.let { addr ->
+                val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
+                val status = when {
+                    serviceability == null -> FulfillmentStatus.UNKNOWN
+                    serviceability.addressId != addr.id -> FulfillmentStatus.UNKNOWN
+                    serviceability.response.eligible -> FulfillmentStatus.SERVICEABLE
+                    else -> FulfillmentStatus.UNSERVICEABLE
+                }
+                val fulfillment = FulfillmentContext(
+                    addressId = addr.id,
+                    status = status,
+                    etaLabel = serviceability?.response?.etaLabel,
+                    requestId = "home-ctx-${addr.id}"
+                )
+                HomeContext(
+                    addressId = addr.id,
+                    tag = addr.tag,
+                    addressLine = addr.addressLine,
+                    cityZip = "${addr.city} ${addr.postalCode}".trim(),
+                    geoPoint = "${addr.latitude},${addr.longitude}",
+                    fulfillment = fulfillment,
+                    sequenceId = fulfillment.generatedAt
+                )
+            }
+
             when (val screen = currentScreen) {
                 is Screen.Home -> {
-                    val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
                     HomeScreen(
                         viewModel = homeViewModel,
                         customerId = authenticatedCustomerId,
@@ -488,30 +516,7 @@ fun CommerceOSApp(
                         calculatedEtaMinutes = addressViewModel.calculatedEtaMinutes,
                         locationHeaderLabel = addressViewModel.activeLocationHeaderLabel,
                         isLocating = addressViewModel.isAcquiringLiveGps,
-                        homeContext = activeAddr?.let { addr ->
-                            val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
-                            val status = when {
-                                serviceability == null -> FulfillmentStatus.UNKNOWN
-                                serviceability.addressId != addr.id -> FulfillmentStatus.UNKNOWN
-                                serviceability.response.eligible -> FulfillmentStatus.SERVICEABLE
-                                else -> FulfillmentStatus.UNSERVICEABLE
-                            }
-                            val fulfillment = FulfillmentContext(
-                                addressId = addr.id,
-                                status = status,
-                                etaLabel = serviceability?.response?.etaLabel,
-                                requestId = "home-ctx-${addr.id}"
-                            )
-                            HomeContext(
-                                addressId = addr.id,
-                                tag = addr.tag,
-                                addressLine = addr.addressLine,
-                                cityZip = "${addr.city} ${addr.postalCode}".trim(),
-                                geoPoint = "${addr.latitude},${addr.longitude}",
-                                fulfillment = fulfillment,
-                                sequenceId = fulfillment.generatedAt
-                            )
-                        },
+                        homeContext = currentHomeContext,
                         onChangeAddress = {
                             addressViewModel.init(authenticatedCustomerId)
                             showAddressBottomSheet = true
@@ -596,6 +601,30 @@ fun CommerceOSApp(
                 )
                 is Screen.Categories -> CategoriesScreen(
                     viewModel = categoryViewModel,
+                    homeContext = currentHomeContext,
+                    selectedAddress = activeAddr,
+                    calculatedEtaMinutes = addressViewModel.calculatedEtaMinutes,
+                    locationHeaderLabel = addressViewModel.activeLocationHeaderLabel,
+                    isLocating = addressViewModel.isAcquiringLiveGps,
+                    onChangeAddress = {
+                        addressViewModel.init(authenticatedCustomerId)
+                        showAddressBottomSheet = true
+                    },
+                    onProfileClick = {
+                        navigateRoot(Screen.Account)
+                    },
+                    onNotificationsClick = {
+                        navigate(Screen.Notifications)
+                    },
+                    onSearchClick = { query ->
+                        if (query.isBlank()) {
+                            universalSearchViewModel.reset()
+                        }
+                        openUniversalSearch(UniversalSearchQuery(text = query))
+                    },
+                    onUploadPrescription = {
+                        showRxUploadDialog = true
+                    },
                     onSelectCategory = { category ->
                         universalSearchViewModel.executeSearch(category.name)
                         openUniversalSearch(UniversalSearchQuery(text = category.name))

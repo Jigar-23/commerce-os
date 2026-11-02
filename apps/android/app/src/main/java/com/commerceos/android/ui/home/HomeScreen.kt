@@ -701,7 +701,7 @@ private fun AssistedCommerceRibbon(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun HeaderCanopy(
+fun HeaderCanopy(
     homeContext: HomeContext?,
     selectedAddress: ApiAddress?,
     calculatedEtaMinutes: Int,

@@ -38,7 +38,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.commerceos.android.model.CatalogCategory
+import com.commerceos.android.model.HomeContext
+import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.ui.components.ProductImage
+import com.commerceos.android.ui.home.HeaderCanopy
 import com.commerceos.android.ui.theme.PlusJakartaSans
 import com.commerceos.android.viewmodel.CategoryTaxonomyUiState
 import com.commerceos.android.viewmodel.CategoryViewModel
@@ -384,6 +387,16 @@ fun getDepartmentColors(department: String): DepartmentColorPalette {
 @Composable
 fun CategoriesScreen(
     viewModel: CategoryViewModel,
+    homeContext: HomeContext? = null,
+    selectedAddress: ApiAddress? = null,
+    calculatedEtaMinutes: Int = 0,
+    locationHeaderLabel: String? = null,
+    isLocating: Boolean = false,
+    onChangeAddress: () -> Unit = {},
+    onProfileClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
+    onSearchClick: (String) -> Unit = {},
+    onUploadPrescription: () -> Unit = {},
     onSelectCategory: (CatalogCategory) -> Unit
 ) {
     LaunchedEffect(Unit) {
@@ -393,39 +406,7 @@ fun CategoriesScreen(
     var selectedDepartment by remember { mutableStateOf("All Categories") }
     var searchQuery by remember { mutableStateOf("") }
 
-    val view = LocalView.current
-    val context = LocalContext.current
     val currentPalette = remember(selectedDepartment) { getDepartmentColors(selectedDepartment) }
-
-    // Match Home Screen status bar color for unified, seamless navigation
-    DisposableEffect(view) {
-        var currentContext: Context? = context
-        var activity: Activity? = null
-        while (currentContext is ContextWrapper) {
-            if (currentContext is Activity) {
-                activity = currentContext
-                break
-            }
-            currentContext = currentContext.baseContext
-        }
-
-        val window = activity?.window
-        if (window != null) {
-            val insetsController = WindowCompat.getInsetsController(window, view)
-            val prevLightStatusBars = insetsController.isAppearanceLightStatusBars
-            val prevStatusBarColor = window.statusBarColor
-
-            insetsController.isAppearanceLightStatusBars = false
-            window.statusBarColor = android.graphics.Color.parseColor("#0E675E")
-
-            onDispose {
-                insetsController.isAppearanceLightStatusBars = prevLightStatusBars
-                window.statusBarColor = prevStatusBarColor
-            }
-        } else {
-            onDispose {}
-        }
-    }
 
     val rawCategories = when (val state = viewModel.taxonomy) {
         is CategoryTaxonomyUiState.Content -> {
@@ -449,6 +430,10 @@ fun CategoriesScreen(
     }
 
     fun handleTrigger(queryText: String) {
+        if (queryText.equals("Upload Prescription", ignoreCase = true)) {
+            onUploadPrescription()
+            return
+        }
         val matched = rawCategories.firstOrNull { it.name.contains(queryText, ignoreCase = true) }
         if (matched != null) {
             onSelectCategory(matched)
@@ -470,243 +455,20 @@ fun CategoriesScreen(
             .background(Color(0xFFF4F6F8))
     ) {
         // ====================================================================
-        // 1. UNIFIED HEALTHCARE EMERALD HEADER WITH ADDRESS & CAMERA Rx BAR
+        // 1. UNIFIED HEALTHCARE EMERALD HEADER (100% shared with Home Screen)
         // ====================================================================
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF0E675E),
-                            Color(0xFF0C5B53),
-                            Color(0xFF0A4F48)
-                        )
-                    ),
-                    shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            // Location & Delivery Strip
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.LocationOn,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    Column {
-                        Text(
-                            text = "DELIVER TO",
-                            fontSize = 9.5.sp,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White.copy(alpha = 0.8f),
-                            letterSpacing = 0.5.sp
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = "Rewari-1, 123401",
-                                fontSize = 13.5.sp,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
-                            Icon(
-                                Icons.Default.KeyboardArrowDown,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
-                // 10-Min SLA Pill Badge
-                Surface(
-                    color = Color(0xFF0D9488),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Bolt,
-                            contentDescription = null,
-                            tint = Color(0xFFFDE047),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "10 MINS",
-                            fontSize = 11.sp,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Search Bar with Integrated Camera Rx Trigger
-            Surface(
-                color = Color.White,
-                shape = RoundedCornerShape(26.dp),
-                shadowElevation = 3.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = Color(0xFF007E65),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        if (searchQuery.isEmpty()) {
-                            Text(
-                                text = "Search medicines, symptoms...",
-                                fontSize = 13.sp,
-                                fontFamily = PlusJakartaSans,
-                                color = Color(0xFF94A3B8),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            singleLine = true,
-                            textStyle = androidx.compose.ui.text.TextStyle(
-                                fontSize = 13.5.sp,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF0F172A)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { searchQuery = "" },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Clear",
-                                tint = Color(0xFF64748B),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        VerticalDivider(
-                            modifier = Modifier
-                                .height(20.dp)
-                                .width(1.dp),
-                            color = Color(0xFFE2E8F0)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { handleTrigger("Upload Prescription") }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.PhotoCamera,
-                                contentDescription = "Upload Rx",
-                                tint = Color(0xFF007E65),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = "Upload Rx",
-                                fontSize = 11.5.sp,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF007E65)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Big Deals, Small Bills Ribbon Banner (PharmEasy Signature)
-            Surface(
-                color = Color.White.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        color = Color(0xFFFFB800),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = "BIG DEALS",
-                            fontSize = 9.sp,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFF1E293B),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                    Text(
-                        text = "UPTO 26% OFF ON MEDICINES • Extra ₹500 credits",
-                        fontSize = 11.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
+        HeaderCanopy(
+            homeContext = homeContext,
+            selectedAddress = selectedAddress,
+            calculatedEtaMinutes = calculatedEtaMinutes,
+            locationHeaderLabel = locationHeaderLabel,
+            isLocating = isLocating,
+            onChangeAddress = onChangeAddress,
+            onProfileClick = onProfileClick,
+            onNotificationsClick = onNotificationsClick,
+            onSearchClick = onSearchClick,
+            onUploadPrescription = onUploadPrescription
+        )
 
         // ====================================================================
         // 2. SCROLLABLE CONTENT BODY
@@ -715,6 +477,47 @@ fun CategoriesScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 140.dp)
         ) {
+            // Big Deals, Small Bills Ribbon Banner (PharmEasy Benchmark - moved below Address Bar)
+            item {
+                Surface(
+                    color = Color(0xFFFEF3C7),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = Color(0xFFD97706),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "BIG DEALS",
+                                fontSize = 9.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Text(
+                            text = "UPTO 26% OFF ON MEDICINES • Extra ₹500 credits",
+                            fontSize = 11.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF92400E),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
             // Section A: "SHOP SMARTER, SAVE BIGGER" (PharmEasy Benchmark)
             if (searchQuery.isBlank() && selectedDepartment == "All Categories") {
                 item {
