@@ -902,60 +902,36 @@ private fun CanopyLocationBar(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        val localCtx = LocalContext.current
+        val unreadCount = remember(localCtx) {
+            com.commerceos.android.notifications.LocalNotificationStorage.getNotifications(localCtx).count { !it.isRead }
+        }
+
+        // Notification Bell Button with live unread badge
+        Surface(
+            color = Color.White.copy(alpha = 0.18f),
+            shape = CircleShape,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+            modifier = Modifier
+                .size(38.dp)
+                .clickable(onClick = onNotificationsClick)
         ) {
-            val localCtx = LocalContext.current
-            val unreadCount = remember(localCtx) {
-                com.commerceos.android.notifications.LocalNotificationStorage.getNotifications(localCtx).count { !it.isRead }
-            }
-
-            // Notification Bell Button with live unread badge
-            Surface(
-                color = Color.White.copy(alpha = 0.18f),
-                shape = CircleShape,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                modifier = Modifier
-                    .size(38.dp)
-                    .clickable(onClick = onNotificationsClick)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Notifications,
-                        contentDescription = "Notifications",
-                        tint = Color.White,
-                        modifier = Modifier.size(19.dp)
-                    )
-                    if (unreadCount > 0) {
-                        Surface(
-                            color = Color(0xFFEF4444),
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .size(8.dp)
-                                .align(Alignment.TopEnd)
-                                .padding(top = 1.dp, end = 1.dp)
-                        ) {}
-                    }
-                }
-            }
-
-            // Profile Avatar Button
-            Surface(
-                color = Color.White.copy(alpha = 0.18f),
-                shape = CircleShape,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                modifier = Modifier
-                    .size(38.dp)
-                    .clickable(onClick = onProfileClick)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = "Account",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Notifications,
+                    contentDescription = "Notifications",
+                    tint = Color.White,
+                    modifier = Modifier.size(19.dp)
+                )
+                if (unreadCount > 0) {
+                    Surface(
+                        color = Color(0xFFEF4444),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .size(8.dp)
+                            .align(Alignment.TopEnd)
+                            .padding(top = 1.dp, end = 1.dp)
+                    ) {}
                 }
             }
         }

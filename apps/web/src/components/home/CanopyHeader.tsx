@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Navigation,
   ChevronDown,
-  User,
+  Bell,
   Search,
   Camera,
   Zap,
@@ -82,53 +82,56 @@ export default function CanopyHeader({
             </div>
           </button>
 
-          {/* Profile Button */}
+          {/* Notifications Button */}
           <button
-            onClick={onProfileClick}
-            className="w-9 h-9 rounded-full bg-white/15 border border-white/25 flex items-center justify-center hover:bg-white/25 active:scale-95 transition-all cursor-pointer"
-            aria-label="Account Profile"
+            onClick={() => {}}
+            className="w-9 h-9 rounded-full bg-white/15 border border-white/25 flex items-center justify-center hover:bg-white/25 active:scale-95 transition-all cursor-pointer relative"
+            aria-label="Notifications"
           >
-            <User className="w-4 h-4 text-white" />
+            <Bell className="w-4 h-4 text-white" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
           </button>
         </div>
 
-        {/* High-Utility Stadium Search Bar */}
-        <div
-          onClick={() => onSearchClick()}
-          className="w-full h-12 bg-white rounded-full shadow-md flex items-center px-4 gap-3 cursor-pointer select-none hover:shadow-lg transition-all"
-        >
-          <Search className="w-5 h-5 text-[#0E675E] shrink-0" />
+        {/* Dual Stadium Capsules (Tata 1mg signature benchmark) */}
+        <div className="flex items-center gap-2">
+          {/* Left Search Stadium Capsule */}
+          <div
+            onClick={() => onSearchClick()}
+            className="flex-1 h-12 bg-white rounded-full shadow-md flex items-center px-4 gap-2.5 cursor-pointer select-none hover:shadow-lg transition-all"
+          >
+            <Search className="w-5 h-5 text-[#E84335] shrink-0 stroke-[1.8]" />
 
-          {/* Animated Hint Carosel */}
-          <div className="flex-1 overflow-hidden relative h-5">
-            <AnimatePresence mode="wait">
-              <motion.span
-                key={hintIndex}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.25 }}
-                className="absolute inset-0 text-xs sm:text-sm font-medium text-slate-500 truncate"
-              >
-                {SEARCH_HINTS[hintIndex]}
-              </motion.span>
-            </AnimatePresence>
+            {/* Animated Hint Carousel */}
+            <div className="flex-1 overflow-hidden relative h-5">
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={hintIndex}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.25 }}
+                  className="absolute inset-0 text-xs sm:text-sm font-medium text-slate-500 truncate"
+                >
+                  {SEARCH_HINTS[hintIndex]}
+                </motion.span>
+              </AnimatePresence>
+            </div>
           </div>
 
-          {/* Vertical Hairline Divider */}
-          <div className="w-px h-5 bg-slate-200 shrink-0" />
-
-          {/* Quick Rx Upload Pill */}
+          {/* Right Upload Prescription Capsule */}
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onUploadRxClick();
-            }}
-            className="flex items-center gap-1.5 py-1 px-2 text-[#0E675E] hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+            onClick={onUploadRxClick}
+            className="h-12 bg-white rounded-full shadow-md flex items-center pl-1.5 pr-3 gap-2 hover:shadow-lg transition-all cursor-pointer shrink-0"
           >
-            <Camera className="w-4 h-4 shrink-0 text-[#0E675E]" />
-            <span className="text-xs font-bold whitespace-nowrap">Upload Rx</span>
+            <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+              <Camera className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex flex-col text-left">
+              <span className="text-[10px] text-slate-500 font-medium leading-tight">Upload</span>
+              <span className="text-xs font-bold text-slate-900 leading-tight">Prescription</span>
+            </div>
           </button>
         </div>
       </div>
