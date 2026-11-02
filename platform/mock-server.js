@@ -2805,9 +2805,18 @@ async function handleRequest(port, req, res) {
     let oauthReady = false;
     let detail = null;
     try {
+      const saJsonStr = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+      const sa = parseServiceAccountJson(saJsonStr);
       const oauthRes = await getMockServerFcmOAuthToken();
       oauthReady = Boolean(oauthRes && oauthRes.token);
-      detail = oauthReady ? 'SUCCESS' : (_lastFcmOauthError || 'NO_TOKEN_GENERATED');
+      detail = oauthReady ? 'SUCCESS' : {
+        keyLength: sa?.private_key?.length,
+        keyStart: sa?.private_key?.slice(0, 35),
+        keyEnd: sa?.private_key?.slice(-35),
+        hasLiteralBackslashN: sa?.private_key?.includes('\\n'),
+        hasRealNewline: sa?.private_key?.includes('\n'),
+        err: _lastFcmOauthError
+      };
     } catch (e) {
       detail = 'ERR: ' + e.message;
     }
