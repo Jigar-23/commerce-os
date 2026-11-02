@@ -4179,6 +4179,31 @@ class TransactionalOrderRepository {
         return { ok: false, httpStatus: 500, error: 'CORRUPT_ORDER_STATE', message: 'Order is missing authoritative store_id.' };
       }
 
+      // Corruption guard: every canonical item snapshot must belong to the authoritative order store.
+      const foreignItem = items.find(it => it && (it.storeId || it.store_id) && (it.storeId || it.store_id) !== storeId);
+      if (foreignItem) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 500,
+          error: 'CORRUPT_ORDER_INVENTORY_CONTEXT',
+          message: `Item snapshot ${foreignItem.sku || foreignItem.productId} points at store ${foreignItem.storeId || foreignItem.store_id}, which does not match the authoritative order store ${storeId}.`
+        };
+      }
+
+      // Canonical identity guard: production inventory release must operate on the canonical
+      // triple (storeId, productId, sku) — sku-only silent release is forbidden.
+      const nonCanonicalItem = items.find(it => !it || !it.productId || !it.sku || !Number(it.quantity));
+      if (nonCanonicalItem) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 500,
+          error: 'CANONICAL_PRODUCT_ID_REQUIRED',
+          message: 'Canonical order item snapshots require storeId, productId, sku, and quantity for inventory release.'
+        };
+      }
+
       // Best-effort inventory release
       if (storeId && this.inventoryRepo && this.inventoryRepo.releaseStockTransactionally) {
         try {

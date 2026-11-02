@@ -1,5 +1,8 @@
 package com.commerceos.android.ui.home
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -13,6 +16,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -24,7 +29,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.core.view.WindowCompat
 import com.commerceos.android.R
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -120,69 +128,107 @@ fun HomeScreen(
         sections.filter { it.type !in nonHealthSections }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    val context = LocalContext.current
+    val handleContactSupport: (String) -> Unit = remember(context) {
+        { mode ->
+            try {
+                if (mode == "whatsapp") {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                        data = android.net.Uri.parse("https://wa.me/919817916180?text=Hello%20CommerceOS%20Pharmacy%2C%20I%20would%20like%20to%20order%20medicines.")
+                    }
+                    context.startActivity(intent)
+                } else if (mode == "call") {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_DIAL).apply {
+                        data = android.net.Uri.parse("tel:+919817916180")
+                    }
+                    context.startActivity(intent)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF4F6F8))
+    ) {
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // 1. Edge-to-Edge Medical Teal Canopy Header
             item {
-                DeliveryAddressWidget(
-                    context = homeContext,
+                HeaderCanopy(
+                    homeContext = homeContext,
                     selectedAddress = selectedAddress,
                     calculatedEtaMinutes = calculatedEtaMinutes,
                     locationHeaderLabel = locationHeaderLabel,
                     isLocating = isLocating,
                     onChangeAddress = onChangeAddress,
-                    onProfileClick = onProfileClick
-                )
-            }
-
-            item {
-                UniversalSearchBar(
-                    onClick = { onSearchClick("") }
-                )
-            }
-
-            item {
-                PrescriptionQuickStrip(
+                    onProfileClick = onProfileClick,
+                    onSearchClick = onSearchClick,
                     onUploadPrescription = onUploadPrescription
                 )
             }
 
+            // 2. Dual Service Hero Tiles (Medicines vs Lab Tests)
             item {
-                MedicineCategoryRail(
-                    onSelectCategory = { categoryQuery -> onSearchClick(categoryQuery) }
+                HeroDualActionCards(
+                    onMedicinesClick = { onSearchClick("") },
+                    onLabTestsClick = { onSearchClick("Lab Tests") }
                 )
+            }
+
+            // 3. Assisted Commerce Ribbon (Upload Rx / WhatsApp / Call 24x7)
+            item {
+                AssistedCommerceRibbon(
+                    onUploadPrescription = onUploadPrescription,
+                    onContactSupport = handleContactSupport
+                )
+            }
+
+            // 4. Popular Healthcare Categories
+            item {
+                Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+                    MedicineCategoryRail(
+                        onSelectCategory = { categoryQuery -> onSearchClick(categoryQuery) },
+                        onSeeAll = onOpenCatalog
+                    )
+                }
             }
 
             if (isLoading && sections.isEmpty()) {
                 item {
-                    LoadingSkeletonWidget()
+                    Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+                        LoadingSkeletonWidget()
+                    }
                 }
             }
 
             if (homeError != null && !isLoading && sections.isEmpty()) {
                 item {
-                    ErrorRetryWidget(onRetry = { viewModel.loadHomeData(customerId, homeContext?.addressId, forceRefresh = true) })
+                    Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+                        ErrorRetryWidget(onRetry = { viewModel.loadHomeData(customerId, homeContext?.addressId, forceRefresh = true) })
+                    }
                 }
             }
 
             items(filteredSections) { section ->
-                HomeSectionRenderer(
-                    section = section,
-                    cartQuantityMap = cartQuantityMap,
-                    onEntityClick = onEntityClick,
-                    onAddToCart = onAddToCart,
-                    onUpdateQuantity = onUpdateQuantity,
-                    onOpenCatalog = onOpenCatalog
-                )
+                Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+                    HomeSectionRenderer(
+                        section = section,
+                        cartQuantityMap = cartQuantityMap,
+                        onEntityClick = onEntityClick,
+                        onAddToCart = onAddToCart,
+                        onUpdateQuantity = onUpdateQuantity,
+                        onOpenCatalog = onOpenCatalog
+                    )
+                }
             }
 
             // Bottom space for floating cart
             item {
-                Spacer(modifier = Modifier.height(if (cartItems.isNotEmpty()) 80.dp else 24.dp))
+                Spacer(modifier = Modifier.height(if (cartItems.isNotEmpty()) 84.dp else 28.dp))
             }
         }
     }
@@ -196,7 +242,8 @@ private data class MedicalCategory(
 
 @Composable
 private fun MedicineCategoryRail(
-    onSelectCategory: (String) -> Unit
+    onSelectCategory: (String) -> Unit,
+    onSeeAll: () -> Unit = {}
 ) {
     val categories = remember {
         listOf(
@@ -211,7 +258,7 @@ private fun MedicineCategoryRail(
                 imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg"
             ),
             MedicalCategory(
-                name = "Diabetes",
+                name = "Diabetes Care",
                 query = "Diabetes",
                 imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg"
             ),
@@ -234,52 +281,94 @@ private fun MedicineCategoryRail(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Popular Categories",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF111827),
-            modifier = Modifier.padding(bottom = 10.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Popular Categories",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF0F172A)
+                )
+                Text(
+                    text = "Genuine medicines verified by certified pharmacists",
+                    fontSize = 11.5.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+            TextButton(
+                onClick = onSeeAll,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "See All",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0E675E)
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color(0xFF0E675E),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
 
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 2.dp)
         ) {
             items(categories) { cat ->
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 0.5.dp,
                     modifier = Modifier
-                        .width(86.dp)
+                        .width(96.dp)
                         .clickable { onSelectCategory(cat.query) }
                 ) {
-                    Surface(
-                        color = Color(0xFFF1F5F9),
-                        shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                        modifier = Modifier.size(68.dp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)
                     ) {
-                        ProductImage(
-                            imageUrl = cat.imageUrl,
-                            contentDescription = cat.name,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(8.dp)
+                        Surface(
+                            color = Color(0xFFF8FAFC),
+                            shape = CircleShape,
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            ProductImage(
+                                imageUrl = cat.imageUrl,
+                                contentDescription = cat.name,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(8.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = cat.name,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF1E293B),
+                            minLines = 2,
+                            maxLines = 2,
+                            lineHeight = 14.sp,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = cat.name,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF1E293B),
-                        minLines = 2,
-                        maxLines = 2,
-                        lineHeight = 14.sp,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
                 }
             }
         }
@@ -287,79 +376,386 @@ private fun MedicineCategoryRail(
 }
 
 /**
- * 1-Tap Prescription Quick Upload Strip (Tata 1mg / PharmEasy / Truemeds pattern).
+ * Dual Service Hero Tiles (Medicines vs Lab Tests 50/50 split).
  */
 @Composable
-private fun PrescriptionQuickStrip(
-    onUploadPrescription: () -> Unit
+private fun HeroDualActionCards(
+    onMedicinesClick: () -> Unit,
+    onLabTestsClick: () -> Unit
 ) {
-    Surface(
-        color = Color(0xFFECFDF5),
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0)),
-        shadowElevation = 0.5.dp,
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onUploadPrescription)
+            .padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Medicines Tile
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onMedicinesClick),
+            shape = RoundedCornerShape(18.dp),
+            color = Color.White,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            shadowElevation = 1.dp
         ) {
-            Surface(
-                color = Color.White,
-                shape = CircleShape,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF6EE7B7)),
-                modifier = Modifier.size(38.dp)
+            Box(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                Column {
+                    Surface(
+                        color = Color(0xFFDCFCE7),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "FLAT 20% OFF",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF166534),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Medicines",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Delivered in 10 mins",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Order Now",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0E675E)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = Color(0xFF0E675E),
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Lab Tests Tile
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onLabTestsClick),
+            shape = RoundedCornerShape(18.dp),
+            color = Color.White,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            shadowElevation = 1.dp
+        ) {
+            Box(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                Column {
+                    Surface(
+                        color = Color(0xFFDBEAFE),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "UP TO 70% OFF",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF1E40AF),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Lab Tests",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Free sample pickup",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Book Test",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2563EB)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = Color(0xFF2563EB),
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Assisted Commerce Ribbon (Upload Rx / WhatsApp / Call 24x7).
+ */
+@Composable
+private fun AssistedCommerceRibbon(
+    onUploadPrescription: () -> Unit,
+    onContactSupport: (String) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFF0FDF4),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Default.Description,
-                        contentDescription = "Prescription",
+                        Icons.Default.VerifiedUser,
+                        contentDescription = null,
                         tint = Color(0xFF059669),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "ORDER WITH ASSISTANCE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF065F46),
+                        letterSpacing = 0.5.sp
+                    )
+                }
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(4.dp),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFF86EFAC))
+                ) {
+                    Text(
+                        text = "Rx Required",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF047857),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Order with Prescription",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF065F46)
-                )
-                Spacer(modifier = Modifier.height(1.dp))
-                Text(
-                    text = "Upload doctor's slip & get 10-min delivery",
-                    fontSize = 11.sp,
-                    color = Color(0xFF047857)
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Surface(
-                color = Color(0xFF0C831F),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable(onClick = onUploadPrescription)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Don't know exact medicine name? Upload prescription or message our pharmacist directly.",
+                fontSize = 11.5.sp,
+                color = Color(0xFF047857),
+                lineHeight = 16.sp
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "Upload",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
+                // Upload Rx Pill Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(onClick = onUploadPrescription),
+                    color = Color(0xFF0E675E),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 9.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.FileUpload,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Upload Rx",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // WhatsApp Pill Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onContactSupport("whatsapp") },
                     color = Color.White,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 9.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = null,
+                            tint = Color(0xFF059669),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "WhatsApp",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF065F46)
+                        )
+                    }
+                }
+
+                // Call Pharmacist Pill Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onContactSupport("call") },
+                    color = Color.White,
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 9.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Phone,
+                            contentDescription = null,
+                            tint = Color(0xFF059669),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Call 24x7",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF065F46)
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Fixed first-viewport chrome (Healthcare-Optimized Header)
+// Medical Canopy Header & Sticky Search Chrome
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun DeliveryAddressWidget(
+private fun HeaderCanopy(
+    homeContext: HomeContext?,
+    selectedAddress: ApiAddress?,
+    calculatedEtaMinutes: Int,
+    locationHeaderLabel: String?,
+    isLocating: Boolean,
+    onChangeAddress: () -> Unit,
+    onProfileClick: () -> Unit,
+    onSearchClick: (String) -> Unit,
+    onUploadPrescription: () -> Unit
+) {
+    val view = LocalView.current
+    val context = LocalContext.current
+
+    // Synchronize notification status bar icons with dark medical teal canopy
+    DisposableEffect(view) {
+        var currentContext = context
+        var activity: Activity? = null
+        while (currentContext is ContextWrapper) {
+            if (currentContext is Activity) {
+                activity = currentContext
+                break
+            }
+            currentContext = currentContext.baseContext
+        }
+        val window = activity?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, view)
+            val prevLightStatusBars = insetsController.isAppearanceLightStatusBars
+            val prevStatusBarColor = window.statusBarColor
+
+            insetsController.isAppearanceLightStatusBars = false
+            window.statusBarColor = android.graphics.Color.parseColor("#0E675E")
+
+            onDispose {
+                insetsController.isAppearanceLightStatusBars = prevLightStatusBars
+                window.statusBarColor = prevStatusBarColor
+            }
+        } else {
+            onDispose {}
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0E675E),
+                        Color(0xFF0C5B53),
+                        Color(0xFF0A4F48)
+                    )
+                ),
+                shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+            )
+            .statusBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 18.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Location Header & Profile
+            CanopyLocationBar(
+                context = homeContext,
+                selectedAddress = selectedAddress,
+                calculatedEtaMinutes = calculatedEtaMinutes,
+                locationHeaderLabel = locationHeaderLabel,
+                isLocating = isLocating,
+                onChangeAddress = onChangeAddress,
+                onProfileClick = onProfileClick
+            )
+
+            // High-Utility Stadium Search Bar with Hairline Divider and Upload Rx action
+            CanopySearchBar(
+                onClick = { onSearchClick("") },
+                onUploadPrescription = onUploadPrescription
+            )
+        }
+    }
+}
+
+@Composable
+private fun CanopyLocationBar(
     context: HomeContext?,
     selectedAddress: ApiAddress? = null,
     calculatedEtaMinutes: Int = 0,
@@ -385,39 +781,36 @@ private fun DeliveryAddressWidget(
     } ?: "Select delivery location")
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 2.dp, vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Column: Modern Healthcare Navigation Pinpoint + Address & ETA
+        // Location Pin + Delivering To Title & ETA
         Row(
             modifier = Modifier
                 .weight(1f)
                 .clickable(onClick = onChangeAddress),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Directional Navigation GPS Arrow Badge (Tata 1mg / PharmEasy / Blinkit standard)
             Surface(
-                color = Color(0xFFECFDF5),
+                color = Color.White.copy(alpha = 0.18f),
                 shape = CircleShape,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
                 modifier = Modifier.size(38.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (isLocating && selectedAddress == null) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
-                            color = Color(0xFF059669),
+                            color = Color.White,
                             strokeWidth = 2.dp
                         )
                     } else {
                         Icon(
                             Icons.Default.NearMe,
                             contentDescription = "Delivery Location",
-                            tint = Color(0xFF059669),
-                            modifier = Modifier.size(20.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -427,11 +820,11 @@ private fun DeliveryAddressWidget(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Delivering to",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF64748B),
-                    letterSpacing = 0.2.sp
+                    text = "DELIVERING TO",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.75f),
+                    letterSpacing = 0.6.sp
                 )
                 Spacer(modifier = Modifier.height(1.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -439,15 +832,15 @@ private fun DeliveryAddressWidget(
                         text = titleTag,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A),
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.width(2.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     Icon(
                         Icons.Default.KeyboardArrowDown,
                         contentDescription = "Change Location",
-                        tint = Color(0xFF059669),
+                        tint = Color.White.copy(alpha = 0.85f),
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -460,17 +853,15 @@ private fun DeliveryAddressWidget(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Black,
                             color = Color(0xFF166534),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                         )
                     }
                 }
-
                 Spacer(modifier = Modifier.height(1.dp))
-
                 Text(
                     text = addressLine,
-                    fontSize = 11.sp,
-                    color = Color(0xFF64748B),
+                    fontSize = 11.5.sp,
+                    color = Color.White.copy(alpha = 0.82f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -479,12 +870,11 @@ private fun DeliveryAddressWidget(
 
         Spacer(modifier = Modifier.width(10.dp))
 
-        // Right Action: User profile button
+        // Profile Avatar Button
         Surface(
-            color = Color.White,
+            color = Color.White.copy(alpha = 0.18f),
             shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            shadowElevation = 0.5.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
             modifier = Modifier
                 .size(38.dp)
                 .clickable(onClick = onProfileClick)
@@ -493,7 +883,7 @@ private fun DeliveryAddressWidget(
                 Icon(
                     Icons.Default.Person,
                     contentDescription = "Account",
-                    tint = Color(0xFF334155),
+                    tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -502,8 +892,9 @@ private fun DeliveryAddressWidget(
 }
 
 @Composable
-private fun UniversalSearchBar(
-    onClick: () -> Unit
+private fun CanopySearchBar(
+    onClick: () -> Unit,
+    onUploadPrescription: () -> Unit
 ) {
     val searchHints = remember {
         listOf(
@@ -526,55 +917,75 @@ private fun UniversalSearchBar(
 
     Surface(
         color = Color.White,
-        shape = RoundedCornerShape(24.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        shadowElevation = 1.5.dp,
+        shape = RoundedCornerShape(26.dp),
+        shadowElevation = 3.dp,
         modifier = Modifier
             .fillMaxWidth()
+            .height(50.dp)
             .clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 Icons.Default.Search,
                 contentDescription = "Search",
-                tint = Color(0xFF0C831F),
-                modifier = Modifier.size(20.dp)
+                tint = Color(0xFF0E675E),
+                modifier = Modifier.size(22.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Box(modifier = Modifier.weight(1f)) {
                 AnimatedContent(
                     targetState = hintIndex,
-                    transitionSpec = {
-                        fadeIn() togetherWith fadeOut()
-                    },
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
                     label = "SearchHintAnimation"
                 ) { targetIndex ->
                     Text(
                         text = searchHints[targetIndex],
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         color = Color(0xFF64748B),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
+
             Spacer(modifier = Modifier.width(8.dp))
-            Icon(
-                painter = painterResource(id = R.drawable.ic_mic),
-                contentDescription = "Voice Search",
-                tint = Color(0xFF64748B),
-                modifier = Modifier.size(18.dp)
+
+            // Hairline vertical divider
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(24.dp)
+                    .background(Color(0xFFE2E8F0))
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Icon(
-                painter = painterResource(id = R.drawable.ic_camera),
-                contentDescription = "Camera Search",
-                tint = Color(0xFF64748B),
-                modifier = Modifier.size(18.dp)
-            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Upload Prescription Quick Button (PharmEasy pattern)
+            Row(
+                modifier = Modifier
+                    .clickable(onClick = onUploadPrescription)
+                    .padding(vertical = 4.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_camera),
+                    contentDescription = "Upload Rx",
+                    tint = Color(0xFF0E675E),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Upload Rx",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0E675E)
+                )
+            }
         }
     }
 }

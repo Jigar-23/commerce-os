@@ -107,8 +107,9 @@ fun CommerceOSApp(
     }
 
     var isSplashVisible by rememberSaveable { mutableStateOf(true) }
+    var isLocationLockinVisible by rememberSaveable { mutableStateOf(false) }
 
-    BackHandler(enabled = !isSplashVisible && currentScreen !is Screen.Auth) { goBack() }
+    BackHandler(enabled = !isSplashVisible && !isLocationLockinVisible && currentScreen !is Screen.Auth) { goBack() }
 
     fun openUniversalSearch(query: UniversalSearchQuery) {
         val targetScreen = router.resolveSearch(query)
@@ -294,7 +295,20 @@ fun CommerceOSApp(
 
     if (isSplashVisible) {
         SplashScreen(
-            onDismiss = { isSplashVisible = false }
+            onDismiss = {
+                isSplashVisible = false
+                isLocationLockinVisible = true
+            }
+        )
+    } else if (isLocationLockinVisible) {
+        val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+        val locality = addressViewModel.activeLocationHeaderLabel
+            ?: activeAddr?.city?.takeIf { it.isNotBlank() }
+            ?: activeAddr?.tag?.takeIf { it.isNotBlank() }
+            ?: "Rewari"
+        com.commerceos.android.ui.splash.LocationLockinScreen(
+            locality = locality,
+            onDismiss = { isLocationLockinVisible = false }
         )
     } else {
         val isCategoryScreen = currentScreen is Screen.Categories
