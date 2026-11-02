@@ -388,32 +388,33 @@ export default function CategoriesHubPage() {
                     </div>
 
                     {/* Quantity Add Button */}
-                    <div className="shrink-0">
+                    <div className="shrink-0 w-20 sm:w-22 h-8 flex justify-end">
                       {qty === 0 ? (
                         <button
                           onClick={() => handleAdd(med)}
-                          className="px-4 py-1.5 rounded-xl border border-emerald-600 text-emerald-700 font-extrabold text-xs hover:bg-emerald-50 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                          className="w-full h-full rounded-xl border-1.5 border-[#0E675E] bg-white text-[#0E675E] font-extrabold text-xs hover:bg-[#0E675E]/5 active:scale-95 transition-all cursor-pointer shadow-2xs flex items-center justify-center gap-1"
                         >
-                          ADD
+                          <span>ADD</span>
+                          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                         </button>
                       ) : (
-                        <div className="flex items-center gap-2 bg-emerald-700 text-white rounded-xl px-2 py-1 shadow-sm">
+                        <div className="w-full h-full flex items-center justify-between bg-[#0E675E] text-white rounded-xl px-1.5 shadow-xs">
                           <button
                             onClick={() => {
                               const sku = med.sku || med.id;
                               if (qty === 1) removeItem(sku);
                               else updateQuantity(sku, qty - 1);
                             }}
-                            className="w-5 h-5 flex items-center justify-center active:scale-90"
+                            className="w-5 h-5 flex items-center justify-center active:scale-90 hover:bg-white/10 rounded transition-colors"
                           >
-                            <Minus className="w-3.5 h-3.5" />
+                            <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
                           </button>
-                          <span className="text-xs font-black">{qty}</span>
+                          <span className="text-xs font-black select-none">{qty}</span>
                           <button
                             onClick={() => updateQuantity(med.sku || med.id, qty + 1)}
-                            className="w-5 h-5 flex items-center justify-center active:scale-90"
+                            className="w-5 h-5 flex items-center justify-center active:scale-90 hover:bg-white/10 rounded transition-colors"
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                           </button>
                         </div>
                       )}

@@ -25,10 +25,10 @@ export const CommerceQuantityControl: React.FC<CommerceQuantityControlProps> = (
 }) => {
   if (quantity <= 0) {
     const addStyles = {
-      xs: 'h-6 px-2 text-2xs rounded-xs',
-      sm: 'h-7 px-2.5 text-xs rounded-sm',
-      md: 'h-8 px-3.5 text-xs rounded-md',
-      lg: 'h-10 px-5 text-sm rounded-lg',
+      xs: 'h-6 min-w-[64px] px-2 text-2xs rounded-xs',
+      sm: 'h-7 min-w-[76px] px-2.5 text-xs rounded-sm',
+      md: 'h-8 min-w-[88px] px-3.5 text-xs rounded-md',
+      lg: 'h-10 min-w-[104px] px-5 text-sm rounded-lg',
     };
 
     return (

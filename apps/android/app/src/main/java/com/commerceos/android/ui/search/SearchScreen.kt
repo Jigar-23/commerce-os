@@ -1681,13 +1681,18 @@ private fun ModernSearchResultCard(
                     // Cart Action: [ ADD + ] or [ - qty + ]
                     if (currentQuantity > 0) {
                         Surface(
-                            color = Color(0xFF0C831F),
+                            color = Color(0xFF0E675E),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(32.dp)
+                            modifier = Modifier
+                                .height(32.dp)
+                                .widthIn(min = 84.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .padding(horizontal = 6.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 IconButton(
                                     onClick = { onUpdateQuantity?.invoke(result.sku ?: result.entityId, currentQuantity - 1) },
@@ -1713,29 +1718,33 @@ private fun ModernSearchResultCard(
                         }
                     } else if (onAddToCart != null) {
                         Surface(
-                            color = Color(0xFFE8F5E9),
+                            color = Color.White,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.2.dp, Color(0xFF0C831F)),
+                            border = BorderStroke(1.5.dp, Color(0xFF0E675E)),
                             modifier = Modifier
                                 .height(32.dp)
+                                .widthIn(min = 84.dp)
                                 .clickable { onAddToCart(result) }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Text(
                                     "ADD",
                                     fontSize = 12.sp,
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF0C831F)
+                                    color = Color(0xFF0E675E)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Icon(
                                     Icons.Default.Add,
                                     contentDescription = null,
-                                    tint = Color(0xFF0C831F),
+                                    tint = Color(0xFF0E675E),
                                     modifier = Modifier.size(13.dp)
                                 )
                             }

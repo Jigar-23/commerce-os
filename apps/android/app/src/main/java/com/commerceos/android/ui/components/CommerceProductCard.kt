@@ -357,7 +357,7 @@ private fun CompactProductCard(
                     onAddToCart = onAddToCart,
                     quantity = quantity,
                     onQuantityChange = onQuantityChange,
-                    modifier = Modifier.align(Alignment.End)
+                    modifier = Modifier.align(Alignment.End).widthIn(min = 96.dp)
                 )
             }
         }
@@ -712,14 +712,13 @@ private fun CardAddToCartButton(
     modifier: Modifier = Modifier
 ) {
     val outOfStock = !model.inStock || model.stockCount == 0
-    val addGreen = CommerceColors.PrimaryDark
-    val brandAccent = Color(0xFFE84335) // Tata 1mg signature coral red
+    val brandTeal = Color(0xFF0E675E) // Deep Medical Teal unified brand palette
 
     if (isReorderCard || outOfStock || quantity <= 0) {
         Surface(
             color = if (outOfStock) CommerceColors.SurfaceSubtle else Color.White,
             shape = RoundedCornerShape(10.dp),
-            border = if (!outOfStock) androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFE2E8F0)) else null,
+            border = if (!outOfStock) androidx.compose.foundation.BorderStroke(1.5.dp, brandTeal) else null,
             shadowElevation = if (!outOfStock) 0.5.dp else 0.dp,
             modifier = modifier
                 .height(36.dp)
@@ -734,7 +733,7 @@ private fun CardAddToCartButton(
                     .padding(horizontal = 8.dp)
             ) {
                 if (isReorderCard) {
-                    Text("REORDER", color = addGreen, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Text("REORDER", color = brandTeal, fontSize = 12.sp, fontWeight = FontWeight.Black)
                 } else if (outOfStock) {
                     Text("OUT OF STOCK", color = CommerceColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 } else {
@@ -744,7 +743,7 @@ private fun CardAddToCartButton(
                     ) {
                         Text(
                             "ADD",
-                            color = brandAccent,
+                            color = brandTeal,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 0.6.sp
@@ -753,7 +752,7 @@ private fun CardAddToCartButton(
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = null,
-                            tint = brandAccent,
+                            tint = brandTeal,
                             modifier = Modifier.size(15.dp)
                         )
                     }
@@ -762,7 +761,7 @@ private fun CardAddToCartButton(
         }
     } else {
         Surface(
-            color = Color(0xFF0E675E),
+            color = brandTeal,
             shape = RoundedCornerShape(10.dp),
             shadowElevation = 1.dp,
             modifier = modifier.height(36.dp)
