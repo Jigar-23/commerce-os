@@ -297,7 +297,9 @@ fun CommerceOSApp(
             onDismiss = { isSplashVisible = false }
         )
     } else {
+        val isCategoryScreen = currentScreen is Screen.Categories
         Scaffold(
+            containerColor = if (isCategoryScreen) Color(0xFF005844) else CommerceColors.Background,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val hideTopBar = currentScreen is Screen.Home ||
@@ -418,7 +420,15 @@ fun CommerceOSApp(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        val topPadding = if (isCategoryScreen) 0.dp else padding.calculateTopPadding()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    top = topPadding,
+                    bottom = padding.calculateBottomPadding()
+                )
+        ) {
             when (val screen = currentScreen) {
                 is Screen.Home -> {
                     val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()

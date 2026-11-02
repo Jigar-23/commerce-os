@@ -1,5 +1,8 @@
 package com.commerceos.android.ui.categories
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,12 +27,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import com.commerceos.android.model.CatalogCategory
 import com.commerceos.android.ui.components.ProductImage
 import com.commerceos.android.ui.theme.PlusJakartaSans
@@ -327,6 +334,42 @@ private val FEATURED_BRANDS = listOf(
     FeaturedBrand("Micro Labs", "Dolo 650 Makers", "Fast Relief", Color(0xFFD97706), "Micro Labs")
 )
 
+data class DepartmentColorPalette(
+    val topGradient: Color,
+    val bottomGradient: Color,
+    val selectedChipColor: Color
+)
+
+fun getDepartmentColors(department: String): DepartmentColorPalette {
+    return when (department.lowercase().trim()) {
+        "chronic care" -> DepartmentColorPalette(
+            topGradient = Color(0xFF1E3A8A), // Deep Royal Navy Blue
+            bottomGradient = Color(0xFF1D4ED8),
+            selectedChipColor = Color(0xFF1E3A8A)
+        )
+        "daily wellness" -> DepartmentColorPalette(
+            topGradient = Color(0xFF0F766E), // Deep Teal
+            bottomGradient = Color(0xFF0D9488),
+            selectedChipColor = Color(0xFF0F766E)
+        )
+        "ayurveda" -> DepartmentColorPalette(
+            topGradient = Color(0xFF14532D), // Deep Herbal Forest Green
+            bottomGradient = Color(0xFF166534),
+            selectedChipColor = Color(0xFF14532D)
+        )
+        "personal care" -> DepartmentColorPalette(
+            topGradient = Color(0xFF831843), // Rich Magenta / Plum
+            bottomGradient = Color(0xFF9D174D),
+            selectedChipColor = Color(0xFF831843)
+        )
+        else -> DepartmentColorPalette( // "All Categories", "Medicines", etc.
+            topGradient = Color(0xFF005844), // Classic PharmEasy Emerald
+            bottomGradient = Color(0xFF067A5E),
+            selectedChipColor = Color(0xFF005844)
+        )
+    }
+}
+
 /**
  * Flagship Healthcare Category Hub matching and exceeding PharmEasy & Tata 1mg benchmarks.
  * Features:
@@ -349,6 +392,41 @@ fun CategoriesScreen(
 
     var selectedDepartment by remember { mutableStateOf("All Categories") }
     var searchQuery by remember { mutableStateOf("") }
+
+    val view = LocalView.current
+    val context = LocalContext.current
+    val currentPalette = remember(selectedDepartment) { getDepartmentColors(selectedDepartment) }
+
+    // Dynamically adjust notification bar / status bar to match category section color!
+    DisposableEffect(currentPalette.topGradient, view) {
+        var currentContext: Context? = context
+        var activity: Activity? = null
+        while (currentContext is ContextWrapper) {
+            if (currentContext is Activity) {
+                activity = currentContext
+                break
+            }
+            currentContext = currentContext.baseContext
+        }
+
+        val window = activity?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, view)
+            val prevLightStatusBars = insetsController.isAppearanceLightStatusBars
+            val prevStatusBarColor = window.statusBarColor
+
+            // Category section is dark colored -> make notification bar icons white and set status bar color
+            insetsController.isAppearanceLightStatusBars = false
+            window.statusBarColor = currentPalette.topGradient.toArgb()
+
+            onDispose {
+                insetsController.isAppearanceLightStatusBars = prevLightStatusBars
+                window.statusBarColor = prevStatusBarColor
+            }
+        } else {
+            onDispose {}
+        }
+    }
 
     val rawCategories = when (val state = viewModel.taxonomy) {
         is CategoryTaxonomyUiState.Content -> {
@@ -400,9 +478,10 @@ fun CategoriesScreen(
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color(0xFF005844), Color(0xFF067A5E))
+                        colors = listOf(currentPalette.topGradient, currentPalette.bottomGradient)
                     )
                 )
+                .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             // Location & Delivery Strip
@@ -894,12 +973,13 @@ fun CategoriesScreen(
                     ) {
                         items(HEALTHCARE_DEPARTMENTS) { dept ->
                             val isSelected = selectedDepartment == dept
+                            val deptPal = getDepartmentColors(dept)
                             Surface(
-                                color = if (isSelected) Color(0xFF005844) else Color(0xFFF8FAFC),
+                                color = if (isSelected) deptPal.selectedChipColor else Color(0xFFF8FAFC),
                                 shape = RoundedCornerShape(20.dp),
                                 border = BorderStroke(
                                     width = 1.dp,
-                                    color = if (isSelected) Color(0xFF005844) else Color(0xFFE2E8F0)
+                                    color = if (isSelected) deptPal.selectedChipColor else Color(0xFFE2E8F0)
                                 ),
                                 modifier = Modifier.clickable { selectedDepartment = dept }
                             ) {
@@ -1017,7 +1097,7 @@ fun CategoriesScreen(
                                 searchQuery = ""
                                 selectedDepartment = "All Categories"
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005844)),
+                            colors = ButtonDefaults.buttonColors(containerColor = currentPalette.selectedChipColor),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(
