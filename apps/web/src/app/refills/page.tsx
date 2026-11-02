@@ -5,6 +5,7 @@ import { RefreshCw, CheckCircle2, Plus, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { CommerceNavbar, CommerceEmptyState } from '@commerce-os/ui';
 import { useSession } from '@/lib/session-store';
+import MobileBottomNav from '@/components/navigation/MobileBottomNav';
 
 interface RefillSubscription {
   id: string;
@@ -204,6 +205,9 @@ export default function RefillSubscriptionsPage() {
           </div>
         )}
       </main>
+
+      {/* MOBILE BOTTOM NAVIGATION */}
+      <MobileBottomNav />
     </div>
   );
 }

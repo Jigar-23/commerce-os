@@ -48,6 +48,8 @@ import {
 } from '@commerce-os/ui';
 import DeliveryAddressMapModal from '@/components/DeliveryAddressMapModal';
 import FlagshipSearchModal from '@/components/FlagshipSearchModal';
+import FloatingCartBar from '@/components/cart/FloatingCartBar';
+import MobileBottomNav from '@/components/navigation/MobileBottomNav';
 
 const REFERENCE_DETAILS: Record<
   string,
@@ -196,11 +198,15 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
+  const locationAddressText = currentAddress
+    ? `${currentAddress.contactName || currentAddress.tag || 'Home'} • ${currentAddress.addressLine}`
+    : 'Rewari Sector 18 • Express Hub';
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-surface-canvas text-content-primary flex flex-col font-sans antialiased pb-24">
         <CommerceNavbar
-          locationAddress={`${currentAddress.contactName || 'Home'} • ${currentAddress.addressLine}`}
+          locationAddress={locationAddressText}
           cartItemCount={cartCount}
           cartTotalAmount={cartSubtotal}
           onOpenCart={() => setIsCartOpen(true)}
@@ -224,7 +230,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
     return (
       <div className="min-h-screen bg-surface-canvas text-content-primary flex flex-col font-sans antialiased pb-24">
         <CommerceNavbar
-          locationAddress={`${currentAddress.contactName || 'Home'} • ${currentAddress.addressLine}`}
+          locationAddress={locationAddressText}
           cartItemCount={cartCount}
           cartTotalAmount={cartSubtotal}
           onOpenCart={() => setIsCartOpen(true)}
@@ -257,7 +263,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
     <div className="min-h-screen bg-surface-canvas text-content-primary flex flex-col font-sans antialiased pb-24 selection:bg-surface-brandSubtle selection:text-content-brand">
       {/* 1. NAVBAR */}
       <CommerceNavbar
-        locationAddress={`${currentAddress.contactName || 'Home'} • ${currentAddress.addressLine}`}
+        locationAddress={locationAddressText}
         onOpenLocationModal={() => setIsMapModalOpen(true)}
         cartItemCount={cartCount}
         cartTotalAmount={cartSubtotal}
@@ -618,6 +624,11 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
           router.push('/checkout');
         }}
       />
+      {/* 7. FLOATING QUICK-CART CAPSULE BAR */}
+      <FloatingCartBar onOpenCart={() => setIsCartOpen(true)} />
+
+      {/* 8. MOBILE BOTTOM NAVIGATION BAR */}
+      <MobileBottomNav />
     </div>
   );
 }
