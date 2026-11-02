@@ -138,10 +138,13 @@ object RiderNotificationManager {
             }
         }
 
-        val dedupKey = "offer_${offer.offerId}"
-        val orderDedupKey = if (offer.orderId.isNotBlank()) "order_${offer.orderId}" else null
-        if (isEventSuccessfullyPosted(context, dedupKey) || (orderDedupKey != null && isEventSuccessfullyPosted(context, orderDedupKey))) {
-            Log.d(TAG, "Notification already posted for $dedupKey / $orderDedupKey. Skipping duplicate alert.")
+        val dedupKey = if (offer.eventId.isNotBlank()) {
+            if (offer.eventId.startsWith("evt_")) offer.eventId else "evt_${offer.eventId}"
+        } else {
+            "offer_${offer.offerId}"
+        }
+        if (isEventSuccessfullyPosted(context, dedupKey)) {
+            Log.d(TAG, "Notification already posted for $dedupKey. Skipping duplicate alert.")
             return NotificationPostResult.POSTED
         }
 
@@ -178,12 +181,13 @@ object RiderNotificationManager {
                         .bigText("Order$orderTag • ~${offer.estimatedDurationMins} min\nPickup: ${offer.merchantName}\nDrop: ${offer.customerAddress}\nTap to accept")
                 )
                 .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setSound(soundUri)
                 .setVibrate(longArrayOf(0, 400, 200, 400))
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, true)
                 .setAutoCancel(false)
                 .setOngoing(true)
 
@@ -191,9 +195,6 @@ object RiderNotificationManager {
             manager.notify(offer.offerId.hashCode(), builder.build())
 
             markEventSuccessfullyPosted(context, dedupKey)
-            if (orderDedupKey != null) {
-                markEventSuccessfullyPosted(context, orderDedupKey)
-            }
 
             // Audible alert tone and vibration pulse (played exactly once per unique order/offer)
             RiderAlertNotifier.playNewJobAlert(context, offer.offerId)

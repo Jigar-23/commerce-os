@@ -216,6 +216,13 @@ fun NativeGoogleOrderTrackingMap(
         val destChanged = lastDst != routeDest
         val distMoved = if (lastOrig != null) SphericalUtil.computeDistanceBetween(lastOrig, routeOrigin) else 999.0
 
+        if (stageChanged || destChanged) {
+            googleRouteWaypoints = emptyList()
+            lastRoutedOrigin = null
+            lastRoutedDest = null
+            lastActiveStage = activeStage
+        }
+
         if (googleRouteWaypoints.isEmpty() || stageChanged || destChanged || distMoved > 60.0) {
             val result = routesProvider.getDrivingRoute(
                 originLat = routeOrigin.latitude,
@@ -292,10 +299,10 @@ fun NativeGoogleOrderTrackingMap(
     }
 
     // Full baseline route points (hugging real roads)
-    val fullRoutePoints = remember(shouldShowRoute, googleRouteWaypoints, waypoints, routeOrigin, routeDest) {
+    val fullRoutePoints = remember(shouldShowRoute, googleRouteWaypoints, waypoints, routeOrigin, routeDest, activeStage, lastActiveStage) {
         when {
             !shouldShowRoute || routeOrigin == null || routeDest == null -> emptyList()
-            googleRouteWaypoints.size >= 2 -> googleRouteWaypoints
+            googleRouteWaypoints.size >= 2 && activeStage == lastActiveStage -> googleRouteWaypoints
             waypoints.size >= 2 -> waypoints.map { LatLng(it.lat, it.lng) }
             else -> listOf(routeOrigin, routeDest)
         }
@@ -424,7 +431,8 @@ fun NativeGoogleOrderTrackingMap(
             }
 
             // 4. Native 3D Isometric Delivery Scooter (Real Turn-by-Turn Bearing)
-            if (riderLatLng != null) {
+            // STRICT INVARIANT: Only render scooter marker when rider is actively assigned and en-route
+            if (riderLatLng != null && (isHeadingToStore || isPostPickup)) {
                 Marker(
                     state = riderMarkerState,
                     icon = riderScooterBitmap,

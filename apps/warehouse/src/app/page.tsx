@@ -20,11 +20,11 @@ function getApiUrl(configuredUrl?: string, defaultPort?: number): string {
   if (isProduction) {
     return ''; // Fail closed in production if environment configuration is omitted
   }
-  return defaultPort ? `http://localhost:${defaultPort}` : 'http://localhost:8083';
+  return defaultPort ? `http://localhost:${defaultPort}` : 'http://localhost:3000';
 }
 
-const ORDER_API = getApiUrl(process.env.NEXT_PUBLIC_ORDER_API_URL, 8083);
-const INVENTORY_API = getApiUrl(process.env.NEXT_PUBLIC_INVENTORY_API_URL, 8083);
+const ORDER_API = getApiUrl(process.env.NEXT_PUBLIC_ORDER_API_URL, 3000);
+const INVENTORY_API = getApiUrl(process.env.NEXT_PUBLIC_INVENTORY_API_URL, 3000);
 
 interface PickItem {
   sku: string;

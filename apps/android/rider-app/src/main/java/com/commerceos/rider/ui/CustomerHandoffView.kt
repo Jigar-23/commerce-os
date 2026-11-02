@@ -1,5 +1,6 @@
 package com.commerceos.rider.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.commerceos.rider.model.ServerDeliverySession
+import com.commerceos.rider.theme.RiderColors
 
 @Composable
 fun CustomerHandoffView(
@@ -43,13 +45,14 @@ fun CustomerHandoffView(
 
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
+        colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+        border = BorderStroke(1.dp, RiderColors.Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Customer Header Info
             Row(
@@ -59,25 +62,25 @@ fun CustomerHandoffView(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        color = Color(0xFFF59E0B).copy(alpha = 0.15f),
+                        color = RiderColors.WarningSoft,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.size(44.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Home, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Home, contentDescription = null, tint = RiderColors.Warning, modifier = Modifier.size(24.dp))
                         }
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text("DOORSTEP HANDOFF", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B), letterSpacing = 1.sp)
-                        Text(session.customerName.ifBlank { "Customer" }, fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White)
+                        Text("DOORSTEP HANDOFF", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = RiderColors.Warning, letterSpacing = 0.8.sp)
+                        Text(session.customerName.ifBlank { "Customer" }, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = RiderColors.TextPrimary)
                     }
                 }
 
                 Surface(
-                    color = Color(0xFF22252E),
+                    color = RiderColors.AccentBlueSoft,
                     shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2B2F3B)),
+                    border = BorderStroke(1.dp, RiderColors.AccentBlue.copy(alpha = 0.3f)),
                     modifier = Modifier.clickable {
                         val ph = session.customerPhone.ifBlank { session.maskedCustomerPhone }
                         com.commerceos.rider.util.RiderNavigationUtils.dialPhoneNumber(context, ph)
@@ -87,13 +90,13 @@ fun CustomerHandoffView(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Phone, contentDescription = "Call Customer", tint = Color(0xFF38BDF8), modifier = Modifier.size(15.dp))
+                        Icon(Icons.Default.Phone, contentDescription = "Call Customer", tint = RiderColors.AccentBlueText, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = session.maskedCustomerPhone,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF38BDF8)
+                            color = RiderColors.AccentBlueText
                         )
                     }
                 }
@@ -101,34 +104,32 @@ fun CustomerHandoffView(
 
             // Customer Delivery Address Box
             Surface(
-                color = Color(0xFF22252E),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2B2F3B)),
+                color = RiderColors.SurfaceSubtle,
+                border = BorderStroke(1.dp, RiderColors.Border),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Text("Delivery Address", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+                    Text("Delivery Address", fontSize = 11.sp, color = RiderColors.TextMuted, fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = session.customerAddress,
                         fontSize = 13.sp,
-                        color = Color.White,
+                        color = RiderColors.TextPrimary,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
 
-            HorizontalDivider(color = Color(0xFF262933), thickness = 1.dp)
+            HorizontalDivider(color = RiderColors.Divider, thickness = 1.dp)
 
-            // ==========================================
             // STEP 1: CASH COLLECTION (FOR COD ORDERS)
-            // ==========================================
             if (session.isCod) {
                 if (!session.codReconciled) {
                     Surface(
-                        color = Color(0xFF271B0B),
+                        color = RiderColors.WarningSoft.copy(alpha = 0.6f),
                         shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFF59E0B).copy(alpha = 0.6f)),
+                        border = BorderStroke(1.5.dp, RiderColors.Warning),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -141,14 +142,14 @@ fun CustomerHandoffView(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text("STEP 1: CASH TO COLLECT", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color(0xFFFBBF24), letterSpacing = 0.5.sp)
-                                    Text("Cash On Delivery (COD)", fontSize = 13.sp, color = Color(0xFFFDE68A))
+                                    Text("STEP 1: CASH TO COLLECT", fontSize = 11.sp, fontWeight = FontWeight.Black, color = RiderColors.WarningText, letterSpacing = 0.5.sp)
+                                    Text("Cash On Delivery (COD)", fontSize = 13.sp, color = RiderColors.WarningText, fontWeight = FontWeight.Medium)
                                 }
                                 Text(
                                     text = "₹$codAmountExpected",
                                     fontSize = 28.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = Color(0xFFFBBF24)
+                                    color = RiderColors.WarningText
                                 )
                             }
 
@@ -158,7 +159,8 @@ fun CustomerHandoffView(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Surface(
-                                    color = if (enteredCodAmount == codAmountExpected.toString()) Color(0xFFFBBF24) else Color(0xFF262933),
+                                    color = if (enteredCodAmount == codAmountExpected.toString()) RiderColors.Warning else RiderColors.Surface,
+                                    border = BorderStroke(1.dp, if (enteredCodAmount == codAmountExpected.toString()) RiderColors.Warning else RiderColors.Border),
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
                                         .weight(1f)
@@ -166,7 +168,7 @@ fun CustomerHandoffView(
                                 ) {
                                     Text(
                                         text = "Exact ₹$codAmountExpected",
-                                        color = if (enteredCodAmount == codAmountExpected.toString()) Color.Black else Color.White,
+                                        color = if (enteredCodAmount == codAmountExpected.toString()) Color.White else RiderColors.TextPrimary,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center,
@@ -177,7 +179,8 @@ fun CustomerHandoffView(
                                 listOf(100, 200, 500).forEach { note ->
                                     if (note >= codAmountExpected) {
                                         Surface(
-                                            color = if (enteredCodAmount == note.toString()) Color(0xFFFBBF24) else Color(0xFF262933),
+                                            color = if (enteredCodAmount == note.toString()) RiderColors.Warning else RiderColors.Surface,
+                                            border = BorderStroke(1.dp, if (enteredCodAmount == note.toString()) RiderColors.Warning else RiderColors.Border),
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier
                                                 .weight(1f)
@@ -185,7 +188,7 @@ fun CustomerHandoffView(
                                         ) {
                                             Text(
                                                 text = "₹$note",
-                                                color = if (enteredCodAmount == note.toString()) Color.Black else Color.White,
+                                                color = if (enteredCodAmount == note.toString()) Color.White else RiderColors.TextPrimary,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 textAlign = TextAlign.Center,
@@ -200,35 +203,37 @@ fun CustomerHandoffView(
                             OutlinedTextField(
                                 value = enteredCodAmount,
                                 onValueChange = onCodAmountChange,
-                                label = { Text("Amount Received from Customer (₹)", color = Color(0xFF94A3B8)) },
-                                placeholder = { Text("e.g. $codAmountExpected", color = Color(0xFF64748B)) },
+                                label = { Text("Amount Received from Customer (₹)", color = RiderColors.TextMuted) },
+                                placeholder = { Text("e.g. $codAmountExpected", color = RiderColors.TextMuted) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = RiderColors.TextPrimary),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFFFBBF24),
-                                    unfocusedBorderColor = Color(0xFF475569),
-                                    focusedLabelColor = Color(0xFFFBBF24),
-                                    cursorColor = Color(0xFFFBBF24)
+                                    focusedBorderColor = RiderColors.Warning,
+                                    unfocusedBorderColor = RiderColors.Border,
+                                    focusedLabelColor = RiderColors.Warning,
+                                    cursorColor = RiderColors.Warning,
+                                    focusedContainerColor = RiderColors.Surface,
+                                    unfocusedContainerColor = RiderColors.Surface
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
 
                             Button(
                                 onClick = onReconcileCod,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBBF24)),
+                                colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Warning),
                                 shape = RoundedCornerShape(12.dp),
                                 enabled = !isLoading && enteredCodAmount.isNotBlank(),
-                                modifier = Modifier.fillMaxWidth().height(52.dp)
+                                modifier = Modifier.fillMaxWidth().height(50.dp)
                             ) {
                                 if (isLoading) {
-                                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                                 } else {
                                     Text(
                                         text = "CONFIRM CASH COLLECTED",
-                                        fontWeight = FontWeight.Black,
+                                        fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
-                                        color = Color.Black,
+                                        color = Color.White,
                                         letterSpacing = 0.5.sp
                                     )
                                 }
@@ -238,33 +243,31 @@ fun CustomerHandoffView(
                 } else {
                     // COD Collected & Reconciled Success Card
                     Surface(
-                        color = Color(0xFF064E3B).copy(alpha = 0.5f),
+                        color = RiderColors.PrimarySoft,
                         shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)),
+                        border = BorderStroke(1.dp, RiderColors.Primary),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(26.dp))
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = RiderColors.Primary, modifier = Modifier.size(26.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("CASH COLLECTED & RECONCILED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF34D399), letterSpacing = 0.5.sp)
-                                Text("₹${(session.codCollectedAmount ?: session.codAmount ?: 0.0).toInt()} received safely", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("CASH COLLECTED & RECONCILED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = RiderColors.PrimarySoftText, letterSpacing = 0.5.sp)
+                                Text("₹${(session.codCollectedAmount ?: session.codAmount ?: 0.0).toInt()} received safely", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = RiderColors.PrimarySoftText)
                             }
                         }
                     }
                 }
             }
 
-            // ==========================================
             // STEP 2: DOORSTEP DELIVERY PIN VERIFICATION
-            // ==========================================
             Surface(
-                color = Color(0xFF22252E),
+                color = RiderColors.Surface,
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (!session.isCod || session.codReconciled) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF2B2F3B)),
+                border = BorderStroke(1.dp, if (!session.isCod || session.codReconciled) RiderColors.Primary else RiderColors.Border),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -277,13 +280,13 @@ fun CustomerHandoffView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = RiderColors.AccentBlue, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (session.isCod) "STEP 2: DELIVERY PIN" else "CUSTOMER DELIVERY PIN",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF38BDF8),
+                                fontWeight = FontWeight.Bold,
+                                color = RiderColors.AccentBlue,
                                 letterSpacing = 0.5.sp
                             )
                         }
@@ -292,7 +295,7 @@ fun CustomerHandoffView(
                             Text(
                                 text = "Resend PIN in ${resendCooldown}s",
                                 fontSize = 11.sp,
-                                color = Color(0xFF94A3B8),
+                                color = RiderColors.TextMuted,
                                 fontWeight = FontWeight.SemiBold
                             )
                         } else {
@@ -300,7 +303,7 @@ fun CustomerHandoffView(
                                 onClick = onResendOtp,
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Text("Resend PIN", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+                                Text("Resend PIN", fontSize = 12.sp, color = RiderColors.AccentBlueText, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -308,7 +311,7 @@ fun CustomerHandoffView(
                     Text(
                         text = "Ask customer for the 6-digit Delivery PIN shown on their app screen to complete the handoff.",
                         fontSize = 12.sp,
-                        color = Color(0xFF94A3B8),
+                        color = RiderColors.TextSecondary,
                         lineHeight = 16.sp
                     )
 
@@ -316,33 +319,35 @@ fun CustomerHandoffView(
                     OutlinedTextField(
                         value = enteredOtp,
                         onValueChange = { if (it.length <= 6 && it.all { ch -> ch.isDigit() }) onOtpChange(it) },
-                        placeholder = { Text("• • • • • •", fontSize = 24.sp, color = Color(0xFF475569), textAlign = TextAlign.Center) },
+                        placeholder = { Text("• • • • • •", fontSize = 24.sp, color = RiderColors.Border, textAlign = TextAlign.Center) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true,
                         textStyle = androidx.compose.ui.text.TextStyle(
                             fontSize = 24.sp,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
                             letterSpacing = 8.sp,
-                            color = Color.White
+                            color = RiderColors.TextPrimary
                         ),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF38BDF8),
-                            unfocusedBorderColor = Color(0xFF475569),
-                            cursorColor = Color(0xFF38BDF8)
+                            focusedBorderColor = RiderColors.Primary,
+                            unfocusedBorderColor = RiderColors.Border,
+                            cursorColor = RiderColors.Primary,
+                            focusedContainerColor = RiderColors.SurfaceSubtle,
+                            unfocusedContainerColor = RiderColors.SurfaceSubtle
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     if (!errorMessage.isNullOrBlank()) {
                         Surface(
-                            color = Color(0xFF7F1D1D).copy(alpha = 0.4f),
+                            color = RiderColors.DangerSoft,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 text = "⚠️ $errorMessage",
-                                color = Color(0xFFFCA5A5),
+                                color = RiderColors.DangerText,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(8.dp)
@@ -352,19 +357,19 @@ fun CustomerHandoffView(
 
                     Button(
                         onClick = onVerifyOtp,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                        colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                         shape = RoundedCornerShape(12.dp),
                         enabled = !isLoading && enteredOtp.trim().length in 4..6 && (!session.isCod || session.codReconciled),
-                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {
                         if (isLoading) {
-                            CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
                         } else {
                             Text(
                                 text = "VERIFY PIN & COMPLETE DELIVERY",
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = Color.Black,
+                                color = Color.White,
                                 letterSpacing = 0.5.sp
                             )
                         }

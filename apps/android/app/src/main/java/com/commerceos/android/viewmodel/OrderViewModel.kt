@@ -107,6 +107,8 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
     }
 
     fun loadDetail(orderId: String) {
+        // Immediately clear previous order's live tracking state to prevent ghost rider markers
+        liveTracking = null
         viewModelScope.launch {
             detail = OrderDetailUiState.Loading
             when (val result = repository.getOrderById(orderId)) {

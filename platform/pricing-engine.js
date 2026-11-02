@@ -103,7 +103,7 @@ function calculateCustomerOrderPricing({
   const handlingFee = Math.max(0, Number(packagingFee || 0));
   const tax = Math.max(0, Number(taxAmount || 0));
   const tipAmount = Math.max(0, Number(tip) || 0);
-  const codFee = 0.0;
+  const codFee = isCod ? (PRICING_CONFIG_V2_4.codCollectionIncentive || 15.0) : 0.0;
   const totalAmount = Math.max(0, Math.round((subtotal - discount + deliveryFee + handlingFee + tax + tipAmount + codFee) * 100) / 100);
 
   return {

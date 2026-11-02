@@ -2175,7 +2175,7 @@ class TransactionalOfferRepository {
        FROM offers o
        LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
        LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
-       WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all')
+       WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE)
          AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
          AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000) OR o.created_at >= NOW() - INTERVAL '60 minutes')
        ORDER BY o.created_at DESC`,
@@ -2355,19 +2355,10 @@ class TransactionalOfferRepository {
       const cleanOfferRider = String(offer.rider_id || '').toLowerCase();
       const isPoolOffer = !offer.rider_id || ['all', 'broadcast', 'pool', 'unassigned', 'open'].includes(cleanOfferRider) || Boolean(offer.is_broadcast || offer.broadcast);
       if (!isPoolOffer && offer.rider_id !== riderId) {
-        // Also check if delivery session is unassigned (LOOKING_FOR_RIDER)
-        const dsCheck = await client.query(
-          `SELECT rider_id, state FROM delivery_sessions WHERE (delivery_id = $1 OR order_id = $1) LIMIT 1`,
-          [offer.delivery_id]
-        );
-        const dsRow = dsCheck.rows[0];
-        const isSessionUnassigned = !dsRow?.rider_id || dsRow?.state === 'LOOKING_FOR_RIDER';
-        if (!isSessionUnassigned) {
-          await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
-        }
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
       }
-      if (isPoolOffer || offer.rider_id !== riderId) {
+      if (isPoolOffer) {
         const canClaim = ['CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED'].includes(offer.status);
         if (canClaim) {
           await client.query('UPDATE offers SET rider_id = $1 WHERE (offer_id = $2 OR id = $2)', [riderId, offerId]);
@@ -2389,7 +2380,8 @@ class TransactionalOfferRepository {
         return { ok: true, httpStatus: 200, offer, session: sessionRes.rows[0] || null, idempotencyReplay: true };
       }
 
-      if ((now > Number(offer.offer_expires_at) && (now - Number(offer.offer_expires_at) > 3600000)) || offer.status === 'EXPIRED') {
+      const offerExpiry = Number(offer.offer_expires_at || 0);
+      if ((offerExpiry > 0 && now > offerExpiry) || offer.status === 'EXPIRED') {
         await client.query(`UPDATE offers SET status = 'EXPIRED' WHERE (offer_id = $1 OR id = $1)`, [offerId]);
         await client.query('COMMIT');
         return { ok: false, httpStatus: 409, error: 'OFFER_EXPIRED', message: 'This offer has expired on the server.' };
@@ -3107,7 +3099,12 @@ class TransactionalDeliveryRepository {
         if (isCodCollected) {
           await client.query(
             `UPDATE cod_ledger 
-             SET status = 'COLLECTED_RECONCILED', amount_collected = COALESCE($2, amount_expected), collector_id = $3, reconciled = TRUE, updated_at = NOW()
+             SET amount_collected = COALESCE($2, amount_expected),
+                 shortage_amount = GREATEST(0, amount_expected - COALESCE($2, amount_expected)),
+                 status = CASE WHEN COALESCE($2, amount_expected) < amount_expected THEN 'COLLECTED_SHORTAGE' ELSE 'COLLECTED_RECONCILED' END,
+                 reconciled = CASE WHEN COALESCE($2, amount_expected) < amount_expected THEN FALSE ELSE TRUE END,
+                 collector_id = $3,
+                 updated_at = NOW()
              WHERE order_id = $1`,
             [order.order_id || order.id, resolvedAmount, riderId]
           );
@@ -3581,13 +3578,15 @@ class TransactionalOrderRepository {
       // 12. Authoritative Financial Totals via Pricing Engine
       const calculatedItemsSubtotal = resolvedItemSnapshots.reduce((acc, it) => acc + it.lineTotal, 0);
       const pricingEngine = require('../pricing-engine');
+      // Zero client trust: Client cannot inject arbitrary discountAmount or discount overrides.
+      // Discounts must originate strictly from verified promotion/coupon tables or server pricing rules.
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,
         distanceKm,
         isCod,
         tip: data.tip || data.selectedTip || 0,
         customDeliveryFee: data.deliveryFee != null ? data.deliveryFee : (data.delivery_fee != null ? data.delivery_fee : null),
-        discountAmount: data.discountAmount || data.discount || data.productDiscount || 0,
+        discountAmount: 0,
         packagingFee: data.packagingFee || data.handlingFee || 0,
         taxAmount: data.taxAmount || 0
       });
@@ -3923,10 +3922,10 @@ class TransactionalOrderRepository {
           return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' };
         }
 
-        // Idempotency: if already in SELLER_ACCEPTED, return without error
-        if (order.status === 'SELLER_ACCEPTED') {
+        // Idempotency & Fleet Re-broadcast: if already accepted or packed/ready without assigned rider, return success to trigger fresh fleet broadcast
+        if (['SELLER_ACCEPTED', 'PACKED', 'READY_FOR_PICKUP'].includes(order.status)) {
           await client.query('COMMIT');
-          return { ok: true, order, isIdempotent: true };
+          return { ok: true, order, isIdempotent: true, isRebroadcast: true };
         }
 
         // Precondition Check: Must be in PLACED, SELLER_PENDING, or CREATED (PAYMENT_PENDING must be rejected)
@@ -6428,40 +6427,49 @@ class ProductionNotificationService {
       }
     }
 
-    if (!apnsOk && this.fcmSender && deviceToken) {
-      if (typeof this.fcmSender.sendPushNotification === 'function') {
-        fcmOk = await this.fcmSender.sendPushNotification(deviceToken, {
-          notificationId: notifId,
-          offerId: offer.offerId || offer.offer_id,
-          orderId: offer.orderId || offer.order_id,
-          deliveryId: offer.deliveryId || offer.delivery_id,
-          title: notifRecord.title,
-          body: notifRecord.body,
-          data: {
-            offerId: offer.offerId || offer.offer_id,
-            orderId: offer.orderId || offer.order_id,
-            deliveryId: offer.deliveryId || offer.delivery_id,
-            earningsAmount: String(earnings),
-            totalDistanceKm: String(totalDist),
-            estimatedDurationMins: String(duration),
-            offerExpiresAt: String(offer.offerExpiresAt || offer.offer_expires_at),
-            merchantName: mName,
-            customerAddress: cAddr,
-            merchantAddress: offer.merchantAddress || offer.merchant_address || ''
-          }
-        });
-      } else if (typeof this.fcmSender === 'function') {
-        fcmOk = await this.fcmSender(riderId, notifRecord.title, notifRecord.body, {
-          eventType: 'NEW_DISPATCH_OFFER',
-          offerId: offer.offerId || offer.offer_id,
-          notificationId: notifId
-        }, deviceToken);
+    if (!apnsOk && this.fcmSender) {
+      const fcmPayload = {
+        notificationId: notifId,
+        offerId: String(offer.offerId || offer.offer_id || ''),
+        orderId: String(offer.orderId || offer.order_id || ''),
+        deliveryId: String(offer.deliveryId || offer.delivery_id || ''),
+        riderId: String(riderId || 'broadcast'),
+        title: notifRecord.title,
+        body: notifRecord.body,
+        data: {
+          offerId: String(offer.offerId || offer.offer_id || ''),
+          orderId: String(offer.orderId || offer.order_id || ''),
+          deliveryId: String(offer.deliveryId || offer.delivery_id || ''),
+          riderId: String(riderId || 'broadcast'),
+          earningsAmount: String(earnings),
+          totalDistanceKm: String(totalDist),
+          estimatedDurationMins: String(duration),
+          offerExpiresAt: String(offer.offerExpiresAt || offer.offer_expires_at || (Date.now() + 900000)),
+          merchantName: mName,
+          customerAddress: cAddr,
+          merchantAddress: offer.merchantAddress || offer.merchant_address || '',
+          serverTime: String(Date.now())
+        }
+      };
+
+      if (deviceToken) {
+        if (typeof this.fcmSender.sendPushNotification === 'function') {
+          fcmOk = await this.fcmSender.sendPushNotification(deviceToken, fcmPayload);
+        } else if (typeof this.fcmSender === 'function') {
+          fcmOk = await this.fcmSender(riderId, notifRecord.title, notifRecord.body, fcmPayload.data, deviceToken);
+        }
+      } else if (riderId === 'broadcast' || riderId === 'ALL' || riderId === 'pool' || !riderId) {
+        if (typeof this.fcmSender.sendPushToTopic === 'function') {
+          fcmOk = await this.fcmSender.sendPushToTopic('riders_broadcast', fcmPayload);
+        } else if (typeof this.fcmSender.sendPushNotification === 'function') {
+          fcmOk = await this.fcmSender.sendPushNotification('/topics/riders_broadcast', fcmPayload);
+        }
       }
     }
 
-    if (this.telemetryRepo) {
+    if (this.telemetryRepo && typeof this.telemetryRepo.recordDispatchAttempt === 'function') {
       try {
-        await this.telemetryRepo.recordTelemetry({
+        await this.telemetryRepo.recordDispatchAttempt({
           riderId,
           deliveryId: offer.deliveryId || offer.delivery_id,
           latitude: Number(offer.merchantLat || offer.merchant_lat || 28.6315),
@@ -6476,6 +6484,20 @@ class ProductionNotificationService {
           platform: tokenPlatform
         });
       } catch (_) {}
+    } else if (this.telemetryRepo && this.telemetryRepo.db) {
+      this.telemetryRepo.db.fcmTelemetry = this.telemetryRepo.db.fcmTelemetry || [];
+      this.telemetryRepo.db.fcmTelemetry.push({
+        riderId,
+        deliveryId: offer.deliveryId || offer.delivery_id,
+        event: 'OFFER_DISPATCH_ATTEMPT',
+        offerId,
+        notificationId: notifId,
+        apnsOk,
+        fcmOk,
+        sseOk,
+        deviceTokenPresent: Boolean(deviceToken),
+        platform: tokenPlatform
+      });
     }
 
     if (apnsOk) {

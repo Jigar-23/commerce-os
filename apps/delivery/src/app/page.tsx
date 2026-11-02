@@ -19,7 +19,7 @@ import { EarningsView } from '../components/EarningsView';
 const isProduction = process.env.NODE_ENV === 'production';
 const ORDER_API = process.env.NEXT_PUBLIC_ORDER_API_URL && process.env.NEXT_PUBLIC_ORDER_API_URL.trim().length > 0
   ? process.env.NEXT_PUBLIC_ORDER_API_URL.replace(/\/$/, '')
-  : isProduction ? '' : 'http://localhost:8090';
+  : isProduction ? '' : 'http://localhost:3000';
 
 const STORAGE_KEY = 'commerce_rider_delivery_session_v2';
 const COMMAND_QUEUE_KEY = 'commerce_rider_offline_command_queue';

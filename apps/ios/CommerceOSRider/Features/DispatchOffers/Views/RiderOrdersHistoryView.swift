@@ -41,16 +41,16 @@ public struct RiderOrdersHistoryView: View {
                                     let shortId = session.orderId.count > 8 ? String(session.orderId.suffix(8)).uppercased() : session.orderId.uppercased()
                                     Text("ORDER #\(shortId)")
                                         .font(.system(size: 15, weight: .black))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(RiderTheme.Colors.textPrimary)
                                     Text("\(session.merchantName) → \(session.customerName)")
                                         .font(.system(size: 12))
-                                        .foregroundColor(Color(hex: "94A3B8"))
+                                        .foregroundColor(RiderTheme.Colors.textSecondary)
                                 }
                                 Spacer()
                                 Button(action: onSelectActiveOrder) {
                                     Text("VIEW")
                                         .font(.system(size: 11, weight: .black))
-                                        .foregroundColor(.black)
+                                        .foregroundColor(.white)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
                                         .background(RiderTheme.Colors.safetyGreen)
@@ -59,7 +59,7 @@ public struct RiderOrdersHistoryView: View {
                             }
                         }
                         .padding(14)
-                        .background(Color(hex: "16181F"))
+                        .background(RiderTheme.Colors.hudCard)
                         .cornerRadius(16)
                         .overlay(
                             RoundedRectangle(cornerRadius: 16)
@@ -72,12 +72,12 @@ public struct RiderOrdersHistoryView: View {
                     HStack {
                         Text("TODAY'S COMPLETED DELIVERIES")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(Color(hex: "94A3B8"))
+                            .foregroundColor(RiderTheme.Colors.textSecondary)
                             .tracking(0.5)
                         Spacer()
                         Text("\(completedOrders.count) orders")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(RiderTheme.Colors.textMuted)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
@@ -87,14 +87,14 @@ public struct RiderOrdersHistoryView: View {
                         VStack(spacing: 12) {
                             Image(systemName: "clock.badge.checkmark")
                                 .font(.system(size: 40))
-                                .foregroundColor(Color(hex: "64748B"))
+                                .foregroundColor(RiderTheme.Colors.textMuted)
                                 .padding(.top, 40)
                             Text("No completed deliveries yet today")
                                 .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(Color(hex: "94A3B8"))
+                                .foregroundColor(RiderTheme.Colors.textPrimary)
                             Text("Completed customer orders will appear here automatically.")
                                 .font(.system(size: 12))
-                                .foregroundColor(Color(hex: "64748B"))
+                                .foregroundColor(RiderTheme.Colors.textSecondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
                         }
@@ -112,7 +112,7 @@ public struct RiderOrdersHistoryView: View {
                                         let shortId = order.orderId.count > 8 ? String(order.orderId.suffix(8)).uppercased() : order.orderId.uppercased()
                                         Text("ORDER #\(shortId)")
                                             .font(.system(size: 13, weight: .bold))
-                                            .foregroundColor(.white)
+                                            .foregroundColor(RiderTheme.Colors.textPrimary)
                                         
                                         Button(action: {
                                             UIPasteboard.general.string = order.orderId
@@ -142,24 +142,24 @@ public struct RiderOrdersHistoryView: View {
                                 
                                 Text("\(order.merchantName) → \(order.customerName)")
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(Color(hex: "CBD5E1"))
+                                    .foregroundColor(RiderTheme.Colors.textSecondary)
                                 
                                 HStack {
                                     Text("📦 \(order.itemsCount) item(s) • \(String(format: "%.1f", order.distanceKm)) km")
                                         .font(.system(size: 11))
-                                        .foregroundColor(Color(hex: "94A3B8"))
+                                        .foregroundColor(RiderTheme.Colors.textMuted)
                                     Spacer()
                                     Text(order.deliveredAt)
                                         .font(.system(size: 11))
-                                        .foregroundColor(Color(hex: "64748B"))
+                                        .foregroundColor(RiderTheme.Colors.textMuted)
                                 }
                             }
                             .padding(14)
-                            .background(Color(hex: "16181F"))
+                            .background(RiderTheme.Colors.hudCard)
                             .cornerRadius(14)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Color(hex: "262933"), lineWidth: 1)
+                                    .stroke(RiderTheme.Colors.hudBorder, lineWidth: 1)
                             )
                             .padding(.horizontal, 16)
                         }
@@ -175,7 +175,7 @@ public struct RiderOrdersHistoryView: View {
             .task {
                 await sessionManager.fetchTripsHistory()
             }
-            .background(Color(hex: "0D0F14").ignoresSafeArea())
+            .background(RiderTheme.Colors.hudBackground.ignoresSafeArea())
             .navigationTitle("Orders History")
             .navigationBarTitleDisplayMode(.inline)
         }

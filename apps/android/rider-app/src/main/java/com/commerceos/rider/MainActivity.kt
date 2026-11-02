@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    private var pendingIntentOfferId by mutableStateOf<String?>(null)
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -31,6 +33,13 @@ class MainActivity : ComponentActivity() {
         try {
             com.google.android.gms.maps.MapsInitializer.initialize(applicationContext, com.google.android.gms.maps.MapsInitializer.Renderer.LATEST, null)
         } catch (_: Exception) {}
+
+        // Set clean white system status bar and navigation bar with dark icons (Zomato/Blinkit style)
+        window.statusBarColor = android.graphics.Color.WHITE
+        window.navigationBarColor = android.graphics.Color.WHITE
+        val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.isAppearanceLightStatusBars = true
+        insetsController.isAppearanceLightNavigationBars = true
 
         requestRequiredPermissions()
         startLocationService()
@@ -49,7 +58,9 @@ class MainActivity : ComponentActivity() {
                         onLogout = {
                             isAuthenticated = false
                             loggedProfile = null
-                        }
+                        },
+                        intentOfferId = pendingIntentOfferId,
+                        onClearIntentOfferId = { pendingIntentOfferId = null }
                     )
                 } else {
                     com.commerceos.rider.ui.RiderAuthScreen(
@@ -80,14 +91,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
+        setIntent(intent)
         checkIntentOfferAck(intent)
     }
 
     private fun checkIntentOfferAck(intent: android.content.Intent?) {
         val offerId = intent?.getStringExtra("offerId")
         if (!offerId.isNullOrBlank()) {
-            com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(applicationContext, offerId)
+            pendingIntentOfferId = offerId
             val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+            sessionMgr.savePendingOfferId(offerId)
+            com.commerceos.rider.util.RiderNotificationManager.cancelOfferNotification(applicationContext, offerId)
             val baseUrl = sessionMgr.getBaseUrl()
             val authToken = sessionMgr.getAuthToken()
             if (baseUrl.isNotBlank() && authToken.isNotBlank()) {
@@ -107,7 +121,7 @@ class MainActivity : ComponentActivity() {
             if (com.google.firebase.FirebaseApp.getApps(applicationContext).isEmpty()) {
                 try {
                     val options = com.google.firebase.FirebaseOptions.Builder()
-                        .setApplicationId("1:586430398048:android:cf343d44537786ec2b0d05")
+                        .setApplicationId("1:586430398048:android:cf343d44537786ec2b0d06")
                         .setApiKey("AIzaSyAhNxuYlXoKy_Zq0yl5j1iJmOW1BCLkm8k")
                         .setProjectId("commerce-os-9f737")
                         .setGcmSenderId("586430398048")
@@ -118,6 +132,17 @@ class MainActivity : ComponentActivity() {
                     android.util.Log.w("MainActivity", "FirebaseApp init fallback warning: ${initErr.message}")
                 }
             }
+
+            // Subscribe to fleet-wide broadcast topic for background quick-commerce delivery offers
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
+                .addOnCompleteListener { subTask ->
+                    if (subTask.isSuccessful) {
+                        android.util.Log.d("MainActivity", "Successfully subscribed to topic: riders_broadcast")
+                    } else {
+                        android.util.Log.w("MainActivity", "Failed to subscribe to topic riders_broadcast: ${subTask.exception?.message}")
+                    }
+                }
+
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful && task.result != null) {

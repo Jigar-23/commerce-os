@@ -109,6 +109,27 @@ class RiderSessionManager private constructor(context: Context) {
         return getFcmToken()
     }
 
+    fun isShiftOnline(): Boolean {
+        return prefs.getBoolean(KEY_IS_ONLINE, true)
+    }
+
+    fun saveShiftOnline(online: Boolean) {
+        prefs.edit().putBoolean(KEY_IS_ONLINE, online).apply()
+    }
+
+    fun getPendingOfferId(): String? {
+        val id = prefs.getString(KEY_PENDING_OFFER_ID, null)
+        return if (!id.isNullOrBlank()) id else null
+    }
+
+    fun savePendingOfferId(offerId: String?) {
+        if (offerId.isNullOrBlank()) {
+            prefs.edit().remove(KEY_PENDING_OFFER_ID).apply()
+        } else {
+            prefs.edit().putString(KEY_PENDING_OFFER_ID, offerId).apply()
+        }
+    }
+
     companion object {
         private const val PREFS_NAME = "commerce_rider_session_config"
         private const val KEY_AUTH_TOKEN = "rider_jwt_access_token_secure"
@@ -116,6 +137,8 @@ class RiderSessionManager private constructor(context: Context) {
         private const val KEY_BASE_URL = "rider_api_base_url"
         private const val KEY_FCM_TOKEN = "rider_fcm_device_token"
         private const val KEY_RIDER_ID = "rider_authenticated_id"
+        private const val KEY_IS_ONLINE = "rider_shift_is_online"
+        private const val KEY_PENDING_OFFER_ID = "rider_pending_intent_offer_id"
 
         @Volatile
         private var INSTANCE: RiderSessionManager? = null

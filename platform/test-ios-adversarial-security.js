@@ -700,7 +700,9 @@ async function run() {
 }
 
 if (require.main === module) {
-  run().catch(err => {
+  run().then(() => {
+    process.exit(0);
+  }).catch(err => {
     console.error('FATAL ADVERSARIAL TEST ERROR:', err);
     if (serverInstance) {
       serverInstance.close();

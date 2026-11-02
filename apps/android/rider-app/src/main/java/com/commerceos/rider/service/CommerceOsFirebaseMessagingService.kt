@@ -21,6 +21,17 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
         val sessionMgr = RiderSessionManager.getInstance(applicationContext)
         sessionMgr.saveFcmToken(token)
 
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        Log.d(TAG, "Subscribed to topic riders_broadcast on token refresh")
+                    }
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to subscribe to riders_broadcast on token refresh: ${e.message}")
+        }
+
         val baseUrl = sessionMgr.getBaseUrl()
         val authToken = sessionMgr.getAuthToken()
 
@@ -61,12 +72,27 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // Single Canonical Pipeline Ingestion (handles single validation, dedup, DEVICE_RECEIVED ack, and notification posting)
-        RiderOfferEventPipeline.processIncomingFcmOffer(
-            context = applicationContext,
-            data = data,
-            authenticatedRiderId = authenticatedRiderId
+        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        val wakeLock = powerManager?.newWakeLock(
+            android.os.PowerManager.PARTIAL_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            "CommerceOsRider:FCMWakeLock"
         )
+        wakeLock?.acquire(10000L)
+
+        try {
+            // Single Canonical Pipeline Ingestion (handles single validation, dedup, DEVICE_RECEIVED ack, and notification posting)
+            RiderOfferEventPipeline.processIncomingFcmOffer(
+                context = applicationContext,
+                data = data,
+                authenticatedRiderId = authenticatedRiderId
+            )
+        } finally {
+            if (wakeLock?.isHeld == true) {
+                try {
+                    wakeLock.release()
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     companion object {

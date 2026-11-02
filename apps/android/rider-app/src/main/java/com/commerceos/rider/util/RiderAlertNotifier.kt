@@ -16,13 +16,13 @@ object RiderAlertNotifier {
     fun playNewJobAlert(context: Context, offerId: String? = null) {
         val now = System.currentTimeMillis()
         if (offerId != null && offerId.isNotBlank()) {
-            if (offerId == lastAlertedOfferId) {
-                return // Already alerted for this exact offer
+            if (offerId == lastAlertedOfferId && (now - lastAlertTimeMs < 5000L)) {
+                return // Debounce duplicate network packets within 5 seconds
             }
             lastAlertedOfferId = offerId
         } else {
-            if (now - lastAlertTimeMs < 10000L) {
-                return // Global 10s cooldown
+            if (now - lastAlertTimeMs < 5000L) {
+                return // Global 5s cooldown
             }
         }
         lastAlertTimeMs = now

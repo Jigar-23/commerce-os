@@ -1,5 +1,6 @@
 package com.commerceos.rider.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.commerceos.rider.model.ServerDeliverySession
+import com.commerceos.rider.theme.RiderColors
 
 @Composable
 fun PickupFlowView(
@@ -25,51 +27,61 @@ fun PickupFlowView(
 ) {
     Card(
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
+        colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+        border = BorderStroke(1.dp, RiderColors.Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Place, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
+                Surface(
+                    color = RiderColors.AccentBlueSoft,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Place, contentDescription = null, tint = RiderColors.AccentBlue, modifier = Modifier.size(22.dp))
+                    }
+                }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
-                    Text("PICKUP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), letterSpacing = 1.sp)
-                    Text("Order is ready", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("STORE PICKUP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = RiderColors.AccentBlue, letterSpacing = 0.8.sp)
+                    Text("Order is ready for pickup", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = RiderColors.TextPrimary)
                 }
             }
 
             Text(
                 text = "${session.merchantName} • ${session.merchantAddress}",
                 fontSize = 13.sp,
-                color = Color(0xFF94A3B8)
+                color = RiderColors.TextSecondary
             )
 
-            HorizontalDivider(color = Color(0xFF262933))
+            HorizontalDivider(color = RiderColors.Divider, thickness = 1.dp)
 
             // Verification Checklist
-            Text("Check package & order details", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Check package & order details", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RiderColors.TextPrimary)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = RiderColors.Primary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Order items packed and sealed in tamper-proof bag", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+                Text("Order items packed and sealed in tamper-proof bag", fontSize = 12.sp, color = RiderColors.TextSecondary)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = RiderColors.Primary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 val itemsSummary = if (session.items.isNotEmpty()) {
                     session.items.joinToString(", ") { "${it.name} (x${it.quantity})" }
                 } else {
                     "Order Items Verified"
                 }
-                Text("Contents: $itemsSummary", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
+                Text("Contents: $itemsSummary", fontSize = 12.sp, color = RiderColors.AccentBlueText, fontWeight = FontWeight.SemiBold)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = RiderColors.Primary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 val cartVal = session.orderTotal ?: session.codAmount ?: 0.0
                 val billText = if (cartVal > 0.0) " • Bill Total ₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else ""
-                Text("Order #${session.orderId}$billText", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+                val shortId = if (session.orderId.length > 14) session.orderId.take(12) + "…" else session.orderId
+                Text("Order #$shortId$billText", fontSize = 12.sp, color = RiderColors.TextSecondary)
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -82,21 +94,21 @@ fun PickupFlowView(
                     onClick = {
                         com.commerceos.rider.util.RiderNavigationUtils.dialPhoneNumber(context, storePhone)
                     },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RiderColors.AccentBlueText),
+                    border = BorderStroke(1.dp, RiderColors.Border),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f).height(48.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Icon(Icons.Default.Place, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Place, contentDescription = null, tint = RiderColors.AccentBlue, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Call Hub", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 OutlinedButton(
                     onClick = onReportIssue,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RiderColors.Danger),
+                    border = BorderStroke(1.dp, RiderColors.Danger.copy(alpha = 0.4f)),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f).height(48.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
@@ -106,12 +118,12 @@ fun PickupFlowView(
 
                 Button(
                     onClick = onConfirmPickup,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1.4f).height(48.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("Confirm pickup", fontWeight = FontWeight.Black, fontSize = 13.sp, color = Color.Black)
+                    Text("Confirm pickup", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
                 }
             }
         }

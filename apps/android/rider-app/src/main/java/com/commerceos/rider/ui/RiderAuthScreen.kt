@@ -1,6 +1,7 @@
 package com.commerceos.rider.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.commerceos.rider.model.RiderProfile
 import com.commerceos.rider.repository.RiderDeliveryRepository
 import com.commerceos.rider.session.RiderSessionManager
+import com.commerceos.rider.theme.RiderColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,7 +55,7 @@ fun RiderAuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D0F14))
+            .background(RiderColors.Background)
     ) {
         Column(
             modifier = Modifier
@@ -65,17 +67,17 @@ fun RiderAuthScreen(
         ) {
             // Rider Icon Badge
             Surface(
-                color = Color(0xFF10B981),
+                color = RiderColors.Primary,
                 shape = RoundedCornerShape(24.dp),
-                shadowElevation = 8.dp,
-                modifier = Modifier.size(80.dp)
+                shadowElevation = 4.dp,
+                modifier = Modifier.size(76.dp)
             ) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Send,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(38.dp)
                     )
                 }
             }
@@ -83,25 +85,26 @@ fun RiderAuthScreen(
             Spacer(modifier = Modifier.height(20.dp))
             Text(
                 text = "CommerceOS Rider",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.White
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = RiderColors.TextPrimary
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Delivery Partner Portal",
                 fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF94A3B8)
+                fontWeight = FontWeight.Medium,
+                color = RiderColors.TextMuted
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             // Main Auth Card
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
-                shape = RoundedCornerShape(24.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
+                colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, RiderColors.Border),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
@@ -110,13 +113,13 @@ fun RiderAuthScreen(
                             text = "Partner Login",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = RiderColors.TextPrimary
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "Enter your 10-digit registered mobile number",
                             fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
+                            color = RiderColors.TextSecondary
                         )
 
                         Spacer(modifier = Modifier.height(20.dp))
@@ -129,7 +132,7 @@ fun RiderAuthScreen(
                             leadingIcon = {
                                 Text(
                                     text = "+91 ",
-                                    color = Color(0xFF10B981),
+                                    color = RiderColors.Primary,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     modifier = Modifier.padding(start = 12.dp)
@@ -138,12 +141,12 @@ fun RiderAuthScreen(
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF2B2F3B),
-                                focusedContainerColor = Color(0xFF22252E),
-                                unfocusedContainerColor = Color(0xFF22252E)
+                                focusedTextColor = RiderColors.TextPrimary,
+                                unfocusedTextColor = RiderColors.TextPrimary,
+                                focusedBorderColor = RiderColors.Primary,
+                                unfocusedBorderColor = RiderColors.Border,
+                                focusedContainerColor = RiderColors.SurfaceSubtle,
+                                unfocusedContainerColor = RiderColors.SurfaceSubtle
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -153,7 +156,7 @@ fun RiderAuthScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = errorMessage!!,
-                                color = Color(0xFFF43F5E),
+                                color = RiderColors.Danger,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -191,8 +194,8 @@ fun RiderAuthScreen(
                             enabled = !isLoading && phone.length == 10,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF10B981),
-                                disabledContainerColor = Color(0xFF334155)
+                                containerColor = RiderColors.Primary,
+                                disabledContainerColor = RiderColors.Border
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -216,17 +219,17 @@ fun RiderAuthScreen(
                                 text = "Verify OTP",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = RiderColors.TextPrimary
                             )
                             TextButton(onClick = { isOtpSent = false; otp = "" }) {
-                                Text("Edit Phone", color = Color(0xFF10B981), fontSize = 12.sp)
+                                Text("Edit Phone", color = RiderColors.Primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
                         Text(
                             text = "Enter 6-digit code sent to +91 $phone\n💡 Direct dev code 123456 verifies immediately",
                             fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
+                            color = RiderColors.TextSecondary
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -239,12 +242,12 @@ fun RiderAuthScreen(
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF2B2F3B),
-                                focusedContainerColor = Color(0xFF22252E),
-                                unfocusedContainerColor = Color(0xFF22252E)
+                                focusedTextColor = RiderColors.TextPrimary,
+                                unfocusedTextColor = RiderColors.TextPrimary,
+                                focusedBorderColor = RiderColors.Primary,
+                                unfocusedBorderColor = RiderColors.Border,
+                                focusedContainerColor = RiderColors.SurfaceSubtle,
+                                unfocusedContainerColor = RiderColors.SurfaceSubtle
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -259,12 +262,12 @@ fun RiderAuthScreen(
                             placeholder = { Text("e.g. Vikram Singh") },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF2B2F3B),
-                                focusedContainerColor = Color(0xFF22252E),
-                                unfocusedContainerColor = Color(0xFF22252E)
+                                focusedTextColor = RiderColors.TextPrimary,
+                                unfocusedTextColor = RiderColors.TextPrimary,
+                                focusedBorderColor = RiderColors.Primary,
+                                unfocusedBorderColor = RiderColors.Border,
+                                focusedContainerColor = RiderColors.SurfaceSubtle,
+                                unfocusedContainerColor = RiderColors.SurfaceSubtle
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -279,12 +282,12 @@ fun RiderAuthScreen(
                             placeholder = { Text("e.g. HR-26-AB-1234") },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF10B981),
-                                unfocusedBorderColor = Color(0xFF2B2F3B),
-                                focusedContainerColor = Color(0xFF22252E),
-                                unfocusedContainerColor = Color(0xFF22252E)
+                                focusedTextColor = RiderColors.TextPrimary,
+                                unfocusedTextColor = RiderColors.TextPrimary,
+                                focusedBorderColor = RiderColors.Primary,
+                                unfocusedBorderColor = RiderColors.Border,
+                                focusedContainerColor = RiderColors.SurfaceSubtle,
+                                unfocusedContainerColor = RiderColors.SurfaceSubtle
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -294,7 +297,7 @@ fun RiderAuthScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = errorMessage!!,
-                                color = Color(0xFFF43F5E),
+                                color = RiderColors.Danger,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -336,8 +339,8 @@ fun RiderAuthScreen(
                             enabled = !isLoading,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF10B981),
-                                disabledContainerColor = Color(0xFF334155)
+                                containerColor = RiderColors.Primary,
+                                disabledContainerColor = RiderColors.Border
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()

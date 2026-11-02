@@ -32,6 +32,7 @@ DerivedData/
 
 # Environment Variables & Local Secrets
 .env
+.env.production
 .env.local
 .env.development.local
 .env.test.local

@@ -21,7 +21,12 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 const { server, pool, getAppRepositories } = require('./server/production-server.js');
 
 function makeJwt(payload) {
-  return jwt.sign(payload, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+  const secret = process.env.JWT_SECRET || 'dev_jwt_secret_must_be_set_in_production_env_32_bytes_min';
+  return jwt.sign({
+    iss: process.env.JWT_ISSUER || 'commerce-os-auth',
+    aud: process.env.JWT_AUDIENCE || 'commerce-os-api',
+    ...payload
+  }, secret, { algorithm: 'HS256', expiresIn: '1h' });
 }
 
 function request(options, body = null) {
@@ -169,6 +174,18 @@ async function runTests() {
       headers: { 'Content-Type': 'application/json' }
     }, { orderId: 'ord_missing', amount: 100, idempotencyKey: 'idemp_1' });
     assert(res.statusCode === 401, `Unauthenticated refund request rejected with 401 (got ${res.statusCode})`);
+  }
+
+  // 2.1b Customer Role Rejected with 403 Forbidden
+  {
+    const res = await request({
+      hostname: '127.0.0.1',
+      port: PORT,
+      path: '/api/v1/payments/refunds',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${customerToken}` }
+    }, { orderId: 'ord_missing', amount: 100, idempotencyKey: 'idemp_1' });
+    assert(res.statusCode === 403, `Customer token refund request rejected with 403 Forbidden (got ${res.statusCode})`);
   }
 
   // 2.2 Missing Mandatory Parameters

@@ -37,6 +37,35 @@ object RiderNavigationUtils {
     }
 
     /**
+     * Launches external Google Maps by address search query when GPS coordinates are unavailable.
+     */
+    fun launchExternalMapsQuery(context: Context, query: String) {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) {
+            Toast.makeText(context, "Location address unavailable", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = Uri.parse("geo:0,0?q=${Uri.encode(cleanQuery)}")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage("com.google.android.apps.maps")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val fallbackUri = Uri.parse("geo:0,0?q=${Uri.encode(cleanQuery)}")
+                val fallbackIntent = Intent(Intent.ACTION_VIEW, fallbackUri).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(fallbackIntent)
+            } catch (ex: Exception) {
+                Toast.makeText(context, "No navigation app found on device", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
      * Opens system phone dialer with pre-populated phone number.
      */
     fun dialPhoneNumber(context: Context, phone: String?) {

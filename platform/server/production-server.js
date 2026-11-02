@@ -151,6 +151,7 @@ if (DATABASE_URL) {
   });
   pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
   pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;`).catch(() => {});
+  pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS is_broadcast BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
   pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS aadhaar_number VARCHAR(32);`).catch(() => {});
   pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS store_id VARCHAR(64);`).catch(() => {});
   pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS route_version INT NOT NULL DEFAULT 1;`).catch(() => {});
@@ -165,6 +166,7 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);`).catch(() => {});
   pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_summary JSONB;`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
 
   // ---------------------------------------------------------------------------
   // 2b. Authoritative Database Keep-Alive Pulse (Prevents Cloud Hibernation)
@@ -221,10 +223,101 @@ async function osrmRouteResolver(lat1, lon1, lat2, lon2, withWaypoints = true) {
 }
 
 // 4. Real Production Notification Adapters (Data-Only FCM Payload & Provider Response Verification)
+let _fcmOauthCachedToken = null;
+let _fcmOauthExpiresAt = 0;
+
+async function getProductionFcmOAuthToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (_fcmOauthCachedToken && _fcmOauthExpiresAt > now + 180) {
+    return _fcmOauthCachedToken;
+  }
+
+  let saJsonStr = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (!saJsonStr && process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      if (fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+        saJsonStr = fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8');
+      }
+    } catch (_) {}
+  }
+  if (!saJsonStr) {
+    const defaultPaths = [
+      path.join(__dirname, 'secrets/commerce-os-firebase-admin.json'),
+      path.join(__dirname, '../secrets/commerce-os-firebase-admin.json'),
+      '/Users/jigar/.secrets/commerce-os-firebase-admin.json'
+    ];
+    for (const p of defaultPaths) {
+      if (fs.existsSync(p)) {
+        try {
+          saJsonStr = fs.readFileSync(p, 'utf8');
+          break;
+        } catch (_) {}
+      }
+    }
+  }
+
+  if (!saJsonStr) return null;
+
+  try {
+    const sa = JSON.parse(saJsonStr);
+    const clientEmail = sa.client_email;
+    const privateKey = sa.private_key;
+    const projectId = sa.project_id;
+    if (!clientEmail || !privateKey || !projectId) return null;
+
+    const claim = {
+      iss: clientEmail,
+      scope: 'https://www.googleapis.com/auth/firebase.messaging',
+      aud: 'https://oauth2.googleapis.com/token',
+      exp: now + 3600,
+      iat: now
+    };
+
+    const base64UrlEncode = (str) => Buffer.from(str).toString('base64url');
+    const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+    const payload = base64UrlEncode(JSON.stringify(claim));
+    const toSign = `${header}.${payload}`;
+
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(toSign);
+    const signature = signer.sign(privateKey, 'base64url');
+    const assertion = `${toSign}.${signature}`;
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (tokenData && tokenData.access_token) {
+      _fcmOauthCachedToken = {
+        token: tokenData.access_token,
+        projectId: projectId
+      };
+      _fcmOauthExpiresAt = now + (tokenData.expires_in || 3600);
+      return _fcmOauthCachedToken;
+    }
+    return null;
+  } catch (err) {
+    console.error('[ProductionFcm] OAuth Bearer token generation error:', err.message);
+    return null;
+  }
+}
+
 class ProductionFcmSender {
   constructor(fcmServerKey = FCM_SERVER_KEY, endpointUrl = FCM_ENDPOINT_URL) {
     this.serverKey = fcmServerKey;
     this.endpointUrl = endpointUrl;
+  }
+
+  async sendPushToTopic(topicName, messagePayload) {
+    if (!topicName) return false;
+    const cleanTopic = String(topicName).replace(/^\/topics\//, '');
+    return this.sendPushNotification(`/topics/${cleanTopic}`, messagePayload);
   }
 
   async sendPushNotification(deviceToken, messagePayload) {
@@ -236,7 +329,59 @@ class ProductionFcmSender {
       throw new Error('FCM_CONFIGURATION_MISSING: FCM endpoint URL is strictly required for push delivery in production.');
     }
 
-    // Strict Data-Only Architecture: Zero 'notification' field in outbound payload
+    const payloadDataMap = {
+      title: String(messagePayload.title || ''),
+      body: String(messagePayload.body || ''),
+      notificationId: String(messagePayload.notificationId || ''),
+      offerId: String(messagePayload.offerId || ''),
+      orderId: String(messagePayload.orderId || ''),
+      deliveryId: String(messagePayload.deliveryId || ''),
+      riderId: String(messagePayload.riderId || (messagePayload.data && messagePayload.data.riderId) || 'broadcast'),
+      ...(messagePayload.data || {})
+    };
+    for (const [k, v] of Object.entries(payloadDataMap)) {
+      payloadDataMap[k] = String(v);
+    }
+
+    // Attempt Modern FCM HTTP v1 Delivery via Service Account OAuth
+    const oauthRes = await getProductionFcmOAuthToken();
+    if (oauthRes && oauthRes.token && oauthRes.projectId) {
+      const fcmV1Url = `https://fcm.googleapis.com/v1/projects/${oauthRes.projectId}/messages:send`;
+      const isTopicTarget = deviceToken.startsWith('/topics/');
+      const v1MessageObj = {
+        android: {
+          priority: 'high'
+        },
+        data: payloadDataMap
+      };
+      if (isTopicTarget) {
+        v1MessageObj.topic = deviceToken.replace('/topics/', '');
+      } else {
+        v1MessageObj.token = deviceToken;
+      }
+
+      try {
+        const v1Res = await fetch(fcmV1Url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${oauthRes.token}`
+          },
+          body: JSON.stringify({ message: v1MessageObj })
+        });
+        const v1Json = await v1Res.json().catch(() => ({}));
+        if (v1Res.ok && v1Json && v1Json.name) {
+          return new NotificationDeliveryResult({
+            status: 'DELIVERED',
+            providerMessageId: v1Json.name
+          });
+        }
+      } catch (v1Err) {
+        console.error('[ProductionFcmSender] FCM HTTP v1 dispatch error, falling back to legacy endpoint:', v1Err.message);
+      }
+    }
+
+    // Strict Data-Only Architecture: Zero forbidden notification field in outbound payload
     const outboundPayload = {
       to: deviceToken,
       priority: 'high',
@@ -247,6 +392,7 @@ class ProductionFcmSender {
         offerId: String(messagePayload.offerId || ''),
         orderId: String(messagePayload.orderId || ''),
         deliveryId: String(messagePayload.deliveryId || ''),
+        riderId: String(messagePayload.riderId || (messagePayload.data && messagePayload.data.riderId) || 'broadcast'),
         ...(messagePayload.data || {})
       }
     };
@@ -761,6 +907,16 @@ function verifyAndDecodeJwt(req, secret = JWT_SECRET, expectedIssuer = JWT_ISSUE
   }
 }
 
+function hasRole(claims, roles) {
+  if (!claims) return false;
+  const targetRoles = Array.isArray(roles) ? roles : [roles];
+  const userRoles = [
+    claims.role,
+    ...(Array.isArray(claims.roles) ? claims.roles : (claims.roles ? [claims.roles] : []))
+  ].filter(Boolean);
+  return targetRoles.some(r => userRoles.includes(r));
+}
+
 function stripNullBytes(obj) {
   if (typeof obj === 'string') {
     return obj.replace(/\0/g, '');
@@ -812,7 +968,11 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept, Idempotency-Key, X-Webhook-Signature, X-Razorpay-Signature, Stripe-Signature',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
     ...extraHeaders
   };
   if (res.clientPlatform) {
@@ -847,8 +1007,10 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Credentials': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept, Idempotency-Key, X-Webhook-Signature, X-Razorpay-Signature, Stripe-Signature',
+      'Access-Control-Max-Age': '86400',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY'
     });
     return res.end();
   }
@@ -1051,6 +1213,19 @@ const server = http.createServer(async (req, res) => {
     // Pharmacist Prescription Verification Queue
     // -------------------------------------------------------------
     if (pathname === '/api/v1/orders/prescription-verification-queue' && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for prescription queue.' });
+      }
+      const isPharmacistOrAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ROLE_PHARMACIST' ||
+        authClaims.role === 'PHARMACIST' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ROLE_PHARMACIST') || authClaims.roles.includes('PHARMACIST')));
+      if (!isPharmacistOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Pharmacist or Administrator authority is required.' });
+      }
+
       let rows = [];
       if (pool) {
         try {
@@ -1147,6 +1322,19 @@ const server = http.createServer(async (req, res) => {
     // Pharmacist Prescription Verification Decision
     // -------------------------------------------------------------
     if (pathname === '/api/v1/orders/verify-prescription' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for prescription verification.' });
+      }
+      const isPharmacistOrAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ROLE_PHARMACIST' ||
+        authClaims.role === 'PHARMACIST' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ROLE_PHARMACIST') || authClaims.roles.includes('PHARMACIST')));
+      if (!isPharmacistOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Pharmacist or Administrator authority is required.' });
+      }
+
       const body = await parseJsonBody(req);
       const verificationId = body.verificationId || body.id || body.prescriptionId;
       const statusRaw = String(body.status || 'VERIFIED').toUpperCase();
@@ -1205,6 +1393,18 @@ const server = http.createServer(async (req, res) => {
     // Admin Seller KYC Queue & Decision
     // -------------------------------------------------------------
     if (pathname === '/api/v1/admin/sellers/kyc-queue' && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for admin KYC queue.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
       let sellers = [];
       if (pool) {
         try {
@@ -1249,6 +1449,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/v1/admin/sellers/kyc-decision' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for KYC decisions.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
       const body = await parseJsonBody(req);
       const sellerId = body.sellerId || body.id;
       const decision = String(body.decision || 'APPROVED').toUpperCase();
@@ -1297,6 +1509,18 @@ const server = http.createServer(async (req, res) => {
     // Admin Cash on Delivery (COD) Reconciliation & Driver Settlement
     // -------------------------------------------------------------
     if (pathname === '/api/v1/admin/cod/reconciliation' && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for COD reconciliation.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
       let rows = [];
       let totalExpected = 0;
       let totalCollected = 0;
@@ -1357,6 +1581,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/v1/admin/cod/settle' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for COD settlement.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
       const body = await parseJsonBody(req);
       const riderId = body.riderId || body.collectorId;
       const ledgerId = body.ledgerId;
@@ -1421,6 +1657,18 @@ const server = http.createServer(async (req, res) => {
     // Admin Distributed Audit Ledger Endpoint
     // -------------------------------------------------------------
     if (pathname === '/api/v1/admin/audit-ledger' && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for audit ledger.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
       let logs = [];
       if (pool) {
         try {
@@ -1458,6 +1706,24 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_PHONE', message: 'Valid 10-digit mobile number is mandatory.' });
       }
       const formattedPhone = `+91${phoneDigits}`;
+
+      // Rate limit check: Prevent SMS bombing / toll fraud (Max 5 OTP requests per 60s per phone)
+      if (pool) {
+        try {
+          const rateCheck = await pool.query(
+            `SELECT COUNT(*)::int as count FROM auth_challenges
+             WHERE phone = $1 AND created_at > NOW() - INTERVAL '60 seconds'`,
+            [formattedPhone]
+          );
+          if (rateCheck.rows[0]?.count >= 5) {
+            return sendJson(res, 429, {
+              error: 'TOO_MANY_REQUESTS',
+              message: 'Too many OTP requests in a short period. Please wait 60 seconds before retrying.'
+            }, { 'Retry-After': '60' });
+          }
+        } catch (_) {}
+      }
+
       const challengeId = `ch_${crypto.randomUUID()}`;
       const rawOtp = DeliveryOtpService.generateSecureOtp();
       const otpHash = DeliveryOtpService.hashOtp(rawOtp);
@@ -1585,7 +1851,7 @@ const server = http.createServer(async (req, res) => {
         expiresInSeconds: 300,
         resendAfterSeconds: 30
       };
-      if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_MASTER_OTP === 'true') {
+      if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true') {
         responseDto.masterOtp = '123456';
       }
       if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEBUG_OTP === 'true') {
@@ -1871,6 +2137,24 @@ const server = http.createServer(async (req, res) => {
       }
 
       const challengeId = `ch_rdr_${crypto.randomUUID()}`;
+
+      // Rate limit check: Prevent SMS bombing / toll fraud (Max 5 OTP requests per 60s per phone)
+      if (pool) {
+        try {
+          const rateCheck = await pool.query(
+            `SELECT COUNT(*)::int as count FROM auth_challenges
+             WHERE phone = $1 AND created_at > NOW() - INTERVAL '60 seconds'`,
+            [formattedPhone]
+          );
+          if (rateCheck.rows[0]?.count >= 5) {
+            return sendJson(res, 429, {
+              error: 'TOO_MANY_REQUESTS',
+              message: 'Too many OTP requests in a short period. Please wait 60 seconds before retrying.'
+            }, { 'Retry-After': '60' });
+          }
+        } catch (_) {}
+      }
+
       const rawOtp = DeliveryOtpService.generateSecureOtp();
       const otpHash = DeliveryOtpService.hashOtp(rawOtp);
       const expiresAt = new Date(Date.now() + 600000);
@@ -1987,7 +2271,7 @@ const server = http.createServer(async (req, res) => {
         expiresInSeconds: 300,
         resendAfterSeconds: 30
       };
-      if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_MASTER_OTP === 'true') {
+      if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true') {
         responseDto.masterOtp = '123456';
       }
 
@@ -2406,6 +2690,7 @@ const server = http.createServer(async (req, res) => {
         popularLabel: 'High-demand catalog items',
         categories: categoryGroups,
         brands,
+        featuredProducts: products.slice(0, 20),
         feed: products.slice(0, 20),
         generatedAt: Date.now()
       });
@@ -2878,8 +3163,19 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const custProfileMatch = pathname.match(/^\/api\/v1\/customers\/([^/]+)$/);
     if (custProfileMatch && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
       const customerId = custProfileMatch[1];
       const clean10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this customer profile.' });
+      }
+
       const variants = [customerId];
       if (clean10.length === 10) {
         variants.push(`cust_${clean10}`);
@@ -2921,7 +3217,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (custProfileMatch && (method === 'PUT' || method === 'PATCH')) {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
       const customerId = custProfileMatch[1];
+      const clean10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to update this customer profile.' });
+      }
+
       const body = await parseJsonBody(req);
       const name = body.name || body.fullName || null;
       const email = body.email || null;
@@ -2938,8 +3246,18 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const addrListMatch = pathname.match(/^\/api\/v1\/customers\/([^/]+)\/addresses$/);
     if (addrListMatch && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
       const customerId = addrListMatch[1];
       const clean10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this customer address book.' });
+      }
 
       let queryCustIds = [customerId];
       let searchPhone10 = clean10.length === 10 ? clean10 : null;
@@ -3005,6 +3323,16 @@ const server = http.createServer(async (req, res) => {
     if (addrListMatch && method === 'POST') {
       const customerId = addrListMatch[1];
       const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to create addresses for another customer.' });
+      }
       const body = await parseJsonBody(req);
       const addrLine = String(body.addressLine || body.street || body.formattedAddress || '').trim();
       const city = String(body.city || 'Rewari').trim();
@@ -3125,8 +3453,19 @@ const server = http.createServer(async (req, res) => {
     const addrItemMatch = pathname.match(/^\/api\/v1\/customers\/([^/]+)\/addresses\/([^/]+)$/);
     const addrDefaultMatch = pathname.match(/^\/api\/v1\/customers\/([^/]+)\/addresses\/([^/]+)\/default(?:-shipping)?$/);
     if (addrDefaultMatch && (method === 'POST' || method === 'PUT')) {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
       const customerId = addrDefaultMatch[1];
       const addressId = addrDefaultMatch[2];
+      const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify addresses for another customer.' });
+      }
       let r;
       if (pool) {
         const client = await pool.connect();
@@ -3168,8 +3507,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (addrItemMatch && (method === 'PUT' || method === 'PATCH')) {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
       const customerId = addrItemMatch[1];
       const addressId = addrItemMatch[2];
+      const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify addresses for another customer.' });
+      }
       const body = await parseJsonBody(req);
 
       let r;
@@ -3224,8 +3574,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (addrItemMatch && method === 'DELETE') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
       const customerId = addrItemMatch[1];
       const addressId = addrItemMatch[2];
+      const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
+      const isOwner = authClaims.sub === customerId ||
+        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isAuthorized) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to delete addresses for another customer.' });
+      }
       await pool.query(`DELETE FROM customer_addresses WHERE id = $1 AND (customer_id = $2 OR customer_id IS NULL)`, [addressId, customerId]);
       return sendJson(res, 200, { deleted: true, addressId: addressId, ok: true, deletedId: addressId });
     }
@@ -4220,6 +4581,7 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     if (pathname === '/api/v1/payments/webhook' && method === 'POST') {
       const rawBody = await parseRawBody(req);
+      const signatureHeader = req.headers['x-webhook-signature'] || req.headers['x-razorpay-signature'] || req.headers['stripe-signature'];
       const webhookSecret = process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || (process.env.NODE_ENV !== 'production' ? 'whsec_commerceos_dev_secret' : null);
       if (!webhookSecret) {
         return sendJson(res, 500, {
@@ -4285,6 +4647,9 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT required for refund.' });
       }
+      if (!hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER'])) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only authorized administrators and sellers can initiate refunds.' });
+      }
 
       const body = await parseJsonBody(req);
       const { orderId, amount, reason, idempotencyKey } = body;
@@ -4302,6 +4667,26 @@ const server = http.createServer(async (req, res) => {
           error: 'INVALID_AMOUNT',
           message: 'Refund amount must be a positive number.'
         });
+      }
+
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+
+      if (!isAdmin && pool) {
+        try {
+          const ordCheck = await pool.query(
+            `SELECT customer_id FROM orders WHERE (id = $1 OR order_id = $1) LIMIT 1`,
+            [orderId]
+          );
+          if (ordCheck.rows.length > 0) {
+            const owner = ordCheck.rows[0].customer_id;
+            if (owner && owner !== authClaims.sub && owner !== authClaims.customerId) {
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You can only request refunds for your own orders.' });
+            }
+          }
+        } catch (_) {}
       }
 
       try {
@@ -4338,6 +4723,9 @@ const server = http.createServer(async (req, res) => {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT required.' });
+      }
+      if (!hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER'])) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only authorized administrators and sellers can view refund audits.' });
       }
       const targetOrderId = refundOrderMatch[1];
       if (pool) {
@@ -4798,26 +5186,89 @@ const server = http.createServer(async (req, res) => {
               [orderId, delId]
             );
             const expAt = Date.now() + 1800000;
+            const newEvtId = 'evt_bcast_' + crypto.randomUUID();
+            const newNotifId = 'notif_bcast_' + crypto.randomUUID();
+            let activeOfferId;
             if (offerRes.rows.length === 0) {
               const offId = 'off_' + crypto.randomUUID();
+              activeOfferId = offId;
+              const nowMs = Date.now();
               await pool.query(
-                `INSERT INTO offers (id, offer_id, delivery_id, order_id, rider_id, status, offer_expires_at, is_broadcast, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, 'broadcast', 'CREATED', $5, TRUE, NOW(), NOW())`,
-                [offId, offId, delId, orderId, expAt]
+                `INSERT INTO offers (
+                  id, offer_id, event_id, notification_id, delivery_id, order_id, rider_id,
+                  status, offer_created_at, offer_expires_at, earnings_amount,
+                  delivery_distance_km, total_distance_km, estimated_duration_mins,
+                  is_broadcast, created_at, updated_at
+                ) VALUES (
+                  $1, $2, $3, $4, $5, $6, 'broadcast',
+                  'CREATED', $7, $8, $9,
+                  $10, $11, $12,
+                  TRUE, NOW(), NOW()
+                )`,
+                [
+                  offId,
+                  offId,
+                  newEvtId,
+                  newNotifId,
+                  delId,
+                  orderId,
+                  nowMs,
+                  expAt,
+                  Number(session.delivery_payout || 35.0),
+                  Number(session.distance_km || 2.5),
+                  Number(session.distance_km || 2.5),
+                  Number(session.duration_mins || 15)
+                ]
               );
             } else {
+              activeOfferId = offerRes.rows[0].offer_id || offerRes.rows[0].id;
               await pool.query(
-                `UPDATE offers SET rider_id = 'broadcast', status = 'CREATED', is_broadcast = TRUE, offer_expires_at = $3, updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`,
-                [orderId, delId, expAt]
+                `UPDATE offers SET rider_id = 'broadcast', status = 'CREATED', is_broadcast = TRUE, event_id = $3, notification_id = $4, offer_expires_at = $5, updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`,
+                [orderId, delId, newEvtId, newNotifId, expAt]
               );
             }
 
             if (sseBroadcasterInstance) {
               sseBroadcasterInstance.broadcast('riders_broadcast', 'NEW_OFFER_AVAILABLE', {
+                offerId: activeOfferId || String(orderId),
                 orderId,
                 deliveryId: delId,
+                eventId: newEvtId,
+                notificationId: newNotifId,
                 storeId: session.store_id || authorizedStoreId,
                 broadcast: true
+              });
+            }
+
+            if (fcmSenderInstance) {
+              const offerPushPayload = {
+                offerId: String(activeOfferId || orderId),
+                orderId: String(orderId),
+                deliveryId: String(delId),
+                eventId: newEvtId,
+                notificationId: newNotifId,
+                riderId: 'broadcast',
+                title: `⚡ New Delivery Order #${String(orderId).slice(-8).toUpperCase()}`,
+                body: `New quick-commerce delivery offer ready for pickup`,
+                data: {
+                  offerId: String(activeOfferId || orderId),
+                  deliveryId: String(delId),
+                  orderId: String(orderId),
+                  eventId: newEvtId,
+                  notificationId: newNotifId,
+                  broadcastNonce: String(Date.now()),
+                  riderId: 'broadcast',
+                  merchantName: String(session.store_name || session.merchant_name || 'Store Partner'),
+                  customerAddress: String(session.delivery_address || session.customer_address || 'Delivery Address'),
+                  earningsAmount: String(session.delivery_payout || 35.0),
+                  totalDistanceKm: String(session.distance_km || 2.5),
+                  estimatedDurationMins: String(session.duration_mins || 15),
+                  offerExpiresAt: String(expAt || (Date.now() + 900000)),
+                  serverTime: String(Date.now())
+                }
+              };
+              fcmSenderInstance.sendPushToTopic('riders_broadcast', offerPushPayload).catch(err => {
+                console.error('[SellerAccept] FCM topic broadcast error:', err.message);
               });
             }
           }
@@ -5011,7 +5462,8 @@ const server = http.createServer(async (req, res) => {
           try {
             const dbRes = await pool.query(
               `SELECT id, store_name as "storeName", address, latitude, longitude, sla_minutes as "slaMinutes",
-                      seller_approval_required as "sellerApprovalRequired", is_active as "isActive", created_at as "createdAt"
+                      seller_approval_required as "sellerApprovalRequired", is_active as "isActive",
+                      COALESCE(service_radius_km, 10.0) as "serviceRadiusKm", created_at as "createdAt"
                FROM stores ORDER BY created_at ASC`
             );
             stores = dbRes.rows;
@@ -5106,8 +5558,8 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           await pool.query(
-            `INSERT INTO stores (id, store_name, address, latitude, longitude, sla_minutes, seller_approval_required, is_active, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            `INSERT INTO stores (id, store_name, address, latitude, longitude, sla_minutes, seller_approval_required, is_active, service_radius_km, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
              ON CONFLICT (id) DO UPDATE SET
                store_name = EXCLUDED.store_name,
                address = EXCLUDED.address,
@@ -5116,8 +5568,9 @@ const server = http.createServer(async (req, res) => {
                sla_minutes = EXCLUDED.sla_minutes,
                seller_approval_required = EXCLUDED.seller_approval_required,
                is_active = EXCLUDED.is_active,
+               service_radius_km = EXCLUDED.service_radius_km,
                updated_at = NOW()`,
-            [storeId, storeName, address, latitude, longitude, slaMinutes, sellerApprovalRequired, isActive]
+            [storeId, storeName, address, latitude, longitude, slaMinutes, sellerApprovalRequired, isActive, serviceRadiusKm]
           );
         } catch (err) {
           console.error('[Stores] DB insert error:', err.message);
@@ -5147,6 +5600,14 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
       const storeId = storePatchMatch[1];
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      const isStoreOwner = authClaims.storeId === storeId || authClaims.store_id === storeId;
+      if (!isAdmin && !isStoreOwner) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify settings for another store.' });
+      }
       const body = await parseJsonBody(req);
       if (pool && !isLocalMode) {
         try {
@@ -5160,6 +5621,7 @@ const server = http.createServer(async (req, res) => {
           if (body.slaMinutes != null) { sets.push(`sla_minutes = $${idx++}`); vals.push(parseInt(body.slaMinutes, 10)); }
           if (body.sellerApprovalRequired != null) { sets.push(`seller_approval_required = $${idx++}`); vals.push(Boolean(body.sellerApprovalRequired)); }
           if (body.isActive != null) { sets.push(`is_active = $${idx++}`); vals.push(Boolean(body.isActive)); }
+          if (body.serviceRadiusKm != null) { sets.push(`service_radius_km = $${idx++}`); vals.push(parseFloat(body.serviceRadiusKm)); }
           if (sets.length > 0) {
             sets.push(`updated_at = NOW()`);
             vals.push(storeId);
@@ -5185,7 +5647,8 @@ const server = http.createServer(async (req, res) => {
         try {
           const dbRes = await pool.query(
             `SELECT id, store_name as "storeName", address, latitude, longitude, sla_minutes as "slaMinutes",
-                    seller_approval_required as "sellerApprovalRequired", is_active as "isActive"
+                    seller_approval_required as "sellerApprovalRequired", is_active as "isActive",
+                    COALESCE(service_radius_km, 10.0) as "serviceRadiusKm"
              FROM stores WHERE is_active = TRUE`
           );
           stores = dbRes.rows;
@@ -5531,8 +5994,10 @@ const server = http.createServer(async (req, res) => {
           if (typeof delivery_address === 'string') {
             try { delivery_address = JSON.parse(delivery_address); } catch { delivery_address = null; }
           }
+          const cleanOrder = { ...o };
+          delete cleanOrder.delivery_otp_hash;
           return {
-            ...o,
+            ...cleanOrder,
             items: Array.isArray(items) ? items : [],
             delivery_address: delivery_address || null
           };
@@ -5647,8 +6112,25 @@ const server = http.createServer(async (req, res) => {
       }
       const uniqueVariants = Array.from(new Set(custVariants.filter(Boolean)));
 
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      const isSelf = uniqueVariants.includes(authClaims.sub) || (authClaims.customerId && uniqueVariants.includes(authClaims.customerId));
+      const isSeller = authClaims.role === 'ROLE_SELLER' || authClaims.role === 'SELLER' || (authClaims.roles && (authClaims.roles.includes('ROLE_SELLER') || authClaims.roles.includes('SELLER')));
+
+      if (!isAdmin && !isSelf && !isSeller) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to update this customer profile.' });
+      }
+
       try {
         const body = await parseJsonBody(req);
+
+        // Restrict phone number modification to Administrator only to prevent account hijacking
+        if (body.phone && !isAdmin) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer phone number (login identity) can only be modified by an administrator.' });
+        }
+
         const fullName = body.fullName || body.full_name || body.name;
         let phone = body.phone;
         if (phone) {
@@ -5738,7 +6220,7 @@ const server = http.createServer(async (req, res) => {
            FROM offers o
            LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
            LEFT JOIN stores s ON s.id = ord.store_id
-           WHERE (o.rider_id = $1 OR o.rider_id = 'all' OR o.rider_id IS NULL)
+           WHERE (o.rider_id = $1 OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE OR o.rider_id IS NULL)
              AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
              AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
            ORDER BY o.created_at DESC LIMIT 5`,
@@ -5912,15 +6394,15 @@ const server = http.createServer(async (req, res) => {
           riderVehicle: sessionObj.rider_vehicle || sessionObj.riderVehicle || realVehicle,
           status: sessionObj.state || sessionObj.status || 'ACCEPTED',
           state: sessionObj.state || sessionObj.status || 'ACCEPTED',
-          merchantName: sessionObj.merchant_name || 'Rewari Central Fulfillment Hub',
-          merchantAddress: sessionObj.merchant_address || 'Circular Road, Rewari, Haryana',
-          merchantLat: Number(sessionObj.merchant_lat || 28.202224),
-          merchantLng: Number(sessionObj.merchant_lng || 76.615418),
-          customerName: sessionObj.customer_name || 'Customer',
-          customerPhone: sessionObj.customer_phone || '+919817916180',
-          customerAddress: sessionObj.customer_address || 'hiiiiiiii, Company Bagh',
-          customerLat: Number(sessionObj.customer_lat || 28.1918),
-          customerLng: Number(sessionObj.customer_lng || 76.6081),
+          merchantName: sessionObj.merchant_name || 'Fulfillment Hub',
+          merchantAddress: sessionObj.merchant_address || 'Fulfillment Hub Address',
+          merchantLat: sessionObj.merchant_lat != null ? Number(sessionObj.merchant_lat) : (sessionObj.merchantLat != null ? Number(sessionObj.merchantLat) : null),
+          merchantLng: sessionObj.merchant_lng != null ? Number(sessionObj.merchant_lng) : (sessionObj.merchantLng != null ? Number(sessionObj.merchantLng) : null),
+          customerName: sessionObj.customer_name || sessionObj.customerName || 'Customer',
+          customerPhone: sessionObj.customer_phone || sessionObj.customerPhone || '',
+          customerAddress: sessionObj.customer_address || sessionObj.customerAddress || 'Customer Delivery Address',
+          customerLat: sessionObj.customer_lat != null ? Number(sessionObj.customer_lat) : (sessionObj.customerLat != null ? Number(sessionObj.customerLat) : null),
+          customerLng: sessionObj.customer_lng != null ? Number(sessionObj.customer_lng) : (sessionObj.customerLng != null ? Number(sessionObj.customerLng) : null),
           isCod: Boolean(sessionObj.is_cod),
           codAmountToCollect: Number(sessionObj.cod_amount || sessionObj.cod_amount_to_collect || 0),
           codReconciled: Boolean(sessionObj.cod_reconciled),
@@ -6000,7 +6482,7 @@ const server = http.createServer(async (req, res) => {
                     ds.customer_name, ds.customer_address, ds.distance_km,
                     ds.state, ds.is_cod, ds.cod_amount, ds.remaining_duration_mins,
                     ds.pricing_snapshot, ds.created_at, ds.updated_at,
-                    (SELECT COUNT(*) FROM order_lines ol WHERE ol.order_id = ds.order_id) AS items_count
+                    (SELECT COALESCE(jsonb_array_length(o.items), 1) FROM orders o WHERE (o.id = ds.order_id OR o.order_id = ds.order_id) LIMIT 1) AS items_count
              FROM delivery_sessions ds
              WHERE ds.rider_id = $1 
              ORDER BY ds.created_at DESC LIMIT 50`,
@@ -6015,8 +6497,8 @@ const server = http.createServer(async (req, res) => {
               deliveryId: r.delivery_id || r.id,
               tripId: r.delivery_id || r.id,
               orderId: r.order_id,
-              merchantName: r.merchant_name || 'CommerceOS Central Hub',
-              merchantAddress: r.merchant_address || 'Main Market, Rewari',
+              merchantName: r.merchant_name || 'CommerceOS Fulfillment Hub',
+              merchantAddress: r.merchant_address || 'Fulfillment Hub Address',
               customerName: r.customer_name || 'Customer',
               customerAddress: r.customer_address || 'Doorstep Delivery',
               customerArea: r.customer_address ? r.customer_address.split(',')[0].trim() : 'Customer Area',
@@ -6116,7 +6598,7 @@ const server = http.createServer(async (req, res) => {
                     rn.created_at as "createdAt",
                     rn.read_at as "readAt"
              FROM rider_notifications rn
-             WHERE rn.rider_id = $1 OR rn.rider_id = 'all'
+             WHERE rn.rider_id = $1 OR rn.rider_id = 'all' OR rn.rider_id = 'broadcast'
              ORDER BY rn.created_at DESC LIMIT 50`,
             [authClaims.sub]
           );
@@ -6127,7 +6609,7 @@ const server = http.createServer(async (req, res) => {
               `SELECT id as "notificationId", notification_id as "id", category, rider_id as "riderId",
                       title, body, status, metadata,
                       created_at as "createdAt", read_at as "readAt"
-               FROM rider_notifications WHERE rider_id = $1 OR rider_id = 'all' ORDER BY created_at DESC LIMIT 50`,
+               FROM rider_notifications WHERE rider_id = $1 OR rider_id = 'all' OR rider_id = 'broadcast' ORDER BY created_at DESC LIMIT 50`,
               [authClaims.sub]
             );
             notifs = fallback.rows;
@@ -6236,13 +6718,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery session not found.' });
       }
       const isAssignedRider = (delivery.rider_id === authClaims.sub || delivery.rider_id === authClaims.riderId);
-      const isRiderRole = authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'));
       const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
-      if (!isAssignedRider && !isAdmin && !(isRiderRole && (!delivery.rider_id || delivery.rider_id === 'unassigned'))) {
+      if (!isAssignedRider && !isAdmin) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not the assigned rider for this delivery.' });
-      }
-      if (isRiderRole && (!delivery.rider_id || delivery.rider_id === 'unassigned')) {
-        delivery.rider_id = authClaims.sub;
       }
 
       const body = await parseJsonBody(req);

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS stores (
     sla_minutes INT NOT NULL DEFAULT 10,
     seller_approval_required BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS products (
     manufacturing_date VARCHAR(64),
     store_id VARCHAR(64) REFERENCES stores(id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_products_id_sku UNIQUE (id, sku)
@@ -184,6 +186,7 @@ CREATE TABLE IF NOT EXISTS customers (
     email VARCHAR(255),
     tier VARCHAR(32) NOT NULL DEFAULT 'STANDARD',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -430,6 +433,7 @@ CREATE TABLE IF NOT EXISTS offers (
     waypoints JSONB NOT NULL DEFAULT '[]'::jsonb,
     pricing_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
     fcm_delivery_status VARCHAR(32) DEFAULT 'PENDING',
+    is_broadcast BOOLEAN NOT NULL DEFAULT FALSE,
     rejection_reason TEXT,
     accepted_at TIMESTAMPTZ,
     declined_at TIMESTAMPTZ,

@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { sellerApi, SellerSession } from '@/lib/apiClient';
 import {
   BarChart3, Package, Layers, IndianRupee, XCircle, RefreshCw,
-  Settings, ChevronRight, ShieldCheck, Store, LogOut, Bike, MapPin, Users
+  Settings, ChevronRight, ShieldCheck, Store, LogOut, Bike, MapPin, Users,
+  Percent, Tag
 } from 'lucide-react';
 
 interface SellerSidebarProps {
@@ -170,6 +171,66 @@ export default function SellerSidebar({
                 {inventoryCount}
               </span>
             )}
+          </Link>
+
+          <Link
+            href="/stores"
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'stores'
+                ? 'bg-surface-accentSubtle text-content-accent font-bold'
+                : 'text-content-secondary hover:bg-surface-subtle'
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <MapPin className="w-4 h-4" />
+              <span>Stores & Hubs</span>
+            </div>
+            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+          </Link>
+
+          <Link
+            href="/pricing"
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'pricing'
+                ? 'bg-surface-accentSubtle text-content-accent font-bold'
+                : 'text-content-secondary hover:bg-surface-subtle'
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <Tag className="w-4 h-4" />
+              <span>Pricing Rules</span>
+            </div>
+            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+          </Link>
+
+          <Link
+            href="/promotions"
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'promotions'
+                ? 'bg-surface-accentSubtle text-content-accent font-bold'
+                : 'text-content-secondary hover:bg-surface-subtle'
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <Percent className="w-4 h-4" />
+              <span>Promotions</span>
+            </div>
+            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+          </Link>
+
+          <Link
+            href="/settlements"
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'settlements'
+                ? 'bg-surface-accentSubtle text-content-accent font-bold'
+                : 'text-content-secondary hover:bg-surface-subtle'
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <IndianRupee className="w-4 h-4" />
+              <span>Settlements & Payouts</span>
+            </div>
+            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
           </Link>
 
           <Link

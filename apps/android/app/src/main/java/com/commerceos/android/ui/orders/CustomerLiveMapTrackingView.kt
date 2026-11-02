@@ -54,12 +54,12 @@ fun CustomerLiveMapTrackingView(
     val hasLocations = merchantLat != 0.0 && merchantLng != 0.0 && customerLat != 0.0 && customerLng != 0.0
     val hasGpsData = realRiderLat != null && realRiderLng != null
 
-    var dynamicRoadPoints by remember { mutableStateOf<List<MapRoutePoint>>(emptyList()) }
-    var cachedRiderLat by remember { mutableStateOf<Double?>(null) }
-    var cachedRiderLng by remember { mutableStateOf<Double?>(null) }
-    var lastRoutedOriginLat by remember { mutableStateOf<Double?>(null) }
-    var lastRoutedOriginLng by remember { mutableStateOf<Double?>(null) }
-    var lastRoutedStage by remember { mutableStateOf<String?>(null) }
+    var dynamicRoadPoints by remember(order.id) { mutableStateOf<List<MapRoutePoint>>(emptyList()) }
+    var cachedRiderLat by remember(order.id) { mutableStateOf<Double?>(null) }
+    var cachedRiderLng by remember(order.id) { mutableStateOf<Double?>(null) }
+    var lastRoutedOriginLat by remember(order.id) { mutableStateOf<Double?>(null) }
+    var lastRoutedOriginLng by remember(order.id) { mutableStateOf<Double?>(null) }
+    var lastRoutedStage by remember(order.id) { mutableStateOf<String?>(null) }
 
     if (realRiderLat != null && realRiderLng != null) {
         cachedRiderLat = realRiderLat
@@ -86,16 +86,41 @@ fun CustomerLiveMapTrackingView(
     )
     val isOrderPlaced = !isHeadingToCustomer && !isHeadingToStore
 
-    val effectiveRiderLat = realRiderLat ?: cachedRiderLat ?: if (isHeadingToCustomer) merchantLat else null
-    val effectiveRiderLng = realRiderLng ?: cachedRiderLng ?: if (isHeadingToCustomer) merchantLng else null
+    val effectiveRiderLat = if (isOrderPlaced) null else (realRiderLat ?: cachedRiderLat ?: if (isHeadingToCustomer) merchantLat else null)
+    val effectiveRiderLng = if (isOrderPlaced) null else (realRiderLng ?: cachedRiderLng ?: if (isHeadingToCustomer) merchantLng else null)
 
-    LaunchedEffect(liveTracking?.waypoints, merchantLat, merchantLng, customerLat, customerLng, realRiderLat, realRiderLng, activeStage) {
-        if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
+    // Prevent 500ms route flash: check if cached/server waypoints terminate at the store when heading to customer
+    val isServerWaypointsStaleForCurrentStage = remember(liveTracking?.waypoints, isHeadingToCustomer, isHeadingToStore, merchantLat, merchantLng, customerLat, customerLng) {
+        val serverWaypoints = liveTracking?.waypoints
+        if (serverWaypoints.isNullOrEmpty() || serverWaypoints.size < 2) {
+            false
+        } else {
+            val lastPt = serverWaypoints.last()
+            if (isHeadingToCustomer && customerLat != 0.0 && merchantLat != 0.0) {
+                val distArrM = FloatArray(1)
+                val distArrC = FloatArray(1)
+                android.location.Location.distanceBetween(lastPt.lat, lastPt.lng, merchantLat, merchantLng, distArrM)
+                android.location.Location.distanceBetween(lastPt.lat, lastPt.lng, customerLat, customerLng, distArrC)
+                distArrM[0] < 150.0f && distArrC[0] > 200.0f
+            } else false
+        }
+    }
+
+    LaunchedEffect(liveTracking?.waypoints, isServerWaypointsStaleForCurrentStage, merchantLat, merchantLng, customerLat, customerLng, realRiderLat, realRiderLng, activeStage) {
+        if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2 && !isServerWaypointsStaleForCurrentStage) {
             dynamicRoadPoints = emptyList()
             return@LaunchedEffect
         }
         val effectiveRiderLat = realRiderLat ?: cachedRiderLat
         val effectiveRiderLng = realRiderLng ?: cachedRiderLng
+
+        // If stage changed, immediately clear dynamicRoadPoints so stale store waypoints never flash into customer delivery!
+        if (activeStage != lastRoutedStage) {
+            dynamicRoadPoints = emptyList()
+            lastRoutedOriginLat = null
+            lastRoutedOriginLng = null
+            lastRoutedStage = activeStage
+        }
 
         // If order is placed / preparing (no committed rider yet), NO route is fetched or drawn
         if (isOrderPlaced || effectiveRiderLat == null || effectiveRiderLng == null) {
@@ -225,19 +250,19 @@ fun CustomerLiveMapTrackingView(
         }
     }
 
-    val routePoints = remember(liveTracking?.waypoints, dynamicRoadPoints, merchantLat, merchantLng, customerLat, customerLng, effectiveRiderLat, effectiveRiderLng, isHeadingToStore, isHeadingToCustomer) {
+    val routePoints = remember(liveTracking?.waypoints, isServerWaypointsStaleForCurrentStage, dynamicRoadPoints, merchantLat, merchantLng, customerLat, customerLng, effectiveRiderLat, effectiveRiderLng, isHeadingToStore, isHeadingToCustomer, activeStage, lastRoutedStage) {
         if (!isHeadingToStore && !isHeadingToCustomer) {
             emptyList()
         } else if (effectiveRiderLat == null || effectiveRiderLng == null) {
             emptyList()
-        } else if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2) {
+        } else if (!liveTracking?.waypoints.isNullOrEmpty() && (liveTracking?.waypoints?.size ?: 0) >= 2 && !isServerWaypointsStaleForCurrentStage) {
             liveTracking!!.waypoints.map { MapRoutePoint(it.lat, it.lng) }
-        } else if (dynamicRoadPoints.size >= 2) {
+        } else if (dynamicRoadPoints.size >= 2 && lastRoutedStage == activeStage) {
             dynamicRoadPoints
-        } else if (isHeadingToStore) {
-            listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(merchantLat, merchantLng))
         } else if (isHeadingToCustomer) {
             listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(customerLat, customerLng))
+        } else if (isHeadingToStore) {
+            listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(merchantLat, merchantLng))
         } else {
             emptyList()
         }
@@ -246,8 +271,8 @@ fun CustomerLiveMapTrackingView(
     val traversedPoints = remember(liveTracking?.traversedWaypoints) {
         liveTracking?.traversedWaypoints?.map { MapRoutePoint(it.lat, it.lng) } ?: emptyList()
     }
-    val remainingPoints = remember(liveTracking?.remainingWaypoints, routePoints) {
-        if (!liveTracking?.remainingWaypoints.isNullOrEmpty()) {
+    val remainingPoints = remember(liveTracking?.remainingWaypoints, isServerWaypointsStaleForCurrentStage, routePoints) {
+        if (!liveTracking?.remainingWaypoints.isNullOrEmpty() && !isServerWaypointsStaleForCurrentStage) {
             liveTracking!!.remainingWaypoints.map { MapRoutePoint(it.lat, it.lng) }
         } else {
             routePoints

@@ -1555,20 +1555,105 @@ async function dispatchNotificationEvent(riderId, notificationPayload) {
   return notifRecord;
 }
 
-async function sendGoogleFcmPushNotification(riderId, title, bodyMessage, dataPayload, explicitDeviceToken = null) {
+let _mockFcmOauthCachedToken = null;
+let _mockFcmOauthExpiresAt = 0;
+
+async function getMockServerFcmOAuthToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (_mockFcmOauthCachedToken && _mockFcmOauthExpiresAt > now + 180) {
+    return _mockFcmOauthCachedToken;
+  }
+
+  let saJsonStr = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (!saJsonStr && process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      if (fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+        saJsonStr = fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8');
+      }
+    } catch (_) {}
+  }
+  if (!saJsonStr) {
+    const candidatePaths = [
+      '/Users/jigar/.secrets/commerce-os-firebase-admin.json'
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        try {
+          saJsonStr = fs.readFileSync(p, 'utf8');
+          break;
+        } catch (_) {}
+      }
+    }
+  }
+
+  if (!saJsonStr) return null;
+
+  try {
+    const sa = JSON.parse(saJsonStr);
+    const clientEmail = sa.client_email;
+    const privateKey = sa.private_key;
+    const projectId = sa.project_id;
+    if (!clientEmail || !privateKey || !projectId) return null;
+
+    const claim = {
+      iss: clientEmail,
+      scope: 'https://www.googleapis.com/auth/firebase.messaging',
+      aud: 'https://oauth2.googleapis.com/token',
+      exp: now + 3600,
+      iat: now
+    };
+
+    const base64UrlEncode = (str) => Buffer.from(str).toString('base64url');
+    const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+    const payload = base64UrlEncode(JSON.stringify(claim));
+    const toSign = `${header}.${payload}`;
+
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(toSign);
+    const signature = signer.sign(privateKey, 'base64url');
+    const assertion = `${toSign}.${signature}`;
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (tokenData && tokenData.access_token) {
+      _mockFcmOauthCachedToken = {
+        token: tokenData.access_token,
+        projectId
+      };
+      _mockFcmOauthExpiresAt = now + (tokenData.expires_in || 3600);
+      return _mockFcmOauthCachedToken;
+    }
+    return null;
+  } catch (err) {
+    console.error('[MockServer FCM] OAuth token exchange error:', err.message);
+    return null;
+  }
+}
+
+async function sendGoogleFcmPushNotification(riderId, title, bodyMessage, dataPayload, explicitDeviceToken = null, targetTopic = null) {
   if (!appRepositories) {
     throw new Error('FATAL_CONFIGURATION_ERROR: Persistence repository layer is not initialized.');
   }
 
-  let resolvedFcmToken = explicitDeviceToken;
-  if (!resolvedFcmToken) {
+  const effectiveTopic = targetTopic || (explicitDeviceToken && explicitDeviceToken.startsWith('/topics/') ? explicitDeviceToken.replace('/topics/', '') : null);
+  let resolvedFcmToken = (!effectiveTopic) ? explicitDeviceToken : null;
+
+  if (!effectiveTopic && !resolvedFcmToken) {
     if (appRepositories.deviceTokenRepo) {
       const tokenRec = await appRepositories.deviceTokenRepo.getTokenByRider(riderId);
       resolvedFcmToken = tokenRec ? (tokenRec.token || tokenRec.fcm_token || tokenRec.fcmToken) : null;
     }
   }
 
-  if (!resolvedFcmToken) {
+  if (!effectiveTopic && !resolvedFcmToken) {
     if (appRepositories.telemetryRepo) {
       try {
         await appRepositories.telemetryRepo.recordTelemetry(riderId, 'FCM_TOKEN_NOT_FOUND', {
@@ -1582,25 +1667,42 @@ async function sendGoogleFcmPushNotification(riderId, title, bodyMessage, dataPa
     return false;
   }
 
-  const oauthToken = process.env.FCM_OAUTH_TOKEN || process.env.GOOGLE_OAUTH_ACCESS_TOKEN || null;
+  // Ensure all payload keys and values are strict strings (FCM HTTP v1 invariant)
+  const cleanData = {};
+  if (dataPayload && typeof dataPayload === 'object') {
+    for (const [k, v] of Object.entries(dataPayload)) {
+      cleanData[k] = String(v ?? '');
+    }
+  }
+  if (!cleanData.riderId) {
+    cleanData.riderId = String(riderId || 'broadcast');
+  }
+  if (title && !cleanData.title) cleanData.title = String(title);
+  if (bodyMessage && !cleanData.body) cleanData.body = String(bodyMessage);
+
   const serverKey = process.env.FCM_SERVER_KEY || 'fcm_key_production_token';
-  const projectId = process.env.FCM_PROJECT_ID || 'commerce-os-9f737';
+  const defaultProjectId = process.env.FCM_PROJECT_ID || 'commerce-os-9f737';
 
   try {
     let res;
-    let messageId;
+    const oauthRes = await getMockServerFcmOAuthToken();
+    const oauthToken = oauthRes?.token || process.env.FCM_OAUTH_TOKEN || process.env.GOOGLE_OAUTH_ACCESS_TOKEN || null;
+    const projectId = oauthRes?.projectId || defaultProjectId;
+
     if (oauthToken) {
       // High-Priority DATA-ONLY FCM HTTP v1 Message (Deterministic background/foreground delivery)
-      const fcmV1Payload = {
-        message: {
-          token: resolvedFcmToken,
-          android: {
-            priority: 'HIGH',
-            ttl: '45s'
-          },
-          data: dataPayload
-        }
+      const messageBody = {
+        android: {
+          priority: 'HIGH',
+          ttl: '45s'
+        },
+        data: cleanData
       };
+      if (effectiveTopic) {
+        messageBody.topic = effectiveTopic;
+      } else {
+        messageBody.token = resolvedFcmToken;
+      }
 
       res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
         method: 'POST',
@@ -1608,14 +1710,14 @@ async function sendGoogleFcmPushNotification(riderId, title, bodyMessage, dataPa
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${oauthToken}`
         },
-        body: JSON.stringify(fcmV1Payload)
+        body: JSON.stringify({ message: messageBody })
       });
     } else {
       // High-Priority DATA-ONLY FCM Legacy / HTTP Protocol
       const legacyPayload = {
-        to: resolvedFcmToken,
+        to: effectiveTopic ? `/topics/${effectiveTopic}` : resolvedFcmToken,
         priority: 'high',
-        data: dataPayload
+        data: cleanData
       };
 
       res = await fetch('https://fcm.googleapis.com/fcm/send', {
@@ -5231,7 +5333,17 @@ async function handleRequest(port, req, res) {
             }
           }
 
-          // Fan out push notification to rider phones
+          // 1. Fleet-wide FCM HTTP v1 Topic Broadcast to riders_broadcast
+          sendGoogleFcmPushNotification(
+            'broadcast',
+            `⚡ New Delivery Order #${order.id.slice(-8).toUpperCase()}`,
+            `Pickup: ${order.storeName || order.merchantName || 'Rewari Central Hub'} (${itemsCount} items) • Bill: ₹${displayBill}`,
+            fcmDataPayload,
+            null,
+            'riders_broadcast'
+          ).catch(err => console.error('[MockServer] Broadcast topic FCM error:', err.message));
+
+          // 2. Direct FCM fan out to all registered rider devices
           for (const item of registeredTokens) {
             sendGoogleFcmPushNotification(
               item.riderId,
@@ -6186,8 +6298,8 @@ async function handleRequest(port, req, res) {
             payoutFormatted: '₹' + payoutNum.toFixed(2),
             status: s.state || s.status || 'DELIVERED',
             state: s.state || s.status || 'DELIVERED',
-            deliveredAt: s.deliveredAt || s.createdAt || nowIso(),
-            createdAt: s.createdAt || nowIso()
+            deliveredAt: s.deliveredAt || s.createdAt || null,
+            createdAt: s.createdAt || s.deliveredAt || null
           };
         });
         return json(res, 200, trips);

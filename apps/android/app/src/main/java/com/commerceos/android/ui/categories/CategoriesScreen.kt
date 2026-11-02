@@ -7,22 +7,21 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -37,177 +36,190 @@ import com.commerceos.android.ui.theme.PlusJakartaSans
 import com.commerceos.android.viewmodel.CategoryTaxonomyUiState
 import com.commerceos.android.viewmodel.CategoryViewModel
 
-data class CategoryPresentation(
+data class HealthcareCategoryPresentation(
     val icon: ImageVector,
     val iconTint: Color,
-    val iconBg: Color,
-    val cardBg: Color,
+    val cardGradientStart: Color,
+    val cardGradientEnd: Color,
     val cardBorder: Color,
     val imageUrl: String,
     val badgeText: String,
-    val badgeColor: Color,
+    val badgeBg: Color,
     val department: String,
     val highlights: String,
     val subTags: List<String>
 )
 
-private fun getPresentation(categoryName: String): CategoryPresentation {
+private fun getHealthcarePresentation(categoryName: String): HealthcareCategoryPresentation {
     val lower = categoryName.lowercase()
     return when {
-        lower.contains("pain") || lower.contains("fever") -> CategoryPresentation(
+        lower.contains("pain") || lower.contains("fever") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Healing,
             iconTint = Color(0xFFE11D48),
-            iconBg = Color(0xFFFFE4E6),
-            cardBg = Color(0xFFFFF7F7),
-            cardBorder = Color(0xFFFFE4E6),
+            cardGradientStart = Color(0xFFFFF1F2),
+            cardGradientEnd = Color(0xFFFFE4E6),
+            cardBorder = Color(0xFFFECDD3),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
             badgeText = "⚡ 10-MIN SLA",
-            badgeColor = Color(0xFFE11D48),
+            badgeBg = Color(0xFFFFE4E6),
             department = "Medicines",
             highlights = "Paracetamol, Dolo, Balms",
-            subTags = listOf("Paracetamol", "Dolo 650", "Pain Balms")
+            subTags = listOf("Dolo 650", "Paracetamol", "Pain Balms", "Volini")
         )
-        lower.contains("cold") || lower.contains("cough") -> CategoryPresentation(
+        lower.contains("cold") || lower.contains("cough") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Thermostat,
             iconTint = Color(0xFF0284C7),
-            iconBg = Color(0xFFE0F2FE),
-            cardBg = Color(0xFFF8FAFC),
+            cardGradientStart = Color(0xFFF0FDF4),
+            cardGradientEnd = Color(0xFFE0F2FE),
             cardBorder = Color(0xFFBAE6FD),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg",
             badgeText = "MUST HAVE",
-            badgeColor = Color(0xFF0284C7),
+            badgeBg = Color(0xFFE0F2FE),
             department = "Medicines",
             highlights = "Syrups, Lozenges, Inhalers",
-            subTags = listOf("Cough Syrups", "Lozenges", "Inhalers")
+            subTags = listOf("Benadryl", "Cough Syrups", "Lozenges", "Steam Inhaler")
         )
-        lower.contains("diabetes") -> CategoryPresentation(
+        lower.contains("diabetes") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Bloodtype,
             iconTint = Color(0xFF4F46E5),
-            iconBg = Color(0xFFEEF2FF),
-            cardBg = Color(0xFFF9FAFD),
+            cardGradientStart = Color(0xFFEEF2FF),
+            cardGradientEnd = Color(0xFFE0E7FF),
             cardBorder = Color(0xFFC7D2FE),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg",
             badgeText = "CHRONIC REFILL",
-            badgeColor = Color(0xFF4F46E5),
+            badgeBg = Color(0xFFEEF2FF),
             department = "Chronic Care",
             highlights = "Glucometers, Strips, Care",
-            subTags = listOf("Metformin", "Glucometers", "Test Strips")
+            subTags = listOf("Glycomet", "Metformin", "Glucometer", "Sugar Free")
         )
-        lower.contains("antibiotic") || lower.contains("infect") -> CategoryPresentation(
+        lower.contains("antibiotic") || lower.contains("infect") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Science,
             iconTint = Color(0xFF0D9488),
-            iconBg = Color(0xFFCCFBF1),
-            cardBg = Color(0xFFF7FDFD),
+            cardGradientStart = Color(0xFFF0FDFA),
+            cardGradientEnd = Color(0xFFCCFBF1),
             cardBorder = Color(0xFF99F6E4),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg",
             badgeText = "Rx PRESCRIBED",
-            badgeColor = Color(0xFF0D9488),
+            badgeBg = Color(0xFFCCFBF1),
             department = "Medicines",
             highlights = "Amoxiclav, Azithral",
-            subTags = listOf("Augmentin", "Azithral", "Ointments")
+            subTags = listOf("Augmentin 625", "Azithral", "Ointments", "Antiseptic")
         )
-        lower.contains("vitamin") || lower.contains("nutrition") -> CategoryPresentation(
+        lower.contains("vitamin") || lower.contains("nutrition") -> HealthcareCategoryPresentation(
             icon = Icons.Default.FitnessCenter,
-            iconTint = Color(0xFF059669),
-            iconBg = Color(0xFFD1FAE5),
-            cardBg = Color(0xFFF6FDF9),
-            cardBorder = Color(0xFFA7F3D0),
+            iconTint = Color(0xFFD97706),
+            cardGradientStart = Color(0xFFFFFBEB),
+            cardGradientEnd = Color(0xFFFEF3C7),
+            cardBorder = Color(0xFFFDE68A),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg",
             badgeText = "UP TO 40% OFF",
-            badgeColor = Color(0xFF059669),
+            badgeBg = Color(0xFFFEF3C7),
             department = "Daily Wellness",
             highlights = "Multivitamins, Zinc, Calcium",
-            subTags = listOf("Multivitamins", "Zinc & C", "Calcium D3")
+            subTags = listOf("Becosules", "Vitamin C", "Zincovit", "Calcium D3")
         )
-        lower.contains("stomach") || lower.contains("digest") || lower.contains("gas") -> CategoryPresentation(
+        lower.contains("stomach") || lower.contains("digest") || lower.contains("gas") -> HealthcareCategoryPresentation(
             icon = Icons.Default.LocalPharmacy,
-            iconTint = Color(0xFFD97706),
-            iconBg = Color(0xFFFEF3C7),
-            cardBg = Color(0xFFFFFDF7),
-            cardBorder = Color(0xFFFDE68A),
+            iconTint = Color(0xFF059669),
+            cardGradientStart = Color(0xFFF0FDF4),
+            cardGradientEnd = Color(0xFFDCFCE7),
+            cardBorder = Color(0xFFBBF7D0),
             imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg",
             badgeText = "FAST RELIEF",
-            badgeColor = Color(0xFFD97706),
+            badgeBg = Color(0xFFDCFCE7),
             department = "Medicines",
-            highlights = "Antacids, Digene, ORS",
-            subTags = listOf("Digene Gel", "Pantoprazole", "Gas Relief")
+            highlights = "Digene, Antacids, ORS",
+            subTags = listOf("Digene", "Pan-D", "Eno", "Probiotics")
         )
-        lower.contains("heart") || lower.contains("cardiac") || lower.contains("bp") -> CategoryPresentation(
+        lower.contains("heart") || lower.contains("cardiac") || lower.contains("bp") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Favorite,
             iconTint = Color(0xFFDB2777),
-            iconBg = Color(0xFFFCE7F3),
-            cardBg = Color(0xFFFFF7FA),
+            cardGradientStart = Color(0xFFFDF2F8),
+            cardGradientEnd = Color(0xFFFCE7F3),
             cardBorder = Color(0xFFFBCFE8),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/163836/telma-40mg-strip-of-30-tablets-front-2-1756884638-non-watermarked.jpg",
-            badgeText = "DOCTOR PREFERRED",
-            badgeColor = Color(0xFFDB2777),
+            badgeText = "DOCTOR PICKS",
+            badgeBg = Color(0xFFFCE7F3),
             department = "Chronic Care",
             highlights = "BP Monitors, Heart Health",
-            subTags = listOf("Telmisartan", "BP Monitors", "Cardio Care")
+            subTags = listOf("Telma 40", "BP Monitor", "Ecosprin 75", "Omega 3")
         )
-        lower.contains("first aid") || lower.contains("wound") || lower.contains("bandage") -> CategoryPresentation(
+        lower.contains("first aid") || lower.contains("wound") || lower.contains("bandage") -> HealthcareCategoryPresentation(
             icon = Icons.Default.MedicalServices,
             iconTint = Color(0xFFDC2626),
-            iconBg = Color(0xFFFEE2E2),
-            cardBg = Color(0xFFFFF8F8),
+            cardGradientStart = Color(0xFFFEF2F2),
+            cardGradientEnd = Color(0xFFFEE2E2),
             cardBorder = Color(0xFFFECACA),
             imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/065110/electral-powder-218g-2-1671741180.jpg",
             badgeText = "EMERGENCY KIT",
-            badgeColor = Color(0xFFDC2626),
+            badgeBg = Color(0xFFFEE2E2),
             department = "Devices & First Aid",
-            highlights = "Bandages, Antiseptic, Dettol",
-            subTags = listOf("Antiseptics", "Bandages", "ORS Electral")
+            highlights = "Bandages, Dettol, ORS",
+            subTags = listOf("Electral ORS", "Dettol", "Bandages", "Thermometer")
         )
-        lower.contains("skin") || lower.contains("hair") || lower.contains("derma") -> CategoryPresentation(
+        lower.contains("skin") || lower.contains("hair") || lower.contains("derma") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Face,
             iconTint = Color(0xFF9333EA),
-            iconBg = Color(0xFFF3E8FF),
-            cardBg = Color(0xFFFAF7FD),
+            cardGradientStart = Color(0xFFFAF5FF),
+            cardGradientEnd = Color(0xFFF3E8FF),
             cardBorder = Color(0xFFE9D5FF),
             imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/I40695/cetaphil-gentle-skin-cleanser-125ml-2-1671741005.jpg",
             badgeText = "CLINICAL DERMA",
-            badgeColor = Color(0xFF9333EA),
+            badgeBg = Color(0xFFF3E8FF),
             department = "Personal Care",
-            highlights = "Derma Creams, Lotions",
-            subTags = listOf("Cleansers", "Sunscreen", "Anti-fungal")
+            highlights = "Derma Cleansers, Sunscreen",
+            subTags = listOf("Cetaphil", "Sunscreen", "Anti-Fungal", "Moisturizer")
         )
-        lower.contains("baby") || lower.contains("mother") -> CategoryPresentation(
+        lower.contains("baby") || lower.contains("mother") -> HealthcareCategoryPresentation(
             icon = Icons.Default.ChildCare,
             iconTint = Color(0xFF2563EB),
-            iconBg = Color(0xFFDBEAFE),
-            cardBg = Color(0xFFF6FAFF),
-            cardBorder = Color(0xFFBFDBFE),
+            cardGradientStart = Color(0xFFF0F9FF),
+            cardGradientEnd = Color(0xFFE0F2FE),
+            cardBorder = Color(0xFFBAE6FD),
             imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/159115/sebamed-baby-cleansing-bar-100g-2-1671741113.jpg",
             badgeText = "GENTLE CARE",
-            badgeColor = Color(0xFF2563EB),
+            badgeBg = Color(0xFFE0F2FE),
             department = "Personal Care",
             highlights = "Diapers, Wipes, Gripe Water",
-            subTags = listOf("Diapers", "Baby Wipes", "Nutrition")
+            subTags = listOf("Sebamed", "Diapers", "Baby Wipes", "Gripe Water")
         )
-        lower.contains("ayurved") || lower.contains("herbal") -> CategoryPresentation(
+        lower.contains("ayurved") || lower.contains("herbal") -> HealthcareCategoryPresentation(
             icon = Icons.Default.Eco,
             iconTint = Color(0xFF16A34A),
-            iconBg = Color(0xFFDCFCE7),
-            cardBg = Color(0xFFF7FDF8),
-            cardBorder = Color(0xFFBBF7D0),
+            cardGradientStart = Color(0xFFF2FBF5),
+            cardGradientEnd = Color(0xFFDCFCE7),
+            cardBorder = Color(0xFFB8ECCD),
             imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/054720/dabur-chyawanprash-2x-immunity-1kg-2-1671741076.jpg",
             badgeText = "100% NATURAL",
-            badgeColor = Color(0xFF16A34A),
+            badgeBg = Color(0xFFDCFCE7),
             department = "Ayurveda",
-            highlights = "Chyawanprash, Immunity",
-            subTags = listOf("Chyawanprash", "Ashwagandha", "Giloy")
+            highlights = "Chyawanprash, Immunity Herbs",
+            subTags = listOf("Chyawanprash", "Ashwagandha", "Giloy", "Pure Honey")
         )
-        else -> CategoryPresentation(
-            icon = Icons.Default.Medication,
-            iconTint = Color(0xFF059669),
-            iconBg = Color(0xFFD1FAE5),
-            cardBg = Color(0xFFF9FBFA),
+        lower.contains("women") || lower.contains("fem") -> HealthcareCategoryPresentation(
+            icon = Icons.Default.Spa,
+            iconTint = Color(0xFFE11D48),
+            cardGradientStart = Color(0xFFFFF1F2),
+            cardGradientEnd = Color(0xFFFFE4E6),
+            cardBorder = Color(0xFFFECDD3),
+            imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/K78299/shelcal-500mg-bottle-of-30-tablets-6.1-1787223246.jpg",
+            badgeText = "WELLNESS CARE",
+            badgeBg = Color(0xFFFFE4E6),
+            department = "Personal Care",
+            highlights = "Calcium, Iron, Intimate Care",
+            subTags = listOf("Shelcal", "Sanitary Pads", "Iron Folic", "Intimate Wash")
+        )
+        else -> HealthcareCategoryPresentation(
+            icon = Icons.Default.LocalPharmacy,
+            iconTint = Color(0xFF007E65),
+            cardGradientStart = Color(0xFFF0FDF4),
+            cardGradientEnd = Color(0xFFDCFCE7),
             cardBorder = Color(0xFFA7F3D0),
             imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
             badgeText = "CERTIFIED",
-            badgeColor = Color(0xFF059669),
+            badgeBg = Color(0xFFDCFCE7),
             department = "Medicines",
-            highlights = "Certified Medicines",
+            highlights = "Certified Essential Care",
             subTags = listOf("Essential", "Daily Meds", "Generic")
         )
     }
@@ -217,30 +229,114 @@ private val DEFAULT_HEALTHCARE_CATEGORIES = listOf(
     CatalogCategory(id = "cat_pain_fever", slug = "pain-fever", name = "Pain & Fever", productCount = 18),
     CatalogCategory(id = "cat_cold_cough", slug = "cold-cough", name = "Cold & Cough", productCount = 14),
     CatalogCategory(id = "cat_diabetes_care", slug = "diabetes-care", name = "Diabetes Care", productCount = 12),
-    CatalogCategory(id = "cat_antibiotics", slug = "antibiotics", name = "Antibiotics", productCount = 9),
     CatalogCategory(id = "cat_vitamins", slug = "vitamins-nutrition", name = "Vitamins & Daily Wellness", productCount = 24),
     CatalogCategory(id = "cat_digestive", slug = "digestive-health", name = "Stomach & Digestion", productCount = 16),
     CatalogCategory(id = "cat_cardiac", slug = "cardiac-care", name = "Heart & Blood Pressure", productCount = 8),
-    CatalogCategory(id = "cat_first_aid", slug = "first-aid", name = "First Aid & Essentials", productCount = 20),
+    CatalogCategory(id = "cat_antibiotics", slug = "antibiotics", name = "Antibiotics", productCount = 9),
     CatalogCategory(id = "cat_skin_care", slug = "skin-care", name = "Skin & Dermatology", productCount = 15),
-    CatalogCategory(id = "cat_baby_care", slug = "baby-care", name = "Baby & Mother Care", productCount = 11),
-    CatalogCategory(id = "cat_ayurveda", slug = "ayurveda-herbal", name = "Ayurveda & Herbal Care", productCount = 19)
+    CatalogCategory(id = "cat_ayurveda", slug = "ayurveda-herbal", name = "Ayurveda & Herbal Care", productCount = 19),
+    CatalogCategory(id = "cat_women_care", slug = "women-care", name = "Women's Health & Care", productCount = 13),
+    CatalogCategory(id = "cat_first_aid", slug = "first-aid", name = "First Aid & Essentials", productCount = 20),
+    CatalogCategory(id = "cat_baby_care", slug = "baby-care", name = "Baby & Mother Care", productCount = 11)
 )
 
 private val HEALTHCARE_DEPARTMENTS = listOf(
-    "All",
+    "All Categories",
     "Medicines",
     "Chronic Care",
     "Daily Wellness",
-    "Devices & First Aid",
+    "Ayurveda",
     "Personal Care",
-    "Ayurveda"
+    "Devices & First Aid"
+)
+
+private data class QuickPromoItem(
+    val title: String,
+    val subtitle: String,
+    val badge: String,
+    val icon: ImageVector,
+    val iconTint: Color,
+    val bgStart: Color,
+    val bgEnd: Color,
+    val borderColor: Color,
+    val query: String
+)
+
+private val QUICK_PROMO_ITEMS = listOf(
+    QuickPromoItem(
+        title = "Most Bought",
+        subtitle = "Daily Essentials",
+        badge = "⚡ 10m SLA",
+        icon = Icons.Default.ShoppingBag,
+        iconTint = Color(0xFF007E65),
+        bgStart = Color(0xFFE6F7F0),
+        bgEnd = Color(0xFFD1F2E2),
+        borderColor = Color(0xFFB5EAD7),
+        query = "Dolo 650"
+    ),
+    QuickPromoItem(
+        title = "Deals Of The Day",
+        subtitle = "Up to 60% OFF",
+        badge = "MEGA SALE",
+        icon = Icons.Default.Percent,
+        iconTint = Color(0xFF0284C7),
+        bgStart = Color(0xFFE5F6FA),
+        bgEnd = Color(0xFFCEEFF9),
+        borderColor = Color(0xFFB2E5F3),
+        query = "Vitamins"
+    ),
+    QuickPromoItem(
+        title = "Health Checkups",
+        subtitle = "Free Home Pickup",
+        badge = "NABL LABS",
+        icon = Icons.Default.Biotech,
+        iconTint = Color(0xFF4F46E5),
+        bgStart = Color(0xFFEEF2FF),
+        bgEnd = Color(0xFFE0E7FF),
+        borderColor = Color(0xFFC7D2FE),
+        query = "Full Body Checkup"
+    ),
+    QuickPromoItem(
+        title = "Generic Switch",
+        subtitle = "Save up to 40%",
+        badge = "SAME SALT",
+        icon = Icons.Default.SwapHoriz,
+        iconTint = Color(0xFFD97706),
+        bgStart = Color(0xFFFEF3C7),
+        bgEnd = Color(0xFFFDE68A),
+        borderColor = Color(0xFFFCD34D),
+        query = "Paracip"
+    )
+)
+
+private data class FeaturedBrand(
+    val name: String,
+    val tagline: String,
+    val badge: String,
+    val accentColor: Color,
+    val query: String
+)
+
+private val FEATURED_BRANDS = listOf(
+    FeaturedBrand("Cipla", "Caring for Life", "Up to 30% OFF", Color(0xFF0284C7), "Cipla"),
+    FeaturedBrand("Abbott", "A Promise for Life", "Best Deals", Color(0xFF0D9488), "Abbott"),
+    FeaturedBrand("Dabur", "100% Ayurvedic", "Immunity Care", Color(0xFF16A34A), "Dabur"),
+    FeaturedBrand("Sun Pharma", "Global Health", "Doctor Preferred", Color(0xFFE11D48), "Sun Pharma"),
+    FeaturedBrand("Dr. Reddy's", "Good Health Can't Wait", "Up to 35% OFF", Color(0xFF4F46E5), "Dr. Reddy"),
+    FeaturedBrand("Himalaya", "Herbal Wellness", "Pure Herbs", Color(0xFF059669), "Himalaya"),
+    FeaturedBrand("Micro Labs", "Dolo 650 Makers", "Fast Relief", Color(0xFFD97706), "Micro Labs")
 )
 
 /**
- * World-class Healthcare Category Directory matching Tata 1mg, PharmEasy, and Truemeds benchmarks.
- * Features therapy-themed pastel cards, real authentic clinical pack imagery, sub-condition tags,
- * department segmenter, promotional badges, and instant search filter.
+ * Flagship Healthcare Category Hub matching and exceeding PharmEasy & Tata 1mg benchmarks.
+ * Features:
+ * - PharmEasy Deep Emerald Header with live address locator & camera prescription quick trigger.
+ * - "SHOP SMARTER, SAVE BIGGER" 3D-styled interactive healthcare tiles.
+ * - Fast-Track Order Strip ("OR YOU CAN ORDER VIA" WhatsApp, Prescription, Call).
+ * - "SHOP BY HEALTH CONCERN" dual-column pastel gradient cards with authentic high-res medicine packs.
+ * - Instant symptom lookup pills and department filter segmenter.
+ * - Truemeds / PharmEasy "Generic Switch & Save up to 40%" trust card.
+ * - Trusted Indian pharmaceutical brand stores.
  */
 @Composable
 fun CategoriesScreen(
@@ -251,7 +347,7 @@ fun CategoriesScreen(
         viewModel.loadTaxonomy()
     }
 
-    var selectedDepartment by remember { mutableStateOf("All") }
+    var selectedDepartment by remember { mutableStateOf("All Categories") }
     var searchQuery by remember { mutableStateOf("") }
 
     val rawCategories = when (val state = viewModel.taxonomy) {
@@ -261,11 +357,12 @@ fun CategoriesScreen(
         else -> DEFAULT_HEALTHCARE_CATEGORIES
     }
 
-    // Filter by department and search text
+    // Filter categories by department and search query
     val filteredCategories = remember(rawCategories, selectedDepartment, searchQuery) {
         rawCategories.filter { cat ->
-            val pres = getPresentation(cat.name)
-            val matchesDept = selectedDepartment == "All" || pres.department.equals(selectedDepartment, ignoreCase = true)
+            val pres = getHealthcarePresentation(cat.name)
+            val matchesDept = selectedDepartment == "All Categories" ||
+                pres.department.equals(selectedDepartment, ignoreCase = true)
             val matchesSearch = searchQuery.isBlank() ||
                 cat.name.contains(searchQuery, ignoreCase = true) ||
                 pres.highlights.contains(searchQuery, ignoreCase = true) ||
@@ -274,45 +371,101 @@ fun CategoriesScreen(
         }
     }
 
+    fun handleTrigger(queryText: String) {
+        val matched = rawCategories.firstOrNull { it.name.contains(queryText, ignoreCase = true) }
+        if (matched != null) {
+            onSelectCategory(matched)
+        } else {
+            onSelectCategory(
+                CatalogCategory(
+                    id = "cat_${queryText.lowercase().replace(" ", "_")}",
+                    slug = queryText.lowercase().replace(" ", "-"),
+                    name = queryText,
+                    productCount = 10
+                )
+            )
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(Color(0xFFF4F6F8))
     ) {
-        // 1. Top Clinical Header & Search Refinement
+        // ====================================================================
+        // 1. PHARMEASY DEEP EMERALD HEADER WITH ADDRESS & CAMERA Rx BAR
+        // ====================================================================
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color(0xFF005844), Color(0xFF067A5E))
+                    )
+                )
+                .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
+            // Location & Delivery Strip
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "Shop by Category",
-                        fontSize = 20.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A),
-                        letterSpacing = (-0.3).sp
-                    )
-                    Text(
-                        text = "100% Genuine Medicines • 10-Min Delivery",
-                        fontSize = 11.5.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF059669)
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = CircleShape,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Column {
+                        Text(
+                            text = "DELIVER TO",
+                            fontSize = 9.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.8f),
+                            letterSpacing = 0.5.sp
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "Rewari-1, 123401",
+                                fontSize = 13.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                 }
 
+                // 10-Min SLA Pill Badge
                 Surface(
-                    color = Color(0xFFECFDF5),
+                    color = Color(0xFF0D9488),
                     shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(0.5.dp, Color(0xFFA7F3D0))
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -320,51 +473,52 @@ fun CategoriesScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            Icons.Default.Verified,
+                            Icons.Default.Bolt,
                             contentDescription = null,
-                            tint = Color(0xFF059669),
-                            modifier = Modifier.size(13.dp)
+                            tint = Color(0xFFFDE047),
+                            modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = "Licensed Rx",
-                            fontSize = 10.5.sp,
+                            text = "10 MINS",
+                            fontSize = 11.sp,
                             fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF065F46)
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Inline Search Filter Box
+            // Search Bar with Integrated Camera Rx Trigger
             Surface(
-                color = Color(0xFFF1F5F9),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                color = Color.White,
+                shape = RoundedCornerShape(26.dp),
+                shadowElevation = 4.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
                         Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = Color(0xFF64748B),
-                        modifier = Modifier.size(18.dp)
+                        tint = Color(0xFF007E65),
+                        modifier = Modifier.size(20.dp)
                     )
+
                     TextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         placeholder = {
                             Text(
-                                text = "Search categories, therapies, or symptoms...",
-                                fontSize = 12.5.sp,
+                                text = "Search medicines, health concerns...",
+                                fontSize = 13.sp,
                                 fontFamily = PlusJakartaSans,
                                 color = Color(0xFF94A3B8)
                             )
@@ -379,10 +533,11 @@ fun CategoriesScreen(
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
+
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { searchQuery = "" },
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
                                 Icons.Default.Close,
@@ -391,88 +546,447 @@ fun CategoriesScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                         }
+                    } else {
+                        // Vertical divider before Rx trigger
+                        VerticalDivider(
+                            modifier = Modifier
+                                .height(22.dp)
+                                .width(1.dp),
+                            color = Color(0xFFE2E8F0)
+                        )
+
+                        // Camera / Upload Rx trigger
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { handleTrigger("Upload Prescription") }
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PhotoCamera,
+                                contentDescription = "Upload Rx",
+                                tint = Color(0xFF007E65),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Upload Rx",
+                                fontSize = 11.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF007E65)
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // 2. Department Horizontal Filter Rail (Netmeds / 1mg benchmark)
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.White)
-                .padding(vertical = 8.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(HEALTHCARE_DEPARTMENTS) { dept ->
-                val isSelected = selectedDepartment == dept
-                Surface(
-                    color = if (isSelected) Color(0xFF0F172A) else Color(0xFFF8FAFC),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = if (isSelected) Color(0xFF0F172A) else Color(0xFFE2E8F0)
-                    ),
-                    modifier = Modifier.clickable { selectedDepartment = dept }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Big Deals, Small Bills Ribbon Banner (PharmEasy Signature)
+            Surface(
+                color = Color.White.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Surface(
+                        color = Color(0xFFFFB800),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "BIG DEALS",
+                            fontSize = 9.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF1E293B),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                     Text(
-                        text = dept,
-                        fontSize = 11.5.sp,
+                        text = "UPTO 26% OFF ON MEDICINES • Extra ₹500 credits",
+                        fontSize = 11.sp,
                         fontFamily = PlusJakartaSans,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                        color = if (isSelected) Color.White else Color(0xFF475569),
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
         }
 
-        HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.5.dp)
-
-        // 3. Main Category Grid
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-            modifier = Modifier.fillMaxSize()
+        // ====================================================================
+        // 2. SCROLLABLE CONTENT BODY
+        // ====================================================================
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            // Optional: Hero "Shop by Health Concern" Spotlight (PharmEasy benchmark)
-            if (selectedDepartment == "All" && searchQuery.isBlank()) {
-                item(span = { GridItemSpan(2) }) {
-                    HealthConcernSpotlight(
-                        onSelectConcern = { concernName ->
-                            val matched = rawCategories.firstOrNull { it.name.contains(concernName, ignoreCase = true) }
-                            if (matched != null) {
-                                onSelectCategory(matched)
-                            } else {
-                                onSelectCategory(
-                                    CatalogCategory(
-                                        id = "cat_${concernName.lowercase().replace(" ", "_")}",
-                                        slug = concernName.lowercase().replace(" ", "-"),
-                                        name = concernName,
-                                        productCount = 10
-                                    )
-                                )
-                            }
-                        }
-                    )
-                }
-            }
-
-            if (filteredCategories.isEmpty()) {
-                item(span = { GridItemSpan(2) }) {
+            // Section A: "SHOP SMARTER, SAVE BIGGER" (PharmEasy Benchmark)
+            if (searchQuery.isBlank() && selectedDepartment == "All Categories") {
+                item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 40.dp),
+                            .background(Color.White)
+                            .padding(top = 14.dp, bottom = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "SHOP SMARTER, SAVE BIGGER",
+                                fontSize = 12.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF475569),
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "100% Genuine",
+                                fontSize = 11.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF007E65)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(QUICK_PROMO_ITEMS) { item ->
+                                Surface(
+                                    color = Color.Transparent,
+                                    shape = RoundedCornerShape(18.dp),
+                                    border = BorderStroke(1.dp, item.borderColor),
+                                    modifier = Modifier
+                                        .width(135.dp)
+                                        .clickable { handleTrigger(item.query) }
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    listOf(item.bgStart, item.bgEnd)
+                                                )
+                                            )
+                                            .padding(10.dp),
+                                        horizontalAlignment = Alignment.Start
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                color = Color.White,
+                                                shape = CircleShape,
+                                                shadowElevation = 1.dp,
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        item.icon,
+                                                        contentDescription = null,
+                                                        tint = item.iconTint,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Surface(
+                                                color = item.iconTint.copy(alpha = 0.12f),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = item.badge,
+                                                    fontSize = 8.sp,
+                                                    fontFamily = PlusJakartaSans,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = item.iconTint,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Text(
+                                            text = item.title,
+                                            fontSize = 12.5.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF0F172A),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = item.subtitle,
+                                            fontSize = 10.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFF64748B),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Section B: "OR YOU CAN ORDER VIA" FAST-TRACK STRIP
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White)
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFFE2E8F0))
+                            Text(
+                                text = "OR YOU CAN ORDER VIA",
+                                fontSize = 10.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF94A3B8),
+                                letterSpacing = 0.5.sp
+                            )
+                            HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFFE2E8F0))
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // WhatsApp
+                            Surface(
+                                color = Color(0xFFF0FDF4),
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { handleTrigger("WhatsApp Order") }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = null,
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "WhatsApp",
+                                        fontSize = 11.sp,
+                                        fontFamily = PlusJakartaSans,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF166534)
+                                    )
+                                }
+                            }
+
+                            // Prescription
+                            Surface(
+                                color = Color(0xFFFFF7ED),
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, Color(0xFFFED7AA)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { handleTrigger("Upload Prescription") }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.PhotoCamera,
+                                        contentDescription = null,
+                                        tint = Color(0xFFEA580C),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Upload Rx",
+                                        fontSize = 11.sp,
+                                        fontFamily = PlusJakartaSans,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF9A3412)
+                                    )
+                                }
+                            }
+
+                            // Call
+                            Surface(
+                                color = Color(0xFFEFF6FF),
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { handleTrigger("Doctor Consultation") }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Phone,
+                                        contentDescription = null,
+                                        tint = Color(0xFF2563EB),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Call Order",
+                                        fontSize = 11.sp,
+                                        fontFamily = PlusJakartaSans,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E40AF)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+
+            // Section C: Department Horizontal Filter Rail
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
+                        .padding(vertical = 8.dp)
+                ) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(HEALTHCARE_DEPARTMENTS) { dept ->
+                            val isSelected = selectedDepartment == dept
+                            Surface(
+                                color = if (isSelected) Color(0xFF005844) else Color(0xFFF8FAFC),
+                                shape = RoundedCornerShape(20.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (isSelected) Color(0xFF005844) else Color(0xFFE2E8F0)
+                                ),
+                                modifier = Modifier.clickable { selectedDepartment = dept }
+                            ) {
+                                Text(
+                                    text = dept,
+                                    fontSize = 12.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isSelected) Color.White else Color(0xFF475569),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.5.dp)
+            }
+
+            // Section D: "SHOP BY HEALTH CONCERN" Header
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = if (selectedDepartment == "All Categories") "Shop by Health Concern" else selectedDepartment,
+                            fontSize = 17.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A),
+                            letterSpacing = (-0.3).sp
+                        )
+                        Text(
+                            text = "${filteredCategories.size} health categories available",
+                            fontSize = 11.sp,
+                            fontFamily = PlusJakartaSans,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xFFECFDF5),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(0.5.dp, Color(0xFFA7F3D0))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF059669),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = "Doctor Curated",
+                                fontSize = 10.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF065F46)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Section E: 2-Column Category Grid
+            if (filteredCategories.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Surface(
                             color = Color(0xFFF1F5F9),
                             shape = CircleShape,
-                            modifier = Modifier.size(56.dp)
+                            modifier = Modifier.size(60.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -485,7 +999,7 @@ fun CategoriesScreen(
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "No categories found",
+                            text = "No health categories found",
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
@@ -493,218 +1007,334 @@ fun CategoriesScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Try searching with a different health condition",
+                            text = "Try searching with a symptom like 'fever', 'cough' or 'diabetes'",
                             fontFamily = PlusJakartaSans,
                             fontSize = 12.sp,
                             color = Color(0xFF64748B)
                         )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Button(
+                            onClick = {
+                                searchQuery = ""
+                                selectedDepartment = "All Categories"
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005844)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = "Reset Filters",
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 }
             } else {
-                items(filteredCategories) { cat ->
-                    HealthcareCategoryCard(
-                        category = cat,
-                        onClick = { onSelectCategory(cat) },
-                        onSelectTag = { tag ->
-                            onSelectCategory(
-                                CatalogCategory(
-                                    id = "cat_${tag.lowercase().replace(" ", "_")}",
-                                    slug = tag.lowercase().replace(" ", "-"),
-                                    name = tag,
-                                    productCount = 5
+                // Chunk into pairs of 2 for grid layout inside LazyColumn
+                val pairs = filteredCategories.chunked(2)
+                items(pairs) { rowItems ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        for (cat in rowItems) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                PharmEasyCategoryCard(
+                                    category = cat,
+                                    onClick = { onSelectCategory(cat) },
+                                    onSelectTag = { tag -> handleTrigger(tag) }
                                 )
+                            }
+                        }
+                        // If odd number, put empty spacer
+                        if (rowItems.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            // Section F: Generic Substitutes Value Proposition (Truemeds & PharmEasy Signature)
+            if (searchQuery.isBlank() && selectedDepartment == "All Categories") {
+                item {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        color = Color(0xFFF0FDF4),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                            .clickable { handleTrigger("Generic Equivalents") }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                color = Color(0xFF007E65),
+                                shape = CircleShape,
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.SwapHoriz,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "Save Up to 40% on Medicines",
+                                        fontSize = 13.5.sp,
+                                        fontFamily = PlusJakartaSans,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Surface(
+                                        color = Color(0xFFDCFCE7),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "WHO-GMP",
+                                            fontSize = 8.5.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF166534),
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Switch to certified generic equivalents with identical salt composition (e.g. Paracip instead of Dolo).",
+                                    fontSize = 11.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    color = Color(0xFF475569),
+                                    lineHeight = 15.sp
+                                )
+                            }
+
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = Color(0xFF007E65),
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                    )
+                    }
+                }
+
+                // Section G: Featured Pharmaceutical Brand Stores
+                item {
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "TOP PHARMACEUTICAL BRANDS",
+                                fontSize = 12.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF475569),
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "Verified Stores",
+                                fontSize = 11.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF007E65)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(FEATURED_BRANDS) { brand ->
+                                Surface(
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    shadowElevation = 1.dp,
+                                    modifier = Modifier
+                                        .width(150.dp)
+                                        .clickable { handleTrigger(brand.query) }
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                color = brand.accentColor.copy(alpha = 0.12f),
+                                                shape = CircleShape,
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        text = brand.name.take(1),
+                                                        fontSize = 14.sp,
+                                                        fontFamily = PlusJakartaSans,
+                                                        fontWeight = FontWeight.Black,
+                                                        color = brand.accentColor
+                                                    )
+                                                }
+                                            }
+
+                                            Surface(
+                                                color = Color(0xFFECFDF5),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = brand.badge,
+                                                    fontSize = 8.5.sp,
+                                                    fontFamily = PlusJakartaSans,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF059669),
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Text(
+                                            text = brand.name,
+                                            fontSize = 13.5.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = brand.tagline,
+                                            fontSize = 10.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            color = Color(0xFF64748B),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Section H: Healthcare Quality Assurance Banner
+                item {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = Color(0xFF007E65),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "100% Genuine Medicines Guarantee",
+                                    fontSize = 12.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Sourced directly from licensed distributors • Temperature controlled cold-chain delivery.",
+                                    fontSize = 10.5.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            item(span = { GridItemSpan(2) }) {
-                Spacer(modifier = Modifier.height(24.dp))
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
 }
 
 /**
- * Curated Health Concern Spotlight Carousel (PharmEasy Benchmark)
+ * Flagship Healthcare Category Card directly matching PharmEasy's Soft Pastel Medical Aesthetic.
+ * Features:
+ * - Dual-tone soft pastel healthcare gradient (Mint, Ice Sky, Citrus, Coral, Rose, Lavender).
+ * - High-definition authentic clinical pack imagery (Dolo 650, Digene, Glycomet, Benadryl, etc.).
+ * - Prominent 15.5sp ExtraBold therapy title.
+ * - SLA and promotional pill badges (⚡ 10-MIN SLA, CHRONIC REFILL, UP TO 40% OFF).
+ * - Interactive micro-tags for instant symptom filtering.
  */
 @Composable
-private fun HealthConcernSpotlight(
-    onSelectConcern: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "TOP HEALTH CONCERNS",
-                fontSize = 11.5.sp,
-                fontFamily = PlusJakartaSans,
-                fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF64748B),
-                letterSpacing = 0.5.sp
-            )
-            Text(
-                text = "Doctor Curated",
-                fontSize = 10.5.sp,
-                fontFamily = PlusJakartaSans,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF059669)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            item {
-                ConcernPillCard(
-                    title = "Diabetes",
-                    sub = "Blood Sugar Under Control",
-                    badge = "CHRONIC REFILL",
-                    bgColor = Color(0xFFEEF2FF),
-                    borderColor = Color(0xFFC7D2FE),
-                    accentColor = Color(0xFF4F46E5),
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg",
-                    onClick = { onSelectConcern("Diabetes Care") }
-                )
-            }
-            item {
-                ConcernPillCard(
-                    title = "Heart & BP",
-                    sub = "Cardio Health Essentials",
-                    badge = "DAILY TRACKING",
-                    bgColor = Color(0xFFFFF1F2),
-                    borderColor = Color(0xFFFECDD3),
-                    accentColor = Color(0xFFE11D48),
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/163836/telma-40mg-strip-of-30-tablets-front-2-1756884638-non-watermarked.jpg",
-                    onClick = { onSelectConcern("Heart & Blood Pressure") }
-                )
-            }
-            item {
-                ConcernPillCard(
-                    title = "Digestive Care",
-                    sub = "Instant Acidity & Gas Relief",
-                    badge = "FAST RELIEF",
-                    bgColor = Color(0xFFFFFBEB),
-                    borderColor = Color(0xFFFDE68A),
-                    accentColor = Color(0xFFD97706),
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg",
-                    onClick = { onSelectConcern("Stomach & Digestion") }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConcernPillCard(
-    title: String,
-    sub: String,
-    badge: String,
-    bgColor: Color,
-    borderColor: Color,
-    accentColor: Color,
-    imageUrl: String,
-    onClick: () -> Unit
-) {
-    Surface(
-        color = bgColor,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, borderColor),
-        modifier = Modifier
-            .width(210.dp)
-            .clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Surface(
-                color = Color.White,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.size(54.dp)
-            ) {
-                ProductImage(
-                    imageUrl = imageUrl,
-                    contentDescription = title,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(4.dp)
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Surface(
-                    color = accentColor.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = badge,
-                        fontSize = 8.5.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = accentColor,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = title,
-                    fontSize = 13.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = sub,
-                    fontSize = 10.sp,
-                    fontFamily = PlusJakartaSans,
-                    color = Color(0xFF64748B),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-/**
- * Premium Healthcare Category Card (Tata 1mg & PharmEasy Benchmark)
- */
-@Composable
-private fun HealthcareCategoryCard(
+private fun PharmEasyCategoryCard(
     category: CatalogCategory,
     onClick: () -> Unit,
     onSelectTag: (String) -> Unit
 ) {
-    val pres = getPresentation(category.name)
+    val pres = getHealthcarePresentation(category.name)
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = pres.cardBg),
-        shape = RoundedCornerShape(18.dp),
+    Surface(
+        color = Color.Transparent,
+        shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, pres.cardBorder),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+        shadowElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .height(198.dp)
+            .height(180.dp)
             .clickable(onClick = onClick)
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(pres.cardGradientStart, pres.cardGradientEnd)
+                    )
+                )
                 .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top Row: Promo Badge + Arrow Circle
+            // Top Row: Promo Badge + Therapy Icon Surface
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -716,7 +1346,7 @@ private fun HealthcareCategoryCard(
                 ) {
                     Text(
                         text = pres.badgeText,
-                        fontSize = 9.sp,
+                        fontSize = 8.5.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.ExtraBold,
                         color = pres.iconTint,
@@ -727,55 +1357,83 @@ private fun HealthcareCategoryCard(
                 Surface(
                     color = Color.White.copy(alpha = 0.85f),
                     shape = CircleShape,
-                    border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                    border = BorderStroke(0.5.dp, pres.cardBorder),
                     modifier = Modifier.size(24.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            tint = Color(0xFF64748B),
+                            tint = pres.iconTint,
                             modifier = Modifier.size(12.dp)
                         )
                     }
                 }
             }
 
-            // Middle Row: Title + Product Pack Image
+            // Middle: Category Name & Highlights
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = category.name,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp,
+                    color = Color(0xFF0F172A),
+                    maxLines = 2,
+                    lineHeight = 18.sp,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = pres.highlights,
+                    fontSize = 10.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF475569),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Bottom Area: Sub-Therapy Tags (left) + Authentic Clinical Pack Visual (right)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Bottom
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                    Text(
-                        text = category.name,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.5.sp,
-                        color = Color(0xFF0F172A),
-                        minLines = 2,
-                        maxLines = 2,
-                        lineHeight = 17.sp,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = pres.highlights,
-                        fontSize = 10.5.sp,
-                        fontFamily = PlusJakartaSans,
-                        color = Color(0xFF64748B),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                // Clickable sub-condition micro-chips
+                Column(
+                    modifier = Modifier.weight(1f).padding(end = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    pres.subTags.take(2).forEach { tag ->
+                        Surface(
+                            color = Color.White.copy(alpha = 0.9f),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(0.5.dp, pres.cardBorder),
+                            modifier = Modifier.clickable { onSelectTag(tag) }
+                        ) {
+                            Text(
+                                text = tag,
+                                fontSize = 9.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF334155),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
 
-                // Authentic Clinical Product Pack Image
+                // Authentic Clinical Product Pack Image in Rounded Surface
                 Surface(
                     color = Color.White,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier.size(54.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(0.5.dp, Color.White),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.size(58.dp)
                 ) {
                     ProductImage(
                         imageUrl = pres.imageUrl,
@@ -786,66 +1444,6 @@ private fun HealthcareCategoryCard(
                             .padding(4.dp)
                     )
                 }
-            }
-
-            // Sub-tag micro pills (1mg Benchmark)
-            if (pres.subTags.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    pres.subTags.take(2).forEach { tag ->
-                        Surface(
-                            color = Color.White.copy(alpha = 0.9f),
-                            shape = RoundedCornerShape(4.dp),
-                            border = BorderStroke(0.5.dp, pres.cardBorder),
-                            modifier = Modifier.clickable { onSelectTag(tag) }
-                        ) {
-                            Text(
-                                text = tag,
-                                fontSize = 9.sp,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF475569),
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Bottom Row: Subcondition micro-chips or Verified product count
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Bolt,
-                        contentDescription = null,
-                        tint = Color(0xFF059669),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = if (category.productCount > 0) "${category.productCount}+ products" else "Express 10m",
-                        fontSize = 10.5.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
-                    )
-                }
-
-                Text(
-                    text = "Explore ›",
-                    fontSize = 11.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.Bold,
-                    color = pres.iconTint
-                )
             }
         }
     }

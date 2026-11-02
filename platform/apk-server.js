@@ -8,20 +8,22 @@ const CUSTOMER_APK = path.resolve(__dirname, '../apps/android/app/build/outputs/
 const RIDER_APK = path.resolve(__dirname, '../apps/android/rider-app/build/outputs/apk/debug/rider-app-debug.apk');
 const ADB_PATH = `${process.env.HOME}/Library/Android/sdk/platform-tools/adb`;
 
-// Continuous background ADB auto-installer
-setInterval(() => {
-  exec(`${ADB_PATH} connect 192.168.1.3:5555 && ${ADB_PATH} devices`, (err, stdout) => {
-    if (stdout.includes('192.168.1.3:5555\tdevice')) {
-      console.log('📱 [ADB] S26 AUTHORIZED! Automatically installing CommerceOS APK...');
-      exec(`${ADB_PATH} -s 192.168.1.3:5555 install -r -d -g "${CUSTOMER_APK}"`, (iErr, iOut) => {
-        if (!iErr) {
-          console.log('✅ [ADB] Successfully installed app on S26! Launching app...');
-          exec(`${ADB_PATH} -s 192.168.1.3:5555 shell am start -n com.commerceos.android/.MainActivity`);
-        }
-      });
-    }
-  });
-}, 3000);
+// Background ADB auto-installer (only enabled when explicitly requested via AUTO_ADB=true)
+if (process.env.AUTO_ADB === 'true') {
+  setInterval(() => {
+    exec(`${ADB_PATH} connect 192.168.1.3:5555 && ${ADB_PATH} devices`, (err, stdout) => {
+      if (stdout.includes('192.168.1.3:5555\tdevice')) {
+        console.log('📱 [ADB] S26 AUTHORIZED! Automatically installing CommerceOS APK...');
+        exec(`${ADB_PATH} -s 192.168.1.3:5555 install -r -d -g "${CUSTOMER_APK}"`, (iErr, iOut) => {
+          if (!iErr) {
+            console.log('✅ [ADB] Successfully installed app on S26! Launching app...');
+            exec(`${ADB_PATH} -s 192.168.1.3:5555 shell am start -n com.commerceos.android/.MainActivity`);
+          }
+        });
+      }
+    });
+  }, 10000);
+}
 
 const server = http.createServer((req, res) => {
   if (req.url === '/app.apk' || req.url === '/download') {

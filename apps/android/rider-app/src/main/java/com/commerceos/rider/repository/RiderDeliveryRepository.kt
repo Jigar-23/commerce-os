@@ -518,7 +518,21 @@ class RiderDeliveryRepository(
                     val ordRiderId = item.optString("orderRiderId").takeIf { it.isNotBlank() } ?: item.optString("order_rider_id").takeIf { it.isNotBlank() }
                     val categoryVal = item.optString("category", "ORDERS")
                     val typeVal = item.optString("type", "ORDER_OFFER")
+                    val metaObj = item.optJSONObject("metadata")
                     val offerIdVal = item.optString("offerId").takeIf { it.isNotBlank() }
+                        ?: item.optString("offer_id").takeIf { it.isNotBlank() }
+                        ?: metaObj?.optString("offerId")?.takeIf { it.isNotBlank() }
+                        ?: metaObj?.optString("offer_id")?.takeIf { it.isNotBlank() }
+
+                    val orderIdVal = item.optString("orderId").takeIf { it.isNotBlank() }
+                        ?: item.optString("order_id").takeIf { it.isNotBlank() }
+                        ?: metaObj?.optString("orderId")?.takeIf { it.isNotBlank() }
+                        ?: metaObj?.optString("order_id")?.takeIf { it.isNotBlank() }
+
+                    val deliveryIdVal = item.optString("deliveryId").takeIf { it.isNotBlank() }
+                        ?: item.optString("delivery_id").takeIf { it.isNotBlank() }
+                        ?: metaObj?.optString("deliveryId")?.takeIf { it.isNotBlank() }
+                        ?: metaObj?.optString("delivery_id")?.takeIf { it.isNotBlank() }
 
                     val isOrderOffer = categoryVal.equals("ORDERS", ignoreCase = true) ||
                                        typeVal.contains("OFFER", ignoreCase = true) ||
@@ -538,8 +552,8 @@ class RiderDeliveryRepository(
                             category = categoryVal,
                             priority = item.optString("priority", "HIGH"),
                             riderId = rId,
-                            orderId = item.optString("orderId").takeIf { it.isNotBlank() },
-                            deliveryId = item.optString("deliveryId").takeIf { it.isNotBlank() },
+                            orderId = orderIdVal,
+                            deliveryId = deliveryIdVal,
                             offerId = offerIdVal,
                             title = item.optString("title", "New Job Alert"),
                             body = item.optString("body", "New order offer received"),
@@ -1084,7 +1098,27 @@ class RiderDeliveryRepository(
                 }
             },
             telemetry = telemetry,
-            history = emptyList()
+            history = mutableListOf<com.commerceos.rider.model.StateHistoryItem>().apply {
+                val histArr = json.optJSONArray("history")
+                if (histArr != null) {
+                    for (i in 0 until histArr.length()) {
+                        val hObj = histArr.optJSONObject(i) ?: continue
+                        val st = hObj.optString("state", "")
+                        val ts = hObj.optString("timestamp", "")
+                        if (st.isNotBlank() && ts.isNotBlank()) {
+                            add(com.commerceos.rider.model.StateHistoryItem(state = st, timestamp = ts))
+                        }
+                    }
+                }
+                val deliveredAt = json.optStringFirst("deliveredAt", "delivered_at", "completedAt", "completed_at")
+                if (deliveredAt.isNotBlank() && this.none { it.state == "DELIVERED" }) {
+                    add(com.commerceos.rider.model.StateHistoryItem(state = "DELIVERED", timestamp = deliveredAt))
+                }
+                val createdAt = json.optStringFirst("createdAt", "created_at")
+                if (createdAt.isNotBlank() && this.none { it.state == "ASSIGNED" || it.state == "CREATED" }) {
+                    add(0, com.commerceos.rider.model.StateHistoryItem(state = "ASSIGNED", timestamp = createdAt))
+                }
+            }
         )
     }
 

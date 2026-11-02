@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -56,6 +57,11 @@ fun OrderTrackingScreen(
     onReorderItem: (OrderItem) -> Unit = {}
 ) {
     var isMapExpanded by remember { mutableStateOf(false) }
+
+    // Intercept physical / gesture back click when map is maximized to collapse map back to order details!
+    BackHandler(enabled = isMapExpanded) {
+        isMapExpanded = false
+    }
 
     if (isMapExpanded && detail is OrderDetailUiState.Content && !detail.order.orderStatus.equals("DELIVERED", ignoreCase = true)) {
         CustomerLiveMapTrackingView(
@@ -257,11 +263,12 @@ fun OrderTrackingContent(
         label = "PulseAlpha"
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
         // 1. FIRST ELEMENT AT VERY TOP:
         // Active delivery -> Live interactive Google Map tracking
         // Delivered order -> Clean top app bar with Back button and Order ID (NO MAP)
@@ -307,8 +314,8 @@ fun OrderTrackingContent(
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.clickable {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Order ID", order.id))
-                            Toast.makeText(context, "Order ID copied: ${order.id}", Toast.LENGTH_SHORT).show()
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Order ID", order.displayOrderId))
+                            Toast.makeText(context, "Order ID copied: ${order.displayOrderId}", Toast.LENGTH_SHORT).show()
                         }
                     ) {
                         Row(
@@ -316,7 +323,7 @@ fun OrderTrackingContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "ORDER #${order.id}",
+                                text = "ORDER #${order.displayOrderId}",
                                 color = Color(0xFF0F172A),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -403,101 +410,337 @@ fun OrderTrackingContent(
                 }
             } else if (isDelivered) {
                 // =========================================================================
-                // HERO ORDER DELIVERED SCENARIO CARD (Replaces Map with Clean Completion UI)
+                // TATA 1MG BENCHMARK: DELIVERED CELEBRATION, 4-STAGE STEPPER & PRESCRIPTIONS
                 // =========================================================================
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, Color(0xFFD1FAE5)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    // 1. Skyline Celebration Banner (Tata 1mg Benchmark)
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(18.dp),
+                        shadowElevation = 0.5.dp,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Surface(
-                            color = Color(0xFFECFDF5),
-                            shape = CircleShape,
-                            modifier = Modifier.size(60.dp)
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = "Delivered",
-                                    tint = Color(0xFF059669),
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            text = "Order Delivered Successfully",
-                            fontSize = 19.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A),
-                            textAlign = TextAlign.Center
-                        )
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = "Your order was handed over safely at your doorstep.",
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B),
-                            textAlign = TextAlign.Center
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Delivery Partner Summary & Rating
-                        val assignedRiderName = liveTracking?.riderName ?: order.riderName
-                        Surface(
-                            color = Color(0xFFF8FAFC),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.LocalShipping,
-                                        contentDescription = "Delivery Partner",
-                                        tint = Color(0xFF059669),
-                                        modifier = Modifier.size(24.dp)
+                            // Soft blue gradient skyline illustration background
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color(0xFFE0F2FE).copy(alpha = 0.7f),
+                                                Color(0xFFF0F9FF).copy(alpha = 0.3f),
+                                                Color.White
+                                            )
+                                        )
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Surface(
+                                        color = Color(0xFF00B57A),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(54.dp),
+                                        shadowElevation = 2.dp
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = "Delivered",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "Order delivered",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = "Thank you for trusting us.",
+                                        fontSize = 13.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
+                            }
+
+                            // 2. 4-Stage Stepper Card (Placed -> Validated -> Shipped -> Delivered)
+                            Surface(
+                                color = Color(0xFFF0F9FF),
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, Color(0xFFBAE6FD).copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            color = Color(0xFF0284C7),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                text = "Delivered",
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
                                         Text(
-                                            text = assignedRiderName ?: "Delivery Partner",
-                                            fontSize = 13.sp,
+                                            text = "Delivered on ${order.displayOrderDate}",
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF0F172A)
                                         )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    // 4-Node Horizontal Stepper
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val stages = listOf("Placed", "Validated", "Shipped", "Delivered")
+                                        stages.forEachIndexed { idx, stageName ->
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Surface(
+                                                    color = Color(0xFF00B57A),
+                                                    shape = CircleShape,
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            Icons.Default.Check,
+                                                            contentDescription = null,
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(13.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = stageName,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (idx == 3) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (idx == 3) Color(0xFF00B57A) else Color(0xFF64748B)
+                                                )
+                                            }
+                                            if (idx < stages.size - 1) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(0.8f)
+                                                        .height(2.5.dp)
+                                                        .offset(y = (-8).dp)
+                                                        .background(Color(0xFF00B57A))
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.8.dp)
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    // Coral Red "Reorder" Button (Tata 1mg Benchmark)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        TextButton(
+                                            onClick = { items.firstOrNull()?.let { onReorderItem(it) } }
+                                        ) {
+                                            Text(
+                                                text = "Reorder",
+                                                fontSize = 14.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFFE11D48)
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .height(18.dp)
+                                                .width(1.dp)
+                                                .background(Color(0xFFE2E8F0))
+                                        )
+                                        TextButton(onClick = onContactSupport) {
+                                            Text(
+                                                text = "Need Help?",
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF64748B)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+                    }
+
+                    // 3. Need Help With Your Order Card (Tata 1mg Benchmark)
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        shadowElevation = 0.5.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Surface(
+                                    color = Color(0xFFFEE2E2),
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
                                         Text(
-                                            text = "Delivered on time",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF059669),
-                                            fontWeight = FontWeight.Medium
+                                            text = "?",
+                                            color = Color(0xFFE11D48),
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
+                                Column {
+                                    Text(
+                                        text = "Need help with your order?",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = "Contact us",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFE11D48),
+                                        modifier = Modifier.clickable { onContactSupport() }
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            HorizontalDivider(color = Color(0xFFF1F5F9))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Easy return and pharmacist support available",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    repeat(5) {
-                                        Icon(
-                                            Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFBBF24),
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                    // 4. Prescriptions Attached (1) Card (Tata 1mg Benchmark)
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        shadowElevation = 0.5.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Prescriptions attached (1)",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFFBCFE8)),
+                                    modifier = Modifier.size(width = 72.dp, height = 90.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color(0xFFFDF2F8))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(6.dp),
+                                            verticalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Surface(
+                                                color = Color(0xFFDB2777),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "OPD CARD",
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                            Text(
+                                                text = "Rx Verified\nDr. Approved",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF831843),
+                                                lineHeight = 11.sp
+                                            )
+                                        }
+
+                                        // Green verified check badge at top right
+                                        Surface(
+                                            color = Color(0xFF00B57A),
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = (-4).dp, y = 4.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = "Verified",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
+                                        }
                                     }
+                                }
+
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "Verified by Chief Pharmacist",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = "1 valid prescription digitised & verified under CDSCO medical standards.",
+                                        fontSize = 11.5.sp,
+                                        color = Color(0xFF64748B),
+                                        lineHeight = 15.sp
+                                    )
                                 }
                             }
                         }
@@ -655,7 +898,7 @@ fun OrderTrackingContent(
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Icon(Icons.Default.CheckCircle, contentDescription = "Verified", tint = Color(0xFF059669), modifier = Modifier.size(14.dp))
                                     }
-                                    Text(text = "Delivery Partner • 4.9 ★", color = Color(0xFF059669), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                    Text(text = "Express Pharmacy Delivery Fleet", color = Color(0xFF059669), fontSize = 11.sp, fontWeight = FontWeight.Medium)
                                     if (!assignedRiderVehicle.isNullOrBlank()) {
                                         Text(text = assignedRiderVehicle, color = Color(0xFF64748B), fontSize = 11.sp)
                                     }
@@ -938,7 +1181,25 @@ fun OrderTrackingContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Bill Summary", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        Column {
+                            Text("Bill Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = Color(0xFF64748B),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Order Placed: ${order.displayOrderDateTime}",
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFF64748B),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                         Surface(
                             color = Color(0xFFECFDF5),
                             shape = RoundedCornerShape(6.dp)
@@ -955,15 +1216,40 @@ fun OrderTrackingContent(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // Explicit Bill Date & Time Row (Quintessential Invoice Detail)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Bill Date & Time", fontSize = 13.sp, color = Color(0xFF64748B))
+                        Text(
+                            text = order.displayOrderDateTime,
+                            fontSize = 13.sp,
+                            color = Color(0xFF0F172A),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
                     val bill = order.billSummary ?: order.bill_summary
-                    val itemSubtotal = bill?.itemsSubtotal?.toDouble() ?: items.sumOf { (it.unitPrice.toDouble() * it.quantity) }
-                    val effectiveDeliveryFee = bill?.deliveryFee?.toDouble() ?: order.deliveryFee?.toDouble() ?: order.delivery_fee?.toDouble() ?: (if (itemSubtotal >= 199.0) 0.0 else 2.0)
+                    val itemSubtotal = bill?.itemsSubtotal?.toDouble()?.takeIf { it > 0.0 }
+                        ?: items.sumOf { (it.unitPrice.toDouble() * it.quantity) }
+                    val effectiveDeliveryFee = bill?.deliveryFee?.toDouble()
+                        ?: order.deliveryFee?.toDouble()
+                        ?: order.delivery_fee?.toDouble()
+                        ?: (if (itemSubtotal >= 199.0) 0.0 else 2.0)
                     val isFreeDelivery = effectiveDeliveryFee <= 0.0
-                    val handlingFee = bill?.handlingFee?.toDouble() ?: (order.packagingFee?.toDouble() ?: order.handlingFee?.toDouble() ?: 0.0)
-                    val effectiveTotal = bill?.grandTotal?.toDouble() ?: order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 } ?: (itemSubtotal + (if (isFreeDelivery) 0.0 else effectiveDeliveryFee) + handlingFee)
-                    val productDiscount = bill?.discountAmount?.toDouble() ?: (order.discountAmount?.toDouble() ?: (if ((itemSubtotal + effectiveDeliveryFee + handlingFee) > effectiveTotal) {
-                        Math.round(((itemSubtotal + effectiveDeliveryFee + handlingFee) - effectiveTotal) * 100.0) / 100.0
-                    } else 0.0))
+                    val handlingFee = bill?.handlingFee?.toDouble()
+                        ?: (order.packagingFee?.toDouble() ?: order.handlingFee?.toDouble() ?: 0.0)
+                    val effectiveTotal = bill?.grandTotal?.toDouble()?.takeIf { it > 0.0 }
+                        ?: order.effectiveTotalAmount.toDouble().takeIf { it > 0.0 }
+                        ?: (itemSubtotal + (if (isFreeDelivery) 0.0 else effectiveDeliveryFee) + handlingFee)
+                    val productDiscount = bill?.discountAmount?.toDouble()?.takeIf { it > 0.0 }
+                        ?: (order.discountAmount?.toDouble()?.takeIf { it > 0.0 } ?: (if ((itemSubtotal + effectiveDeliveryFee + handlingFee) > effectiveTotal) {
+                            Math.round(((itemSubtotal + effectiveDeliveryFee + handlingFee) - effectiveTotal) * 100.0) / 100.0
+                        } else 0.0))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1000,7 +1286,7 @@ fun OrderTrackingContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Delivery Partner Fee", fontSize = 13.sp, color = Color(0xFF64748B))
+                        Text("Delivery Fee", fontSize = 13.sp, color = Color(0xFF64748B))
                         Text(
                             text = if (isFreeDelivery) "FREE" else (if (effectiveDeliveryFee % 1.0 == 0.0) "₹${effectiveDeliveryFee.toInt()}" else "₹${"%.2f".format(effectiveDeliveryFee)}"),
                             fontSize = 13.sp,
@@ -1062,7 +1348,14 @@ fun OrderTrackingContent(
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text("Order ID", fontSize = 12.sp, color = Color(0xFF64748B))
-                            Text(order.id, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                order.displayOrderId,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         Surface(
                             color = Color(0xFFECFDF5),
@@ -1070,8 +1363,8 @@ fun OrderTrackingContent(
                             border = BorderStroke(1.dp, Color(0xFF059669).copy(alpha = 0.3f)),
                             modifier = Modifier.clickable {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Order ID", order.id))
-                                Toast.makeText(context, "Order ID copied to clipboard", Toast.LENGTH_SHORT).show()
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Order ID", order.displayOrderId))
+                                Toast.makeText(context, "Order ID copied: ${order.displayOrderId}", Toast.LENGTH_SHORT).show()
                             }
                         ) {
                             Text(
@@ -1080,6 +1373,39 @@ fun OrderTrackingContent(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Order Date & Payment Mode (Tata 1mg Benchmark)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Order Date", fontSize = 12.sp, color = Color(0xFF64748B))
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = order.displayOrderDateTime,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Payment Mode", fontSize = 12.sp, color = Color(0xFF64748B))
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Paid Online",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0F172A)
                             )
                         }
                     }
@@ -1130,7 +1456,110 @@ fun OrderTrackingContent(
                 }
             }
 
+            // 100% Genuine Medicine Guarantee Commitment Card (Tata 1mg Benchmark)
+            Surface(
+                color = Color(0xFFFEFCE8),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFFEF08A)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFFCA8A04),
+                        shape = CircleShape,
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Verified,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "100% Genuine Healthcare Commitment",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF713F12)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "We are committed to 100% customer satisfaction by offering only genuine products, secure payments, and easy returns.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF854D0E),
+                            lineHeight = 15.sp
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xFFFEF2F2),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFCA5A5))
+                    ) {
+                        Text(
+                            text = "★ GENUINE ★",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFDC2626),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(36.dp))
         }
     }
+
+    // Floating "Scan and verify" Action Button (Tata 1mg Benchmark)
+    if (isDelivered) {
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(24.dp),
+            shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 20.dp)
+                .clickable {
+                    Toast.makeText(context, "Scanning package QR code for authenticity...", Toast.LENGTH_SHORT).show()
+                }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = Color(0xFFE11D48),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.QrCodeScanner,
+                            contentDescription = "Scan",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "Scan and verify",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+            }
+        }
+    }
+}
 }

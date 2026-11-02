@@ -93,7 +93,7 @@ fun ZomatoDarkMapView(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFF0D0F14))) {
+    Box(modifier = modifier.fillMaxSize().background(Color(0xFFF8FAFC))) {
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
@@ -105,7 +105,7 @@ fun ZomatoDarkMapView(
                     settings.domStorageEnabled = true
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
-                    setBackgroundColor(0xFF0D0F14.toInt())
+                    setBackgroundColor(0xFFF8FAFC.toInt())
 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -143,8 +143,9 @@ fun ZomatoDarkMapView(
         // Route Status Overlay
         if (routeUnavailable) {
             Surface(
-                color = Color(0xFF7F1D1D).copy(alpha = 0.9f),
-                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFEE2E2),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 12.dp)
@@ -153,16 +154,17 @@ fun ZomatoDarkMapView(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Route temporarily unavailable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Route temporarily unavailable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF991B1B))
                 }
             }
         } else if (isRouteLoading) {
             Surface(
-                color = Color(0xFF16181F).copy(alpha = 0.9f),
-                shape = RoundedCornerShape(8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
+                color = Color.White.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                shadowElevation = 2.dp,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 12.dp)
@@ -171,9 +173,9 @@ fun ZomatoDarkMapView(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF10B981), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF16A34A), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Updating route…", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Updating route…", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                 }
             }
         }
@@ -181,9 +183,10 @@ fun ZomatoDarkMapView(
         // Rider GPS Status Pill
         if (!hasRiderLocation) {
             Surface(
-                color = Color(0xFF16181F).copy(alpha = 0.9f),
+                color = Color.White.copy(alpha = 0.95f),
                 shape = RoundedCornerShape(20.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262933)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                shadowElevation = 2.dp,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp)
@@ -192,15 +195,16 @@ fun ZomatoDarkMapView(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF10B981), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFF16A34A), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Waiting for live GPS fix…", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF94A3B8))
+                    Text("Waiting for live GPS fix…", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF475569))
                 }
             }
         } else if (isStale) {
             Surface(
-                color = Color(0xFF78350F).copy(alpha = 0.9f),
+                color = Color(0xFFFEF3C7),
                 shape = RoundedCornerShape(20.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp)
@@ -209,7 +213,7 @@ fun ZomatoDarkMapView(
                     text = "Updating rider location…",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFFFBBF24),
+                    color = Color(0xFF92400E),
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                 )
             }
@@ -220,9 +224,10 @@ fun ZomatoDarkMapView(
             onClick = {
                 webViewRef?.evaluateJavascript("recenterMap();", null)
             },
-            containerColor = Color(0xFF16181F),
-            contentColor = Color(0xFF10B981),
+            containerColor = Color.White,
+            contentColor = Color(0xFF16A34A),
             shape = CircleShape,
+            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 3.dp),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(12.dp)
@@ -292,17 +297,16 @@ private fun generateHardenedDarkMapHtml(
             padding: 0;
             width: 100%;
             height: 100%;
-            background: #050811;
+            background: #F8FAFC;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             overflow: hidden;
         }
         .leaflet-container {
-            background: #050811;
+            background: #F8FAFC;
         }
         
-        /* Zomato-Grade Dark Obsidian Tile Contrast Filter */
         .leaflet-tile-pane {
-            filter: brightness(0.85) contrast(1.25) saturate(1.2) hue-rotate(210deg);
+            filter: none;
         }
 
         /* 3D Elevated Store Marker */
@@ -474,7 +478,7 @@ private fun generateHardenedDarkMapHtml(
         attributionControl: false
     }).setView([$merchantLat, $merchantLng], 14);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
         subdomains: 'abcd',
         attribution: ''

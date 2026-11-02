@@ -85,11 +85,11 @@ const isProduction = process.env.NODE_ENV === 'production';
 const GATEWAY_URL = (process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
 const ORDER_API = (process.env.NEXT_PUBLIC_ORDER_API_URL && process.env.NEXT_PUBLIC_ORDER_API_URL.trim().length > 0)
   ? process.env.NEXT_PUBLIC_ORDER_API_URL.replace(/\/$/, '')
-  : (GATEWAY_URL || (isProduction ? '' : 'http://localhost:8083'));
+  : (GATEWAY_URL || (isProduction ? '' : 'http://localhost:3000'));
 
 const AI_API = (process.env.NEXT_PUBLIC_AI_API_URL && process.env.NEXT_PUBLIC_AI_API_URL.trim().length > 0)
   ? process.env.NEXT_PUBLIC_AI_API_URL.replace(/\/$/, '')
-  : (GATEWAY_URL || (isProduction ? '' : 'http://localhost:8083'));
+  : (GATEWAY_URL || (isProduction ? '' : 'http://localhost:3000'));
 
 export default function PharmacistAdminDashboard() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'rx' | 'sellers' | 'cod' | 'audit'>('dashboard');

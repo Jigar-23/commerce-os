@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.commerceos.rider.model.RoutePoint
 import com.commerceos.rider.model.ServerDeliverySession
 import com.commerceos.rider.repository.RiderDeliveryRepository
+import com.commerceos.rider.theme.RiderColors
 import com.commerceos.rider.util.RiderNavigationUtils
 import kotlinx.coroutines.launch
 
@@ -94,7 +95,6 @@ fun RiderLiveNavigationView(
         val originLat = effectiveLat ?: (if (isPhase1) (merchantLat - 0.008) else merchantLat)
         val originLng = effectiveLng ?: (if (isPhase1) (merchantLng - 0.006) else merchantLng)
 
-        // Throttle route recalculation: do not re-fetch from OSRM unless moved > 40m or phase changed
         val prevLat = lastRoutedOriginLat
         val prevLng = lastRoutedOriginLng
         if (waypoints.size >= 2 && isPhase1 == lastRoutedPhase && prevLat != null && prevLng != null) {
@@ -139,8 +139,9 @@ fun RiderLiveNavigationView(
 
     Card(
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
-        border = BorderStroke(1.dp, Color(0xFF262933)),
+        colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+        border = BorderStroke(1.dp, RiderColors.Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onViewOrderDetails)
@@ -155,36 +156,37 @@ fun RiderLiveNavigationView(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            color = if (isPhase1) Color(0xFF0284C7) else Color(0xFFD97706),
-                            shape = RoundedCornerShape(20.dp)
+                            color = if (isPhase1) RiderColors.AccentBlueSoft else RiderColors.WarningSoft,
+                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(
                                 text = if (isPhase1) "Going to pickup" else "On the way to customer",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                color = if (isPhase1) RiderColors.AccentBlueText else RiderColors.WarningText,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
+                        val shortId = if (session.orderId.length > 14) session.orderId.take(12) + "…" else session.orderId
                         Text(
-                            text = "ORDER #${session.orderId}",
+                            text = "ORDER #$shortId",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF38BDF8)
+                            color = RiderColors.TextSecondary
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = targetName,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White
+                        fontWeight = FontWeight.Bold,
+                        color = RiderColors.TextPrimary
                     )
                     Text(
                         text = targetAddress,
                         fontSize = 12.sp,
-                        color = Color(0xFF94A3B8),
+                        color = RiderColors.TextSecondary,
                         maxLines = 1
                     )
                 }
@@ -194,13 +196,13 @@ fun RiderLiveNavigationView(
                         text = "$displayEtaMins MIN",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black,
-                        color = if (isPhase1) Color(0xFF38BDF8) else Color(0xFFF59E0B)
+                        color = if (isPhase1) RiderColors.AccentBlue else RiderColors.Warning
                     )
                     Text(
                         text = "%.1f km".format(displayDistanceKm),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF94A3B8)
+                        color = RiderColors.TextMuted
                     )
                 }
             }
@@ -229,8 +231,8 @@ fun RiderLiveNavigationView(
 
                 if (isRouteLoading) {
                     Surface(
-                        color = Color(0xFF16181F).copy(alpha = 0.9f),
-                        border = BorderStroke(1.dp, Color(0xFF262933)),
+                        color = RiderColors.Surface.copy(alpha = 0.95f),
+                        border = BorderStroke(1.dp, RiderColors.Border),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -241,12 +243,12 @@ fun RiderLiveNavigationView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CircularProgressIndicator(
-                                color = Color(0xFF38BDF8),
+                                color = RiderColors.Primary,
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(12.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Updating Route", fontSize = 10.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.SemiBold)
+                            Text("Updating Route", fontSize = 10.sp, color = RiderColors.Primary, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -263,15 +265,15 @@ fun RiderLiveNavigationView(
                     onClick = {
                         RiderNavigationUtils.launchExternalMaps(context, targetLat, targetLng, targetName)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22252E)),
-                    border = BorderStroke(1.dp, Color(0xFF2B2F3B)),
+                    colors = ButtonDefaults.buttonColors(containerColor = RiderColors.SurfaceSubtle),
+                    border = BorderStroke(1.dp, RiderColors.Border),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1.2f).height(42.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = RiderColors.AccentBlue, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Navigate (Maps) ↗", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                    Text("Navigate (Maps) ↗", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RiderColors.AccentBlueText)
                 }
 
                 val contactPhone = if (isPhase1) session.merchantPhone.ifBlank { "1800123456" } else session.customerPhone.ifBlank { session.maskedCustomerPhone }
@@ -279,15 +281,15 @@ fun RiderLiveNavigationView(
                     onClick = {
                         RiderNavigationUtils.dialPhoneNumber(context, contactPhone)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22252E)),
-                    border = BorderStroke(1.dp, Color(0xFF2B2F3B)),
+                    colors = ButtonDefaults.buttonColors(containerColor = RiderColors.SurfaceSubtle),
+                    border = BorderStroke(1.dp, RiderColors.Border),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f).height(42.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
-                    Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(15.dp))
+                    Icon(Icons.Default.Phone, contentDescription = null, tint = RiderColors.Primary, modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isPhase1) "Call Hub" else "Call Customer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                    Text(if (isPhase1) "Call Hub" else "Call Customer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RiderColors.PrimarySoftText)
                 }
             }
 
@@ -309,12 +311,13 @@ fun RiderLiveNavigationView(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isWithinStoreArrivalRadius) Color(0xFF0284C7) else Color(0xFF22252E)
+                                containerColor = if (isWithinStoreArrivalRadius) RiderColors.Primary else RiderColors.SurfaceSubtle
                             ),
+                            border = if (!isWithinStoreArrivalRadius) BorderStroke(1.dp, RiderColors.Border) else null,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().height(54.dp)
+                            modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
-                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = if (isWithinStoreArrivalRadius) Color.White else Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = if (isWithinStoreArrivalRadius) Color.White else RiderColors.AccentBlue, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (isWithinStoreArrivalRadius) {
@@ -324,17 +327,17 @@ fun RiderLiveNavigationView(
                                 } else {
                                     "ARRIVED AT STORE"
                                 },
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 letterSpacing = 0.5.sp,
-                                color = if (isWithinStoreArrivalRadius) Color.White else Color(0xFF38BDF8)
+                                color = if (isWithinStoreArrivalRadius) Color.White else RiderColors.TextPrimary
                             )
                         }
                         if (!isWithinStoreArrivalRadius) {
                             Text(
                                 text = "📍 Tap to confirm arrival if GPS is drifting or indoors (${distanceToStoreMeters?.let { "approx %.0fm away".format(it) } ?: "acquiring GPS..."})",
                                 fontSize = 11.sp,
-                                color = Color(0xFFFBBF24),
+                                color = RiderColors.WarningText,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -343,42 +346,42 @@ fun RiderLiveNavigationView(
                 "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "ARRIVED_MERCHANT" -> {
                     Button(
                         onClick = onConfirmPickup,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                        colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(54.dp)
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {
-                        Text("CONFIRM ORDER PICKUP", fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color.Black, letterSpacing = 0.5.sp)
+                        Text("CONFIRM ORDER PICKUP", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White, letterSpacing = 0.5.sp)
                     }
                 }
                 "PICKED_UP", "EN_ROUTE_CUSTOMER", "OUT_FOR_DELIVERY" -> {
                     Button(
                         onClick = onArrivedCustomer,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                        colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Warning),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(54.dp)
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {
-                        Text("ARRIVED AT CUSTOMER", fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = 0.5.sp)
+                        Text("ARRIVED AT CUSTOMER", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White, letterSpacing = 0.5.sp)
                     }
                 }
                 "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> {
                     if (session.otpVerified) {
                         Button(
                             onClick = onCompleteDelivery,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().height(54.dp)
+                            modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
-                            Text("COMPLETE HANDOFF", fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color.Black, letterSpacing = 0.5.sp)
+                            Text("COMPLETE HANDOFF", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White, letterSpacing = 0.5.sp)
                         }
                     } else {
                         Button(
                             onClick = onVerifyOtp,
                             enabled = enteredOtp.trim().length in 4..6 && (!session.isCod || session.codReconciled),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().height(54.dp)
+                            modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
-                            Text("VERIFY PIN & COMPLETE", fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color.Black, letterSpacing = 0.5.sp)
+                            Text("VERIFY PIN & COMPLETE", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White, letterSpacing = 0.5.sp)
                         }
                     }
                 }
@@ -392,8 +395,8 @@ fun RiderLiveNavigationView(
             ) {
                 OutlinedButton(
                     onClick = onViewOrderDetails,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RiderColors.TextPrimary),
+                    border = BorderStroke(1.dp, RiderColors.Border),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f).height(42.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
@@ -403,13 +406,13 @@ fun RiderLiveNavigationView(
 
                 OutlinedButton(
                     onClick = onCancelDelivery,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RiderColors.Danger),
+                    border = BorderStroke(1.dp, RiderColors.Danger.copy(alpha = 0.4f)),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f).height(42.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
-                    Text("Cancel Order", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                    Text("Cancel Order", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RiderColors.Danger)
                 }
             }
         }
@@ -419,13 +422,13 @@ fun RiderLiveNavigationView(
         AlertDialog(
             onDismissRequest = { showManualArrivalConfirmDialog = false },
             title = {
-                Text("Confirm Store Arrival", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 17.sp)
+                Text("Confirm Store Arrival", fontWeight = FontWeight.Bold, color = RiderColors.TextPrimary, fontSize = 17.sp)
             },
             text = {
                 val distText = if (distanceToStoreMeters != null) "GPS estimates you are ~%.0fm from the store hub.".format(distanceToStoreMeters) else "GPS is acquiring your precise coordinates."
                 Text(
                     text = "$distText\n\nConfirm that you have arrived at the store to proceed with package pickup verification?",
-                    color = Color(0xFFCBD5E1),
+                    color = RiderColors.TextSecondary,
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 )
@@ -436,7 +439,7 @@ fun RiderLiveNavigationView(
                         showManualArrivalConfirmDialog = false
                         onArrivedStore()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                    colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Text("Confirm Arrival", fontWeight = FontWeight.Bold, color = Color.White)
@@ -445,12 +448,13 @@ fun RiderLiveNavigationView(
             dismissButton = {
                 OutlinedButton(
                     onClick = { showManualArrivalConfirmDialog = false },
+                    border = BorderStroke(1.dp, RiderColors.Border),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Cancel", color = Color(0xFF94A3B8))
+                    Text("Cancel", color = RiderColors.TextSecondary)
                 }
             },
-            containerColor = Color(0xFF16181F),
+            containerColor = RiderColors.Surface,
             shape = RoundedCornerShape(16.dp)
         )
     }

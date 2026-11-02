@@ -32,8 +32,12 @@ object OfferPayloadValidator {
                 ?: json.optString("id").takeIf { it.isNotBlank() }
                 ?: return logReject("offerId missing")
 
-            val eventId = json.optString("eventId").takeIf { it.isNotBlank() } ?: ("evt_" + offerId)
-            val notificationId = json.optString("notificationId").takeIf { it.isNotBlank() } ?: ("notif_" + offerId)
+            val eventNonce = json.optString("broadcastNonce").takeIf { it.isNotBlank() }
+                ?: json.optString("serverTime").takeIf { it.isNotBlank() }
+                ?: System.currentTimeMillis().toString()
+
+            val eventId = json.optString("eventId").takeIf { it.isNotBlank() } ?: ("evt_${offerId}_${eventNonce}")
+            val notificationId = json.optString("notificationId").takeIf { it.isNotBlank() } ?: ("notif_${offerId}_${eventNonce}")
 
             val deliveryId = json.optString("deliveryId").takeIf { it.isNotBlank() }
                 ?: return logReject("deliveryId missing")
@@ -176,8 +180,12 @@ object OfferPayloadValidator {
                 ?: data["id"]?.takeIf { it.isNotBlank() }
                 ?: return logReject("FCM offerId missing")
 
-            val eventId = data["eventId"]?.takeIf { it.isNotBlank() } ?: ("evt_" + offerId)
-            val notificationId = data["notificationId"]?.takeIf { it.isNotBlank() } ?: ("notif_" + offerId)
+            val eventNonce = data["broadcastNonce"]?.takeIf { it.isNotBlank() }
+                ?: data["serverTime"]?.takeIf { it.isNotBlank() }
+                ?: System.currentTimeMillis().toString()
+
+            val eventId = data["eventId"]?.takeIf { it.isNotBlank() } ?: ("evt_${offerId}_${eventNonce}")
+            val notificationId = data["notificationId"]?.takeIf { it.isNotBlank() } ?: ("notif_${offerId}_${eventNonce}")
 
             val deliveryId = data["deliveryId"]?.takeIf { it.isNotBlank() }
                 ?: return logReject("FCM deliveryId missing")

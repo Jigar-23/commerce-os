@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.commerceos.rider.model.ServerDeliverySession
+import com.commerceos.rider.theme.RiderColors
 
 @Composable
 fun DeliveryCompletionDialog(
@@ -37,14 +38,14 @@ fun DeliveryCompletionDialog(
                 Box(
                     modifier = Modifier
                         .size(64.dp)
-                        .background(Color(0xFF10B981).copy(alpha = 0.15f), CircleShape),
+                        .background(RiderColors.PrimarySoft, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Default.CheckCircle,
                         contentDescription = null,
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(40.dp)
+                        tint = RiderColors.Primary,
+                        modifier = Modifier.size(38.dp)
                     )
                 }
 
@@ -53,20 +54,21 @@ fun DeliveryCompletionDialog(
                         text = "DELIVERY COMPLETED! 🎉",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color.White
+                        color = RiderColors.TextPrimary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    val shortId = if (session.orderId.length > 14) session.orderId.take(12) + "…" else session.orderId
                     Text(
-                        text = "Order #${session.orderId} handoff confirmed",
+                        text = "Order #$shortId handoff confirmed",
                         fontSize = 12.sp,
-                        color = Color(0xFF94A3B8)
+                        color = RiderColors.TextMuted
                     )
                 }
 
                 // Earnings Credit Summary
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF22252E)),
-                    border = BorderStroke(1.dp, Color(0xFF2B2F3B)),
+                    colors = CardDefaults.cardColors(containerColor = RiderColors.SurfaceSubtle),
+                    border = BorderStroke(1.dp, RiderColors.Border),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -76,23 +78,28 @@ fun DeliveryCompletionDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Payment / Bill:", fontSize = 13.sp, color = Color(0xFF94A3B8))
+                            Text("Order Value / Mode:", fontSize = 13.sp, color = RiderColors.TextSecondary)
+                            val billVal = if (session.isCod) {
+                                "₹${(session.codCollectedAmount ?: session.codAmount ?: session.orderTotal ?: 0.0).toInt()} (COD)"
+                            } else {
+                                "₹${(session.orderTotal ?: 0.0).toInt()} (Zero Cash Due)"
+                            }
                             Text(
-                                text = session.codAmount?.takeIf { it > 0.0 }?.let { "₹${it.toInt()} (COD)" } ?: session.payoutFormatted ?: "Paid Online",
+                                text = billVal,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF10B981)
+                                color = RiderColors.Primary
                             )
                         }
 
-                        HorizontalDivider(color = Color(0xFF2B2F3B))
+                        HorizontalDivider(color = RiderColors.Border, thickness = 1.dp)
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Customer:", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                            Text(session.customerName ?: "Customer", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            Text("Customer:", fontSize = 12.sp, color = RiderColors.TextMuted)
+                            Text(session.customerName.ifBlank { "Customer" }, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = RiderColors.TextPrimary)
                         }
 
                         if (session.isCod) {
@@ -100,8 +107,8 @@ fun DeliveryCompletionDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("COD Cash Collected:", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                                Text("₹${(session.codCollectedAmount ?: 0.0).toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
+                                Text("COD Cash Collected:", fontSize = 12.sp, color = RiderColors.TextMuted)
+                                Text("₹${(session.codCollectedAmount ?: 0.0).toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RiderColors.Warning)
                             }
                         }
                     }
@@ -109,7 +116,7 @@ fun DeliveryCompletionDialog(
 
                 Button(
                     onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
@@ -117,7 +124,7 @@ fun DeliveryCompletionDialog(
                 }
             }
         },
-        containerColor = Color(0xFF16181F),
+        containerColor = RiderColors.Surface,
         shape = RoundedCornerShape(22.dp)
     )
 }

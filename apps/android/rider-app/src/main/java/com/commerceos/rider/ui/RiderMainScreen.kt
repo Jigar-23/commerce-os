@@ -3,17 +3,23 @@ package com.commerceos.rider.ui
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -26,17 +32,21 @@ import com.commerceos.rider.model.ServerOffer
 import com.commerceos.rider.repository.RiderDeliveryRepository
 import com.commerceos.rider.service.RiderForegroundLocationService
 import com.commerceos.rider.session.RiderSessionManager
+import com.commerceos.rider.theme.RiderColors
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RiderMainScreen(
     profile: RiderProfile? = null,
-    onLogout: () -> Unit = {}
+    onLogout: () -> Unit = {},
+    intentOfferId: String? = null,
+    onClearIntentOfferId: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -50,7 +60,7 @@ fun RiderMainScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var liveProfile by remember { mutableStateOf<RiderProfile?>(profile) }
-    var isOnline by remember { mutableStateOf(true) }
+    var isOnline by remember { mutableStateOf(sessionManager.isShiftOnline()) }
     var session by remember { mutableStateOf<ServerDeliverySession?>(null) }
     var completedSessionsList by remember { mutableStateOf<List<ServerDeliverySession>>(emptyList()) }
     var activeOffer by remember { mutableStateOf<ServerOffer?>(null) }
@@ -65,6 +75,24 @@ fun RiderMainScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var jobAlreadyAssignedDialogMessage by remember { mutableStateOf<String?>(null) }
     var actionLoading by remember { mutableStateOf(false) }
+
+    // Direct Notification Click Deep-Link: Navigate to Order Acceptance on Home Page
+    LaunchedEffect(intentOfferId) {
+        val targetId = intentOfferId ?: sessionManager.getPendingOfferId()
+        if (!targetId.isNullOrBlank()) {
+            selectedTab = 0
+            selectedOfferForDetail = null
+            selectedOrderForDetail = null
+            scope.launch {
+                val offerRes = repository.fetchOfferById(targetId)
+                if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
+                    activeOffer = offerRes.offer
+                }
+                sessionManager.savePendingOfferId(null)
+                onClearIntentOfferId()
+            }
+        }
+    }
     var enteredOtp by remember { mutableStateOf("") }
     var enteredCodAmount by remember { mutableStateOf("") }
     var resendCooldown by remember { mutableIntStateOf(0) }
@@ -91,9 +119,10 @@ fun RiderMainScreen(
             return@LaunchedEffect
         }
         val res = repository.fetchRiderProfile()
+        val savedDuty = sessionManager.isShiftOnline()
         res.onSuccess {
             liveProfile = it
-            isOnline = true
+            isOnline = savedDuty
         }.onFailure { err ->
             android.util.Log.e("RiderMainScreen", "fetchRiderProfile failed: ${err.message}", err)
             if (err.message?.contains("401") == true || err.message?.contains("UNAUTHORIZED") == true) {
@@ -103,7 +132,7 @@ fun RiderMainScreen(
                     val retry = repository.fetchRiderProfile()
                     retry.onSuccess {
                         liveProfile = it
-                        isOnline = true
+                        isOnline = savedDuty
                     }.onFailure {
                         sessionManager.clearSession()
                         onLogout()
@@ -123,10 +152,10 @@ fun RiderMainScreen(
                     rating = 4.9,
                     completedToday = 0,
                     earningsTodayFormatted = "₹0",
-                    shiftStatus = "ONLINE_AVAILABLE",
+                    shiftStatus = if (savedDuty) "ONLINE_AVAILABLE" else "OFFLINE",
                     assignedHub = "Koramangala Dark Store"
                 )
-                isOnline = true
+                isOnline = savedDuty
             }
         }
 
@@ -136,9 +165,9 @@ fun RiderMainScreen(
             repository.registerDeviceToken(cachedFcmToken)
         }
 
-        // Initial sync of shift status so rider is marked online in dispatch engine
+        // Initial sync of shift status so dispatch engine aligns with rider preference
         if (sessionManager.getAuthToken().isNotBlank()) {
-            repository.updateShiftStatus(true)
+            repository.updateShiftStatus(savedDuty)
         }
 
         // Initial Trips / Order History Fetch
@@ -161,11 +190,8 @@ fun RiderMainScreen(
     // 2. Realtime Incoming Offer Pipeline Stream (FCM & SSE Ingestion)
     LaunchedEffect(Unit) {
         com.commerceos.rider.util.RiderOfferEventPipeline.incomingOfferEvents.collect { offer ->
-            val prevId = activeOffer?.offerId
             activeOffer = offer
-            if (prevId != offer.offerId) {
-                com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offer.offerId)
-            }
+            com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offer.offerId)
         }
     }
 
@@ -212,7 +238,7 @@ fun RiderMainScreen(
                         is com.commerceos.rider.model.ActiveOfferResult.Success -> {
                             val prevId = activeOffer?.offerId
                             activeOffer = offerResult.offer
-                            if (prevId != offerResult.offer.offerId) {
+                            if (prevId != offerResult.offer.offerId && isOnline) {
                                 com.commerceos.rider.util.RiderAlertNotifier.playNewJobAlert(context, offerResult.offer.offerId)
                                 com.commerceos.rider.util.RiderNotificationManager.postDirectOfferNotification(context, offerResult.offer)
                             }
@@ -229,11 +255,13 @@ fun RiderMainScreen(
                     }
                 } catch (_: Exception) {}
 
-                // 3. Process notifications concurrently
+                // 3. Process notifications concurrently (merging remote SSE/REST + local on-device store)
                 try {
                     val notifs = notifsDeferred.await()
-                    notificationsList = notifs
-                    unreadNotifCount = notifs.count { it.readAt == null }
+                    val localNotifs = com.commerceos.rider.util.RiderLocalNotificationStore.getStoredNotifications(context)
+                    val merged = (notifs + localNotifs).distinctBy { it.notificationId.ifBlank { it.offerId ?: it.orderId ?: "" } }
+                    notificationsList = merged
+                    unreadNotifCount = merged.count { it.readAt == null }
                 } catch (_: Exception) {}
 
                 // 4. Process periodic profile & earnings refresh
@@ -276,84 +304,222 @@ fun RiderMainScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        val displayName = liveProfile?.name
-                        Text(
-                            text = if (displayName != null) "$greeting, $displayName 👋" else if (isOnline) "Welcome 👋" else "Offline",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                color = if (isOnline) Color(0xFF10B981) else Color(0xFF64748B),
-                                shape = CircleShape,
-                                modifier = Modifier.size(7.dp)
-                            ) {}
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isShiftUpdating) "Updating…" else if (isOnline) "Online" else "Offline",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isOnline) Color(0xFF10B981) else Color(0xFF94A3B8)
-                            )
+                    when (selectedTab) {
+                        0 -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(if (isOnline) RiderColors.PrimarySoft else RiderColors.SurfaceSubtle, CircleShape)
+                                        .border(1.5.dp, if (isOnline) RiderColors.Primary else RiderColors.Border, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = if (isOnline) RiderColors.Primary else RiderColors.TextMuted,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    val displayName = liveProfile?.name ?: "Partner 6180"
+                                    Text(
+                                        text = "$greeting, $displayName",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = RiderColors.TextPrimary,
+                                        maxLines = 1
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            color = if (isOnline) RiderColors.Primary else RiderColors.TextMuted,
+                                            shape = CircleShape,
+                                            modifier = Modifier.size(6.dp)
+                                        ) {}
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isOnline) "On Duty • Rewari Hub" else "Off Duty • Shift Paused",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (isOnline) RiderColors.Primary else RiderColors.TextMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        1 -> {
+                            Column {
+                                Text(
+                                    text = "Trip History",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RiderColors.TextPrimary
+                                )
+                                Text(
+                                    text = "${completedSessionsList.size} deliveries completed today",
+                                    fontSize = 11.sp,
+                                    color = RiderColors.TextMuted
+                                )
+                            }
+                        }
+                        2 -> {
+                            Column {
+                                Text(
+                                    text = "Dispatch Alerts",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RiderColors.TextPrimary
+                                )
+                                Text(
+                                    text = if (unreadNotifCount > 0) "$unreadNotifCount unread notification(s)" else "All caught up with dispatches",
+                                    fontSize = 11.sp,
+                                    color = RiderColors.TextMuted
+                                )
+                            }
+                        }
+                        else -> {
+                            Column {
+                                Text(
+                                    text = "Captain Profile",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RiderColors.TextPrimary
+                                )
+                                Text(
+                                    text = "CommerceOS Partner Fleet",
+                                    fontSize = 11.sp,
+                                    color = RiderColors.TextMuted
+                                )
+                            }
                         }
                     }
                 },
                 actions = {
-                    Switch(
-                        checked = isOnline,
-                        enabled = !isShiftUpdating,
-                        onCheckedChange = { newStatus ->
-                            isShiftUpdating = true
-                            scope.launch {
-                                val res = repository.updateShiftStatus(newStatus)
-                                res.onSuccess {
-                                    isOnline = newStatus
-                                    liveProfile = liveProfile?.copy(shiftStatus = if (newStatus) "ONLINE_AVAILABLE" else "OFFLINE")
-                                }.onFailure {
-                                    Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                    when (selectedTab) {
+                        0, 3 -> {
+                            // Tactile Duty Pill Switch
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isOnline) RiderColors.PrimarySoft else RiderColors.SurfaceSubtle,
+                                border = BorderStroke(1.dp, if (isOnline) RiderColors.Primary.copy(alpha = 0.5f) else RiderColors.Border),
+                                modifier = Modifier
+                                    .padding(end = 12.dp)
+                                    .clickable(enabled = !isShiftUpdating) {
+                                        val nextStatus = !isOnline
+                                        isShiftUpdating = true
+                                        scope.launch {
+                                            val res = repository.updateShiftStatus(nextStatus)
+                                            res.onSuccess {
+                                                isOnline = nextStatus
+                                                sessionManager.saveShiftOnline(nextStatus)
+                                                if (nextStatus) {
+                                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast") } catch (_: Exception) {}
+                                                } else {
+                                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
+                                                }
+                                                liveProfile = liveProfile?.copy(shiftStatus = if (nextStatus) "ONLINE_AVAILABLE" else "OFFLINE")
+                                            }.onFailure {
+                                                Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                            isShiftUpdating = false
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Surface(
+                                        color = if (isOnline) RiderColors.Primary else RiderColors.TextMuted,
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(7.dp)
+                                    ) {}
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isShiftUpdating) "Updating…" else if (isOnline) "ON DUTY" else "OFF DUTY",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 0.5.sp,
+                                        color = if (isOnline) RiderColors.PrimarySoftText else RiderColors.TextSecondary
+                                    )
                                 }
-                                isShiftUpdating = false
                             }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF10B981),
-                            uncheckedThumbColor = Color(0xFF94A3B8),
-                            uncheckedTrackColor = Color(0xFF334155)
-                        )
-                    )
+                        }
+                        1 -> {
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        val trips = repository.fetchTrips()
+                                        if (trips.isNotEmpty()) {
+                                            completedSessionsList = trips.filter { it.state in listOf("DELIVERED", "COMPLETED", "CANCELLED") }
+                                        }
+                                        Toast.makeText(context, "Trips refreshed", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = RiderColors.Primary)
+                            }
+                        }
+                        2 -> {
+                            if (unreadNotifCount > 0) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = RiderColors.PrimarySoft,
+                                    border = BorderStroke(1.dp, RiderColors.Primary.copy(alpha = 0.3f)),
+                                    modifier = Modifier
+                                        .padding(end = 12.dp)
+                                        .clickable {
+                                            notificationsList = notificationsList.map { it.copy(readAt = "read") }
+                                            unreadNotifCount = 0
+                                            scope.launch { repository.markAllNotificationsRead() }
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = RiderColors.Primary, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Mark read", color = RiderColors.PrimarySoftText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF16181F))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = RiderColors.Surface)
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF16181F)) {
+            NavigationBar(
+                containerColor = RiderColors.Surface,
+                tonalElevation = 6.dp
+            ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                    label = { Text("Home") },
+                    label = { Text("Home", fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        unselectedIconColor = Color(0xFF94A3B8),
-                        unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF262933)
+                        selectedIconColor = RiderColors.Primary,
+                        selectedTextColor = RiderColors.Primary,
+                        unselectedIconColor = RiderColors.TextMuted,
+                        unselectedTextColor = RiderColors.TextMuted,
+                        indicatorColor = RiderColors.PrimarySoft
                     )
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     icon = { Icon(Icons.Default.ShoppingCart, contentDescription = "Orders") },
-                    label = { Text("Orders") },
+                    label = { Text("Orders", fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        unselectedIconColor = Color(0xFF94A3B8),
-                        unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF262933)
+                        selectedIconColor = RiderColors.Primary,
+                        selectedTextColor = RiderColors.Primary,
+                        unselectedIconColor = RiderColors.TextMuted,
+                        unselectedTextColor = RiderColors.TextMuted,
+                        indicatorColor = RiderColors.PrimarySoft
                     )
                 )
                 NavigationBarItem(
@@ -363,8 +529,8 @@ fun RiderMainScreen(
                         BadgedBox(
                             badge = {
                                 if (unreadNotifCount > 0) {
-                                    Badge(containerColor = Color(0xFFEF4444)) {
-                                        Text("$unreadNotifCount", color = Color.White, fontSize = 10.sp)
+                                    Badge(containerColor = RiderColors.Danger) {
+                                        Text("$unreadNotifCount", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -372,31 +538,31 @@ fun RiderMainScreen(
                             Icon(Icons.Default.Notifications, contentDescription = "Alerts")
                         }
                     },
-                    label = { Text("Alerts") },
+                    label = { Text("Alerts", fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        unselectedIconColor = Color(0xFF94A3B8),
-                        unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF262933)
+                        selectedIconColor = RiderColors.Primary,
+                        selectedTextColor = RiderColors.Primary,
+                        unselectedIconColor = RiderColors.TextMuted,
+                        unselectedTextColor = RiderColors.TextMuted,
+                        indicatorColor = RiderColors.PrimarySoft
                     )
                 )
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
-                    label = { Text("Profile") },
+                    label = { Text("Profile", fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Medium) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        unselectedIconColor = Color(0xFF94A3B8),
-                        unselectedTextColor = Color(0xFF94A3B8),
-                        indicatorColor = Color(0xFF262933)
+                        selectedIconColor = RiderColors.Primary,
+                        selectedTextColor = RiderColors.Primary,
+                        unselectedIconColor = RiderColors.TextMuted,
+                        unselectedTextColor = RiderColors.TextMuted,
+                        indicatorColor = RiderColors.PrimarySoft
                     )
                 )
             }
         },
-        containerColor = Color(0xFF0D0F14)
+        containerColor = RiderColors.Background
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             var stickyLat by remember { mutableStateOf<Double?>(null) }
@@ -548,7 +714,7 @@ fun RiderMainScreen(
                             onCodAmountChange = { enteredCodAmount = it },
                             onReconcileCod = {
                                 scope.launch {
-                                    val amount = enteredCodAmount.toDoubleOrNull() ?: 0.0
+                                    val amount = enteredCodAmount.toDoubleOrNull() ?: currentSession.codAmount ?: currentSession.orderTotal ?: 0.0
                                     actionLoading = true
                                     errorMessage = null
                                     val res = repository.reconcileCod(currentSession.deliveryId, amount)
@@ -620,105 +786,399 @@ fun RiderMainScreen(
                             )
                         }
                     } else {
-                        // Quick-Commerce Rider Home Dashboard
+                        // Quick-Commerce Rider Home Dashboard (Swiggy / Zomato / Blinkit Style)
+                        val infiniteTransition = rememberInfiniteTransition(label = "RadarSonar")
+                        val radarScale1 by infiniteTransition.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 2.1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(2200, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "RadarScale1"
+                        )
+                        val radarAlpha1 by infiniteTransition.animateFloat(
+                            initialValue = 0.5f,
+                            targetValue = 0f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(2200, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "RadarAlpha1"
+                        )
+                        val radarScale2 by infiniteTransition.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 2.1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(2200, delayMillis = 800, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "RadarScale2"
+                        )
+                        val radarAlpha2 by infiniteTransition.animateFloat(
+                            initialValue = 0.5f,
+                            targetValue = 0f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(2200, delayMillis = 800, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "RadarAlpha2"
+                        )
+
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
                                 .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            // Store Delivery Operations Summary Card
+                            // 1. Shift & Hub Priority Banner
                             Card(
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
-                                border = BorderStroke(1.dp, Color(0xFF262933)),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+                                border = BorderStroke(1.dp, RiderColors.Border),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(20.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column {
-                                            Text("Today's Deliveries", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                                            Text(
-                                                text = "${liveProfile?.completedToday ?: 0}",
-                                                fontSize = 32.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = Color(0xFF10B981)
-                                            )
-                                        }
-
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                         Surface(
-                                            color = (if (isOnline) Color(0xFF10B981) else Color(0xFF64748B)).copy(alpha = 0.15f),
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Text(
-                                                text = if (isOnline) "🟢 Online & Ready" else "⚪ Offline",
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isOnline) Color(0xFF10B981) else Color(0xFF94A3B8),
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    HorizontalDivider(color = Color(0xFF262933))
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    val hubProf = liveProfile
-                                    if (hubProf != null && !hubProf.assignedHub.isNullOrBlank()) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(hubProf.assignedHub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFCBD5E1))
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Waiting State Container
-                            Card(
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181F)),
-                                border = BorderStroke(1.dp, Color(0xFF262933)),
-                                modifier = Modifier.fillMaxWidth().weight(1f)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        Surface(
-                                            color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                            color = if (isOnline) RiderColors.PrimarySoft else RiderColors.SurfaceSubtle,
                                             shape = CircleShape,
-                                            modifier = Modifier.size(64.dp)
+                                            modifier = Modifier.size(46.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
                                                     Icons.Default.Place,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF10B981),
-                                                    modifier = Modifier.size(32.dp)
+                                                    tint = if (isOnline) RiderColors.Primary else RiderColors.TextMuted,
+                                                    modifier = Modifier.size(24.dp)
                                                 )
                                             }
                                         }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            val assignedHub = liveProfile?.assignedHub?.ifBlank { "Rewari Central Hub" } ?: "Rewari Central Hub"
+                                            val cleanHubDisplay = if (assignedHub.contains("(")) assignedHub.substringBefore("(").trim() else assignedHub
+                                            val cleanStoreId = if (assignedHub.contains("(")) assignedHub.substringAfter("(").substringBefore(")") else "STORE_REWARI_01"
+                                            Text(
+                                                text = cleanHubDisplay,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = RiderColors.TextPrimary
+                                            )
+                                            Text(
+                                                text = if (isOnline) "🟢 $cleanStoreId • Priority Area" else "⚪ Offline • Shift Paused",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = if (isOnline) RiderColors.Primary else RiderColors.TextMuted
+                                            )
+                                        }
+                                    }
 
+                                    Surface(
+                                        color = RiderColors.PrimarySoft,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, RiderColors.Primary.copy(alpha = 0.3f))
+                                    ) {
                                         Text(
-                                            text = if (isOnline) "You're Ready" else "You Are Offline",
-                                            fontSize = 18.sp,
+                                            text = "⚡ 10-Min SLA",
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = if (isOnline) "Waiting for your next delivery.\nWe'll alert you immediately as soon as a parcel is assigned." else "Go online in the top bar to start receiving delivery offers.",
-                                            fontSize = 13.sp,
-                                            color = Color(0xFF94A3B8),
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                            lineHeight = 18.sp
+                                            color = RiderColors.PrimarySoftText,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                         )
                                     }
+                                }
+                            }
+
+                            // 2. Today's Performance Cockpit (Order Value & Deliveries)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Today's Order Value Fulfilled Tile
+                                val todayOrderValSum = completedSessionsList.sumOf {
+                                    it.orderTotal ?: it.items.sumOf { item -> item.price * item.quantity }.takeIf { it > 0.0 } ?: 32.0
+                                }
+                                val orderValueText = if (todayOrderValSum > 0.0) "₹${todayOrderValSum.toInt()}" else "₹0"
+
+                                Card(
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+                                    border = BorderStroke(1.dp, RiderColors.Border),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Text(
+                                            text = "TODAY'S ORDER VALUE",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = RiderColors.TextMuted,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = orderValueText,
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = RiderColors.Primary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Fulfilled Store Volume",
+                                            fontSize = 11.sp,
+                                            color = RiderColors.TextLight
+                                        )
+                                    }
+                                }
+
+                                // Today's Trips Tile
+                                Card(
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+                                    border = BorderStroke(1.dp, RiderColors.Border),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Text(
+                                            text = "DELIVERIES",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = RiderColors.TextMuted,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        val tripCount = liveProfile?.completedToday ?: completedSessionsList.size
+                                        Text(
+                                            text = "$tripCount",
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = RiderColors.TextPrimary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Orders fulfilled",
+                                            fontSize = 11.sp,
+                                            color = RiderColors.TextLight
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 3. Hero Animated Dispatch Radar Container
+                            Card(
+                                shape = RoundedCornerShape(22.dp),
+                                colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+                                border = BorderStroke(1.dp, RiderColors.Border),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    // Animated Sonar Wave Circle
+                                    Box(
+                                        modifier = Modifier.size(110.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isOnline) {
+                                            // Radar Pulse 1
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(76.dp)
+                                                    .scale(radarScale1)
+                                                    .background(RiderColors.Primary.copy(alpha = radarAlpha1), CircleShape)
+                                            )
+                                            // Radar Pulse 2
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(76.dp)
+                                                    .scale(radarScale2)
+                                                    .background(RiderColors.Primary.copy(alpha = radarAlpha2), CircleShape)
+                                            )
+                                        }
+
+                                        // Central Core
+                                        Surface(
+                                            color = if (isOnline) RiderColors.DarkHeaderBg else RiderColors.SurfaceSubtle,
+                                            shape = CircleShape,
+                                            border = BorderStroke(2.dp, if (isOnline) RiderColors.Primary else RiderColors.Border),
+                                            modifier = Modifier.size(74.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Place,
+                                                    contentDescription = null,
+                                                    tint = if (isOnline) RiderColors.Primary else RiderColors.TextMuted,
+                                                    modifier = Modifier.size(36.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = if (isOnline) "Scanning Express Dispatches" else "You Are Offline",
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = RiderColors.TextPrimary
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = if (isOnline) "Connected to Central Dispatch Engine near Rewari Central Hub.\nKeep your app open to receive instant order dispatches." else "Turn on duty to start receiving assigned dispatches for Rewari Central Hub.",
+                                            fontSize = 13.sp,
+                                            color = RiderColors.TextSecondary,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            lineHeight = 19.sp
+                                        )
+                                    }
+
+                                    if (!isOnline) {
+                                        Button(
+                                            onClick = {
+                                                isShiftUpdating = true
+                                                scope.launch {
+                                                    val res = repository.updateShiftStatus(true)
+                                                    res.onSuccess {
+                                                        isOnline = true
+                                                        liveProfile = liveProfile?.copy(shiftStatus = "ONLINE_AVAILABLE")
+                                                    }.onFailure {
+                                                        Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    isShiftUpdating = false
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                                        ) {
+                                            Text("GO ON DUTY", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                                        }
+                                    }
+
+                                    HorizontalDivider(color = RiderColors.Divider, thickness = 1.dp)
+
+                                    // Realtime Status Chips Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                color = if (isOnline) RiderColors.Primary else RiderColors.TextMuted,
+                                                shape = CircleShape,
+                                                modifier = Modifier.size(8.dp)
+                                            ) {}
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (isOnline) "GPS Active" else "GPS Idle",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = RiderColors.TextSecondary
+                                            )
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = RiderColors.Primary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Express Fleet",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = RiderColors.TextSecondary
+                                            )
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.Place,
+                                                contentDescription = null,
+                                                tint = RiderColors.AccentBlue,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Rewari Hub",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = RiderColors.TextSecondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. Quick Shortcut to Order History
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = RiderColors.Surface),
+                                border = BorderStroke(1.dp, RiderColors.Border),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                                onClick = { selectedTab = 1 },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            color = RiderColors.PrimarySoft,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.ShoppingCart,
+                                                    contentDescription = null,
+                                                    tint = RiderColors.Primary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = "Trip & Order History",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = RiderColors.TextPrimary
+                                            )
+                                            Text(
+                                                text = "View all past completed deliveries and billings",
+                                                fontSize = 11.sp,
+                                                color = RiderColors.TextMuted
+                                            )
+                                        }
+                                    }
+
+                                    Icon(
+                                        Icons.Default.ArrowForward,
+                                        contentDescription = null,
+                                        tint = RiderColors.TextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                             }
                         }
@@ -740,6 +1200,7 @@ fun RiderMainScreen(
                         selectedCategory = selectedNotifCategory,
                         onCategorySelected = { selectedNotifCategory = it },
                         onNotificationClick = { notif ->
+                            android.util.Log.e("RiderMainScreen", ">>> onNotificationClick clicked: id=${notif.notificationId}, title=${notif.title}, orderId=${notif.orderId}, offerId=${notif.offerId}")
                             scope.launch {
                                 repository.markNotificationRead(notif.notificationId)
                                 notificationsList = notificationsList.map {
@@ -747,40 +1208,13 @@ fun RiderMainScreen(
                                 }
                                 unreadNotifCount = notificationsList.count { it.readAt == null }
 
-                                // 0. If marked as unavailable/claimed, immediately notify rider
-                                if (notif.isAvailable == false || notif.offerStatus in listOf("ACCEPTED", "CLAIMED_BY_OTHER")) {
+                                // 0. Check if strictly claimed by another rider
+                                if (notif.offerStatus == "CLAIMED_BY_OTHER") {
                                     jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
                                     return@launch
                                 }
 
-                                // 1. Check if offer notification -> show RiderOrderDetailDialog pop-up
-                                val targetOfferId = notif.offerId
-                                if (!targetOfferId.isNullOrBlank()) {
-                                    if (activeOffer?.offerId == targetOfferId) {
-                                        selectedOfferForDetail = activeOffer
-                                        return@launch
-                                    }
-                                    val offerRes = repository.fetchOfferById(targetOfferId)
-                                    if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
-                                        if (offerRes.offer.status in listOf("ACCEPTED", "CLAIMED_BY_OTHER", "EXPIRED", "CANCELLED")) {
-                                            jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
-                                            notificationsList = notificationsList.map {
-                                                if (it.notificationId == notif.notificationId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
-                                            }
-                                            return@launch
-                                        }
-                                        selectedOfferForDetail = offerRes.offer
-                                        return@launch
-                                    } else {
-                                        jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
-                                        notificationsList = notificationsList.map {
-                                            if (it.notificationId == notif.notificationId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
-                                        }
-                                        return@launch
-                                    }
-                                }
-
-                                // 2. Check if active/historical order delivery session -> show ActiveDeliveryDetailDialog pop-up
+                                // 1. Check if active/historical order delivery session -> show ActiveDeliveryDetailDialog pop-up
                                 val notifOrderId = notif.orderId ?: notif.deliveryId
                                 if (!notifOrderId.isNullOrBlank()) {
                                     if (session?.orderId == notifOrderId || session?.deliveryId == notifOrderId) {
@@ -801,22 +1235,73 @@ fun RiderMainScreen(
                                     }
                                 }
 
+                                // 2. Check if active offer notification -> navigate directly to Home page Order Acceptance Card
+                                val targetOfferId = notif.offerId
+                                if (!targetOfferId.isNullOrBlank()) {
+                                    if (activeOffer?.offerId == targetOfferId) {
+                                        selectedOfferForDetail = null
+                                        selectedOrderForDetail = null
+                                        selectedTab = 0
+                                        Toast.makeText(context, "Review & accept order offer", Toast.LENGTH_SHORT).show()
+                                        return@launch
+                                    }
+                                    val offerRes = repository.fetchOfferById(targetOfferId)
+                                    if (offerRes is com.commerceos.rider.model.ActiveOfferResult.Success) {
+                                        if (offerRes.offer.status in listOf("CLAIMED_BY_OTHER")) {
+                                            jobAlreadyAssignedDialogMessage = "This delivery job has already been taken by another rider."
+                                            notificationsList = notificationsList.map {
+                                                if (it.notificationId == notif.notificationId) it.copy(isAvailable = false, offerStatus = "CLAIMED_BY_OTHER") else it
+                                            }
+                                            return@launch
+                                        }
+                                        activeOffer = offerRes.offer
+                                        selectedOfferForDetail = null
+                                        selectedOrderForDetail = null
+                                        selectedTab = 0
+                                        Toast.makeText(context, "Review & accept order offer", Toast.LENGTH_SHORT).show()
+                                        return@launch
+                                    }
+                                }
+
                                 // 3. Fallback pop-up for order/job notification so rider ALWAYS gets a pop-up dialog directly in Alerts
                                 if (notif.category == "ORDER" || notif.category == "ORDERS" || notif.type.contains("ORDER", ignoreCase = true) || !notif.orderId.isNullOrBlank() || !notif.deliveryId.isNullOrBlank()) {
-                                    val cleanOrderId = notif.orderId ?: notif.deliveryId ?: ("ORD-" + notif.notificationId.takeLast(6).uppercase())
+                                    val orderIdFromTitle = Regex("""#([A-Za-z0-9_-]+)""").find(notif.title)?.groupValues?.get(1)
+                                    val cleanOrderId = notif.orderId ?: notif.deliveryId ?: orderIdFromTitle?.let { "ord_$it" } ?: ("ORD-" + notif.notificationId.takeLast(6).uppercase())
                                     val cleanDeliveryId = notif.deliveryId ?: notif.orderId ?: ("DEL-" + notif.notificationId.takeLast(6).uppercase())
-                                    val extractedAmount = Regex("""[₹Rs\.]*\s*(\d+(?:\.\d+)?)""").find(notif.title + " " + notif.body)?.groupValues?.get(1)?.toDoubleOrNull()
+
+                                    // Check if existing session in trips matches cleanOrderId or orderIdFromTitle
+                                    val existingSession = completedSessionsList.find { it.orderId.contains(cleanOrderId, ignoreCase = true) || (orderIdFromTitle != null && it.orderId.contains(orderIdFromTitle, ignoreCase = true)) }
+                                        ?: (if (session?.orderId?.contains(cleanOrderId, ignoreCase = true) == true) session else null)
+
+                                    if (existingSession != null) {
+                                        selectedOrderForDetail = existingSession
+                                        return@launch
+                                    }
+
+                                    // Extract bill amount properly (never match hex characters in order hash!)
+                                    val extractedAmount = Regex("""(?:Bill|Payout|Total|₹|Rs\.?)\s*:?\s*[₹Rs\.]*\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
+                                        .find(notif.body + " " + notif.title)?.groupValues?.get(1)?.toDoubleOrNull()
+                                        ?: 32.0
 
                                     val storeFromNotif = when {
                                         notif.body.contains("Pickup:", ignoreCase = true) -> notif.body.substringAfter("Pickup:").substringBefore("•").substringBefore("(").substringBefore("\n").trim()
                                         notif.body.contains("from ", ignoreCase = true) -> notif.body.substringAfter("from ").substringBefore("•").substringBefore(" to").trim()
-                                        else -> "Authorized Pharmacy Store"
+                                        else -> "Rewari Central Hub (STORE_REWARI_01)"
                                     }
                                     val dropFromNotif = when {
                                         notif.body.contains("Drop:", ignoreCase = true) -> notif.body.substringAfter("Drop:").substringBefore("\n").substringBefore("•").trim()
                                         notif.body.contains("to ", ignoreCase = true) -> notif.body.substringAfter("to ").trim()
-                                        else -> "Customer Delivery Address"
+                                        else -> "Customer Delivery Address, Rewari Sector 4"
                                     }
+
+                                    val isCodOrder = notif.body.contains("COD", ignoreCase = true) || notif.title.contains("COD", ignoreCase = true)
+
+                                    val fallbackItem = com.commerceos.rider.model.RiderOrderItem(
+                                        name = "Medical Essentials Package",
+                                        quantity = 1,
+                                        price = extractedAmount,
+                                        sku = cleanOrderId
+                                    )
 
                                     val fallbackSession = ServerDeliverySession(
                                         deliveryId = cleanDeliveryId,
@@ -824,30 +1309,30 @@ fun RiderMainScreen(
                                         riderId = liveProfile?.riderId ?: "rider-self",
                                         riderName = liveProfile?.name ?: "Delivery Partner",
                                         riderPhone = liveProfile?.phone ?: "",
-                                        riderVehicle = liveProfile?.vehicleNumber ?: "Delivery Vehicle",
+                                        riderVehicle = liveProfile?.vehicleNumber ?: "Electric Scooter",
                                         customerId = "cust-order",
                                         customerName = "Customer",
-                                        customerPhone = "+91 98765 43210",
+                                        customerPhone = "+91 98179 16180",
                                         customerAddress = dropFromNotif,
                                         customerLat = null,
                                         customerLng = null,
                                         merchantName = storeFromNotif,
-                                        merchantAddress = "Registered Medical Store Hub",
+                                        merchantAddress = "Rewari Central Hub (STORE_REWARI_01)",
                                         merchantLat = null,
                                         merchantLng = null,
                                         merchantPhone = "+91 1800 123 4567",
-                                        payoutFormatted = extractedAmount?.let { "₹${it.toInt()}" } ?: "₹35",
-                                        distanceKm = 2.0,
-                                        estimatedTimeMins = 10,
+                                        payoutFormatted = null,
+                                        distanceKm = 2.4,
+                                        estimatedTimeMins = 12,
                                         state = if (notif.title.contains("delivered", ignoreCase = true) || notif.body.contains("delivered", ignoreCase = true)) "DELIVERED" else "ACTIVE",
                                         otpAttemptsLeft = 3,
                                         otpVerified = true,
-                                        isCod = notif.body.contains("COD", ignoreCase = true) || notif.title.contains("COD", ignoreCase = true),
-                                        codAmount = if (notif.body.contains("COD", ignoreCase = true)) (extractedAmount ?: 250.0) else null,
+                                        isCod = isCodOrder,
+                                        codAmount = if (isCodOrder) extractedAmount else null,
                                         codCollectedAmount = null,
                                         codReconciled = false,
-                                        orderTotal = extractedAmount ?: 350.0,
-                                        items = emptyList(),
+                                        orderTotal = extractedAmount,
+                                        items = listOf(fallbackItem),
                                         telemetry = null,
                                         history = emptyList()
                                     )
@@ -878,6 +1363,12 @@ fun RiderMainScreen(
                             val res = repository.updateShiftStatus(newStatus)
                             res.onSuccess {
                                 isOnline = newStatus
+                                sessionManager.saveShiftOnline(newStatus)
+                                if (newStatus) {
+                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast") } catch (_: Exception) {}
+                                } else {
+                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
+                                }
                                 liveProfile = liveProfile?.copy(shiftStatus = if (newStatus) "ONLINE_AVAILABLE" else "OFFLINE")
                             }.onFailure {
                                 Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
@@ -886,6 +1377,7 @@ fun RiderMainScreen(
                     },
                     onLogout = {
                         scope.launch {
+                            try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
                             repository.logoutDeviceToken()
                             sessionManager.clearSession()
                             isOnline = false
@@ -944,6 +1436,7 @@ fun RiderMainScreen(
     }
 
     if (selectedOrderForDetail != null) {
+        android.util.Log.e("RiderMainScreen", ">>> Showing ActiveDeliveryDetailDialog for ${selectedOrderForDetail?.orderId}")
         ActiveDeliveryDetailDialog(
             session = selectedOrderForDetail!!,
             onDismiss = { selectedOrderForDetail = null }
@@ -996,29 +1489,29 @@ fun RiderMainScreen(
             onDismissRequest = { jobAlreadyAssignedDialogMessage = null },
             title = {
                 Text(
-                    text = "⚡ Delivery Notice",
+                    text = "Delivery Notice",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
-                    color = Color.White
+                    color = RiderColors.TextPrimary
                 )
             },
             text = {
                 Text(
                     text = jobAlreadyAssignedDialogMessage ?: "",
                     fontSize = 14.sp,
-                    color = Color(0xFFCBD5E1)
+                    color = RiderColors.TextSecondary
                 )
             },
             confirmButton = {
                 Button(
                     onClick = { jobAlreadyAssignedDialogMessage = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = Color(0xFF16181F),
+            containerColor = RiderColors.Surface,
             shape = RoundedCornerShape(16.dp)
         )
     }

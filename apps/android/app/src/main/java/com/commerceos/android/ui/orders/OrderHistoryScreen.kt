@@ -215,7 +215,12 @@ private fun OrderHistoryCard(
     val isDelivered = order.orderStatus.uppercase() == "DELIVERED"
     val isCancelled = order.orderStatus.uppercase() == "CANCELLED"
     val isActive = !presented.isTerminal
-    var userRating by remember { mutableIntStateOf(0) }
+
+    val effectiveTotal = when {
+        order.effectiveTotalAmount > java.math.BigDecimal.ZERO -> order.effectiveTotalAmount
+        items.isNotEmpty() -> items.map { it.unitPrice * java.math.BigDecimal(it.quantity) }.fold(java.math.BigDecimal.ZERO, java.math.BigDecimal::add) + (order.effectiveDeliveryFee)
+        else -> java.math.BigDecimal.ZERO
+    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -236,12 +241,19 @@ private fun OrderHistoryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
                     Text(
-                        text = "Order #${order.id}",
+                        text = "Order #${order.displayOrderId}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Placed on ${order.displayOrderDateTime}",
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF64748B),
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
@@ -344,7 +356,7 @@ private fun OrderHistoryCard(
             ) {
                 Column {
                     Text(
-                        text = "${items.sumOf { it.quantity }} ${if (items.sumOf { it.quantity } == 1) "item" else "items"} • Total ₹${order.totalAmount}",
+                        text = "${items.sumOf { it.quantity }} ${if (items.sumOf { it.quantity } == 1) "item" else "items"} • Total ₹${if (effectiveTotal.remainder(java.math.BigDecimal.ONE).compareTo(java.math.BigDecimal.ZERO) == 0) effectiveTotal.toInt() else effectiveTotal}",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
@@ -356,20 +368,17 @@ private fun OrderHistoryCard(
                     )
                 }
 
-                // Delivery SLA ETA badge if active
-                if (isActive) {
-                    Surface(
-                        color = Color(0xFFECFDF5),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = "⚡ In ${order.deliverySlaMins} mins",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF059669),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = if (isDelivered) "Delivered on ${order.displayOrderDate}" else "In Progress",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDelivered) Color(0xFF1D4ED8) else Color(0xFF059669),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
                 }
             }
 
@@ -414,37 +423,22 @@ private fun OrderHistoryCard(
                 }
             }
 
-            // Star Rating for Delivered Orders
-            if (isDelivered) {
+            // Reorder Option for Delivered Orders (Tata 1mg Benchmark)
+            if (isDelivered && items.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                Surface(
-                    color = Color(0xFFF8FAFC),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier.fillMaxWidth()
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                    TextButton(onClick = { items.firstOrNull()?.let { onReorderItem(it) } }) {
                         Text(
-                            text = if (userRating > 0) "Rated $userRating/5 ⭐" else "Rate your order:",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF475569)
+                            text = "Reorder",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE11D48)
                         )
-                        Row {
-                            (1..5).forEach { star ->
-                                Text(
-                                    text = if (star <= userRating) "⭐" else "☆",
-                                    fontSize = 16.sp,
-                                    modifier = Modifier
-                                        .clickable { userRating = star }
-                                        .padding(horizontal = 2.dp)
-                                )
-                            }
-                        }
                     }
                 }
             }
