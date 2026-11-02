@@ -1557,6 +1557,7 @@ async function dispatchNotificationEvent(riderId, notificationPayload) {
 
 let _mockFcmOauthCachedToken = null;
 let _mockFcmOauthExpiresAt = 0;
+let _lastFcmOauthError = null;
 
 function parseServiceAccountJson(raw) {
   if (!raw) return null;
@@ -1662,11 +1663,14 @@ async function getMockServerFcmOAuthToken() {
         projectId
       };
       _mockFcmOauthExpiresAt = now + (tokenData.expires_in || 3600);
+      _lastFcmOauthError = null;
       return _mockFcmOauthCachedToken;
     }
+    _lastFcmOauthError = 'TOKEN_RES: ' + JSON.stringify(tokenData);
     console.error('[MockServer FCM] OAuth token exchange rejected:', tokenData);
     return null;
   } catch (err) {
+    _lastFcmOauthError = 'SIGN_OR_FETCH_ERR: ' + err.message;
     console.error('[MockServer FCM] OAuth token exchange error:', err.message);
     return null;
   }
@@ -2801,16 +2805,9 @@ async function handleRequest(port, req, res) {
     let oauthReady = false;
     let detail = null;
     try {
-      const saJsonStr = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-      if (!saJsonStr) {
-        detail = 'NO_SA_STRING';
-      } else {
-        const sa = parseServiceAccountJson(saJsonStr);
-        detail = { hasEmail: Boolean(sa?.client_email), hasKey: Boolean(sa?.private_key), hasProject: Boolean(sa?.project_id) };
-        const oauthRes = await getMockServerFcmOAuthToken();
-        oauthReady = Boolean(oauthRes && oauthRes.token);
-        if (oauthRes?.token) detail = 'SUCCESS';
-      }
+      const oauthRes = await getMockServerFcmOAuthToken();
+      oauthReady = Boolean(oauthRes && oauthRes.token);
+      detail = oauthReady ? 'SUCCESS' : (_lastFcmOauthError || 'NO_TOKEN_GENERATED');
     } catch (e) {
       detail = 'ERR: ' + e.message;
     }
