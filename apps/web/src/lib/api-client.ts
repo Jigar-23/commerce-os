@@ -14,7 +14,7 @@ function resolveWebEndpoint(envVal: string | undefined, defaultLocal: string): s
 
 const GATEWAY_ORIGIN = resolveWebEndpoint(
   process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL,
-  'http://localhost:8083'
+  'http://localhost:3000'
 );
 
 export const API_CONFIG = {

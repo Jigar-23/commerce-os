@@ -2763,6 +2763,17 @@ async function handleRequest(port, req, res) {
       environment: process.env.NODE_ENV || 'development'
     });
   }
+  if (path === '/api/v1/system/fcm-status') {
+    let oauthReady = false;
+    try {
+      const oauthRes = await getMockServerFcmOAuthToken();
+      oauthReady = Boolean(oauthRes && oauthRes.token);
+    } catch (_) {}
+    return json(res, 200, {
+      hasEnvVar: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+      oauthReady
+    });
+  }
   const route = GATEWAY_ROUTES.find((r) => path.startsWith(r.prefix));
   if (route && port !== route.port) {
     return handleRequest(route.port, req, res);
