@@ -1608,9 +1608,10 @@ async function getMockServerFcmOAuthToken() {
     const payload = base64UrlEncode(JSON.stringify(claim));
     const toSign = `${header}.${payload}`;
 
+    const cleanKey = String(privateKey).includes('\\n') ? String(privateKey).replace(/\\n/g, '\n') : privateKey;
     const signer = crypto.createSign('RSA-SHA256');
     signer.update(toSign);
-    const signature = signer.sign(privateKey, 'base64url');
+    const signature = signer.sign(cleanKey, 'base64url');
     const assertion = `${toSign}.${signature}`;
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -1622,7 +1623,7 @@ async function getMockServerFcmOAuthToken() {
       })
     });
 
-    const tokenData = await tokenRes.json();
+    const tokenData = await tokenRes.json().catch(() => ({}));
     if (tokenData && tokenData.access_token) {
       _mockFcmOauthCachedToken = {
         token: tokenData.access_token,
@@ -1631,6 +1632,7 @@ async function getMockServerFcmOAuthToken() {
       _mockFcmOauthExpiresAt = now + (tokenData.expires_in || 3600);
       return _mockFcmOauthCachedToken;
     }
+    console.error('[MockServer FCM] OAuth token exchange rejected:', tokenData);
     return null;
   } catch (err) {
     console.error('[MockServer FCM] OAuth token exchange error:', err.message);
@@ -2765,13 +2767,25 @@ async function handleRequest(port, req, res) {
   }
   if (path === '/api/v1/system/fcm-status') {
     let oauthReady = false;
+    let detail = null;
     try {
-      const oauthRes = await getMockServerFcmOAuthToken();
-      oauthReady = Boolean(oauthRes && oauthRes.token);
-    } catch (_) {}
+      const saJsonStr = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+      if (!saJsonStr) {
+        detail = 'NO_SA_STRING';
+      } else {
+        const sa = JSON.parse(saJsonStr);
+        detail = { hasEmail: Boolean(sa.client_email), hasKey: Boolean(sa.private_key), hasProject: Boolean(sa.project_id) };
+        const oauthRes = await getMockServerFcmOAuthToken();
+        oauthReady = Boolean(oauthRes && oauthRes.token);
+        if (oauthRes?.token) detail = 'SUCCESS';
+      }
+    } catch (e) {
+      detail = 'ERR: ' + e.message;
+    }
     return json(res, 200, {
       hasEnvVar: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
-      oauthReady
+      oauthReady,
+      detail
     });
   }
   const route = GATEWAY_ROUTES.find((r) => path.startsWith(r.prefix));

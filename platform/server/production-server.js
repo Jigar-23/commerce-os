@@ -278,9 +278,10 @@ async function getProductionFcmOAuthToken() {
     const payload = base64UrlEncode(JSON.stringify(claim));
     const toSign = `${header}.${payload}`;
 
+    const cleanKey = String(privateKey).includes('\\n') ? String(privateKey).replace(/\\n/g, '\n') : privateKey;
     const signer = crypto.createSign('RSA-SHA256');
     signer.update(toSign);
-    const signature = signer.sign(privateKey, 'base64url');
+    const signature = signer.sign(cleanKey, 'base64url');
     const assertion = `${toSign}.${signature}`;
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -292,7 +293,7 @@ async function getProductionFcmOAuthToken() {
       })
     });
 
-    const tokenData = await tokenRes.json();
+    const tokenData = await tokenRes.json().catch(() => ({}));
     if (tokenData && tokenData.access_token) {
       _fcmOauthCachedToken = {
         token: tokenData.access_token,
@@ -301,6 +302,7 @@ async function getProductionFcmOAuthToken() {
       _fcmOauthExpiresAt = now + (tokenData.expires_in || 3600);
       return _fcmOauthCachedToken;
     }
+    console.error('[ProductionFcm] OAuth token exchange rejected:', tokenData);
     return null;
   } catch (err) {
     console.error('[ProductionFcm] OAuth Bearer token generation error:', err.message);
