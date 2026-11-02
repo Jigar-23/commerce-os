@@ -1558,6 +1558,38 @@ async function dispatchNotificationEvent(riderId, notificationPayload) {
 let _mockFcmOauthCachedToken = null;
 let _mockFcmOauthExpiresAt = 0;
 
+function parseServiceAccountJson(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    let inString = false;
+    let escaped = false;
+    let out = '';
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (c === '"' && !escaped) {
+        inString = !inString;
+        out += c;
+      } else if (inString) {
+        if (c === '\n') {
+          out += '\\n';
+        } else if (c === '\r') {
+          out += '\\r';
+        } else if (c === '\t') {
+          out += '\\t';
+        } else {
+          out += c;
+        }
+      } else {
+        out += c;
+      }
+      escaped = (c === '\\' && !escaped);
+    }
+    return JSON.parse(out);
+  }
+}
+
 async function getMockServerFcmOAuthToken() {
   const now = Math.floor(Date.now() / 1000);
   if (_mockFcmOauthCachedToken && _mockFcmOauthExpiresAt > now + 180) {
@@ -1589,10 +1621,10 @@ async function getMockServerFcmOAuthToken() {
   if (!saJsonStr) return null;
 
   try {
-    const sa = JSON.parse(saJsonStr);
-    const clientEmail = sa.client_email;
-    const privateKey = sa.private_key;
-    const projectId = sa.project_id;
+    const sa = parseServiceAccountJson(saJsonStr);
+    const clientEmail = sa?.client_email;
+    const privateKey = sa?.private_key;
+    const projectId = sa?.project_id;
     if (!clientEmail || !privateKey || !projectId) return null;
 
     const claim = {
@@ -2773,8 +2805,8 @@ async function handleRequest(port, req, res) {
       if (!saJsonStr) {
         detail = 'NO_SA_STRING';
       } else {
-        const sa = JSON.parse(saJsonStr);
-        detail = { hasEmail: Boolean(sa.client_email), hasKey: Boolean(sa.private_key), hasProject: Boolean(sa.project_id) };
+        const sa = parseServiceAccountJson(saJsonStr);
+        detail = { hasEmail: Boolean(sa?.client_email), hasKey: Boolean(sa?.private_key), hasProject: Boolean(sa?.project_id) };
         const oauthRes = await getMockServerFcmOAuthToken();
         oauthReady = Boolean(oauthRes && oauthRes.token);
         if (oauthRes?.token) detail = 'SUCCESS';

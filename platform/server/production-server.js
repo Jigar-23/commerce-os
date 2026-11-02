@@ -222,6 +222,38 @@ async function osrmRouteResolver(lat1, lon1, lat2, lon2, withWaypoints = true) {
   }
 }
 
+function parseServiceAccountJson(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    let inString = false;
+    let escaped = false;
+    let out = '';
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (c === '"' && !escaped) {
+        inString = !inString;
+        out += c;
+      } else if (inString) {
+        if (c === '\n') {
+          out += '\\n';
+        } else if (c === '\r') {
+          out += '\\r';
+        } else if (c === '\t') {
+          out += '\\t';
+        } else {
+          out += c;
+        }
+      } else {
+        out += c;
+      }
+      escaped = (c === '\\' && !escaped);
+    }
+    return JSON.parse(out);
+  }
+}
+
 // 4. Real Production Notification Adapters (Data-Only FCM Payload & Provider Response Verification)
 let _fcmOauthCachedToken = null;
 let _fcmOauthExpiresAt = 0;
@@ -259,10 +291,10 @@ async function getProductionFcmOAuthToken() {
   if (!saJsonStr) return null;
 
   try {
-    const sa = JSON.parse(saJsonStr);
-    const clientEmail = sa.client_email;
-    const privateKey = sa.private_key;
-    const projectId = sa.project_id;
+    const sa = parseServiceAccountJson(saJsonStr);
+    const clientEmail = sa?.client_email;
+    const privateKey = sa?.private_key;
+    const projectId = sa?.project_id;
     if (!clientEmail || !privateKey || !projectId) return null;
 
     const claim = {
