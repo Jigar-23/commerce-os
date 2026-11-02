@@ -42,10 +42,13 @@ export interface MedicineProduct {
   mrp?: number;
   expressDeliverySlaMins?: number;
   coldChainRequired?: boolean;
+  category?: string;
   therapeuticCategory?: string;
   rating?: number;
   reviewCount?: number;
   image?: string;
+  imageUrl?: string;
+  description?: string;
   discountPercentage?: number;
   inStock?: boolean;
   stockCount?: number;
@@ -167,7 +170,20 @@ export async function fetchCatalogMedicines(query: string = '', category?: strin
   let result = data.content || data || [];
   if (Array.isArray(result)) {
     if (category) {
-      result = result.filter((m: MedicineProduct) => m.therapeuticCategory === category);
+      const catLower = category.toLowerCase().trim();
+      result = result.filter((m: MedicineProduct) => {
+        const itemCat = (m.therapeuticCategory || m.category || '').toLowerCase();
+        if (itemCat === catLower || itemCat.includes(catLower) || catLower.includes(itemCat)) return true;
+        if (catLower === 'analgesic' && (itemCat.includes('pain') || itemCat.includes('fever'))) return true;
+        if (catLower === 'antibiotic' && (itemCat.includes('anti') || itemCat.includes('infect'))) return true;
+        if (catLower === 'antacid' && (itemCat.includes('digest') || itemCat.includes('stomach') || itemCat.includes('acid'))) return true;
+        if (catLower === 'diabetic' && itemCat.includes('diabet')) return true;
+        if (catLower === 'wellness' && (itemCat.includes('wellness') || itemCat.includes('vitamin') || itemCat.includes('supplement') || itemCat.includes('mineral'))) return true;
+        if (catLower === 'cardiac' && (itemCat.includes('cardiac') || itemCat.includes('heart') || itemCat.includes('bp'))) return true;
+        if (catLower === 'baby' && (itemCat.includes('baby') || itemCat.includes('infant'))) return true;
+        if (catLower === 'essentials' && (itemCat.includes('sanitizer') || itemCat.includes('aid') || itemCat.includes('personal') || itemCat.includes('oral'))) return true;
+        return false;
+      });
     }
     return result;
   }

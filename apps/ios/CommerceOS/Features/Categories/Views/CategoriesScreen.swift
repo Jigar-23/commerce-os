@@ -89,7 +89,7 @@ public struct CategoriesScreen: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("100% Genuine Medicines")
-                            .font(CommerceOSTheme.Typography.caption().weight(.bold))
+                            .font(CommerceOSTheme.Typography.caption())
                             .foregroundColor(Color(hex: "0F172A"))
                         Text("Sourced directly from licensed pharmacies • Cold chain maintained")
                             .font(.system(size: 10, weight: .medium))
@@ -108,64 +108,9 @@ public struct CategoriesScreen: View {
                 // 2-Column Categories Grid (Modern Pastel Surfaces)
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                     ForEach(defaultCategories) { cat in
-                        Button(action: {
-                            HapticFeedbackEngine.shared.triggerSelection()
+                        CategoryGridCard(cat: cat) {
                             selectedCategory = cat
-                        }) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                // Centered Pastel Visual Tile
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(hex: cat.iconBg))
-                                        .frame(height: 72)
-
-                                    Text(cat.emoji)
-                                        .font(.system(size: 32))
-
-                                    VStack {
-                                        HStack {
-                                            Spacer()
-                                            Text("\(cat.productCount)+ items")
-                                                .font(.system(size: 9, weight: .heavy))
-                                                .foregroundColor(Color(hex: cat.iconTint))
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(Color.white.opacity(0.9))
-                                                .cornerRadius(6)
-                                                .padding(6)
-                                        }
-                                        Spacer()
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(cat.name)
-                                        .font(CommerceOSTheme.Typography.bodyMedium().weight(.bold))
-                                        .foregroundColor(Color(hex: "0F172A"))
-                                        .lineLimit(1)
-
-                                    Text(cat.highlights)
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(Color(hex: "64748B"))
-                                        .lineLimit(1)
-                                }
-
-                                HStack(spacing: 4) {
-                                    Text("Explore")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
-                                }
-                                .padding(.top, 2)
-                            }
-                            .padding(12)
-                            .background(Color.white)
-                            .cornerRadius(16)
-                            .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 1.5)
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
                 }
                 .padding(.horizontal, 14)
@@ -189,5 +134,76 @@ public struct CategoriesScreen: View {
             }
             .navigationViewStyle(.stack)
         }
+    }
+}
+
+public struct CategoryGridCard: View {
+    public let cat: HealthcareCategoryItem
+    public let onSelect: () -> Void
+
+    public init(cat: HealthcareCategoryItem, onSelect: @escaping () -> Void) {
+        self.cat = cat
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
+        Button(action: {
+            HapticFeedbackEngine.shared.triggerSelection()
+            onSelect()
+        }) {
+            VStack(alignment: .leading, spacing: 10) {
+                // Centered Pastel Visual Tile
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(hex: cat.iconBg))
+                        .frame(height: 72)
+
+                    Text(cat.emoji)
+                        .font(.system(size: 32))
+
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Text("\(cat.productCount)+ items")
+                                .font(.system(size: 9, weight: .heavy))
+                                .foregroundColor(Color(hex: cat.iconTint))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.9))
+                                .cornerRadius(6)
+                                .padding(6)
+                        }
+                        Spacer()
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(cat.name)
+                        .font(CommerceOSTheme.Typography.bodyBold())
+                        .foregroundColor(Color(hex: "0F172A"))
+                        .lineLimit(1)
+
+                    Text(cat.highlights)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Color(hex: "64748B"))
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 4) {
+                    Text("Explore")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
+                }
+                .padding(.top, 2)
+            }
+            .padding(12)
+            .background(Color.white)
+            .cornerRadius(16)
+            .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 1.5)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }

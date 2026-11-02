@@ -59,22 +59,22 @@ public struct AccountScreen: View {
                 // Top Header matching Android
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("My Account")
-                            .font(.system(size: 20, weight: .bold))
+                        Text("Profile & Account")
+                            .font(CommerceOSTheme.Typography.heading())
                             .foregroundColor(Color(hex: "0F172A"))
-                        Text("Manage your pharmacy profile, orders & addresses")
-                            .font(.system(size: 12))
+                        Text("Manage your healthcare orders, addresses & prescriptions")
+                            .font(CommerceOSTheme.Typography.caption())
                             .foregroundColor(Color(hex: "64748B"))
                     }
                     
                     Spacer()
                     
-                    // Notification Bell Button
+                    // Notification Bell Button (Comfortable 42pt touch target)
                     Button(action: { showNotificationAlert = true }) {
                         ZStack {
                             Circle()
                                 .fill(Color.white)
-                                .frame(width: 38, height: 38)
+                                .frame(width: 42, height: 42)
                                 .overlay(
                                     Circle()
                                         .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
@@ -82,8 +82,8 @@ public struct AccountScreen: View {
                                 .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
                             
                             Image(systemName: "bell.fill")
-                                .font(.system(size: 16))
-                                .foregroundColor(Color(hex: "059669"))
+                                .font(.system(size: 18))
+                                .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                         }
                     }
                 }
@@ -179,40 +179,40 @@ public struct AccountScreen: View {
             // Circular Initial Avatar
             ZStack {
                 Circle()
-                    .fill(Color(hex: "ECFDF5"))
+                    .fill(CommerceOSTheme.Colors.brandPrimarySoft)
                     .frame(width: 54, height: 54)
                     .overlay(
                         Circle()
-                            .stroke(Color(hex: "10B981"), lineWidth: 1.5)
+                            .stroke(CommerceOSTheme.Colors.brandPrimary.opacity(0.3), lineWidth: 1.5)
                     )
                 
                 Text(initialLetter)
-                    .font(.system(size: 22, weight: .black))
-                    .foregroundColor(Color(hex: "065F46"))
+                    .font(CommerceOSTheme.Typography.titleMedium())
+                    .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
             }
             
             VStack(alignment: .leading, spacing: 3) {
                 Text(displayName)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(CommerceOSTheme.Typography.titleMedium())
                     .foregroundColor(Color(hex: "0F172A"))
                 
                 HStack(spacing: 8) {
                     Text(maskedPhone)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(CommerceOSTheme.Typography.body())
                         .foregroundColor(Color(hex: "475569"))
                     
                     // Verified Badge
                     HStack(spacing: 3) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "166534"))
+                            .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                         Text("Verified")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: "166534"))
+                            .font(CommerceOSTheme.Typography.caption())
+                            .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color(hex: "DCFCE7"))
+                    .background(CommerceOSTheme.Colors.brandPrimarySoft)
                     .cornerRadius(6)
                 }
             }
@@ -285,12 +285,12 @@ public struct AccountScreen: View {
                 Spacer(minLength: 4)
                 
                 Text(title)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(CommerceOSTheme.Typography.caption())
                     .foregroundColor(Color(hex: "0F172A"))
                     .lineLimit(1)
                 
                 Text(subtitle)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(Color(hex: "64748B"))
                     .lineLimit(1)
             }
@@ -299,10 +299,6 @@ public struct AccountScreen: View {
             .padding(.vertical, 12)
             .background(Color.white)
             .cornerRadius(14)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
-            )
             .shadow(color: Color.black.opacity(0.02), radius: 4, x: 0, y: 1)
         }
         .buttonStyle(PlainButtonStyle())

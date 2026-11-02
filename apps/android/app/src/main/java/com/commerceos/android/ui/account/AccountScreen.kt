@@ -119,14 +119,19 @@ fun AccountScreen(
                 shape = CircleShape,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 shadowElevation = 0.5.dp,
-                modifier = Modifier.size(42.dp)
+                modifier = Modifier
+                    .size(42.dp)
+                    .clickable(onClick = onNotifications)
             ) {
-                IconButton(onClick = onNotifications) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         Icons.Default.Notifications,
                         contentDescription = "Alerts",
                         tint = Color(0xFF0E675E),
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

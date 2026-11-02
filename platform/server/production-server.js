@@ -2664,30 +2664,49 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     if ((pathname === '/api/v1/catalog/home-feed' || pathname === '/api/v1/catalog/home') && method === 'GET') {
       const productsRes = await pool.query(
-        `SELECT p.id, p.sku, p.name, p.category, p.mrp, p.price, p.discounted_price, p.image_url, p.rx_requirement, p.cold_chain_required
+        `SELECT p.id, p.sku, p.name, p.brand_name, p.pack_size, p.category, p.mrp, p.price, p.discounted_price, p.image_url, p.rx_requirement, p.cold_chain_required, p.description
          FROM products p
          WHERE p.is_active = TRUE
          ORDER BY p.created_at DESC
-         LIMIT 40`
+         LIMIT 60`
       );
 
-      const products = productsRes.rows.map(r => ({
-        id: r.id,
-        sku: r.sku,
-        name: r.name,
-        category: r.category || 'General',
-        verticalId: r.category === 'medicines' || r.category === 'Medicines' ? 'pharma' : 'grocery',
-        price: Number(r.mrp),
-        sellingPrice: Number(r.price || r.discounted_price || r.mrp),
-        discountedPrice: Number(r.discounted_price || r.price || r.mrp),
-        mrp: Number(r.mrp),
-        imageUrl: r.image_url || '',
-        inStock: true,
-        medicineDetails: {
-          prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-          coldChain: Boolean(r.cold_chain_required)
-        }
-      }));
+      const products = productsRes.rows.map(r => {
+        const mrpVal = Number(r.mrp || r.price || 0);
+        const sellPrice = Number(r.discounted_price || r.price || mrpVal);
+        const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
+        const img = r.image_url || '';
+        return {
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          brandName: r.brand_name || r.name,
+          manufacturer: r.brand_name || 'CommerceOS Health',
+          packSize: r.pack_size || '1 Unit',
+          category: r.category || 'General',
+          therapeuticCategory: r.category || 'General',
+          verticalId: 'pharma',
+          price: mrpVal,
+          sellingPrice: sellPrice,
+          discountedPrice: sellPrice,
+          mrp: mrpVal,
+          discountPercentage: discPct,
+          imageUrl: img,
+          image: img,
+          description: r.description || '',
+          rxRequirement: r.rx_requirement || 'OTC',
+          coldChainRequired: Boolean(r.cold_chain_required),
+          expressDeliverySlaMins: 10,
+          inStock: true,
+          stockCount: 50,
+          rating: 4.8,
+          reviewCount: 124,
+          medicineDetails: {
+            prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
+            coldChain: Boolean(r.cold_chain_required)
+          }
+        };
+      });
 
       const categories = [...new Set(products.map(p => p.category).filter(Boolean))].map(cat => ({
         id: cat.toLowerCase().replace(/\s+/g, '-'),
@@ -2765,37 +2784,67 @@ const server = http.createServer(async (req, res) => {
       const q = (parsedUrl.searchParams.get('q') || parsedUrl.searchParams.get('query') || '').trim();
       const cat = (parsedUrl.searchParams.get('category') || '').trim();
 
-      let queryText = `SELECT id, sku, name, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required FROM products WHERE is_active = TRUE`;
+      let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description FROM products WHERE is_active = TRUE`;
       const queryParams = [];
 
       if (q) {
         queryParams.push(`%${q}%`);
-        queryText += ` AND (name ILIKE $${queryParams.length} OR category ILIKE $${queryParams.length})`;
+        queryText += ` AND (name ILIKE $${queryParams.length} OR brand_name ILIKE $${queryParams.length} OR category ILIKE $${queryParams.length} OR sku ILIKE $${queryParams.length})`;
       }
       if (cat) {
-        queryParams.push(cat);
-        queryText += ` AND category = $${queryParams.length}`;
+        queryParams.push(`%${cat}%`);
+        queryText += ` AND category ILIKE $${queryParams.length}`;
       }
-      queryText += ` ORDER BY created_at DESC LIMIT 50`;
+      queryText += ` ORDER BY created_at DESC LIMIT 100`;
 
       const searchRes = await pool.query(queryText, queryParams);
-      const results = searchRes.rows.map(r => ({
-        id: r.id,
-        sku: r.sku,
-        name: r.name,
-        category: r.category || 'General',
-        verticalId: r.category === 'medicines' || r.category === 'Medicines' ? 'pharma' : 'grocery',
-        price: Number(r.mrp),
-        sellingPrice: Number(r.price || r.discounted_price || r.mrp),
-        discountedPrice: Number(r.discounted_price || r.price || r.mrp),
-        mrp: Number(r.mrp),
-        imageUrl: r.image_url || '',
-        inStock: true,
-        medicineDetails: {
-          prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-          coldChain: Boolean(r.cold_chain_required)
-        }
-      }));
+      const results = searchRes.rows.map(r => {
+        const mrpVal = Number(r.mrp || r.price || 0);
+        const sellPrice = Number(r.discounted_price || r.price || mrpVal);
+        const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
+        const img = r.image_url || '';
+        return {
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          brandName: r.brand_name || r.name,
+          manufacturer: r.brand_name || 'CommerceOS Health',
+          packSize: r.pack_size || '1 Unit',
+          category: r.category || 'General',
+          therapeuticCategory: r.category || 'General',
+          verticalId: 'pharma',
+          price: mrpVal,
+          sellingPrice: sellPrice,
+          discountedPrice: sellPrice,
+          mrp: mrpVal,
+          discountPercentage: discPct,
+          imageUrl: img,
+          image: img,
+          description: r.description || '',
+          rxRequirement: r.rx_requirement || 'OTC',
+          coldChainRequired: Boolean(r.cold_chain_required),
+          expressDeliverySlaMins: 10,
+          inStock: true,
+          stockCount: 50,
+          rating: 4.8,
+          reviewCount: 124,
+          medicineDetails: {
+            prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
+            coldChain: Boolean(r.cold_chain_required)
+          }
+        };
+      });
+
+      if (parsedUrl.searchParams.has('limit') || parsedUrl.searchParams.has('offset')) {
+        const lim = parseInt(parsedUrl.searchParams.get('limit') || '20', 10);
+        return sendJson(res, 200, {
+          content: results,
+          totalElements: results.length,
+          totalPages: Math.ceil(results.length / lim) || 1,
+          hasMore: false,
+          nextOffset: null
+        });
+      }
       return sendJson(res, 200, results);
     }
 
@@ -2813,25 +2862,42 @@ const server = http.createServer(async (req, res) => {
     if (medDetailMatch && method === 'GET') {
       const prodId = medDetailMatch[1];
       const prodRes = await pool.query(
-        `SELECT id, sku, name, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required FROM products WHERE (id = $1 OR sku = $1) AND is_active = TRUE`,
+        `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description FROM products WHERE (id = $1 OR sku = $1) AND is_active = TRUE`,
         [prodId]
       );
       if (prodRes.rows.length === 0) {
         return sendJson(res, 404, { error: 'PRODUCT_NOT_FOUND', message: 'Product not found.' });
       }
       const r = prodRes.rows[0];
+      const mrpVal = Number(r.mrp || r.price || 0);
+      const sellPrice = Number(r.discounted_price || r.price || mrpVal);
+      const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
+      const img = r.image_url || '';
       return sendJson(res, 200, {
         id: r.id,
         sku: r.sku,
         name: r.name,
+        brandName: r.brand_name || r.name,
+        manufacturer: r.brand_name || 'CommerceOS Health',
+        packSize: r.pack_size || '1 Unit',
         category: r.category || 'General',
-        verticalId: r.category === 'medicines' || r.category === 'Medicines' ? 'pharma' : 'grocery',
-        price: Number(r.mrp),
-        sellingPrice: Number(r.price || r.discounted_price || r.mrp),
-        discountedPrice: Number(r.discounted_price || r.price || r.mrp),
-        mrp: Number(r.mrp),
-        imageUrl: r.image_url || '',
+        therapeuticCategory: r.category || 'General',
+        verticalId: 'pharma',
+        price: mrpVal,
+        sellingPrice: sellPrice,
+        discountedPrice: sellPrice,
+        mrp: mrpVal,
+        discountPercentage: discPct,
+        imageUrl: img,
+        image: img,
+        description: r.description || '',
+        rxRequirement: r.rx_requirement || 'OTC',
+        coldChainRequired: Boolean(r.cold_chain_required),
+        expressDeliverySlaMins: 10,
         inStock: true,
+        stockCount: 50,
+        rating: 4.8,
+        reviewCount: 124,
         medicineDetails: {
           prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
           coldChain: Boolean(r.cold_chain_required)
@@ -2841,31 +2907,61 @@ const server = http.createServer(async (req, res) => {
 
     if ((pathname === '/api/v1/catalog/medicines/category' || pathname === '/api/v1/catalog/products/category') && method === 'GET') {
       const category = (parsedUrl.searchParams.get('category') || parsedUrl.searchParams.get('categoryId') || '').trim();
-      let queryText = `SELECT id, sku, name, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required FROM products WHERE is_active = TRUE`;
+      let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description FROM products WHERE is_active = TRUE`;
       const queryParams = [];
       if (category) {
-        queryParams.push(category);
-        queryText += ` AND (category ILIKE $1 OR id ILIKE $1)`;
+        queryParams.push(`%${category}%`);
+        queryText += ` AND (category ILIKE $1 OR id ILIKE $1 OR sku ILIKE $1)`;
       }
-      queryText += ` ORDER BY created_at DESC LIMIT 50`;
+      queryText += ` ORDER BY created_at DESC LIMIT 100`;
       const resQuery = await pool.query(queryText, queryParams);
-      const items = resQuery.rows.map(r => ({
-        id: r.id,
-        sku: r.sku,
-        name: r.name,
-        category: r.category || 'General',
-        verticalId: r.category === 'medicines' || r.category === 'Medicines' ? 'pharma' : 'grocery',
-        price: Number(r.mrp),
-        sellingPrice: Number(r.price || r.discounted_price || r.mrp),
-        discountedPrice: Number(r.discounted_price || r.price || r.mrp),
-        mrp: Number(r.mrp),
-        imageUrl: r.image_url || '',
-        inStock: true,
-        medicineDetails: {
-          prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-          coldChain: Boolean(r.cold_chain_required)
-        }
-      }));
+      const items = resQuery.rows.map(r => {
+        const mrpVal = Number(r.mrp || r.price || 0);
+        const sellPrice = Number(r.discounted_price || r.price || mrpVal);
+        const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
+        const img = r.image_url || '';
+        return {
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          brandName: r.brand_name || r.name,
+          manufacturer: r.brand_name || 'CommerceOS Health',
+          packSize: r.pack_size || '1 Unit',
+          category: r.category || 'General',
+          therapeuticCategory: r.category || 'General',
+          verticalId: 'pharma',
+          price: mrpVal,
+          sellingPrice: sellPrice,
+          discountedPrice: sellPrice,
+          mrp: mrpVal,
+          discountPercentage: discPct,
+          imageUrl: img,
+          image: img,
+          description: r.description || '',
+          rxRequirement: r.rx_requirement || 'OTC',
+          coldChainRequired: Boolean(r.cold_chain_required),
+          expressDeliverySlaMins: 10,
+          inStock: true,
+          stockCount: 50,
+          rating: 4.8,
+          reviewCount: 124,
+          medicineDetails: {
+            prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
+            coldChain: Boolean(r.cold_chain_required)
+          }
+        };
+      });
+
+      if (parsedUrl.searchParams.has('limit') || parsedUrl.searchParams.has('offset')) {
+        const lim = parseInt(parsedUrl.searchParams.get('limit') || '20', 10);
+        return sendJson(res, 200, {
+          content: items,
+          totalElements: items.length,
+          totalPages: Math.ceil(items.length / lim) || 1,
+          hasMore: false,
+          nextOffset: null
+        });
+      }
       return sendJson(res, 200, items);
     }
 
@@ -2873,27 +2969,46 @@ const server = http.createServer(async (req, res) => {
     if (verticalFeedMatch && method === 'GET') {
       const verticalId = verticalFeedMatch[1];
       const feedRes = await pool.query(
-        `SELECT id, sku, name, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required
+        `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description
          FROM products WHERE is_active = TRUE
-         ORDER BY created_at DESC LIMIT 40`
+         ORDER BY created_at DESC LIMIT 50`
       );
-      const products = feedRes.rows.map(r => ({
-        id: r.id,
-        sku: r.sku,
-        name: r.name,
-        category: r.category || 'General',
-        verticalId: r.category === 'medicines' || r.category === 'Medicines' ? 'pharma' : 'grocery',
-        price: Number(r.mrp),
-        sellingPrice: Number(r.price || r.discounted_price || r.mrp),
-        discountedPrice: Number(r.discounted_price || r.price || r.mrp),
-        mrp: Number(r.mrp),
-        imageUrl: r.image_url || '',
-        inStock: true,
-        medicineDetails: {
-          prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-          coldChain: Boolean(r.cold_chain_required)
-        }
-      }));
+      const products = feedRes.rows.map(r => {
+        const mrpVal = Number(r.mrp || r.price || 0);
+        const sellPrice = Number(r.discounted_price || r.price || mrpVal);
+        const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
+        const img = r.image_url || '';
+        return {
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          brandName: r.brand_name || r.name,
+          manufacturer: r.brand_name || 'CommerceOS Health',
+          packSize: r.pack_size || '1 Unit',
+          category: r.category || 'General',
+          therapeuticCategory: r.category || 'General',
+          verticalId: 'pharma',
+          price: mrpVal,
+          sellingPrice: sellPrice,
+          discountedPrice: sellPrice,
+          mrp: mrpVal,
+          discountPercentage: discPct,
+          imageUrl: img,
+          image: img,
+          description: r.description || '',
+          rxRequirement: r.rx_requirement || 'OTC',
+          coldChainRequired: Boolean(r.cold_chain_required),
+          expressDeliverySlaMins: 10,
+          inStock: true,
+          stockCount: 50,
+          rating: 4.8,
+          reviewCount: 124,
+          medicineDetails: {
+            prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
+            coldChain: Boolean(r.cold_chain_required)
+          }
+        };
+      });
       return sendJson(res, 200, {
         verticalId,
         featuredProducts: products,

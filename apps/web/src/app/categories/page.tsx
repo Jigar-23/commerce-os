@@ -147,6 +147,49 @@ export default function CategoriesHubPage() {
   const activeAddress = addresses.find((a) => a.isDefault) || addresses[0];
   const localityName = activeAddress?.city || activeAddress?.tag || 'Rewari';
 
+  const activeSubcategoryObj = activeDepartment.categories.find((c) => c.id === activeSubcategory) || activeDepartment.categories[0];
+  const activeSubcategoryName = activeSubcategoryObj?.name || '';
+
+  const displayedMedicines = medicines.filter((med) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchName = med.name?.toLowerCase().includes(q);
+      const matchBrand = med.brandName?.toLowerCase().includes(q);
+      const matchCat = (med.therapeuticCategory || med.category)?.toLowerCase().includes(q);
+      const matchSku = med.sku?.toLowerCase().includes(q);
+      return matchName || matchBrand || matchCat || matchSku;
+    }
+
+    const cat = (med.therapeuticCategory || med.category || '').toLowerCase();
+    const subName = activeSubcategoryName.toLowerCase();
+
+    if (cat.includes(subName) || subName.includes(cat)) return true;
+
+    if (activeSubcategory === 'pain-fever' && (cat.includes('pain') || cat.includes('fever'))) return true;
+    if (activeSubcategory === 'cough-cold' && (cat.includes('cold') || cat.includes('cough'))) return true;
+    if (activeSubcategory === 'antibiotics' && (cat.includes('anti') || cat.includes('infect'))) return true;
+    if (activeSubcategory === 'stomach-care' && (cat.includes('stomach') || cat.includes('digest') || cat.includes('acidity') || cat.includes('gas'))) return true;
+    if (activeSubcategory === 'first-aid' && (cat.includes('first aid') || cat.includes('wound') || cat.includes('bandage') || cat.includes('antiseptic') || cat.includes('ors'))) return true;
+    if (activeSubcategory === 'diabetes' && cat.includes('diabet')) return true;
+    if (activeSubcategory === 'cardiac' && (cat.includes('cardiac') || cat.includes('heart') || cat.includes('blood pressure') || cat.includes('bp'))) return true;
+    if (activeSubcategory === 'respiratory' && (cat.includes('asthma') || cat.includes('inhaler') || cat.includes('respiratory'))) return true;
+    if (activeSubcategory === 'thyroid' && cat.includes('thyroid')) return true;
+    if (activeSubcategory === 'vitamins' && (cat.includes('vitamin') || cat.includes('supplement'))) return true;
+    if (activeSubcategory === 'calcium' && (cat.includes('calcium') || cat.includes('mineral'))) return true;
+    if (activeSubcategory === 'immunity' && (cat.includes('immunity') || cat.includes('boost'))) return true;
+    if (activeSubcategory === 'protein' && (cat.includes('protein') || cat.includes('drink'))) return true;
+    if (activeSubcategory === 'chyawanprash' && cat.includes('chyawanprash')) return true;
+    if (activeSubcategory === 'ashwagandha' && (cat.includes('ashwagandha') || cat.includes('pure herbs') || cat.includes('herb'))) return true;
+    if (activeSubcategory === 'herbal-juices' && (cat.includes('herbal') || cat.includes('juice') || cat.includes('amla'))) return true;
+    if (activeSubcategory === 'digestive-churn' && (cat.includes('churn') || cat.includes('triphala'))) return true;
+    if (activeSubcategory === 'skin-care' && (cat.includes('skin') || cat.includes('derma'))) return true;
+    if (activeSubcategory === 'oral-care' && (cat.includes('oral') || cat.includes('toothpaste') || cat.includes('dental'))) return true;
+    if (activeSubcategory === 'baby-care' && (cat.includes('baby') || cat.includes('infant'))) return true;
+    if (activeSubcategory === 'sanitizers' && (cat.includes('sanitizer') || cat.includes('hand') || cat.includes('antiseptic'))) return true;
+
+    return false;
+  });
+
   const getItemQuantity = (id: string, sku?: string) => {
     return cartLines.find((l) => l.productId === id || (sku && l.sku === sku))?.quantity || 0;
   };
@@ -285,12 +328,20 @@ export default function CategoriesHubPage() {
                   <div key={n} className="bg-white rounded-2xl p-3 h-24 animate-pulse border border-slate-200/60" />
                 ))}
               </div>
-            ) : medicines.length === 0 ? (
+            ) : displayedMedicines.length === 0 ? (
               <div className="bg-white rounded-2xl p-8 text-center border border-slate-200">
-                <p className="text-xs font-bold text-slate-500">No products found in this category.</p>
+                <p className="text-xs font-bold text-slate-500">
+                  {searchQuery ? `No products match "${searchQuery}"` : `No products found in ${activeSubcategoryName}.`}
+                </p>
+                <button
+                  onClick={() => { setSearchQuery(''); setActiveSubcategory(activeDepartment.categories[0].id); }}
+                  className="mt-2 text-2xs font-extrabold text-emerald-700 hover:underline cursor-pointer"
+                >
+                  View All in {activeDepartment.name}
+                </button>
               </div>
             ) : (
-              medicines.map((med) => {
+              displayedMedicines.map((med) => {
                 const qty = getItemQuantity(med.id, med.sku);
                 const discount = med.discountPercentage || 20;
 
