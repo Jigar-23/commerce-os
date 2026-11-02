@@ -353,9 +353,10 @@ private fun FreeDeliveryBanner(
         } else 0f
 
         Surface(
-            color = if (unlocked) Color(0xFFECFDF5) else Color.White,
+            color = Color.White,
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, if (unlocked) Color(0xFF86EFAC) else Color(0xFFE2E8F0)),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            shadowElevation = 0.5.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(

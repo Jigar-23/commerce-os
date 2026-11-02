@@ -547,8 +547,9 @@ private fun AssistedCommerceRibbon(
             .fillMaxWidth()
             .padding(horizontal = 14.dp),
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFFF0FDF4),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0))
+        color = Color.White,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 0.5.dp
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -733,7 +734,7 @@ private fun HeaderCanopy(
             val prevStatusBarColor = window.statusBarColor
 
             insetsController.isAppearanceLightStatusBars = false
-            window.statusBarColor = android.graphics.Color.parseColor("#0E675E")
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
 
             onDispose {
                 insetsController.isAppearanceLightStatusBars = prevLightStatusBars
@@ -748,13 +749,7 @@ private fun HeaderCanopy(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0E675E),
-                        Color(0xFF0C5B53),
-                        Color(0xFF0A4F48)
-                    )
-                ),
+                color = Color(0xFF0E675E),
                 shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
             )
             .statusBarsPadding()

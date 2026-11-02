@@ -2,13 +2,16 @@ package com.commerceos.android
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -420,35 +423,46 @@ fun CommerceOSApp(
                 }
                 if (isPrimary) {
                     HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
-                    NavigationBar(containerColor = CommerceColors.Surface, tonalElevation = 0.dp) {
-                        NavigationBarItem(
-                            selected = currentScreen is Screen.Home,
-                            onClick = { navigateRoot(Screen.Home) },
-                            icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                            label = { Text("Home", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                            colors = bottomNavColors
-                        )
-                        NavigationBarItem(
-                            selected = currentScreen is Screen.Categories,
-                            onClick = { navigateRoot(Screen.Categories) },
-                            icon = { Icon(Icons.Default.GridView, contentDescription = "Categories") },
-                            label = { Text("Categories", fontSize = 11.sp, fontWeight = if (currentScreen is Screen.Categories) FontWeight.Bold else FontWeight.Normal) },
-                            colors = bottomNavColors
-                        )
-                        NavigationBarItem(
-                            selected = currentScreen is Screen.OrderHistory,
-                            onClick = { navigateRoot(Screen.OrderHistory); orderViewModel.loadHistory(authenticatedCustomerId) },
-                            icon = { Icon(Icons.Default.ShoppingBag, contentDescription = terminology.orderLabel) },
-                            label = { Text(terminology.orderLabel, fontSize = 11.sp) },
-                            colors = bottomNavColors
-                        )
-                        NavigationBarItem(
-                            selected = currentScreen is Screen.Account,
-                            onClick = { navigateRoot(Screen.Account) },
-                            icon = { Icon(Icons.Default.Person, contentDescription = "Account") },
-                            label = { Text("Account", fontSize = 11.sp, fontWeight = if (currentScreen is Screen.Account) FontWeight.Bold else FontWeight.Normal) },
-                            colors = bottomNavColors
-                        )
+                    Surface(
+                        color = Color.White,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .height(56.dp),
+                            horizontalArrangement = Arrangement.SpaceAround,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CommerceBottomNavItem(
+                                selected = currentScreen is Screen.Home,
+                                icon = Icons.Default.Home,
+                                label = "Home",
+                                onClick = { navigateRoot(Screen.Home) }
+                            )
+                            CommerceBottomNavItem(
+                                selected = currentScreen is Screen.Categories,
+                                icon = Icons.Default.GridView,
+                                label = "Categories",
+                                onClick = { navigateRoot(Screen.Categories) }
+                            )
+                            CommerceBottomNavItem(
+                                selected = currentScreen is Screen.OrderHistory,
+                                icon = Icons.Default.ShoppingBag,
+                                label = terminology.orderLabel,
+                                onClick = {
+                                    navigateRoot(Screen.OrderHistory)
+                                    orderViewModel.loadHistory(authenticatedCustomerId)
+                                }
+                            )
+                            CommerceBottomNavItem(
+                                selected = currentScreen is Screen.Account,
+                                icon = Icons.Default.Person,
+                                label = "Account",
+                                onClick = { navigateRoot(Screen.Account) }
+                            )
+                        }
                     }
                 }
             }
@@ -1051,4 +1065,42 @@ fun CommerceOSApp(
         }
     }
 }
+}
+
+@Composable
+private fun CommerceBottomNavItem(
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val activeColor = Color(0xFF0E675E)
+    val inactiveColor = Color(0xFF64748B)
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = if (selected) activeColor else inactiveColor,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) activeColor else inactiveColor
+        )
+    }
 }
