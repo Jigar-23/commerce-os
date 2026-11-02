@@ -443,28 +443,10 @@ fun CommerceOSApp(
                             colors = bottomNavColors
                         )
                         NavigationBarItem(
-                            selected = currentScreen is Screen.Cart,
-                            onClick = {
-                                navigate(Screen.Cart)
-                                cartViewModel.loadCart()
-                                prescriptionViewModel.load(authenticatedCustomerId)
-                            },
-                            icon = {
-                                BadgedBox(badge = {
-                                    val count = cartViewModel.itemCount
-                                    if (count > 0) {
-                                        Badge(
-                                            containerColor = CommerceColors.PrimaryDark,
-                                            contentColor = CommerceColors.OnPrimary
-                                        ) {
-                                            Text(if (count > 99) "99+" else "$count")
-                                        }
-                                    }
-                                }) {
-                                    Icon(Icons.Default.ShoppingCart, contentDescription = terminology.cartLabel)
-                                }
-                            },
-                            label = { Text(terminology.cartLabel, fontSize = 11.sp) },
+                            selected = currentScreen is Screen.Account,
+                            onClick = { navigateRoot(Screen.Account) },
+                            icon = { Icon(Icons.Default.Person, contentDescription = "Account") },
+                            label = { Text("Account", fontSize = 11.sp, fontWeight = if (currentScreen is Screen.Account) FontWeight.Bold else FontWeight.Normal) },
                             colors = bottomNavColors
                         )
                     }

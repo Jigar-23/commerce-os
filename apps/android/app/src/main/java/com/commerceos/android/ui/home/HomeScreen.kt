@@ -239,7 +239,9 @@ fun HomeScreen(
 private data class MedicalCategory(
     val name: String,
     val query: String,
-    val imageUrl: String
+    val imageUrl: String,
+    val badgeText: String? = null,
+    val backgroundColor: Color = Color(0xFFFFF7ED)
 )
 
 @Composable
@@ -252,32 +254,44 @@ private fun MedicineCategoryRail(
             MedicalCategory(
                 name = "Pain & Fever",
                 query = "Pain & Fever",
-                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
+                badgeText = "Best Seller",
+                backgroundColor = Color(0xFFFFF5ED)
             ),
             MedicalCategory(
                 name = "Cold & Cough",
                 query = "Cold & Cough",
-                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg"
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022615/benadryl-cough-formula-bottle-of-150ml-syrup-side-6.1-1785588733-non-watermark.jpg",
+                badgeText = "Trending",
+                backgroundColor = Color(0xFFEFF6FF)
             ),
             MedicalCategory(
                 name = "Diabetes Care",
                 query = "Diabetes",
-                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg"
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/085775/glycomet-500mg-strip-of-10-tablets-box-front-1-1756904771-non-watermarked.jpg",
+                badgeText = null,
+                backgroundColor = Color(0xFFF0FDF4)
             ),
             MedicalCategory(
                 name = "Antibiotics",
                 query = "Antibiotics",
-                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg"
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg",
+                badgeText = "Rx Verified",
+                backgroundColor = Color(0xFFFEF3C7)
             ),
             MedicalCategory(
                 name = "Vitamins",
                 query = "Vitamins",
-                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg"
+                imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg",
+                badgeText = "Trending",
+                backgroundColor = Color(0xFFFFF1F2)
             ),
             MedicalCategory(
                 name = "Acidity & Gas",
                 query = "Acidity & Gas",
-                imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
+                imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg",
+                badgeText = "Fast Relief",
+                backgroundColor = Color(0xFFFAF5FF)
             )
         )
     }
@@ -330,47 +344,60 @@ private fun MedicineCategoryRail(
             contentPadding = PaddingValues(horizontal = 2.dp)
         ) {
             items(categories) { cat ->
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    shadowElevation = 0.5.dp,
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .width(96.dp)
+                        .width(86.dp)
                         .clickable { onSelectCategory(cat.query) }
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)
+                    // Soft Pastel Rounded Container (Tata 1mg signature benchmark)
+                    Surface(
+                        color = cat.backgroundColor,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(86.dp)
                     ) {
-                        Surface(
-                            color = Color(0xFFF8FAFC),
-                            shape = CircleShape,
-                            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.size(64.dp)
-                        ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             ProductImage(
                                 imageUrl = cat.imageUrl,
                                 contentDescription = cat.name,
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(8.dp)
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
                             )
+                            if (cat.badgeText != null) {
+                                Surface(
+                                    color = Color(0xFFEA580C),
+                                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(17.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = cat.badgeText,
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = cat.name,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF1E293B),
-                            minLines = 2,
-                            maxLines = 2,
-                            lineHeight = 14.sp,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = cat.name,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF1E293B),
+                        minLines = 2,
+                        maxLines = 2,
+                        lineHeight = 14.sp,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
             }
         }
@@ -959,29 +986,34 @@ private fun CanopySearchBar(
         }
     }
 
-    Surface(
-        color = Color.White,
-        shape = RoundedCornerShape(26.dp),
-        shadowElevation = 3.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(50.dp)
-            .clickable(onClick = onClick)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        // Left Floating Stadium Search Pill (Fine-stroke vector icon + ample breathing room)
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(24.dp),
+            shadowElevation = 2.dp,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .weight(1f)
+                .height(48.dp)
+                .clickable(onClick = onClick)
         ) {
-            Icon(
-                Icons.Default.Search,
-                contentDescription = "Search",
-                tint = Color(0xFF0E675E),
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Box(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_thin_search),
+                    contentDescription = "Search",
+                    tint = Color(0xFFE84335),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 AnimatedContent(
                     targetState = hintIndex,
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -989,46 +1021,59 @@ private fun CanopySearchBar(
                 ) { targetIndex ->
                     Text(
                         text = searchHints[targetIndex],
-                        fontSize = 13.5.sp,
+                        fontSize = 13.sp,
                         color = Color(0xFF64748B),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Hairline vertical divider
-            Box(
-                modifier = Modifier
-                    .width(1.dp)
-                    .height(24.dp)
-                    .background(Color(0xFFE2E8F0))
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Upload Prescription Quick Button (PharmEasy pattern)
+        // Right Floating Stadium Upload Prescription Pill (Tata 1mg signature benchmark)
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(24.dp),
+            shadowElevation = 2.dp,
+            modifier = Modifier
+                .height(48.dp)
+                .clickable(onClick = onUploadPrescription)
+        ) {
             Row(
-                modifier = Modifier
-                    .clickable(onClick = onUploadPrescription)
-                    .padding(vertical = 4.dp, horizontal = 4.dp),
+                modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_camera),
-                    contentDescription = "Upload Rx",
-                    tint = Color(0xFF0E675E),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Upload Rx",
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0E675E)
-                )
+                Surface(
+                    color = Color(0xFFEF4444),
+                    shape = CircleShape,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_camera),
+                            contentDescription = "Upload Rx",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(7.dp))
+                Column(verticalArrangement = Arrangement.Center) {
+                    Text(
+                        text = "Upload",
+                        fontSize = 10.sp,
+                        color = Color(0xFF64748B),
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 12.sp
+                    )
+                    Text(
+                        text = "Prescription",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        lineHeight = 13.sp
+                    )
+                }
             }
         }
     }

@@ -229,7 +229,7 @@ fun SearchScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.Search,
+                                painter = painterResource(id = R.drawable.ic_thin_search),
                                 contentDescription = "Search",
                                 tint = Color(0xFF0C831F),
                                 modifier = Modifier.size(20.dp)
@@ -576,7 +576,7 @@ private fun SearchTypeaheadView(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF0C831F), modifier = Modifier.size(13.dp))
+                            Icon(painterResource(id = R.drawable.ic_thin_search), contentDescription = null, tint = Color(0xFF0C831F), modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = pill,
@@ -655,7 +655,7 @@ private fun SearchTypeaheadView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        Icons.Default.Search,
+                        painter = painterResource(id = R.drawable.ic_thin_search),
                         contentDescription = null,
                         tint = Color(0xFF0C831F),
                         modifier = Modifier.size(16.dp)
@@ -1959,7 +1959,7 @@ private fun SearchEmptyWidget(
             modifier = Modifier.size(68.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(32.dp))
+                Icon(painterResource(id = R.drawable.ic_thin_search), contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(32.dp))
             }
         }
         Spacer(modifier = Modifier.height(14.dp))

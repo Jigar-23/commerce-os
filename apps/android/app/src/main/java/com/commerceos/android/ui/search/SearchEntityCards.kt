@@ -4,7 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -227,19 +229,36 @@ fun ProductSearchCard(
                         }
 
                         if (onAddToCart != null) {
-                            Button(
-                                onClick = { onAddToCart(result) },
+                            Surface(
+                                color = androidx.compose.ui.graphics.Color.White,
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.PrimaryDark),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                modifier = Modifier.height(34.dp)
+                                border = androidx.compose.foundation.BorderStroke(1.2.dp, androidx.compose.ui.graphics.Color(0xFFE2E8F0)),
+                                shadowElevation = 0.5.dp,
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clickable { onAddToCart(result) }
                             ) {
-                                Text(
-                                    "ADD",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = androidx.compose.ui.graphics.Color.White
-                                )
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 14.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "ADD",
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = androidx.compose.ui.graphics.Color(0xFFE84335),
+                                            letterSpacing = 0.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Icon(
+                                            androidx.compose.material.icons.Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = androidx.compose.ui.graphics.Color(0xFFE84335),
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

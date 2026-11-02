@@ -713,21 +713,25 @@ private fun CardAddToCartButton(
 ) {
     val outOfStock = !model.inStock || model.stockCount == 0
     val addGreen = CommerceColors.PrimaryDark
+    val brandAccent = Color(0xFFE84335) // Tata 1mg signature coral red
 
     if (isReorderCard || outOfStock || quantity <= 0) {
         Surface(
-            color = if (outOfStock) CommerceColors.SurfaceSubtle else CommerceColors.SuccessSoft,
-            shape = RoundedCornerShape(8.dp),
-            border = if (!outOfStock) androidx.compose.foundation.BorderStroke(1.dp, addGreen) else null,
+            color = if (outOfStock) CommerceColors.SurfaceSubtle else Color.White,
+            shape = RoundedCornerShape(10.dp),
+            border = if (!outOfStock) androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFE2E8F0)) else null,
+            shadowElevation = if (!outOfStock) 0.5.dp else 0.dp,
             modifier = modifier
-                .height(32.dp)
+                .height(36.dp)
                 .then(
                     if (!outOfStock) Modifier.clickable(onClick = onAddToCart) else Modifier
                 )
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 12.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
             ) {
                 if (isReorderCard) {
                     Text("REORDER", color = addGreen, fontSize = 12.sp, fontWeight = FontWeight.Black)
@@ -738,13 +742,19 @@ private fun CardAddToCartButton(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Text("ADD", color = addGreen, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        Text(
+                            "ADD",
+                            color = brandAccent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.6.sp
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = null,
-                            tint = addGreen,
-                            modifier = Modifier.size(14.dp)
+                            tint = brandAccent,
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
@@ -752,15 +762,17 @@ private fun CardAddToCartButton(
         }
     } else {
         Surface(
-            color = addGreen,
-            shape = RoundedCornerShape(8.dp),
-            shadowElevation = CommerceElevation.Raised,
-            modifier = modifier.height(32.dp)
+            color = Color(0xFF0E675E),
+            shape = RoundedCornerShape(10.dp),
+            shadowElevation = 1.dp,
+            modifier = modifier.height(36.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.padding(horizontal = 4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp)
             ) {
                 IconButton(
                     onClick = { onQuantityChange(quantity - 1) },
@@ -772,7 +784,7 @@ private fun CardAddToCartButton(
                 Text(
                     "$quantity",
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
