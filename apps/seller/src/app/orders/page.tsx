@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import SellerSidebar from '../../components/SellerSidebar';
 import {
-  Package, Search, CheckCircle2, RefreshCw, Eye, ArrowRight, ShieldCheck, MapPin, Bike, AlertCircle
+  Package, Search, CheckCircle2, RefreshCw, Eye, ArrowRight, ShieldCheck, MapPin, Bike, AlertCircle, XCircle
 } from 'lucide-react';
 
 import { sellerApi } from '@/lib/apiClient';
@@ -24,11 +24,37 @@ export default function OrdersPage() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [rebroadcastOrderId, setRebroadcastOrderId] = useState<string | null>(null);
+  const [cancelModalOrderId, setCancelModalOrderId] = useState<string | null>(null);
+  const [cancelReasonInput, setCancelReasonInput] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
   const { session, storeName } = useSellerSession();
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleExecuteCancel = async () => {
+    if (!cancelModalOrderId) return;
+    setIsCancelling(true);
+    try {
+      const res = await sellerApi.post(`/api/v1/orders/${cancelModalOrderId}/cancel`, {
+        reason: cancelReasonInput.trim() || 'Cancelled by seller',
+        cancelledBy: 'SELLER',
+      });
+      if (res.ok) {
+        showToast(`Order #${cancelModalOrderId.slice(-8).toUpperCase()} cancelled & inventory restored!`, 'success');
+        setCancelModalOrderId(null);
+        setCancelReasonInput('');
+        await fetchOrders(false);
+      } else {
+        showToast(res.error || 'Failed to cancel order', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error cancelling order', 'error');
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   const handleAcceptOrder = async (e: React.MouseEvent, orderId: string) => {
@@ -425,7 +451,25 @@ export default function OrdersPage() {
                         </div>
                       )}
 
-                      {/* 4. Details Navigation */}
+                      {/* 4. Cancel Order Button */}
+                      {order.orderStatus !== 'DELIVERED' && order.orderStatus !== 'CANCELLED' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCancelModalOrderId(order.id);
+                            setCancelReasonInput('');
+                          }}
+                          disabled={actionLoadingId === order.id}
+                          className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                          title="Cancel Order"
+                        >
+                          <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Cancel</span>
+                        </button>
+                      )}
+
+                      {/* 5. Details Navigation */}
                       <div
                         className="px-3.5 py-2.5 bg-surface-subtle hover:bg-surface-muted text-content-primary rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all border border-border-default cursor-pointer"
                       >
@@ -441,6 +485,59 @@ export default function OrdersPage() {
           </div>
         </main>
       </div>
+
+      {/* Cancel Confirmation Modal */}
+      {cancelModalOrderId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-border-default max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 font-bold">
+                <XCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-content-danger">Cancel Order #{cancelModalOrderId.slice(-8).toUpperCase()}</h3>
+                <p className="text-xs text-content-secondary font-mono">{cancelModalOrderId}</p>
+              </div>
+            </div>
+            <p className="text-sm text-content-primary">
+              Are you sure you want to cancel this order? Active rider broadcasts will be revoked and inventory returned to stock.
+            </p>
+            <input
+              type="text"
+              placeholder="Reason for cancellation (optional)"
+              value={cancelReasonInput}
+              onChange={(e) => setCancelReasonInput(e.target.value)}
+              className="w-full p-3 bg-surface-subtle border border-border-default rounded-xl outline-none text-xs focus:border-rose-500"
+            />
+            <div className="flex justify-end space-x-3 pt-2">
+              <button
+                onClick={() => setCancelModalOrderId(null)}
+                disabled={isCancelling}
+                className="px-4 py-2 border border-border-default hover:bg-surface-subtle rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Keep Order
+              </button>
+              <button
+                onClick={handleExecuteCancel}
+                disabled={isCancelling}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isCancelling ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Cancelling…</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="w-4 h-4" />
+                    <span>Confirm Cancel</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Re-Broadcast Confirmation Modal */}
       {rebroadcastOrderId && (

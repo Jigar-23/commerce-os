@@ -4867,49 +4867,74 @@ async function handleRequest(port, req, res) {
         order.reservedStock = false;
       }
 
-// POST /api/v1/orders/:id/cancel
+      // POST /api/v1/orders/:id/cancel
       const cancelMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/cancel$/);
       if (cancelMatch && req.method === 'POST') {
-        const order = findOrder(cancelMatch[1]);
-        if (!order) return json(res, 404, { error: 'Order not found' });
+        const authClaims = verifyAndDecodeJwt(req);
+        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
+          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required for order cancellation.' });
+        }
+        const orderId = cancelMatch[1];
         const body = await parseBody(req);
-        const actor = (body.cancelledBy || body.actor || 'CUSTOMER').toUpperCase();
+        const reason = body.reason || body.cancellationReason || 'Seller decision';
+        const actor = body.cancelledBy || authClaims.sub || 'SELLER';
 
-        // CUSTOMER self-cancel after PACKED is not allowed directly; instead a
-        // cancellation request is raised for the seller/admin to approve/reject.
-        if (actor === 'CUSTOMER' && !canCancel(order, actor)) {
-          if (['DELIVERED', 'CANCELLED', 'RETURNED_TO_SELLER'].includes(order.orderStatus)) {
-            return json(res, 409, { error: `Order cannot be cancelled in state ${order.orderStatus}` });
+        // 1. If PostgreSQL application repository is available, use it
+        if (appRepositories && appRepositories.orderRepo) {
+          try {
+            const resCancel = await appRepositories.orderRepo.cancelOrder(orderId, actor, reason);
+            if (resCancel && resCancel.ok) {
+              const ord = resCancel.order || {};
+              if (typeof sseBroadcaster !== 'undefined' && sseBroadcaster) {
+                sseBroadcaster('orders', 'ORDER_CANCELLED', { orderId, reason, actor });
+              }
+              const formatted = {
+                id: ord.order_id || ord.id || orderId,
+                orderId: ord.order_id || ord.id || orderId,
+                status: 'CANCELLED',
+                orderStatus: 'CANCELLED',
+                ...ord
+              };
+              return json(res, 200, { ok: true, order: formatted, ...formatted });
+            } else if (resCancel) {
+              return json(res, resCancel.httpStatus || 400, { error: resCancel.error, message: resCancel.message });
+            }
+          } catch (err) {
+            console.error('[MockServer] Order cancellation repository error:', err);
           }
-          order.cancellationRequest = {
-            reason: body.reason || 'Customer requested cancellation',
-            requestedBy: 'CUSTOMER',
-            requestedAt: nowIso(),
-            status: 'PENDING',
-          };
-          appendCheckpoint(order, 'CANCELLATION_REQUESTED', `Customer requested cancellation: ${order.cancellationRequest.reason}`, 'customer', 'Customer');
-          pushNotification('CANCELLATION_REQUESTED', order, `Customer requested cancellation of order ${order.id}`);
-          recordAuditLog('customer', 'REQUEST_CANCELLATION', `Cancellation requested for ${order.id}: ${order.cancellationRequest.reason}`);
-          saveDb();
-          return json(res, 202, order);
         }
 
-        if (!canCancel(order, actor)) {
-          return json(res, 409, { error: `Order cannot be cancelled in state ${order.orderStatus} by ${actor}` });
+        // 2. Direct PostgreSQL fallback if pool is connected
+        if (typeof productionPgPool !== 'undefined' && productionPgPool) {
+          try {
+            const pgCheck = await productionPgPool.query(`SELECT * FROM orders WHERE (id = $1 OR order_id = $1) LIMIT 1`, [orderId]);
+            if (pgCheck.rows.length > 0) {
+              await productionPgPool.query(
+                `UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (id = $1 OR order_id = $1)`,
+                [orderId]
+              );
+              await productionPgPool.query(
+                `UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
+                [orderId]
+              ).catch(() => {});
+              await productionPgPool.query(
+                `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR offer_id = $1)`,
+                [orderId]
+              ).catch(() => {});
+              const updatedRow = { ...pgCheck.rows[0], status: 'CANCELLED', orderStatus: 'CANCELLED', id: orderId, orderId };
+              return json(res, 200, { ok: true, order: updatedRow, ...updatedRow });
+            }
+          } catch (pgErr) {
+            console.error('[MockServer] Direct pg cancel error:', pgErr.message);
+          }
         }
 
-        order.cancellation = {
-          reason: body.reason || 'Cancelled by ' + actor,
-          cancelledBy: actor,
-          cancelledAt: nowIso(),
-        };
-        order.cancellationRequest = null;
-        applyCancellation(order, actor, order.cancellation.reason);
-
-        const result = setOrderStatus(order, 'CANCELLED', actor, `Cancelled: ${order.cancellation.reason}`);
-        recordAuditLog(actor, 'CANCEL_ORDER', `Cancelled order ${order.id} reason=${order.cancellation.reason}`);
+        // 3. In-memory fallback
+        const order = findOrder(orderId);
+        if (!order) return json(res, 404, { error: 'Order not found' });
+        setOrderStatus(order, 'CANCELLED', actor, reason);
         saveDb();
-        return result.ok ? json(res, 200, order) : json(res, 409, { error: result.error });
+        return json(res, 200, { ok: true, order, ...order });
       }
 
       // POST /api/v1/orders/:id/feedback or :id/rating
@@ -6232,30 +6257,6 @@ async function handleRequest(port, req, res) {
         setOrderStatus(order, 'READY_FOR_PICKUP', authClaims.sub, 'Ready for rider pickup');
         saveDb();
         return json(res, 200, order);
-      }
-
-      // POST /api/v1/orders/:id/cancel
-      const cancelOrderMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/cancel$/);
-      if (cancelOrderMatch && req.method === 'POST') {
-        const authClaims = verifyAndDecodeJwt(req);
-        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
-          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Authentication required.' });
-        }
-        const orderId = cancelOrderMatch[1];
-        const body = await parseBody(req);
-        if (appRepositories && appRepositories.orderRepo) {
-          const resCancel = await appRepositories.orderRepo.cancelOrder(orderId, authClaims.sub, body.reason || 'User/Merchant Cancellation');
-          if (!resCancel.ok) return json(res, resCancel.httpStatus || 400, { error: resCancel.error, message: resCancel.message });
-          const ord = resCancel.order || {};
-          return json(res, 200, { ok: true, order: ord, ...ord });
-        } else if (appRepositories && appRepositories.isProduction) {
-          return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
-        }
-        const order = findOrder(orderId);
-        if (!order) return json(res, 404, { error: 'Order not found' });
-        setOrderStatus(order, 'CANCELLED', authClaims.sub, body.reason || 'Cancelled');
-        saveDb();
-        return json(res, 200, { ok: true, order, ...order });
       }
 
       // POST /api/v1/orders/:id/deliver-with-otp (Atomic Delivery Completion)

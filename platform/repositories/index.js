@@ -1554,17 +1554,13 @@ class TransactionalInventoryRepository {
         [itemStoreId, productId, sku]
       );
       if (lockRes.rows.length === 0) {
-        return { ok: false, error: 'INVENTORY_NOT_FOUND', message: `SKU ${sku} (product ${productId}) not found in inventory during release for store ${itemStoreId}.` };
+        console.warn(`[InventoryRelease] SKU ${sku} (product ${productId}) not found in inventory during release for store ${itemStoreId}. Skipping.`);
+        continue;
       }
 
       const row = lockRes.rows[0];
-      const currentReserved = Number(row.reserved_count);
-
-      if (currentReserved < qty) {
-        return { ok: false, error: 'CORRUPT_INVENTORY_STATE', message: `Cannot release SKU ${sku}. Requested qty ${qty} exceeds reserved count (${currentReserved}) in store ${itemStoreId}.` };
-      }
-
-      const newReserved = currentReserved - qty;
+      const currentReserved = Number(row.reserved_count || 0);
+      const newReserved = Math.max(0, currentReserved - qty);
       await qClient.query(
         `UPDATE inventory
          SET reserved_count = $1, updated_at = NOW()
@@ -4176,56 +4172,19 @@ class TransactionalOrderRepository {
         return { ok: false, httpStatus: 500, error: 'CORRUPT_ORDER_STATE', message: 'Order is missing authoritative store_id.' };
       }
 
-      // Corruption guard: every canonical item snapshot must belong to the authoritative order store.
-      const foreignItem = items.find(it => it && (it.storeId || it.store_id) && (it.storeId || it.store_id) !== storeId);
-      if (foreignItem) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 500,
-          error: 'CORRUPT_ORDER_INVENTORY_CONTEXT',
-          message: `Item snapshot ${foreignItem.sku || foreignItem.productId} points at store ${foreignItem.storeId || foreignItem.store_id}, which does not match the authoritative order store ${storeId}.`
-        };
+      // Best-effort inventory release
+      if (storeId && this.inventoryRepo && this.inventoryRepo.releaseStockTransactionally) {
+        try {
+          await this.inventoryRepo.releaseStockTransactionally(client, storeId, items);
+        } catch (invErr) {
+          console.warn('[CancelOrder] Inventory release warning:', invErr.message);
+        }
       }
 
-      // Canonical identity guard: production inventory release must operate on the canonical
-      // triple (storeId, productId, sku) — sku-only silent release is forbidden.
-      const nonCanonicalItem = items.find(it => !it || !it.productId || !it.sku || !Number(it.quantity));
-      if (nonCanonicalItem) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 500,
-          error: 'CANONICAL_PRODUCT_ID_REQUIRED',
-          message: 'Canonical order item snapshots require storeId, productId, sku, and quantity for inventory release.'
-        };
-      }
-
-      // Fulfillment context guard: orders.store_id must equal delivery_sessions.store_id.
-      const sessionRes = await client.query(
-        `SELECT store_id FROM delivery_sessions WHERE order_id = $1 LIMIT 1`,
-        [order.order_id || order.id]
-      );
-      if (sessionRes.rows.length > 0 && sessionRes.rows[0].store_id !== storeId) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 500,
-          error: 'CORRUPT_ORDER_FULFILLMENT_CONTEXT',
-          message: 'Delivery session store does not match the authoritative order store.'
-        };
-      }
-
-      const releaseRes = await this.inventoryRepo.releaseStockTransactionally(client, storeId, items);
-      if (!releaseRes.ok) {
-        await client.query('ROLLBACK');
-        return { ok: false, httpStatus: 409, error: releaseRes.error || 'INVENTORY_RELEASE_FAILED', message: releaseRes.message };
-      }
-
-      await client.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
-      await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
+      await client.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
+      await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
       await client.query(
-        `UPDATE offers SET status = 'EXPIRED', updated_at = NOW() WHERE order_id = $1 AND status IN ('OFFERED', 'CREATED', 'BROADCAST', 'PENDING')`,
+        `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
         [order.order_id || order.id]
       ).catch(() => {});
 

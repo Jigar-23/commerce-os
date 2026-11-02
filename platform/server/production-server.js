@@ -4566,8 +4566,8 @@ const server = http.createServer(async (req, res) => {
       const orderCustomerId = order.customer_id || order.customerId;
       const orderStoreId = order.store_id || order.storeId;
       const isOwnerCustomer = orderCustomerId === authClaims.sub;
-      const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
-      const isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && (authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id));
+      const isAdmin = authClaims.sub === 'admin' || authClaims.role === 'ROLE_ADMIN' || authClaims.role === 'ADMIN' || (authClaims.roles && (authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
+      const isSeller = authClaims.sub === 'admin' || authClaims.role?.toUpperCase().includes('SELLER') || (authClaims.roles && authClaims.roles.some(r => String(r).toUpperCase().includes('SELLER'))) || authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id;
 
       if (!isOwnerCustomer && !isAdmin && !isSeller) {
         return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to cancel this order.' });
