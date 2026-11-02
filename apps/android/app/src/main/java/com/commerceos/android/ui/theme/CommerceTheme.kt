@@ -7,6 +7,8 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -15,21 +17,24 @@ import androidx.compose.ui.unit.sp
 import com.commerceos.android.R
 import com.commerceos.android.config.LocalClientConfiguration
 
+@OptIn(ExperimentalTextApi::class)
 val PlusJakartaSans = FontFamily(
-    Font(R.font.plus_jakarta_sans, FontWeight.Light),
-    Font(R.font.plus_jakarta_sans, FontWeight.Normal),
-    Font(R.font.plus_jakarta_sans, FontWeight.Medium),
-    Font(R.font.plus_jakarta_sans, FontWeight.SemiBold),
-    Font(R.font.plus_jakarta_sans, FontWeight.Bold),
-    Font(R.font.plus_jakarta_sans, FontWeight.ExtraBold)
+    Font(R.font.plus_jakarta_sans, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.plus_jakarta_sans, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.plus_jakarta_sans, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.plus_jakarta_sans, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+    Font(R.font.plus_jakarta_sans, FontWeight.ExtraBold, variationSettings = FontVariation.Settings(FontVariation.weight(800))),
+    Font(R.font.plus_jakarta_sans, FontWeight.Black, variationSettings = FontVariation.Settings(FontVariation.weight(900)))
 )
 
+@OptIn(ExperimentalTextApi::class)
 val Inter = FontFamily(
-    Font(R.font.inter, FontWeight.Light),
-    Font(R.font.inter, FontWeight.Normal),
-    Font(R.font.inter, FontWeight.Medium),
-    Font(R.font.inter, FontWeight.SemiBold),
-    Font(R.font.inter, FontWeight.Bold)
+    Font(R.font.inter, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.inter, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.inter, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.inter, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+    Font(R.font.inter, FontWeight.ExtraBold, variationSettings = FontVariation.Settings(FontVariation.weight(800))),
+    Font(R.font.inter, FontWeight.Black, variationSettings = FontVariation.Settings(FontVariation.weight(900)))
 )
 
 /**
@@ -225,50 +230,50 @@ object CommerceTypography {
     val Title = TextStyle(
         fontFamily = PlusJakartaSans,
         fontSize = 16.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         lineHeight = 22.sp,
         letterSpacing = (-0.1).sp
     )
     val ProductTitle = TextStyle(
         fontFamily = PlusJakartaSans,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontSize = 13.5.sp,
+        fontWeight = FontWeight.Bold,
         lineHeight = 18.sp
     )
     val BodyLarge = TextStyle(
         fontFamily = PlusJakartaSans,
         fontSize = 15.sp,
-        fontWeight = FontWeight.Normal,
+        fontWeight = FontWeight.Medium,
         lineHeight = 22.sp
     )
     val Body = TextStyle(
         fontFamily = PlusJakartaSans,
         fontSize = 14.sp,
-        fontWeight = FontWeight.Normal,
+        fontWeight = FontWeight.Medium,
         lineHeight = 20.sp
     )
     val BodySmall = TextStyle(
         fontFamily = PlusJakartaSans,
         fontSize = 12.sp,
-        fontWeight = FontWeight.Normal,
+        fontWeight = FontWeight.Medium,
         lineHeight = 16.sp
     )
     val Label = TextStyle(
         fontFamily = PlusJakartaSans,
         fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         lineHeight = 16.sp
     )
     val Caption = TextStyle(
         fontFamily = PlusJakartaSans,
         fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         lineHeight = 15.sp
     )
     val Meta = TextStyle(
         fontFamily = PlusJakartaSans,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Normal,
+        fontSize = 10.5.sp,
+        fontWeight = FontWeight.Medium,
         lineHeight = 14.sp
     )
 

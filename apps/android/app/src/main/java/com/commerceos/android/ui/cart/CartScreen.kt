@@ -26,7 +26,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.platform.LocalContext
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import java.io.File
 import coil.compose.SubcomposeAsyncImage
+import com.commerceos.android.data.local.LocalPrescriptionManager
 import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.model.CartItem
 import com.commerceos.android.model.MedicineImageResolver
@@ -197,9 +203,14 @@ fun CartScreen(
 
             // Prescription verification card
             item {
+                val context = LocalContext.current
+                val localRx = remember { LocalPrescriptionManager.getAllPrescriptions(context) }
+                val allPrescriptions = remember(prescriptions, localRx) {
+                    (prescriptions + localRx).distinctBy { it.id }
+                }
                 OptionalPrescriptionCard(
-                    attachedRx = prescriptions.firstOrNull { it.id == attachedPrescriptionId },
-                    savedPrescriptions = prescriptions,
+                    attachedRx = allPrescriptions.firstOrNull { it.id == attachedPrescriptionId },
+                    savedPrescriptions = allPrescriptions,
                     onUploadPrescription = onUploadPrescription,
                     onAttachPrescription = onAttachPrescription
                 )
@@ -680,6 +691,11 @@ private fun OptionalPrescriptionCard(
     onUploadPrescription: () -> Unit,
     onAttachPrescription: (String?) -> Unit
 ) {
+    val context = LocalContext.current
+    val localRx = remember { LocalPrescriptionManager.getAllPrescriptions(context) }
+    val allSavedRx = remember(savedPrescriptions, localRx) {
+        (savedPrescriptions + localRx).distinctBy { it.id }
+    }
     var showSavedRxSheet by remember { mutableStateOf(false) }
     var previewPrescription by remember { mutableStateOf<Prescription?>(null) }
 
@@ -687,7 +703,7 @@ private fun OptionalPrescriptionCard(
         ModalBottomSheet(
             onDismissRequest = { showSavedRxSheet = false },
             containerColor = Color.White,
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -699,11 +715,11 @@ private fun OptionalPrescriptionCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Select from Saved Prescriptions",
                             fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             color = Color(0xFF0F172A)
                         )
                         Text(
@@ -719,43 +735,103 @@ private fun OptionalPrescriptionCard(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (savedPrescriptions.isEmpty()) {
+                if (allSavedRx.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 24.dp),
+                            .padding(vertical = 32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("No saved prescriptions found in your vault", fontSize = 14.sp, color = Color(0xFF64748B))
-                            Spacer(modifier = Modifier.height(10.dp))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                color = Color(0xFFECFDF5),
+                                shape = CircleShape,
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0E675E),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                "No Saved Prescriptions",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                "Upload a prescription to save it in your vault for instant one-tap reuse.",
+                                fontSize = 13.sp,
+                                color = Color(0xFF64748B),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Button(
                                 onClick = {
                                     showSavedRxSheet = false
                                     onUploadPrescription()
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                                shape = RoundedCornerShape(10.dp)
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                             ) {
-                                Text("Upload New Prescription", fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Upload Prescription Now", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
                     }
                 } else {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
                     ) {
-                        items(savedPrescriptions) { rx ->
+                        items(allSavedRx) { rx ->
                             val isSelected = rx.id == attachedRx?.id
+                            val firstAttachment = rx.attachments.firstOrNull()?.takeIf { it.isNotBlank() }
+                            val thumbModel: Any? = when {
+                                firstAttachment == null -> null
+                                firstAttachment.startsWith("data:") -> {
+                                    remember(firstAttachment) {
+                                        try {
+                                            val b64 = if (firstAttachment.contains(",")) firstAttachment.substringAfter(",") else firstAttachment
+                                            val bytes = Base64.decode(b64, Base64.DEFAULT)
+                                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                        } catch (_: Exception) {
+                                            null
+                                        }
+                                    }
+                                }
+                                firstAttachment.startsWith("/") -> {
+                                    val f = File(firstAttachment)
+                                    if (f.exists()) f else null
+                                }
+                                firstAttachment.startsWith("file:") -> {
+                                    val f = File(firstAttachment.removePrefix("file://"))
+                                    if (f.exists()) f else null
+                                }
+                                firstAttachment.startsWith("http://") || firstAttachment.startsWith("https://") -> firstAttachment
+                                else -> null
+                            }
+
                             Card(
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (isSelected) Color(0xFFECFDF5) else Color.White
                                 ),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 border = BorderStroke(
                                     1.5.dp,
-                                    if (isSelected) Color(0xFF059669) else Color(0xFFE2E8F0)
+                                    if (isSelected) Color(0xFF0E675E) else Color(0xFFE2E8F0)
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -765,40 +841,72 @@ private fun OptionalPrescriptionCard(
                                     }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(14.dp),
+                                    modifier = Modifier.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // Thumbnail Image
                                     Surface(
-                                        color = if (isSelected) Color(0xFF059669) else Color(0xFFF1F5F9),
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(36.dp)
+                                        color = Color(0xFFF1F5F9),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.size(50.dp)
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = if (isSelected) Color.White else Color(0xFF94A3B8),
-                                                modifier = Modifier.size(18.dp)
+                                        if (thumbModel != null) {
+                                            SubcomposeAsyncImage(
+                                                model = thumbModel,
+                                                contentDescription = "Rx Thumbnail",
+                                                contentScale = ContentScale.Crop,
+                                                loading = {
+                                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF0E675E))
+                                                    }
+                                                },
+                                                error = {
+                                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                        Icon(Icons.Default.Description, contentDescription = null, tint = Color(0xFF0E675E), modifier = Modifier.size(24.dp))
+                                                    }
+                                                },
+                                                modifier = Modifier.fillMaxSize()
                                             )
+                                        } else {
+                                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                Icon(Icons.Default.Description, contentDescription = null, tint = Color(0xFF0E675E), modifier = Modifier.size(24.dp))
+                                            }
                                         }
                                     }
+
                                     Spacer(modifier = Modifier.width(12.dp))
+
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = rx.patientName.ifBlank { "Patient Prescription" },
+                                            text = rx.patientName.ifBlank { "Prescription #${rx.id.takeLast(6).uppercase()}" },
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF0F172A)
+                                            color = Color(0xFF0F172A),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+                                        if (!rx.doctorName.isNullOrBlank()) {
+                                            Text(
+                                                text = "Dr. ${rx.doctorName}",
+                                                fontSize = 12.sp,
+                                                color = Color(0xFF475569),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                         Text(
                                             text = "Rx #${rx.id.takeLast(6).uppercase()} • Attached for Pharmacy",
-                                            fontSize = 12.sp,
-                                            color = Color(0xFF059669)
+                                            fontSize = 11.5.sp,
+                                            color = Color(0xFF0E675E),
+                                            fontWeight = FontWeight.SemiBold
                                         )
                                     }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
                                     IconButton(
                                         onClick = { previewPrescription = rx },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(34.dp)
                                     ) {
                                         Icon(
                                             painter = painterResource(com.commerceos.android.R.drawable.ic_visibility),
@@ -807,18 +915,24 @@ private fun OptionalPrescriptionCard(
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
-                                    if (isSelected) {
-                                        Surface(
-                                            color = Color(0xFF059669),
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Text(
-                                                "Selected",
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
+
+                                    Spacer(modifier = Modifier.width(4.dp))
+
+                                    Surface(
+                                        color = if (isSelected) Color(0xFF0E675E) else Color.Transparent,
+                                        shape = CircleShape,
+                                        border = if (!isSelected) BorderStroke(1.5.dp, Color(0xFFCBD5E1)) else null,
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        if (isSelected) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -833,13 +947,13 @@ private fun OptionalPrescriptionCard(
                             showSavedRxSheet = false
                             onUploadPrescription()
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
                         shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Color(0xFF059669))
+                        border = BorderStroke(1.dp, Color(0xFF0E675E))
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF0E675E), modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Upload New Photo Instead", color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
+                        Text("Upload New Photo Instead", color = Color(0xFF0E675E), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -967,13 +1081,7 @@ private fun OptionalPrescriptionCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
-                        onClick = {
-                            if (savedPrescriptions.isNotEmpty()) {
-                                showSavedRxSheet = true
-                            } else {
-                                onUploadPrescription()
-                            }
-                        },
+                        onClick = { showSavedRxSheet = true },
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
                         modifier = Modifier.weight(1f).height(38.dp),
@@ -987,7 +1095,7 @@ private fun OptionalPrescriptionCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (savedPrescriptions.isNotEmpty()) "From Vault (${savedPrescriptions.size})" else "Select Saved",
+                            text = if (allSavedRx.isNotEmpty()) "From Vault (${allSavedRx.size})" else "Select Saved",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF334155)
@@ -997,7 +1105,7 @@ private fun OptionalPrescriptionCard(
                     Button(
                         onClick = onUploadPrescription,
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
                         modifier = Modifier.weight(1f).height(38.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
@@ -1023,6 +1131,10 @@ private fun OptionalPrescriptionCard(
     if (previewPrescription != null) {
         PrescriptionQuickViewDialog(
             prescription = previewPrescription!!,
+            onSelect = {
+                onAttachPrescription(previewPrescription!!.id)
+                showSavedRxSheet = false
+            },
             onDismiss = { previewPrescription = null }
         )
     }
@@ -1031,6 +1143,7 @@ private fun OptionalPrescriptionCard(
 @Composable
 private fun PrescriptionQuickViewDialog(
     prescription: Prescription,
+    onSelect: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     Dialog(
@@ -1176,13 +1289,39 @@ private fun PrescriptionQuickViewDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(44.dp)
-                ) {
-                    Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
+                if (onSelect != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            Text("Close", color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = {
+                                onSelect()
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1.5f).height(46.dp)
+                        ) {
+                            Text("Attach to Order", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                    ) {
+                        Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }

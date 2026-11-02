@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Pure monochrome silhouette for Rider Dispatch Notifications -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.2 L3.5,6.7 L12,11.2 L20.5,6.7 Z M3,8.2 L3,17.2 L11,21.5 L11,12.5 Z M13,12.5 L13,21.5 L21,17.2 L21,8.2 Z" />
+</vector>

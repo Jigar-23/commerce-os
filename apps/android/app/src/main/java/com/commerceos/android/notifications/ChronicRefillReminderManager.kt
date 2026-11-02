@@ -105,55 +105,13 @@ object ChronicRefillReminderManager {
  */
 class RefillReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (!NotificationPreferenceManager.isRefillAlertsEnabled(context)) {
-            return
-        }
-
         val medicineName = intent.getStringExtra(ChronicRefillReminderManager.EXTRA_MEDICINE_NAME) ?: "Chronic Medicine"
         val sku = intent.getStringExtra(ChronicRefillReminderManager.EXTRA_MEDICINE_SKU) ?: ""
-
-        val title = "Refill Alert: $medicineName"
-        val message = "Your $medicineName supply is estimated to run out in 3 days. Tap to reorder with 1-click express delivery."
-
-        // 1. Record to persistent in-app notification center history
-        LocalNotificationStorage.saveNotification(
-            context,
-            InAppNotificationItem(
-                title = title,
-                message = message,
-                category = "Refills",
-                deepLinkAction = if (sku.isNotBlank()) "REFILL_CART:$sku" else "CART"
-            )
+        CustomerNotificationManager.postRefillNotification(
+            context = context,
+            medicineName = medicineName,
+            sku = sku,
+            daysRemaining = 3
         )
-
-        // 2. Post Android system status bar tray notification
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("notification_action", "REFILL_CART")
-            putExtra("notification_sku", sku)
-        }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            sku.hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
-
-        val notification = NotificationCompat.Builder(context, NotificationChannelHelper.CHANNEL_REFILL_REMINDERS)
-            .setSmallIcon(R.drawable.ic_medicine)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(context).notify(sku.hashCode(), notification)
-        } catch (_: SecurityException) {
-            // POST_NOTIFICATIONS permission not granted
-        }
     }
 }

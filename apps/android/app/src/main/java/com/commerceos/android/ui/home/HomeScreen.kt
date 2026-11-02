@@ -94,6 +94,7 @@ fun HomeScreen(
     isLocating: Boolean = false,
     onChangeAddress: () -> Unit = {},
     onProfileClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
     onEntityClick: (CommerceEntity) -> Unit = {},
     onAddToCart: (CommerceProduct) -> Unit = {},
     onUpdateQuantity: (String, Int) -> Unit = { _, _ -> },
@@ -166,6 +167,7 @@ fun HomeScreen(
                     isLocating = isLocating,
                     onChangeAddress = onChangeAddress,
                     onProfileClick = onProfileClick,
+                    onNotificationsClick = onNotificationsClick,
                     onSearchClick = onSearchClick,
                     onUploadPrescription = onUploadPrescription
                 )
@@ -679,6 +681,7 @@ private fun HeaderCanopy(
     isLocating: Boolean,
     onChangeAddress: () -> Unit,
     onProfileClick: () -> Unit,
+    onNotificationsClick: () -> Unit = {},
     onSearchClick: (String) -> Unit,
     onUploadPrescription: () -> Unit
 ) {
@@ -728,11 +731,11 @@ private fun HeaderCanopy(
                 shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
             )
             .statusBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 18.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 14.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(11.dp)
         ) {
             // Location Header & Profile
             CanopyLocationBar(
@@ -742,7 +745,8 @@ private fun HeaderCanopy(
                 locationHeaderLabel = locationHeaderLabel,
                 isLocating = isLocating,
                 onChangeAddress = onChangeAddress,
-                onProfileClick = onProfileClick
+                onProfileClick = onProfileClick,
+                onNotificationsClick = onNotificationsClick
             )
 
             // High-Utility Stadium Search Bar with Hairline Divider and Upload Rx action
@@ -762,7 +766,8 @@ private fun CanopyLocationBar(
     locationHeaderLabel: String? = null,
     isLocating: Boolean = false,
     onChangeAddress: () -> Unit,
-    onProfileClick: () -> Unit
+    onProfileClick: () -> Unit,
+    onNotificationsClick: () -> Unit = {}
 ) {
     val hasAddress = context?.hasAddress == true || selectedAddress != null || !locationHeaderLabel.isNullOrBlank()
 
@@ -868,24 +873,63 @@ private fun CanopyLocationBar(
             }
         }
 
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp))
 
-        // Profile Avatar Button
-        Surface(
-            color = Color.White.copy(alpha = 0.18f),
-            shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-            modifier = Modifier
-                .size(38.dp)
-                .clickable(onClick = onProfileClick)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = "Account",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+            val localCtx = LocalContext.current
+            val unreadCount = remember(localCtx) {
+                com.commerceos.android.notifications.LocalNotificationStorage.getNotifications(localCtx).count { !it.isRead }
+            }
+
+            // Notification Bell Button with live unread badge
+            Surface(
+                color = Color.White.copy(alpha = 0.18f),
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                modifier = Modifier
+                    .size(38.dp)
+                    .clickable(onClick = onNotificationsClick)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Notifications,
+                        contentDescription = "Notifications",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp)
+                    )
+                    if (unreadCount > 0) {
+                        Surface(
+                            color = Color(0xFFEF4444),
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .size(8.dp)
+                                .align(Alignment.TopEnd)
+                                .padding(top = 1.dp, end = 1.dp)
+                        ) {}
+                    }
+                }
+            }
+
+            // Profile Avatar Button
+            Surface(
+                color = Color.White.copy(alpha = 0.18f),
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                modifier = Modifier
+                    .size(38.dp)
+                    .clickable(onClick = onProfileClick)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = "Account",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

@@ -92,7 +92,11 @@ fun AccountScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 12.dp)
+            ) {
                 Text(
                     text = "Profile & Account",
                     fontSize = 20.sp,
@@ -102,7 +106,9 @@ fun AccountScreen(
                 Text(
                     text = "Manage your healthcare orders, addresses & prescriptions",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF64748B)
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
             Surface(
@@ -110,14 +116,14 @@ fun AccountScreen(
                 shape = CircleShape,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 shadowElevation = 0.5.dp,
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(42.dp)
             ) {
                 IconButton(onClick = onNotifications) {
                     Icon(
                         Icons.Default.Notifications,
                         contentDescription = "Alerts",
                         tint = Color(0xFF0E675E),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
@@ -417,7 +423,7 @@ fun AccountScreen(
                 }
             }
 
-            // 3. Healthcare Hub Grouped Features (Wallet & Prescriptions)
+            // 3. Healthcare Hub Grouped Features (Prescriptions Vault)
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -426,61 +432,6 @@ fun AccountScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column {
-                    // CommerceOS Wallet row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showRefillDialog = true }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                color = Color(0xFFFEF3C7),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.AccountBalanceWallet,
-                                        contentDescription = null,
-                                        tint = Color(0xFFD97706),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "CommerceOS Wallet",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A)
-                                )
-                                Text(
-                                    text = "Instant refunds & cashbacks",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF64748B)
-                                )
-                            }
-                        }
-                        Surface(
-                            color = Color(0xFFFEF3C7),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(0.5.dp, Color(0xFFFDE68A))
-                        ) {
-                            Text(
-                                text = "🪙 ₹0",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF92400E),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.8.dp)
 
                     // Prescriptions Vault row
                     Row(

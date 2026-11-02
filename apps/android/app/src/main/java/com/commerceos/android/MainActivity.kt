@@ -1,5 +1,6 @@
 package com.commerceos.android
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -42,8 +45,12 @@ class MainActivity : ComponentActivity() {
     private val verticalHomeViewModel by lazy { ViewModelProvider(this, container.factory)[VerticalHomeViewModel::class.java] }
     private val universalSearchViewModel by lazy { ViewModelProvider(this, container.factory)[UniversalSearchViewModel::class.java] }
 
+    private var pendingNotificationAction by mutableStateOf<String?>(null)
+    private var pendingNotificationTargetId by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        extractNotificationExtras(intent)
 
         // Enable edge-to-edge transparent system bars (infinite app theme)
         enableEdgeToEdge(
@@ -98,11 +105,33 @@ class MainActivity : ComponentActivity() {
                             catalogViewModel = catalogViewModel,
                             categoryViewModel = categoryViewModel,
                             verticalHomeViewModel = verticalHomeViewModel,
-                            universalSearchViewModel = universalSearchViewModel
+                            universalSearchViewModel = universalSearchViewModel,
+                            pendingNotificationAction = pendingNotificationAction,
+                            pendingNotificationTargetId = pendingNotificationTargetId,
+                            onConsumePendingNotification = {
+                                pendingNotificationAction = null
+                                pendingNotificationTargetId = null
+                            }
                         )
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractNotificationExtras(intent)
+    }
+
+    private fun extractNotificationExtras(intent: Intent?) {
+        val action = intent?.getStringExtra("notification_action")
+        val targetId = intent?.getStringExtra("notification_order_id")
+            ?: intent?.getStringExtra("notification_sku")
+        if (!action.isNullOrBlank()) {
+            pendingNotificationAction = action
+            pendingNotificationTargetId = targetId
         }
     }
 }

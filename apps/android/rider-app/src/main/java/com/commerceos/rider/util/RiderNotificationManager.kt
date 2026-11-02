@@ -170,11 +170,9 @@ object RiderNotificationManager {
             val earningsText = "₹${offer.earningsAmount.toInt()}"
             val orderTag = if (offer.orderId.isNotBlank()) " #${offer.orderId}" else ""
 
-            val appIconRes = context.applicationInfo.icon.takeIf { it != 0 }
-                ?: android.R.drawable.stat_notify_chat
-
             val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(appIconRes)
+                .setSmallIcon(com.commerceos.rider.R.drawable.ic_rider_notification_small)
+                .setColor(0xFF0E675E.toInt())
                 .setContentTitle("🚀 ORDER$orderTag · $earningsText")
                 .setContentText("${offer.totalDistanceKm} km • ~${offer.estimatedDurationMins} min | ${offer.merchantName}")
                 .setStyle(

@@ -397,8 +397,8 @@ fun CategoriesScreen(
     val context = LocalContext.current
     val currentPalette = remember(selectedDepartment) { getDepartmentColors(selectedDepartment) }
 
-    // Dynamically adjust notification bar / status bar to match category section color!
-    DisposableEffect(currentPalette.topGradient, view) {
+    // Match Home Screen status bar color for unified, seamless navigation
+    DisposableEffect(view) {
         var currentContext: Context? = context
         var activity: Activity? = null
         while (currentContext is ContextWrapper) {
@@ -415,9 +415,8 @@ fun CategoriesScreen(
             val prevLightStatusBars = insetsController.isAppearanceLightStatusBars
             val prevStatusBarColor = window.statusBarColor
 
-            // Category section is dark colored -> make notification bar icons white and set status bar color
             insetsController.isAppearanceLightStatusBars = false
-            window.statusBarColor = currentPalette.topGradient.toArgb()
+            window.statusBarColor = android.graphics.Color.parseColor("#0E675E")
 
             onDispose {
                 insetsController.isAppearanceLightStatusBars = prevLightStatusBars
@@ -471,15 +470,20 @@ fun CategoriesScreen(
             .background(Color(0xFFF4F6F8))
     ) {
         // ====================================================================
-        // 1. PHARMEASY DEEP EMERALD HEADER WITH ADDRESS & CAMERA Rx BAR
+        // 1. UNIFIED HEALTHCARE EMERALD HEADER WITH ADDRESS & CAMERA Rx BAR
         // ====================================================================
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(currentPalette.topGradient, currentPalette.bottomGradient)
-                    )
+                        colors = listOf(
+                            Color(0xFF0E675E),
+                            Color(0xFF0C5B53),
+                            Color(0xFF0A4F48)
+                        )
+                    ),
+                    shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
                 )
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 10.dp)
@@ -709,7 +713,7 @@ fun CategoriesScreen(
         // ====================================================================
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            contentPadding = PaddingValues(bottom = 140.dp)
         ) {
             // Section A: "SHOP SMARTER, SAVE BIGGER" (PharmEasy Benchmark)
             if (searchQuery.isBlank() && selectedDepartment == "All Categories") {
@@ -1397,135 +1401,80 @@ private fun PharmEasyCategoryCard(
     val pres = getHealthcarePresentation(category.name)
 
     Surface(
-        color = Color.Transparent,
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, pres.cardBorder),
-        shadowElevation = 1.dp,
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 0.5.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .height(180.dp)
             .clickable(onClick = onClick)
     ) {
         Column(
-            modifier = Modifier
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(pres.cardGradientStart, pres.cardGradientEnd)
-                    )
-                )
-                .padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Row: Promo Badge + Therapy Icon Surface
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Prominent category visual in soft pastel container
+            Surface(
+                color = pres.cardGradientStart,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(0.5.dp, pres.cardBorder.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(84.dp)
             ) {
-                Surface(
-                    color = pres.iconTint.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Text(
-                        text = pres.badgeText,
-                        fontSize = 8.5.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = pres.iconTint,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                    )
-                }
-
-                Surface(
-                    color = Color.White.copy(alpha = 0.85f),
-                    shape = CircleShape,
-                    border = BorderStroke(0.5.dp, pres.cardBorder),
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = pres.iconTint,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                }
-            }
-
-            // Middle: Category Name & Highlights
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = category.name,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.sp,
-                    color = Color(0xFF0F172A),
-                    maxLines = 2,
-                    lineHeight = 18.sp,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = pres.highlights,
-                    fontSize = 10.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF475569),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Bottom Area: Sub-Therapy Tags (left) + Authentic Clinical Pack Visual (right)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
-                // Clickable sub-condition micro-chips
-                Column(
-                    modifier = Modifier.weight(1f).padding(end = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    pres.subTags.take(2).forEach { tag ->
-                        Surface(
-                            color = Color.White.copy(alpha = 0.9f),
-                            shape = RoundedCornerShape(6.dp),
-                            border = BorderStroke(0.5.dp, pres.cardBorder),
-                            modifier = Modifier.clickable { onSelectTag(tag) }
-                        ) {
-                            Text(
-                                text = tag,
-                                fontSize = 9.sp,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF334155),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-
-                // Authentic Clinical Product Pack Image in Rounded Surface
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(0.5.dp, Color.White),
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.size(58.dp)
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp)
                 ) {
                     ProductImage(
                         imageUrl = pres.imageUrl,
                         contentDescription = category.name,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(4.dp)
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = category.name,
+                fontFamily = PlusJakartaSans,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Color(0xFF0F172A),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = pres.highlights,
+                fontSize = 11.sp,
+                fontFamily = PlusJakartaSans,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF64748B),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Surface(
+                color = pres.badgeBg,
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    text = pres.badgeText,
+                    fontSize = 9.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Bold,
+                    color = pres.iconTint,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
+                )
             }
         }
     }

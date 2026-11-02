@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Circular Deep Emerald Brand Badge -->
+    <path
+        android:fillColor="#FF0E675E"
+        android:pathData="M24,0 C10.745,0 0,10.745 0,24 C0,37.255 10.745,48 24,48 C37.255,48 48,37.255 48,24 C48,10.745 37.255,0 24,0 Z" />
+    <!-- White Pharmacy Cross -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M21,11 C21,9.895 21.895,9 23,9 L25,9 C26.105,9 27,9.895 27,11 L27,21 L37,21 C38.105,21 39,21.895 39,23 L39,25 C39,26.105 38.105,27 37,27 L27,27 L27,37 C27,38.105 26.105,39 25,39 L23,39 C21.895,39 21,38.105 21,37 L21,27 L11,27 C9.895,27 9,26.105 9,25 L9,23 C9,21.895 9.895,21 11,21 L21,21 Z" />
+</vector>

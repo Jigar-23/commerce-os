@@ -73,7 +73,10 @@ fun CommerceOSApp(
     catalogViewModel: CatalogViewModel,
     categoryViewModel: CategoryViewModel,
     verticalHomeViewModel: VerticalHomeViewModel,
-    universalSearchViewModel: UniversalSearchViewModel
+    universalSearchViewModel: UniversalSearchViewModel,
+    pendingNotificationAction: String? = null,
+    pendingNotificationTargetId: String? = null,
+    onConsumePendingNotification: () -> Unit = {}
 ) {
     val router = remember { AppDestinationRouter() }
     val clientConfig = LocalClientConfiguration.current
@@ -129,6 +132,7 @@ fun CommerceOSApp(
             is Screen.Cart -> {
                 navigateRoot(Screen.Cart)
                 cartViewModel.loadCart()
+                prescriptionViewModel.load(authenticatedCustomerId)
             }
             is Screen.Prescriptions -> {
                 prescriptionViewModel.load(authenticatedCustomerId)
@@ -155,6 +159,36 @@ fun CommerceOSApp(
     }
 
     var showRxUploadDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingNotificationAction, pendingNotificationTargetId, session.isAuthenticated) {
+        val action = pendingNotificationAction ?: return@LaunchedEffect
+        if (!session.isAuthenticated) return@LaunchedEffect
+
+        when (action) {
+            "TRACK_ORDER" -> {
+                val orderId = pendingNotificationTargetId
+                if (!orderId.isNullOrBlank()) {
+                    orderViewModel.loadDetail(orderId)
+                    navigateRoot(Screen.OrderTracking(orderId))
+                } else {
+                    navigateRoot(Screen.OrderHistory)
+                    orderViewModel.loadHistory(authenticatedCustomerId)
+                }
+            }
+            "REFILL_CART", "CART" -> {
+                navigateRoot(Screen.Cart)
+                cartViewModel.loadCart()
+            }
+            "REORDER", "ORDERS" -> {
+                navigateRoot(Screen.OrderHistory)
+                orderViewModel.loadHistory(authenticatedCustomerId)
+            }
+            "NOTIFICATIONS" -> {
+                navigate(Screen.Notifications)
+            }
+        }
+        onConsumePendingNotification()
+    }
 
     LaunchedEffect(authenticatedCustomerId, session.isAuthenticated) {
         if (session.isAuthenticated) {
@@ -205,15 +239,14 @@ fun CommerceOSApp(
                     if (!pin.isNullOrBlank()) {
                         orderViewModel.setKnownOrderPin(event.orderId, pin)
                     }
-                    val orderCode = event.orderId.takeLast(6).uppercase()
-                    com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
-                        context,
-                        com.commerceos.android.notifications.InAppNotificationItem(
-                            title = "Order #$orderCode Placed",
-                            message = "Your order is confirmed and being prepared at the fulfillment hub. Express 10-15 min delivery guaranteed.",
-                            category = "Orders",
-                            deepLinkAction = "ORDERS"
-                        )
+                    val itemCount = event.order?.items?.sumOf { it.quantity } ?: 1
+                    val totalAmount = event.order?.totalAmount?.let { com.commerceos.android.util.MoneyFormatter.format(it) } ?: "540"
+                    com.commerceos.android.notifications.CustomerNotificationManager.postOrderPlacedNotification(
+                        context = context,
+                        orderId = event.orderId,
+                        itemCount = itemCount,
+                        totalAmount = totalAmount,
+                        etaMins = 12
                     )
                     event.order?.items?.forEach { item ->
                         if (com.commerceos.android.notifications.ChronicRefillReminderManager.isChronicMedication(item.name, item.sku)) {
@@ -312,8 +345,9 @@ fun CommerceOSApp(
         )
     } else {
         val isCategoryScreen = currentScreen is Screen.Categories
+        val isHomeScreen = currentScreen is Screen.Home
         Scaffold(
-            containerColor = if (isCategoryScreen) Color(0xFF005844) else CommerceColors.Background,
+            containerColor = if (isCategoryScreen) Color(0xFF005844) else if (isHomeScreen) Color(0xFF0E675E) else CommerceColors.Background,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val hideTopBar = currentScreen is Screen.Home ||
@@ -410,7 +444,11 @@ fun CommerceOSApp(
                         )
                         NavigationBarItem(
                             selected = currentScreen is Screen.Cart,
-                            onClick = { navigate(Screen.Cart); cartViewModel.loadCart() },
+                            onClick = {
+                                navigate(Screen.Cart)
+                                cartViewModel.loadCart()
+                                prescriptionViewModel.load(authenticatedCustomerId)
+                            },
                             icon = {
                                 BadgedBox(badge = {
                                     val count = cartViewModel.itemCount
@@ -434,7 +472,7 @@ fun CommerceOSApp(
             }
         }
     ) { padding ->
-        val topPadding = if (isCategoryScreen) 0.dp else padding.calculateTopPadding()
+        val topPadding = if (isCategoryScreen || isHomeScreen) 0.dp else padding.calculateTopPadding()
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -484,6 +522,9 @@ fun CommerceOSApp(
                         },
                         onProfileClick = {
                             navigateRoot(Screen.Account)
+                        },
+                        onNotificationsClick = {
+                            navigate(Screen.Notifications)
                         },
                     onEntityClick = { entity ->
                         when (entity) {

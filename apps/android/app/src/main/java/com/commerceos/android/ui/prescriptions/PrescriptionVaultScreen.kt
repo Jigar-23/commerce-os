@@ -115,20 +115,20 @@ fun PrescriptionVaultScreen(
 
         Spacer(modifier = Modifier.height(Spacing.md))
 
-        val isLimitReached = prescriptions.size >= 100
         Button(
             onClick = onUpload,
-            enabled = !isLimitReached,
-            shape = RoundedCornerShape(Radius.Button),
-            colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                if (isLimitReached) "Storage limit reached (100/100)" else "Upload prescription (${prescriptions.size}/100)",
-                style = CommerceTypography.Label,
-                fontWeight = FontWeight.Bold
+                "Upload Prescription",
+                fontSize = 14.sp,
+                fontFamily = com.commerceos.android.ui.theme.PlusJakartaSans,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
             )
         }
 
