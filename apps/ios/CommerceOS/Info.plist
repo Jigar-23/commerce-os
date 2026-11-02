@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>CommerceOS</string>
+	<string>Commerce OS</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,6 +20,15 @@
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>COMMERCEOS_API_URL</key>
+	<string>https://commerce-os-api.onrender.com</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is needed for scanning medical prescriptions via VisionKit.</string>
 	<key>NSFaceIDUsageDescription</key>
@@ -28,13 +37,11 @@
 	<string>Location is used for delivery address selection and live courier tracking.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Resources/Fonts/plus_jakarta_sans.ttf</string>
+		<string>Resources/Fonts/inter.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

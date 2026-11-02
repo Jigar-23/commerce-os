@@ -2,14 +2,14 @@ import SwiftUI
 import MapKit
 
 /**
- * 1:1 Parity with Android AddAddressFlow.kt
- * Implements the full production Add Address flow:
- * - Interactive map viewport with center pinpoint & camera settle reverse geocoding
+ * 1:1 Parity with Android AddAddressFlow.kt and Zomato-Grade Address Experience.
+ * Implements:
+ * - 120Hz native Apple MapKit viewport with Zomato physical spring pin & drop shadow
  * - Real-time Google Places / Apple Maps autocomplete search overlay
  * - Floating "Use current location" GPS lock button
- * - Sliding bottom sheet with locality badge
+ * - Sliding bottom sheet with 2-tier locality hierarchy & smooth cross-fades
  * - Complete structured address form:
- *     * House / Flat / Society details
+ *     * House / Flat / Society details with in-field clear button
  *     * Tag selector (Home, Work, Other)
  *     * Recipient selector (Myself vs Someone else)
  *     * 10-digit delivery contact phone validation
@@ -18,7 +18,7 @@ import MapKit
  *     * Delivery entrance selector (Main Gate, Gate 2, etc.)
  *     * Delivery instructions preset chips
  *     * Default address checkbox
- *     * Validation-bound Save address button
+ *     * Validation-bound Save address button in #0E675E
  */
 public struct AddAddressFlowView: View {
     @Environment(\.presentationMode) private var presentationMode
@@ -28,8 +28,9 @@ public struct AddAddressFlowView: View {
 
     @State private var isForSomeoneElse: Bool = false
     @State private var makeDefault: Bool = false
-    @State private var sheetHeight: CGFloat = 340
+    @State private var sheetHeight: CGFloat = 360
     @State private var isShowingSearchOverlay: Bool = false
+    @State private var isMapMoving: Bool = false
 
     public init(onSaveAddress: @escaping (AddressDto) -> Void = { _ in }) {
         self.onSaveAddress = onSaveAddress
@@ -68,7 +69,7 @@ public struct AddAddressFlowView: View {
                     }
 
                     Text("Select delivery location")
-                        .font(.system(size: 19, weight: .heavy))
+                        .font(CommerceOSTheme.Typography.titleMedium())
                         .foregroundColor(Color(hex: "0F172A"))
 
                     Spacer()
@@ -80,7 +81,7 @@ public struct AddAddressFlowView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(hex: "059669"))
+                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
 
                     TextField("Search for area, street name...", text: Binding(
                         get: { viewModel.platformUiState.locationSearchQuery },
@@ -89,7 +90,7 @@ public struct AddAddressFlowView: View {
                             isShowingSearchOverlay = $0.trimmingCharacters(in: .whitespaces).count >= 2
                         }
                     ))
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .medium))
 
                     if !viewModel.platformUiState.locationSearchQuery.isEmpty {
                         Button(action: {
@@ -117,47 +118,45 @@ public struct AddAddressFlowView: View {
 
             // Map Area & Bottom Form Sheet
             ZStack(alignment: .bottom) {
-                // Interactive Map Viewport
+                // Interactive 120Hz Native MapKit Viewport
                 ZStack {
                     LocationMapViewport(
                         centerCoordinate: currentForm.geoLocation?.coordinate,
+                        onCameraMoveStateChanged: { moving in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+                                isMapMoving = moving
+                            }
+                        },
                         onCameraSettled: { coord in
                             viewModel.onMapCameraSettled(lat: coord.latitude, lng: coord.longitude)
                         }
                     )
                     .ignoresSafeArea(.keyboard, edges: .bottom)
 
-                    // Center Target Pin
-                    VStack(spacing: 0) {
-                        Image(systemName: "mappin")
-                            .font(.system(size: 38, weight: .bold))
-                            .foregroundColor(Color(hex: "16A34A"))
-                            .shadow(color: Color.black.opacity(0.25), radius: 4, x: 0, y: 3)
-                        Circle()
-                            .fill(Color.black.opacity(0.2))
-                            .frame(width: 8, height: 4)
-                    }
-                    .offset(y: -19)
+                    // Zomato-Grade Grounded Center Pin with Levitation & Landing Bounce
+                    ZomatoDeliveryPinView(isMoving: isMapMoving)
+                        .offset(y: -20)
 
                     // Floating "Use current location" GPS Pill
                     VStack {
                         Spacer()
                         Button(action: {
+                            HapticFeedbackEngine.shared.triggerImpact(.medium)
                             viewModel.requestCurrentGpsLocation()
                         }) {
                             HStack(spacing: 6) {
                                 Image(systemName: "location.fill")
                                     .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(Color(hex: "059669"))
+                                    .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                                 Text("Use current location")
                                     .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(Color(hex: "047857"))
+                                    .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .background(Color.white)
                             .cornerRadius(24)
-                            .shadow(color: Color.black.opacity(0.12), radius: 6, x: 0, y: 3)
+                            .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 3)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 24)
                                     .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
@@ -174,13 +173,13 @@ public struct AddAddressFlowView: View {
                             HStack {
                                 Spacer()
                                 ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "16A34A")))
+                                    .progressViewStyle(CircularProgressViewStyle(tint: CommerceOSTheme.Colors.brandPrimary))
                                     .padding(24)
                                 Spacer()
                             }
                         } else if viewModel.platformUiState.placeSearchResults.isEmpty {
                             Text("No areas found. Try a landmark or city name.")
-                                .font(.system(size: 13))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(Color(hex: "64748B"))
                                 .padding(16)
                         } else {
@@ -194,14 +193,14 @@ public struct AddAddressFlowView: View {
                                             HStack(spacing: 12) {
                                                 Image(systemName: "location.fill")
                                                     .font(.system(size: 16))
-                                                    .foregroundColor(Color(hex: "16A34A"))
+                                                    .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
 
                                                 VStack(alignment: .leading, spacing: 2) {
                                                     Text(result.primaryText)
                                                         .font(.system(size: 14, weight: .bold))
                                                         .foregroundColor(Color(hex: "0F172A"))
                                                     Text(result.secondaryText)
-                                                        .font(.system(size: 12))
+                                                        .font(.system(size: 12, weight: .medium))
                                                         .foregroundColor(Color(hex: "64748B"))
                                                         .lineLimit(1)
                                                 }
@@ -238,51 +237,67 @@ public struct AddAddressFlowView: View {
                             .padding(.bottom, 6)
 
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 14) {
                                 Text("Delivery details")
-                                    .font(.system(size: 15, weight: .heavy))
+                                    .font(CommerceOSTheme.Typography.titleMedium())
                                     .foregroundColor(Color(hex: "0F172A"))
 
-                                // Locality Detection Box (Clickable to re-search)
+                                // 2-Tier Location Card (Clickable to re-search)
                                 Button(action: {
                                     isShowingSearchOverlay = true
                                     viewModel.searchLocationPlaces(" ")
                                 }) {
-                                    HStack(spacing: 10) {
+                                    HStack(spacing: 12) {
                                         ZStack {
                                             Circle()
-                                                .fill(Color(hex: "DCFCE7"))
-                                                .frame(width: 32, height: 32)
+                                                .fill(CommerceOSTheme.Colors.brandPrimarySoft)
+                                                .frame(width: 36, height: 36)
                                             Image(systemName: "location.fill")
-                                                .font(.system(size: 14, weight: .bold))
-                                                .foregroundColor(Color(hex: "16A34A"))
+                                                .font(.system(size: 16, weight: .bold))
+                                                .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                                         }
 
                                         VStack(alignment: .leading, spacing: 2) {
-                                            let localityText: String = {
-                                                if viewModel.platformUiState.isReverseGeocoding {
+                                            let primaryTitle: String = {
+                                                if isMapMoving || viewModel.platformUiState.isReverseGeocoding {
                                                     return "Detecting location..."
                                                 }
-                                                let area = currentForm.subLocality.isEmpty ?
+                                                return currentForm.subLocality.isEmpty ?
                                                     (currentForm.street.isEmpty ? (currentForm.locality.isEmpty ? "Selected Locality" : currentForm.locality) : currentForm.street) :
                                                     currentForm.subLocality
-                                                if !currentForm.city.isEmpty && !area.localizedCaseInsensitiveContains(currentForm.city) {
-                                                    return "\(area), \(currentForm.city)"
-                                                }
-                                                return area
                                             }()
 
-                                            Text(localityText)
-                                                .font(.system(size: 14, weight: .bold))
+                                            let secondarySubtitle: String = {
+                                                if isMapMoving || viewModel.platformUiState.isReverseGeocoding {
+                                                    return "Pinpointing area on map..."
+                                                }
+                                                var parts: [String] = []
+                                                if !currentForm.city.isEmpty { parts.append(currentForm.city) }
+                                                if !currentForm.state.isEmpty { parts.append(currentForm.state) }
+                                                if !currentForm.postalCode.isEmpty { parts.append(currentForm.postalCode) }
+                                                return parts.joined(separator: ", ").isEmpty ? "India" : parts.joined(separator: ", ")
+                                            }()
+
+                                            Text(primaryTitle)
+                                                .font(.system(size: 15, weight: .bold))
                                                 .foregroundColor(Color(hex: "0F172A"))
-                                                .lineLimit(2)
+                                                .lineLimit(1)
+
+                                            Text(secondarySubtitle)
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(Color(hex: "64748B"))
+                                                .lineLimit(1)
                                         }
 
                                         Spacer()
 
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 13, weight: .bold))
-                                            .foregroundColor(Color(hex: "94A3B8"))
+                                        Text("Change")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(CommerceOSTheme.Colors.brandPrimarySoft)
+                                            .cornerRadius(6)
                                     }
                                     .padding(12)
                                     .background(Color(hex: "F8FAFC"))
@@ -294,21 +309,35 @@ public struct AddAddressFlowView: View {
                                 }
                                 .buttonStyle(PlainButtonStyle())
 
-                                // Address Details* (House / Floor / Apartment)
+                                // Address Details* (House / Floor / Apartment) with In-Field Clear
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Address details*")
                                         .font(.system(size: 12, weight: .bold))
                                         .foregroundColor(Color(hex: "64748B"))
 
-                                    TextField("Enter complete address*", text: Binding(
-                                        get: { currentForm.houseNumber },
-                                        set: {
-                                            var copy = currentForm
-                                            copy.houseNumber = $0
-                                            viewModel.updateFormAddress(copy)
+                                    HStack {
+                                        TextField("House / Flat / Block / Floor", text: Binding(
+                                            get: { currentForm.houseNumber },
+                                            set: {
+                                                var copy = currentForm
+                                                copy.houseNumber = $0
+                                                viewModel.updateFormAddress(copy)
+                                            }
+                                        ))
+                                        .font(.system(size: 14, weight: .medium))
+
+                                        if !currentForm.houseNumber.isEmpty {
+                                            Button(action: {
+                                                var copy = currentForm
+                                                copy.houseNumber = ""
+                                                viewModel.updateFormAddress(copy)
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.system(size: 16))
+                                                    .foregroundColor(Color(hex: "94A3B8"))
+                                            }
                                         }
-                                    ))
-                                    .font(.system(size: 13))
+                                    }
                                     .padding(12)
                                     .background(Color.white)
                                     .cornerRadius(12)
@@ -317,8 +346,8 @@ public struct AddAddressFlowView: View {
                                             .stroke(validationResult.houseNumberError != nil ? Color(hex: "EF4444") : Color(hex: "CBD5E1"), lineWidth: 1)
                                     )
 
-                                    Text("Example: A-504, Floor 5, Shanti Heights, Near City Mall")
-                                        .font(.system(size: 11))
+                                    Text("E.g. A-504, 5th Floor, Shanti Heights, Near City Mall")
+                                        .font(.system(size: 11, weight: .medium))
                                         .foregroundColor(Color(hex: "64748B"))
                                         .padding(.leading, 4)
                                 }
@@ -361,7 +390,6 @@ public struct AddAddressFlowView: View {
                                     }
                                 )
 
-
                                 // Conflict Warning Alert Banner (Address ↔ Geocode Conflict)
                                 if conflictWarning.hasConflict {
                                     VStack(alignment: .leading, spacing: 6) {
@@ -376,7 +404,7 @@ public struct AddAddressFlowView: View {
 
                                         if let msg = conflictWarning.message {
                                             Text(msg)
-                                                .font(.system(size: 11))
+                                                .font(.system(size: 11, weight: .medium))
                                                 .foregroundColor(Color(hex: "78350F"))
                                         }
 
@@ -439,7 +467,7 @@ public struct AddAddressFlowView: View {
                                     HStack(spacing: 8) {
                                         Image(systemName: makeDefault ? "checkmark.square.fill" : "square")
                                             .font(.system(size: 16))
-                                            .foregroundColor(makeDefault ? Color(hex: "16A34A") : Color(hex: "94A3B8"))
+                                            .foregroundColor(makeDefault ? CommerceOSTheme.Colors.brandPrimary : Color(hex: "94A3B8"))
                                         Text("Make this my default delivery address")
                                             .font(.system(size: 13, weight: .semibold))
                                             .foregroundColor(Color(hex: "0F172A"))
@@ -451,6 +479,7 @@ public struct AddAddressFlowView: View {
 
                                 // Save Address Button
                                 Button(action: {
+                                    HapticFeedbackEngine.shared.triggerImpact(.medium)
                                     viewModel.submitSaveFormAddress { success in
                                         if success {
                                             if let saved = viewModel.selectedAddress {
@@ -469,13 +498,13 @@ public struct AddAddressFlowView: View {
                                                 .foregroundColor(.white)
                                         } else {
                                             Text("Save address")
-                                                .font(.system(size: 15, weight: .heavy))
+                                                .font(.system(size: 15, weight: .bold))
                                                 .foregroundColor(validationResult.isValid ? .white : Color(hex: "94A3B8"))
                                         }
                                     }
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 50)
-                                    .background(validationResult.isValid ? Color(hex: "166534") : Color(hex: "E2E8F0"))
+                                    .background(validationResult.isValid ? CommerceOSTheme.Colors.brandPrimary : Color(hex: "E2E8F0"))
                                     .cornerRadius(12)
                                 }
                                 .disabled(!validationResult.isValid || viewModel.platformUiState.saveState == .saving)
@@ -488,7 +517,7 @@ public struct AddAddressFlowView: View {
                     .frame(height: sheetHeight)
                     .background(Color.white)
                     .cornerRadius(24, corners: [.topLeft, .topRight])
-                    .shadow(color: Color.black.opacity(0.16), radius: 16, x: 0, y: -4)
+                    .shadow(color: Color.black.opacity(0.14), radius: 16, x: 0, y: -4)
                 }
             }
         }

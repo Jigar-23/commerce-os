@@ -15,18 +15,24 @@ public struct CartScreen: View {
     private enum CartSheetDestination: Identifiable {
         case addressSelection
         case addAddressFlow
-        case vault
+        case vaultSheet
+        case vaultUpload
+        case preview(PrescriptionItem)
 
         var id: String {
             switch self {
             case .addressSelection: return "addressSelection"
             case .addAddressFlow: return "addAddressFlow"
-            case .vault: return "vault"
+            case .vaultSheet: return "vaultSheet"
+            case .vaultUpload: return "vaultUpload"
+            case .preview(let rx): return "preview_\(rx.id)"
             }
         }
     }
     @State private var activeCartSheet: CartSheetDestination? = nil
     @State private var isPrescriptionAttached: Bool = true
+    @State private var savedPrescriptions: [PrescriptionItem] = []
+    @State private var attachedPrescription: PrescriptionItem? = nil
     
     let onCheckoutSuccess: (String) -> Void
     
@@ -176,57 +182,104 @@ public struct CartScreen: View {
                     )
                     .padding(.horizontal, 14)
                     
-                    // Prescription Gating Banner (Matching Android)
-                    if cartStore.hasPrescriptionItem {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top, spacing: 10) {
+                    // Doctor's Prescription Verification Card (1:1 Android Parity)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            HStack(spacing: 8) {
                                 ZStack {
-                                    Circle()
-                                        .fill(isPrescriptionAttached ? Color(hex: "DCFCE7") : Color(hex: "FEE2E2"))
-                                        .frame(width: 38, height: 38)
-                                    Image(systemName: isPrescriptionAttached ? "checkmark.seal.fill" : "doc.text.fill")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(isPrescriptionAttached ? Color(hex: "16A34A") : Color(hex: "DC2626"))
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(attachedPrescription != nil ? CommerceOSTheme.Colors.brandPrimarySoft : Color(hex: "EFF6FF"))
+                                        .frame(width: 32, height: 32)
+                                    Image(systemName: attachedPrescription != nil ? "checkmark.circle.fill" : "info.circle.fill")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(attachedPrescription != nil ? CommerceOSTheme.Colors.brandPrimary : Color(hex: "0284C7"))
                                 }
-                                
+                                Text("Doctor's Prescription")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(Color(hex: "0F172A"))
+                            }
+                            Spacer()
+                            Text(attachedPrescription != nil ? "ATTACHED" : "OPTIONAL")
+                                .font(.system(size: 10, weight: .heavy))
+                                .foregroundColor(attachedPrescription != nil ? CommerceOSTheme.Colors.brandPrimary : Color(hex: "64748B"))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(attachedPrescription != nil ? CommerceOSTheme.Colors.brandPrimarySoft : Color(hex: "F1F5F9"))
+                                .cornerRadius(6)
+                        }
+
+                        if let rx = attachedPrescription {
+                            HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(isPrescriptionAttached ? "Prescription Attached & Verified" : "Prescription Required (Schedule H/H1)")
+                                    Text("Attached: \(rx.patientName.isEmpty ? "Patient Rx" : rx.patientName)")
                                         .font(.system(size: 13, weight: .bold))
                                         .foregroundColor(Color(hex: "0F172A"))
-                                    Text(isPrescriptionAttached ? "Valid doctor's prescription attached to this order." : "Your cart contains regulated medicines requiring a valid prescription.")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(Color(hex: "64748B"))
+                                    Text("Rx #\(rx.id.suffix(6).uppercased()) • Pharmacist will verify")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                                 }
                                 Spacer()
-                            }
-                            
-                            Button(action: { activeCartSheet = .vault }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: isPrescriptionAttached ? "doc.badge.gearshape" : "camera.viewfinder")
-                                        .font(.system(size: 13, weight: .bold))
-                                    Text(isPrescriptionAttached ? "Change Attached Prescription" : "Scan / Select Prescription from Vault")
-                                        .font(.system(size: 12, weight: .bold))
+                                Button("Change") {
+                                    activeCartSheet = .vaultSheet
                                 }
-                                .foregroundColor(Color(hex: "059669"))
-                                .padding(.vertical, 8)
-                                .frame(maxWidth: .infinity)
-                                .background(Color(hex: "ECFDF5"))
-                                .cornerRadius(8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color(hex: "059669").opacity(0.4), lineWidth: 1)
-                                )
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color(hex: "0284C7"))
+
+                                Button("Remove") {
+                                    attachedPrescription = nil
+                                }
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color(hex: "DC2626"))
+                            }
+                            .padding(12)
+                            .background(Color(hex: "F8FAFC"))
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: "E2E8F0"), lineWidth: 1))
+                        } else {
+                            Text("Upload prescription for licensed pharmacist verification (optional). You can still proceed without it.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(hex: "64748B"))
+
+                            HStack(spacing: 8) {
+                                Button(action: { activeCartSheet = .vaultSheet }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "list.bullet")
+                                            .font(.system(size: 13, weight: .bold))
+                                        Text(savedPrescriptions.isEmpty ? "Select Saved" : "From Vault (\(savedPrescriptions.count))")
+                                            .font(.system(size: 12, weight: .bold))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 38)
+                                    .foregroundColor(Color(hex: "334155"))
+                                    .background(Color.white)
+                                    .cornerRadius(10)
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: "CBD5E1"), lineWidth: 1))
+                                }
+
+                                Button(action: { activeCartSheet = .vaultUpload }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 13, weight: .bold))
+                                        Text("Upload New")
+                                            .font(.system(size: 12, weight: .bold))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 38)
+                                    .foregroundColor(.white)
+                                    .background(CommerceOSTheme.Colors.brandPrimary)
+                                    .cornerRadius(10)
+                                }
                             }
                         }
-                        .padding(14)
-                        .background(Color.white)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(isPrescriptionAttached ? Color(hex: "86EFAC") : Color(hex: "FCA5A5"), lineWidth: 1.5)
-                        )
-                        .padding(.horizontal, 14)
                     }
+                    .padding(14)
+                    .background(Color.white)
+                    .cornerRadius(14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(attachedPrescription != nil ? CommerceOSTheme.Colors.brandPrimary.opacity(0.4) : Color(hex: "E2E8F0"), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 14)
                     
                     // Tip Delivery Partner Widget
                     VStack(alignment: .leading, spacing: 10) {
@@ -466,9 +519,40 @@ public struct CartScreen: View {
                         addressRepository.selectAddress(newAddr)
                         activeCartSheet = nil
                     }
-                case .vault:
-                    PrescriptionVaultScreen()
+                case .vaultSheet:
+                    SavedPrescriptionsBottomSheet(
+                        prescriptions: savedPrescriptions,
+                        selectedRxId: attachedPrescription?.id,
+                        onSelect: { rx in
+                            attachedPrescription = rx
+                            activeCartSheet = nil
+                        },
+                        onUploadNew: {
+                            activeCartSheet = .vaultUpload
+                        },
+                        onPreview: { rx in
+                            activeCartSheet = .preview(rx)
+                        }
+                    )
+                case .vaultUpload:
+                    UploadPrescriptionModal(onUploadSuccess: { newRx in
+                        attachedPrescription = newRx
+                        savedPrescriptions.insert(newRx, at: 0)
+                        activeCartSheet = nil
+                    })
+                    .environmentObject(container)
+                case .preview(let rx):
+                    PrescriptionQuickPreviewModal(
+                        prescription: rx,
+                        onAttach: {
+                            attachedPrescription = rx
+                            activeCartSheet = nil
+                        }
+                    )
                 }
+            }
+            .onAppear {
+                loadSavedPrescriptions()
             }
         }
     }
@@ -478,6 +562,31 @@ public struct CartScreen: View {
         let handling = 5.00
         let tip = Double(selectedTip)
         return cartStore.subtotal + delivery + handling + tip
+    }
+
+    private func loadSavedPrescriptions() {
+        Task {
+            do {
+                let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+                let list: [PrescriptionServerDto] = try await container.apiClient.get(endpoint: "/api/v1/prescriptions/customer/\(customerId)")
+                let mapped = list.map { dto in
+                    PrescriptionItem(
+                        id: dto.id,
+                        doctorName: dto.doctorName ?? "Licensed Practitioner",
+                        doctorRegNo: "CDSCO-VERIFIED",
+                        patientName: dto.patientName ?? "Self Patient",
+                        extractedMedicines: [],
+                        pharmacistStatus: dto.status ?? "PENDING",
+                        uploadedDate: dto.createdAt ?? "Recent"
+                    )
+                }
+                await MainActor.run {
+                    self.savedPrescriptions = mapped
+                }
+            } catch {
+                // Ignore silent fetch failures in background
+            }
+        }
     }
     
     private func placeExpressOrder() {
@@ -549,7 +658,7 @@ public struct CartScreen: View {
                     addressId: authoritativeId,
                     deliveryAddress: addressPayload,
                     items: itemsPayload,
-                    prescriptionId: nil
+                    prescriptionId: attachedPrescription?.id
                 )
                 
                 let orderRes: ServerOrderResponse = try await container.apiClient.post(

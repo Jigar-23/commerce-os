@@ -76,23 +76,23 @@ public struct CategoriesScreen: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 4)
 
-                // Reassuring Safety Banner (Verbatim Android CategoriesScreen.kt)
+                // Reassuring Safety Banner (Subtle Healthcare Mint)
                 HStack(spacing: 10) {
                     Circle()
-                        .fill(Color(hex: "ECFDF5"))
+                        .fill(CommerceOSTheme.Colors.brandPrimarySoft)
                         .frame(width: 32, height: 32)
                         .overlay(
                             Image(systemName: "checkmark.shield.fill")
                                 .font(.system(size: 15))
-                                .foregroundColor(Color(hex: "059669"))
+                                .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                         )
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("100% Genuine Medicines")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(CommerceOSTheme.Typography.caption().weight(.bold))
                             .foregroundColor(Color(hex: "0F172A"))
                         Text("Sourced directly from licensed pharmacies • Cold chain maintained")
-                            .font(.system(size: 10))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundColor(Color(hex: "64748B"))
                             .lineLimit(1)
                     }
@@ -102,76 +102,74 @@ public struct CategoriesScreen: View {
                 .padding(10)
                 .background(Color.white)
                 .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.02), radius: 1, x: 0, y: 0.5)
+                .shadow(color: Color.black.opacity(0.02), radius: 2, x: 0, y: 1)
                 .padding(.horizontal, 14)
 
-                // 2-Column Categories Grid (Verbatim Android CategoriesScreen.kt)
+                // 2-Column Categories Grid (Modern Pastel Surfaces)
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                     ForEach(defaultCategories) { cat in
                         Button(action: {
+                            HapticFeedbackEngine.shared.triggerSelection()
                             selectedCategory = cat
                         }) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color(hex: cat.iconBg))
-                                            .frame(width: 44, height: 44)
-                                        Text(cat.emoji)
-                                            .font(.system(size: 22))
+                            VStack(alignment: .leading, spacing: 10) {
+                                // Centered Pastel Visual Tile
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(hex: cat.iconBg))
+                                        .frame(height: 72)
+
+                                    Text(cat.emoji)
+                                        .font(.system(size: 32))
+
+                                    VStack {
+                                        HStack {
+                                            Spacer()
+                                            Text("\(cat.productCount)+ items")
+                                                .font(.system(size: 9, weight: .heavy))
+                                                .foregroundColor(Color(hex: cat.iconTint))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.white.opacity(0.9))
+                                                .cornerRadius(6)
+                                                .padding(6)
+                                        }
+                                        Spacer()
                                     }
-
-                                    Spacer()
-
-                                    Text("\(cat.productCount)+")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(Color(hex: "64748B"))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color(hex: "F1F5F9"))
-                                        .cornerRadius(6)
                                 }
 
-                                VStack(alignment: .leading, spacing: 2) {
+                                VStack(alignment: .leading, spacing: 3) {
                                     Text(cat.name)
-                                        .font(.system(size: 13, weight: .bold))
+                                        .font(CommerceOSTheme.Typography.bodyMedium().weight(.bold))
                                         .foregroundColor(Color(hex: "0F172A"))
                                         .lineLimit(1)
 
                                     Text(cat.highlights)
-                                        .font(.system(size: 10))
+                                        .font(.system(size: 10, weight: .medium))
                                         .foregroundColor(Color(hex: "64748B"))
                                         .lineLimit(1)
                                 }
 
-                                HStack {
-                                    Text("View items")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(Color(hex: "059669"))
-                                    Image(systemName: "arrow.right")
+                                HStack(spacing: 4) {
+                                    Text("Explore")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
+                                    Image(systemName: "chevron.right")
                                         .font(.system(size: 9, weight: .bold))
-                                        .foregroundColor(Color(hex: "059669"))
+                                        .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
                                 }
                                 .padding(.top, 2)
                             }
                             .padding(12)
                             .background(Color.white)
-                            .cornerRadius(14)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Color(hex: "E2E8F0"), lineWidth: 1)
-                            )
-                            .shadow(color: Color.black.opacity(0.02), radius: 1, x: 0, y: 0.5)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 1.5)
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                 }
                 .padding(.horizontal, 14)
-                .padding(.bottom, 90)
+                .padding(.bottom, 140)
             }
             .padding(.top, 4)
         }

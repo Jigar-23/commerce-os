@@ -1,21 +1,25 @@
 import SwiftUI
-import WebKit
+import MapKit
 import CoreLocation
 
 /**
- * 1:1 Parity with Android RealLocationMapViewport in MapProvider.kt
- * Interactive Google Maps Viewport powered by Google Maps JavaScript API (Console Cloud Key: AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c).
- * Uses clean Zepto/Blinkit light styling and reports camera settle events for address geocoding.
+ * Zomato-Grade Native Apple MapKit Viewport for iOS.
+ * Replaces legacy WKWebView with a 120Hz native MKMapView.
+ * Provides high-precision camera state tracking (moving vs settled)
+ * and seamless programmatic pan-to animations.
  */
 public struct LocationMapViewport: UIViewRepresentable {
     public var centerCoordinate: CLLocationCoordinate2D?
+    public var onCameraMoveStateChanged: (Bool) -> Void
     public var onCameraSettled: (CLLocationCoordinate2D) -> Void
 
     public init(
         centerCoordinate: CLLocationCoordinate2D? = nil,
+        onCameraMoveStateChanged: @escaping (Bool) -> Void = { _ in },
         onCameraSettled: @escaping (CLLocationCoordinate2D) -> Void = { _ in }
     ) {
         self.centerCoordinate = centerCoordinate
+        self.onCameraMoveStateChanged = onCameraMoveStateChanged
         self.onCameraSettled = onCameraSettled
     }
 
@@ -23,174 +27,155 @@ public struct LocationMapViewport: UIViewRepresentable {
         Coordinator(self)
     }
 
-    public func makeUIView(context: Context) -> WKWebView {
-        let contentController = WKUserContentController()
-        contentController.add(context.coordinator, name: "cameraSettled")
+    public func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView(frame: .zero)
+        mapView.delegate = context.coordinator
+        mapView.showsUserLocation = false
+        mapView.showsCompass = false
+        mapView.showsScale = false
+        mapView.isPitchEnabled = false
+        mapView.isRotateEnabled = true
+        mapView.pointOfInterestFilter = .excludingAll
 
-        let config = WKWebViewConfiguration()
-        config.userContentController = contentController
-        let prefs = WKWebpagePreferences()
-        prefs.allowsContentJavaScript = true
-        config.defaultWebpagePreferences = prefs
+        // Configure light clean cartography
+        if #available(iOS 17.0, *) {
+            let config = MKStandardMapConfiguration(elevationStyle: .realistic, emphasisStyle: .muted)
+            mapView.preferredConfiguration = config
+        }
 
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.bounces = false
-        webView.isOpaque = true
-        webView.backgroundColor = UIColor(red: 248/255, green: 249/255, blue: 250/255, alpha: 1.0)
+        context.coordinator.mapView = mapView
 
-        context.coordinator.webView = webView
+        let initialCoord = centerCoordinate ?? CLLocationCoordinate2D(latitude: 20.5937, longitude: 78.9629)
+        let span = MKCoordinateSpan(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
+        let region = MKCoordinateRegion(center: initialCoord, span: span)
+        mapView.setRegion(region, animated: false)
 
-        let lat = centerCoordinate?.latitude ?? 20.5937
-        let lng = centerCoordinate?.longitude ?? 78.9629
-        let html = generateGoogleMapsViewportHtml(lat: lat, lng: lng)
-        webView.loadHTMLString(html, baseURL: URL(string: "https://maps.googleapis.com"))
-
-        return webView
+        return mapView
     }
 
-    public func updateUIView(_ uiView: WKWebView, context: Context) {
-        if let target = centerCoordinate {
-            let dLat = abs(context.coordinator.lastSettledLat - target.latitude)
-            let dLng = abs(context.coordinator.lastSettledLng - target.longitude)
-            if dLat > 0.0002 || dLng > 0.0002 {
-                context.coordinator.panTo(lat: target.latitude, lng: target.longitude)
-            }
+    public func updateUIView(_ uiView: MKMapView, context: Context) {
+        guard let target = centerCoordinate else { return }
+        let current = uiView.centerCoordinate
+        let dLat = abs(current.latitude - target.latitude)
+        let dLng = abs(current.longitude - target.longitude)
+
+        // Only animate camera if target coordinate significantly diverged (e.g. from GPS tap or place search)
+        if (dLat > 0.0003 || dLng > 0.0003) && !context.coordinator.isUserInteracting {
+            let span = MKCoordinateSpan(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
+            let region = MKCoordinateRegion(center: target, span: span)
+            uiView.setRegion(region, animated: true)
         }
     }
 
-    public class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    public class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         var parent: LocationMapViewport
-        weak var webView: WKWebView?
-        var lastSettledLat: Double = 0.0
-        var lastSettledLng: Double = 0.0
-        private var isLoaded = false
+        weak var mapView: MKMapView?
+        var isUserInteracting: Bool = false
         private var debounceTimer: Timer?
 
         init(_ parent: LocationMapViewport) {
             self.parent = parent
-            self.lastSettledLat = parent.centerCoordinate?.latitude ?? 20.5937
-            self.lastSettledLng = parent.centerCoordinate?.longitude ?? 78.9629
         }
 
-        public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            isLoaded = true
-        }
+        public func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+            // Detect user-driven gesture vs programmatic pan
+            let view = mapView.subviews.first
+            if let gestureRecognizers = view?.gestureRecognizers {
+                for recognizer in gestureRecognizers {
+                    if recognizer.state == .began || recognizer.state == .changed {
+                        isUserInteracting = true
+                        break
+                    }
+                }
+            }
 
-        public func panTo(lat: Double, lng: Double) {
-            lastSettledLat = lat
-            lastSettledLng = lng
-            if isLoaded {
-                let js = "if (window.panToCoordinates) { window.panToCoordinates(\(lat), \(lng)); }"
-                webView?.evaluateJavaScript(js, completionHandler: nil)
+            debounceTimer?.invalidate()
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.parent.onCameraMoveStateChanged(true)
             }
         }
 
-        public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "cameraSettled",
-                  let body = message.body as? [String: Any],
-                  let lat = body["lat"] as? Double,
-                  let lng = body["lng"] as? Double else { return }
-
-            lastSettledLat = lat
-            lastSettledLng = lng
-
+        public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
             debounceTimer?.invalidate()
-            debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
-                guard let self = self else { return }
-                self.parent.onCameraSettled(CLLocationCoordinate2D(latitude: lat, longitude: lng))
+            debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.22, repeats: false) { [weak self] _ in
+                guard let self = self, let mv = self.mapView else { return }
+                self.isUserInteracting = false
+                let settledCoord = mv.centerCoordinate
+
+                DispatchQueue.main.async {
+                    self.parent.onCameraMoveStateChanged(false)
+                    self.parent.onCameraSettled(settledCoord)
+                }
             }
         }
     }
 }
 
-// MARK: - Light Google Maps HTML Template for Address Viewport
-private func generateGoogleMapsViewportHtml(lat: Double, lng: Double) -> String {
-    return #"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <style>
-        html, body, #map {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            background: #f8f9fa;
-            overflow: hidden;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-    </style>
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c&libraries=geometry"></script>
-</head>
-<body>
-<div id="map"></div>
-<script>
-    var ZEPTO_LIGHT_STYLE = [
-        { "elementType": "geometry", "stylers": [{ "color": "#f8f9fa" }] },
-        { "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
-        { "elementType": "labels.text.fill", "stylers": [{ "color": "#616161" }] },
-        { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
-        { "featureType": "administrative.land_parcel", "elementType": "labels.text.fill", "stylers": [{ "color": "#bdbdbd" }] },
-        { "featureType": "poi", "elementType": "geometry", "stylers": [{ "color": "#eeeeee" }] },
-        { "featureType": "poi", "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] },
-        { "featureType": "poi.park", "elementType": "geometry", "stylers": [{ "color": "#e8f5e9" }] },
-        { "featureType": "poi.park", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] },
-        { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
-        { "featureType": "road.arterial", "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] },
-        { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#dadada" }] },
-        { "featureType": "road.highway", "elementType": "labels.text.fill", "stylers": [{ "color": "#616161" }] },
-        { "featureType": "road.local", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] },
-        { "featureType": "transit.line", "elementType": "geometry", "stylers": [{ "color": "#e5e5e5" }] },
-        { "featureType": "transit.station", "elementType": "geometry", "stylers": [{ "color": "#eeeeee" }] },
-        { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c8e0f4" }] },
-        { "featureType": "water", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] }
-    ];
+// MARK: - Zomato-Grade Grounded Delivery Pin Component
+public struct ZomatoDeliveryPinView: View {
+    public let isMoving: Bool
 
-    var map = null;
-    function initMap() {
-        var center = { lat: INIT_LAT, lng: INIT_LNG };
-        map = new google.maps.Map(document.getElementById('map'), {
-            center: center,
-            zoom: 16,
-            styles: ZEPTO_LIGHT_STYLE,
-            disableDefaultUI: true,
-            zoomControl: false,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: false,
-            gestureHandling: 'greedy'
-        });
+    public init(isMoving: Bool) {
+        self.isMoving = isMoving
+    }
 
-        map.addListener('idle', function() {
-            var c = map.getCenter();
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cameraSettled) {
-                window.webkit.messageHandlers.cameraSettled.postMessage({
-                    lat: c.lat(),
-                    lng: c.lng()
-                });
+    public var body: some View {
+        ZStack(alignment: .bottom) {
+            // 1. Physical Ground Anchor Disk (Tip of pin rests on this shadow)
+            Ellipse()
+                .fill(Color(hex: "0F172A").opacity(isMoving ? 0.20 : 0.42))
+                .frame(width: isMoving ? 8 : 15, height: isMoving ? 3 : 5)
+                .animation(.spring(response: 0.35, dampingFraction: 0.65), value: isMoving)
+
+            // 2. Elevating Teardrop Pin with Spring Levitation & Landing Bounce
+            ZStack(alignment: .center) {
+                // Teardrop pin container
+                VStack(spacing: 0) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: "0E675E"))
+                            .frame(width: 38, height: 38)
+                            .shadow(color: Color.black.opacity(0.18), radius: 4, x: 0, y: 2)
+
+                        Image(systemName: "mappin")
+                            .font(.system(size: 19, weight: .black))
+                            .foregroundColor(.white)
+                    }
+
+                    // Triangular pin point
+                    PinTipShape()
+                        .fill(Color(hex: "0E675E"))
+                        .frame(width: 12, height: 10)
+                        .offset(y: -2)
+                }
             }
-        });
-    }
-
-    function panToCoordinates(lat, lng) {
-        if (map) {
-            map.panTo(new google.maps.LatLng(lat, lng));
+            .offset(y: isMoving ? -20 : 0)
+            .animation(
+                isMoving
+                    ? .easeOut(duration: 0.16)
+                    : .spring(response: 0.38, dampingFraction: 0.62, blendDuration: 0),
+                value: isMoving
+            )
+        }
+        .frame(width: 44, height: 58, alignment: .bottom)
+        .onChange(of: isMoving) { moving in
+            if !moving {
+                // Subtle tactile haptic click on pin drop
+                HapticFeedbackEngine.shared.triggerImpact(.light)
+            }
         }
     }
-    window.panToCoordinates = panToCoordinates;
+}
 
-    if (typeof google !== 'undefined' && google.maps) {
-        initMap();
-    } else {
-        window.addEventListener('load', initMap);
+// MARK: - Pin Tip Triangle
+private struct PinTipShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
-</script>
-</body>
-</html>
-"""#.replacingOccurrences(of: "INIT_LAT", with: "\(lat)")
-   .replacingOccurrences(of: "INIT_LNG", with: "\(lng)")
 }

@@ -6,26 +6,26 @@ public struct CommerceOSTheme {
     public static let shared = CommerceOSTheme()
     
     public struct Colors {
-        // Quick-Commerce Emerald Vitality Palette (matching Android CommerceColors)
-        public static let brandPrimary = Color(hex: "0DA314")      // QuickGreen (#0DA314)
-        public static let brandPrimaryDark = Color(hex: "0C831F")  // QuickGreenDark (#0C831F)
-        public static let brandPrimarySoft = Color(hex: "EAF8E8")  // Soft Green Pill (#EAF8E8)
-        public static let brandSecondary = Color(hex: "0B132B")    // Midnight Navy (#0B132B)
-        public static let brandAccent = Color(hex: "0DA314")       // QuickGreen SLA (#0DA314)
+        // Modern 2026 Healthcare Deep Teal & Mint Palette (matching Android CommerceColors)
+        public static let brandPrimary = Color(hex: "0E675E")      // Healthcare Teal (#0E675E)
+        public static let brandPrimaryDark = Color(hex: "0A4D46")  // Deep Teal Dark (#0A4D46)
+        public static let brandPrimarySoft = Color(hex: "ECFDF5")  // Soft Mint Container (#ECFDF5)
+        public static let brandSecondary = Color(hex: "0F172A")    // Midnight Slate (#0F172A)
+        public static let brandAccent = Color(hex: "059669")       // Emerald SLA (#059669)
         public static let speedYellow = Color(hex: "E9BE3A")       // Rating / Speed Yellow (#E9BE3A)
-        public static let sushiInk = Color(hex: "1C1C1C")          // Text Primary Ink (#1C1C1C)
-        public static let homeGrid = Color(hex: "F4F5F7")          // Quick-Commerce Background Grid
-        public static let sushiGrey = Color(hex: "EFEFEF")         // Sushi Grey
+        public static let sushiInk = Color(hex: "0F172A")          // Text Primary Slate (#0F172A)
+        public static let homeGrid = Color(hex: "F4F6F8")          // Clean Healthcare Grid (#F4F6F8)
+        public static let sushiGrey = Color(hex: "E2E8F0")         // Border Grey (#E2E8F0)
         
-        public static let success = Color(hex: "0DA314")
-        public static let warning = Color(hex: "E9BE3A")
+        public static let success = Color(hex: "059669")
+        public static let warning = Color(hex: "D97706")
         public static let error = Color(hex: "E11D48")
         
         public static var background: Color {
             Color(UIColor { trait in
                 trait.userInterfaceStyle == .dark
                     ? UIColor(red: 0.05, green: 0.07, blue: 0.10, alpha: 1.0)
-                    : UIColor(red: 0.957, green: 0.961, blue: 0.969, alpha: 1.0) // #F4F5F7
+                    : UIColor(red: 0.957, green: 0.965, blue: 0.973, alpha: 1.0) // #F4F6F8
             })
         }
         
@@ -72,30 +72,38 @@ public struct CommerceOSTheme {
         }
     }
     
-    // MARK: - Dynamic Type Typography
+    // MARK: - High Ink-Density Typography (Matching Android Plus Jakarta Sans)
     public struct Typography {
         public static func displayLarge() -> Font {
-            .system(size: 28, weight: .black, design: .default)
+            .custom("PlusJakartaSans-Regular", size: 28).weight(.heavy)
+        }
+        
+        public static func heading() -> Font {
+            .custom("PlusJakartaSans-Regular", size: 20).weight(.bold)
         }
         
         public static func titleMedium() -> Font {
-            .system(size: 18, weight: .bold, design: .default)
+            .custom("PlusJakartaSans-Regular", size: 17).weight(.bold)
         }
         
         public static func body() -> Font {
-            .system(size: 14, weight: .regular, design: .default)
+            .custom("PlusJakartaSans-Regular", size: 14).weight(.medium)
         }
         
         public static func bodyBold() -> Font {
-            .system(size: 14, weight: .semibold, design: .default)
+            .custom("PlusJakartaSans-Regular", size: 14).weight(.bold)
         }
         
         public static func caption() -> Font {
-            .system(size: 11, weight: .medium, design: .default)
+            .custom("PlusJakartaSans-Regular", size: 12).weight(.semibold)
+        }
+        
+        public static func meta() -> Font {
+            .custom("PlusJakartaSans-Regular", size: 11).weight(.semibold)
         }
         
         public static func priceTag() -> Font {
-            .system(size: 15, weight: .black, design: .rounded)
+            .system(size: 16, weight: .black, design: .rounded)
         }
     }
 }

@@ -46,6 +46,9 @@ targets:
         NSFaceIDUsageDescription: "FaceID is used to securely unlock and access the encrypted prescription vault."
         NSLocationWhenInUseUsageDescription: "Location is used for delivery address selection and live courier tracking."
         NSSupportsLiveActivities: true
+        UIAppFonts:
+          - Resources/Fonts/plus_jakarta_sans.ttf
+          - Resources/Fonts/inter.ttf
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true

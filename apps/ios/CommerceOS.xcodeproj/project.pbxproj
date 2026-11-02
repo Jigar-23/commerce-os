@@ -21,6 +21,7 @@
 		254621D176014F42FD5E9FC2 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 245F30C262C39C398D193C89 /* CoreLocation.framework */; };
 		2665A015ACF0150C4F0C3D68 /* DeliveryLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE04D42110EC85352610A8BA /* DeliveryLiveActivityWidget.swift */; };
 		2685BE7C2B0FD474AF56CA41 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9DB80420B4C99807F0491D1 /* AppEnvironment.swift */; };
+		283C4CE73A706B65260AC7E0 /* plus_jakarta_sans.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BED6016ACCCDA859F6E07DB2 /* plus_jakarta_sans.ttf */; };
 		2A26E16A97A55689ECF3B79D /* ClientConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 653C243BABECFC42BCD548CE /* ClientConfiguration.swift */; };
 		2D86AAE8E3E0D603D694531C /* AuthScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 565ADF2BC16865D847F4CFC5 /* AuthScreen.swift */; };
 		2DA3CEE0D63477A50CE0103A /* AddressSelectionBottomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 484B0BE07532472F07D7AE66 /* AddressSelectionBottomSheet.swift */; };
@@ -38,6 +39,7 @@
 		4B46D9229064D69A26B186D8 /* DeliveryCompletionCelebrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD9C33A6EB6ECE553C8356CC /* DeliveryCompletionCelebrationView.swift */; };
 		4CF7CA4D83ECF5196EAE38B3 /* TurnByTurnVoiceNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27242099A2F9B8D4EC2379F4 /* TurnByTurnVoiceNotifier.swift */; };
 		4DF066E2DBACA20A08AF61DC /* LocationMapViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8629667B42C9AFF5FA669737 /* LocationMapViewport.swift */; };
+		583B8EF3F9CD95FD379E28F5 /* inter.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3A0AFEB345D7D2F3BBBAD069 /* inter.ttf */; };
 		584D359004C67603339C8761 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 932BDEE7986AC173AD45688D /* MainTabView.swift */; };
 		5D4FBE433373DA55BEF6E688 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD6D785930855602B565CB9C /* APIClient.swift */; };
 		5E08AFECAD1E1FBD9BD7BB74 /* CatalogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9809F6BA1D1C45686034A15E /* CatalogRepository.swift */; };
@@ -89,6 +91,7 @@
 		D5905EDAAED166A5585240EC /* GeoLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4E866F30154FA4CED4E4726 /* GeoLocation.swift */; };
 		D7E0FDB99B1C8EE3A9D9C703 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5BD1EA75A99EC91C9430E653 /* AudioToolbox.framework */; };
 		D9B43DE3FA0B39ABBDA3EE4B /* CartScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C6E84337A2C56B3828F8241 /* CartScreen.swift */; };
+		DA119A1327B55F78BD3DDA27 /* SavedPrescriptionsBottomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA79E2E0A143F4254772BFD6 /* SavedPrescriptionsBottomSheet.swift */; };
 		DAD2B50110863797213A126E /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD983E8585582B5D010F1C0 /* KeychainHelper.swift */; };
 		DB0DDF81A8AF0A29936DEE06 /* LocalAuthentication.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5E357DA55C35E1F67E2CCD7 /* LocalAuthentication.framework */; };
 		DE3803A494C09A9B4051FA4E /* AddressPlatformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBF27B72ABEB1143929B598A /* AddressPlatformTests.swift */; };
@@ -140,6 +143,7 @@
 		27242099A2F9B8D4EC2379F4 /* TurnByTurnVoiceNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnByTurnVoiceNotifier.swift; sourceTree = "<group>"; };
 		27DE27F64BBB753C92676155 /* RiderAlertNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RiderAlertNotifier.swift; sourceTree = "<group>"; };
 		39D41E76C31F6035F280C4CF /* DeliveryInstructionsField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryInstructionsField.swift; sourceTree = "<group>"; };
+		3A0AFEB345D7D2F3BBBAD069 /* inter.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = inter.ttf; sourceTree = "<group>"; };
 		3AD983E8585582B5D010F1C0 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		3CFB151C9B1A820780A7DFB8 /* AddressRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddressRepository.swift; sourceTree = "<group>"; };
 		3EB2CF8964C156EF8317F5B0 /* DeliveryEntranceSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryEntranceSelector.swift; sourceTree = "<group>"; };
@@ -199,6 +203,7 @@
 		BBEFBC7A8D7BB0593FB058D8 /* RecipientSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipientSelector.swift; sourceTree = "<group>"; };
 		BBF27B72ABEB1143929B598A /* AddressPlatformTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddressPlatformTests.swift; sourceTree = "<group>"; };
 		BE04D42110EC85352610A8BA /* DeliveryLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryLiveActivityWidget.swift; sourceTree = "<group>"; };
+		BED6016ACCCDA859F6E07DB2 /* plus_jakarta_sans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = plus_jakarta_sans.ttf; sourceTree = "<group>"; };
 		BF42D33E6BF558F27F37F2FE /* RiderGeofenceDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RiderGeofenceDetector.swift; sourceTree = "<group>"; };
 		C03204EB21479DF4DBE43D7F /* KeychainPasskeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainPasskeyManager.swift; sourceTree = "<group>"; };
 		C2E2EBA56E7D9CA680F0C90F /* GeofenceDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofenceDetectorTests.swift; sourceTree = "<group>"; };
@@ -223,6 +228,7 @@
 		F4E866F30154FA4CED4E4726 /* GeoLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoLocation.swift; sourceTree = "<group>"; };
 		F5372319533B68AAFA44AC87 /* RiderEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RiderEnvironment.swift; sourceTree = "<group>"; };
 		F866436EFDC783E9648A21DE /* ZomatoDarkMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZomatoDarkMapView.swift; sourceTree = "<group>"; };
+		FA79E2E0A143F4254772BFD6 /* SavedPrescriptionsBottomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPrescriptionsBottomSheet.swift; sourceTree = "<group>"; };
 		FAFE1661D4E8CF32DD6DC9BB /* PrescriptionVaultScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrescriptionVaultScreen.swift; sourceTree = "<group>"; };
 		FD6D785930855602B565CB9C /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		FEEDAABFC775CD2A41158A92 /* OrderHistoryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderHistoryScreen.swift; sourceTree = "<group>"; };
@@ -348,6 +354,7 @@
 			isa = PBXGroup;
 			children = (
 				6C6E84337A2C56B3828F8241 /* CartScreen.swift */,
+				FA79E2E0A143F4254772BFD6 /* SavedPrescriptionsBottomSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -405,6 +412,15 @@
 				BE3FB915A8CAEED2B7F0F30C /* Views */,
 			);
 			path = PrescriptionVault;
+			sourceTree = "<group>";
+		};
+		632A6454D8EB923D41427AA9 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				3A0AFEB345D7D2F3BBBAD069 /* inter.ttf */,
+				BED6016ACCCDA859F6E07DB2 /* plus_jakarta_sans.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 		64C35ED898670C5D3351F8F6 /* Views */ = {
@@ -815,6 +831,7 @@
 				712B66B301241C0F9DC672C0 /* Auth */,
 				D2FEE55AFC2FD0F17AEE6111 /* Core */,
 				691FB4B4F097AC2B0EA4DA9F /* Features */,
+				FFE449381A5EEC40ABE8ED24 /* Resources */,
 				48A79B0AAF95A9CE480F104F /* Services */,
 				1F79FD56929E59986452E6E6 /* Shared */,
 			);
@@ -846,6 +863,14 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
+		FFE449381A5EEC40ABE8ED24 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				632A6454D8EB923D41427AA9 /* Fonts */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -854,6 +879,7 @@
 			buildConfigurationList = ECF65E0C2F2AA47184C06BD5 /* Build configuration list for PBXNativeTarget "CommerceOS" */;
 			buildPhases = (
 				3F646237A37D8DFAA6777362 /* Sources */,
+				B6257E85B5E24CE23BFF3A51 /* Resources */,
 				A9EFE66DD05DA14829D57BA1 /* Frameworks */,
 			);
 			buildRules = (
@@ -970,6 +996,18 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		B6257E85B5E24CE23BFF3A51 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				583B8EF3F9CD95FD379E28F5 /* inter.ttf in Resources */,
+				283C4CE73A706B65260AC7E0 /* plus_jakarta_sans.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		0E2BAF7B0EBF0ECE1F3A5E37 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -1039,6 +1077,7 @@
 				670D9FE32ABB2CC556A135F0 /* PrescriptionVaultScreen.swift in Sources */,
 				AFCDC810122ECC1E30445974 /* ProductDetailSheet.swift in Sources */,
 				4439EE96309AA5112FD7C18A /* RecipientSelector.swift in Sources */,
+				DA119A1327B55F78BD3DDA27 /* SavedPrescriptionsBottomSheet.swift in Sources */,
 				F4B7530178EEB6558F86FAA1 /* SearchScreenView.swift in Sources */,
 				3ADF5CA93AB20407E9060338 /* ServerEnvironmentConfig.swift in Sources */,
 				9E76841517BE08791BF205EC /* ServerSettingsSheet.swift in Sources */,
