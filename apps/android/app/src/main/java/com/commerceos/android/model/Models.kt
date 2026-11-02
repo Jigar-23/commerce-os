@@ -1,5 +1,6 @@
 package com.commerceos.android.model
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 import java.math.BigDecimal
 import java.text.SimpleDateFormat
@@ -7,6 +8,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+@Immutable
 data class ApiMedicine(
     val id: String,
     val sku: String,
@@ -32,6 +34,7 @@ data class ApiMedicine(
     val description: String? = null
 )
 
+@Immutable
 data class PageResponse<T>(
     val content: List<T>,
     val totalElements: Int,
@@ -45,12 +48,14 @@ data class PageResponse<T>(
  * (composition, monograph, storage) and live-computed equivalent substitutes.
  * Enriched on the SDK-facing catalog endpoint (GET /catalog/medicines/{id}).
  */
+@Immutable
 data class MedicineDetail(
     val medicine: ApiMedicine,
     val medicineInfo: MedicineInfo? = null,
     val substitutes: List<ApiMedicine> = emptyList()
 )
 
+@Immutable
 data class MedicineInfo(
     val composition: String? = null,
     val salt: String? = null,
@@ -62,6 +67,7 @@ data class MedicineInfo(
 )
 
 // Server-derived catalog taxonomy (GET /api/v1/catalog/categories)
+@Immutable
 data class CatalogCategory(
     val id: String,
     val slug: String,
@@ -171,6 +177,7 @@ data class AuthResponse(
 }
 
 // Server-owned address book (GET /api/v1/customers/:id/addresses)
+@Immutable
 data class ApiAddress(
     val id: String = "",
     val tag: String = "Home",

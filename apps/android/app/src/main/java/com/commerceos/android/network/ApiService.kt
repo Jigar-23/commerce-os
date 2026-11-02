@@ -396,9 +396,11 @@ object NetworkClient {
                 .addInterceptor(refreshInterceptor)
                 .addInterceptor(
                     HttpLoggingInterceptor { msg ->
-                        android.util.Log.d("OkHttp", msg)
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.d("OkHttp", msg)
+                        }
                     }.apply {
-                        level = HttpLoggingInterceptor.Level.BODY
+                        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
                     }
                 )
                 .build()

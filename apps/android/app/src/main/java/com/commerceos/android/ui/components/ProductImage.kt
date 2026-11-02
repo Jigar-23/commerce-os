@@ -16,16 +16,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.Radius
 
 /**
  * Reusable product image surface. Loads via Coil (memory + disk caching,
- * crossfade) and renders a shimmer while loading, a neutral pharmacy tile when
- * the URL is absent, and the same tile on error — so product grids keep a
- * clean, consistent retail frame no matter what the catalog serves.
+ * crossfade) with zero subcomposition overhead during list scrolling.
  *
  * Every medicine visual in the app (cards, PDP, cart, orders) should flow
  * through this component instead of raw Image()/placeholder Text().
@@ -51,23 +49,16 @@ fun ProductImage(
         if (url.isEmpty()) {
             CommerceProductPlaceholder(tint = tint)
         } else {
-            SubcomposeAsyncImage(
+            // Background placeholder visible while image downloads or on error
+            CommerceProductPlaceholder(tint = tint)
+
+            AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(url)
-                    .crossfade(true)
+                    .crossfade(200)
                     .build(),
                 contentDescription = contentDescription,
                 contentScale = contentScale,
-                loading = {
-                    if (showShimmer) {
-                        ShimmerBox(modifier = Modifier.fillMaxSize(), shape = shape)
-                    } else {
-                        CommerceProductPlaceholder(tint = tint)
-                    }
-                },
-                error = {
-                    CommerceProductPlaceholder(tint = tint)
-                },
                 modifier = Modifier.fillMaxSize()
             )
         }
