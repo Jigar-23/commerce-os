@@ -350,6 +350,7 @@ fun CommerceOSApp(
     } else {
         val isCategoryScreen = currentScreen is Screen.Categories
         val isHomeScreen = currentScreen is Screen.Home
+        val isNotificationScreen = currentScreen is Screen.Notifications
         Scaffold(
             containerColor = CommerceColors.Background,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -471,7 +472,7 @@ fun CommerceOSApp(
             }
         }
     ) { padding ->
-        val topPadding = if (isCategoryScreen || isHomeScreen) 0.dp else padding.calculateTopPadding()
+        val topPadding = if (isCategoryScreen || isHomeScreen || isNotificationScreen) 0.dp else padding.calculateTopPadding()
         Box(
             modifier = Modifier
                 .fillMaxSize()

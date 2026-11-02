@@ -73,6 +73,10 @@ fun NotificationsScreen(
     ) { _ -> }
 
     LaunchedEffect(Unit) {
+        if (notificationsList.any { !it.isRead }) {
+            LocalNotificationStorage.markAllAsRead(context)
+            notificationsList = LocalNotificationStorage.getNotifications(context)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val hasPermission = ContextCompat.checkSelfPermission(
                 context,
@@ -97,7 +101,7 @@ fun NotificationsScreen(
             .fillMaxSize()
             .background(Color(0xFFF8FAFC))
     ) {
-        // 1. Signature Deep Emerald Header Canopy
+        // 1. Signature Deep Emerald Header Canopy (Status bar height unified with Home & Categories)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -107,7 +111,7 @@ fun NotificationsScreen(
                     )
                 )
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 14.dp)
         ) {
             Column {
                 Row(
@@ -116,11 +120,13 @@ fun NotificationsScreen(
                 ) {
                     // Back button
                     Surface(
-                        color = Color.White.copy(alpha = 0.15f),
+                        onClick = onBack,
+                        color = Color.White.copy(alpha = 0.18f),
                         shape = CircleShape,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
                         modifier = Modifier.size(38.dp)
                     ) {
-                        IconButton(onClick = onBack) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
@@ -139,7 +145,7 @@ fun NotificationsScreen(
                         ) {
                             Text(
                                 text = "Notifications",
-                                fontSize = 19.sp,
+                                fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 maxLines = 1,
@@ -183,7 +189,7 @@ fun NotificationsScreen(
                                 }
                             ) {
                                 Text(
-                                    text = "Mark read",
+                                    text = "Mark all read",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White,
@@ -226,11 +232,6 @@ fun NotificationsScreen(
             ) {
                 items(categories) { cat ->
                     val isSelected = selectedCategory == cat
-                    val categoryCount = if (cat == "All") {
-                        notificationsList.size
-                    } else {
-                        notificationsList.count { it.category.equals(cat, ignoreCase = true) }
-                    }
                     val categoryUnread = if (cat == "All") {
                         notificationsList.count { !it.isRead }
                     } else {
@@ -259,18 +260,17 @@ fun NotificationsScreen(
                             if (categoryUnread > 0) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
-                                    color = if (isSelected) Color.White else EmeraldPrimary,
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(6.dp)
-                                ) {}
-                            } else if (categoryCount > 0) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "$categoryCount",
-                                    fontSize = 11.sp,
-                                    color = if (isSelected) Color.White.copy(alpha = 0.8f) else Color(0xFF94A3B8),
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                    color = if (isSelected) Color.White else Color(0xFFEF4444),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                        text = "$categoryUnread",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) EmeraldPrimary else Color.White,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
                             }
                         }
                     }
