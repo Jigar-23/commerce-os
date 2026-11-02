@@ -204,7 +204,7 @@ private fun DetailTopBar(
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color(0xFF0F172A),
+                    tint = Color(0xFF0E675E),
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -305,7 +305,7 @@ fun OrderTrackingContent(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF0F172A))
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF0E675E))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {

@@ -421,11 +421,11 @@ fun NativeGoogleOrderTrackingMap(
                 )
             }
 
-            // 3. Signature Zepto Purple Active Navigation Ribbon (ONLY when rider is actively navigating)
+            // 3. Signature Active Navigation Ribbon (Brand Emerald Teal)
             if (shouldShowRoute && activeDeliveryRoute.size >= 2) {
                 Polyline(
                     points = activeDeliveryRoute,
-                    color = Color(0xFF7C3AED), // Signature Zepto Purple Navigation Ribbon
+                    color = Color(0xFF0E675E), // Signature Brand Emerald Navigation Ribbon
                     width = 16f,
                     startCap = RoundCap(),
                     endCap = RoundCap(),
@@ -472,7 +472,7 @@ fun NativeGoogleOrderTrackingMap(
             Icon(
                 imageVector = Icons.Default.LocationOn,
                 contentDescription = "Recenter",
-                tint = Color(0xFF7C3AED),
+                tint = Color(0xFF0E675E),
                 modifier = Modifier.size(22.dp)
             )
         }

@@ -303,7 +303,7 @@ fun CustomerLiveMapTrackingView(
     )
 
     if (isFullscreen) {
-        Box(modifier = modifier.fillMaxSize().background(Color(0xFF080C16))) {
+        Box(modifier = modifier.fillMaxSize().background(Color(0xFFF1F5F9))) {
             if (hasLocations) {
                 NativeGoogleOrderTrackingMap(
                     merchantLat = merchantLat,
@@ -320,14 +320,14 @@ fun CustomerLiveMapTrackingView(
                 )
             } else {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Color(0xFF080C16)),
+                    modifier = Modifier.fillMaxSize().background(Color(0xFFF1F5F9)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.Place,
                             contentDescription = null,
-                            tint = Color(0xFF38BDF8),
+                            tint = Color(0xFF0E675E),
                             modifier = Modifier.size(32.dp)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -335,18 +335,18 @@ fun CustomerLiveMapTrackingView(
                             text = "Live Route Syncing",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color(0xFF0F172A)
                         )
                         Text(
                             text = "Waiting for dark store dispatch coordinates",
                             fontSize = 11.sp,
-                            color = Color(0xFF94A3B8)
+                            color = Color(0xFF64748B)
                         )
                     }
                 }
             }
 
-            // Top Floating Header for Fullscreen
+            // Top Floating Header for Fullscreen (Clean white themed floating controls)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -355,23 +355,29 @@ fun CustomerLiveMapTrackingView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
+                Surface(
                     onClick = { onExitFullscreen?.invoke() },
-                    modifier = Modifier
-                        .background(Color(0xFF0F172A).copy(alpha = 0.95f), CircleShape)
-                        .size(44.dp)
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.96f),
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.size(42.dp)
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Exit Fullscreen",
-                        tint = Color.White
-                    )
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Exit Fullscreen",
+                            tint = Color(0xFF0E675E),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
 
                 Surface(
-                    color = Color(0xFF0F172A).copy(alpha = 0.95f),
+                    color = Color.White.copy(alpha = 0.96f),
                     shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, Color(0xFF1E293B))
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -385,16 +391,16 @@ fun CustomerLiveMapTrackingView(
                                     when {
                                         hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
                                         hasGpsData && isStale -> Color(0xFFF59E0B)
-                                        else -> Color(0xFF38BDF8)
+                                        else -> Color(0xFF0E675E)
                                     },
                                     CircleShape
                                 )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ORDER #${order.id} • FULLSCREEN MAP",
-                            color = Color.White,
-                            fontSize = 11.sp,
+                            text = "LIVE MAP TRACKING",
+                            color = Color(0xFF0F172A),
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -405,7 +411,7 @@ fun CustomerLiveMapTrackingView(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0B1120))
+                .background(Color(0xFFF1F5F9))
         ) {
             if (hasLocations) {
                 NativeGoogleOrderTrackingMap(
@@ -423,14 +429,14 @@ fun CustomerLiveMapTrackingView(
                 )
             } else {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Color(0xFF0B1120)),
+                    modifier = Modifier.fillMaxSize().background(Color(0xFFF1F5F9)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.Place,
                             contentDescription = null,
-                            tint = Color(0xFF38BDF8),
+                            tint = Color(0xFF0E675E),
                             modifier = Modifier.size(32.dp)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -438,60 +444,42 @@ fun CustomerLiveMapTrackingView(
                             text = "Live Route Syncing",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color(0xFF0F172A)
                         )
                         Text(
                             text = "Waiting for dark store dispatch coordinates",
                             fontSize = 11.sp,
-                            color = Color(0xFF94A3B8)
+                            color = Color(0xFF64748B)
                         )
                     }
                 }
             }
 
-            // Top Floating Navigation Bar (Back button + Order ID chip)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 14.dp)
-                    .align(Alignment.TopStart),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (onBack != null) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier
-                            .background(Color(0xFF0F172A).copy(alpha = 0.88f), CircleShape)
-                            .size(40.dp)
-                    ) {
+            // Top Floating Navigation Bar (Back button only - black order ID tile removed as requested)
+            if (onBack != null) {
+                Surface(
+                    onClick = onBack,
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.96f),
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier
+                        .padding(14.dp)
+                        .size(40.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = Color.White,
+                            tint = Color(0xFF0E675E),
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                } else {
-                    Spacer(modifier = Modifier.size(40.dp))
-                }
-
-                Surface(
-                    color = Color(0xFF0F172A).copy(alpha = 0.88f),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, Color(0xFF1E293B))
-                ) {
-                    Text(
-                        text = "ORDER #${order.id}",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                    )
                 }
             }
 
-            // Bottom Floating Controls (Live Status Text + Pulsing Beacon on Left, ⛶ Fullscreen Icon Button on Right)
+            // Bottom Floating Controls (White elevated Live Status Pill + Brand Fullscreen Button)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -500,14 +488,15 @@ fun CustomerLiveMapTrackingView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Sleek Floating Status Pill (NOT bulky white card!)
+                // Sleek Floating Status Pill (White card with emerald beacon and dark slate text)
                 Surface(
-                    color = Color(0xFF0F172A).copy(alpha = 0.90f),
+                    color = Color.White.copy(alpha = 0.96f),
                     shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, Color(0xFF1E293B).copy(alpha = 0.8f))
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
@@ -519,8 +508,8 @@ fun CustomerLiveMapTrackingView(
                                         currentStatus.equals("CANCELLED", ignoreCase = true) -> Color(0xFFEF4444)
                                         hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
                                         hasGpsData && isStale -> Color(0xFFF59E0B)
-                                        currentStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
-                                        else -> Color(0xFF38BDF8)
+                                        currentStatus == "SELLER_ACCEPTED" -> Color(0xFF0E675E)
+                                        else -> Color(0xFF0E675E)
                                     },
                                     CircleShape
                                 )
@@ -539,28 +528,32 @@ fun CustomerLiveMapTrackingView(
                                 hasGpsData -> "Partner is on the way"
                                 else -> "Assigning delivery partner..."
                             },
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0F172A),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
                     }
                 }
 
-                // Square bracket symbol/icon button (NO text saying "Fullscreen"!)
+                // Clean White Fullscreen Icon Button (Theme-aligned with brand teal symbol)
                 if (onExpandClick != null) {
-                    IconButton(
+                    Surface(
                         onClick = onExpandClick,
-                        modifier = Modifier
-                            .background(Color(0xFF0F172A).copy(alpha = 0.90f), CircleShape)
-                            .size(38.dp)
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.96f),
+                        shadowElevation = 4.dp,
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Text(
-                            text = "⛶",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text(
+                                text = "⛶",
+                                color = Color(0xFF0E675E),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
