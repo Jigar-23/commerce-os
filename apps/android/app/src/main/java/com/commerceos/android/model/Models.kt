@@ -447,12 +447,8 @@ data class CustomerOrderApiResponse(
 
     val displayOrderId: String
         get() {
-            if (id.isBlank()) return "PO30922584377725"
-            if (id.startsWith("PO") && id.length <= 16) return id
-            val clean = id.removePrefix("ord_").replace("-", "").lowercase()
-            val hash = kotlin.math.abs(clean.hashCode().toLong())
-            val extraDigits = clean.filter { it.isDigit() }.padEnd(6, '7').take(6)
-            return "PO${hash}${extraDigits}".take(16)
+            if (id.isNotBlank()) return id
+            return "ord_${System.currentTimeMillis()}"
         }
 
     val displayOrderDateTime: String

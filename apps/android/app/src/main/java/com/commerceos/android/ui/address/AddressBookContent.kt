@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -20,9 +22,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceTypography
+import com.commerceos.android.ui.theme.PlusJakartaSans
 import com.commerceos.android.ui.theme.Radius
 import com.commerceos.android.ui.theme.Spacing
 import com.commerceos.android.viewmodel.ServiceabilityState
@@ -262,26 +267,104 @@ fun AddressBookContent(
 
     // Delete Confirmation Dialog
     if (addrToDelete != null) {
-        AlertDialog(
+        Dialog(
             onDismissRequest = { addrToDelete = null },
-            title = { Text("Delete Address", style = CommerceTypography.Title) },
-            text = { Text("Are you sure you want to remove '${addrToDelete?.addressLine}'? This action cannot be undone.", style = CommerceTypography.BodySmall) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val targetId = addrToDelete!!.id
-                        addrToDelete = null
-                        onDeleteAddress(targetId)
-                    }
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = Color.White,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .fillMaxWidth(0.90f)
+                    .wrapContentHeight()
+                    .padding(vertical = 20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
                 ) {
-                    Text("Delete", color = CommerceColors.Danger, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { addrToDelete = null }) {
-                    Text("Cancel", color = CommerceColors.TextSecondary)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFFEE2E2),
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = Color(0xFFDC2626),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                "Delete Address",
+                                fontSize = 17.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+                        IconButton(
+                            onClick = { addrToDelete = null },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        "Are you sure you want to remove '${addrToDelete?.addressLine}'? This saved address will be permanently removed.",
+                        fontSize = 13.sp,
+                        fontFamily = PlusJakartaSans,
+                        color = Color(0xFF475569),
+                        lineHeight = 19.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { addrToDelete = null },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Text("Cancel", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                        }
+                        Button(
+                            onClick = {
+                                val targetId = addrToDelete!!.id
+                                addrToDelete = null
+                                onDeleteAddress(targetId)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Text("Delete", color = Color.White, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 }

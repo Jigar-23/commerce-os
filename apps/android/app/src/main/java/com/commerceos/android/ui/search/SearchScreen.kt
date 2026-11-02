@@ -33,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -2058,64 +2060,214 @@ private fun SearchEmptyWidget(
 
 @Composable
 private fun VoiceSearchDialog(onDismiss: () -> Unit, onResult: (String) -> Unit) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Voice Search", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("Listening... Speak medicine name or symptom", fontSize = 13.sp, color = Color(0xFF64748B))
-                Spacer(modifier = Modifier.height(16.dp))
-                CircularProgressIndicator(color = Color(0xFF0C831F))
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onResult("Paracetamol")
-                    onDismiss()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F))
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.90f)
+                .wrapContentHeight()
+                .padding(vertical = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Search 'Paracetamol'", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF64748B))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Voice Search",
+                        fontSize = 17.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A)
+                    )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFFECFDF5),
+                    modifier = Modifier.size(64.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = Color(0xFF0E675E),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    "Listening... Speak medicine name or symptom",
+                    fontSize = 13.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF64748B)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = Color(0xFF0E675E),
+                    strokeWidth = 2.5.dp
+                )
+
+                Spacer(modifier = Modifier.height(22.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Text("Cancel", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                    }
+                    Button(
+                        onClick = {
+                            onResult("Paracetamol")
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Text("Search 'Paracetamol'", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 @Composable
 private fun CameraSearchDialog(onDismiss: () -> Unit, onResult: (String) -> Unit) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Scan Medicine Barcode", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("Align medicine package or barcode inside the camera frame", fontSize = 13.sp, color = Color(0xFF64748B))
-                Spacer(modifier = Modifier.height(16.dp))
-                CircularProgressIndicator(color = Color(0xFF0C831F))
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onResult("Dolo 650")
-                    onDismiss()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F))
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.90f)
+                .wrapContentHeight()
+                .padding(vertical = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Simulate Scan", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF64748B))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Scan Medicine Barcode",
+                        fontSize = 17.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A)
+                    )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFFEFF6FF),
+                    modifier = Modifier.size(64.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.PhotoCamera,
+                            contentDescription = null,
+                            tint = Color(0xFF2563EB),
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    "Align medicine package or barcode inside the frame",
+                    fontSize = 13.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF64748B)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = Color(0xFF2563EB),
+                    strokeWidth = 2.5.dp
+                )
+
+                Spacer(modifier = Modifier.height(22.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Text("Cancel", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                    }
+                    Button(
+                        onClick = {
+                            onResult("Dolo 650")
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Text("Simulate Scan", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 // -------------------------------------------------------------

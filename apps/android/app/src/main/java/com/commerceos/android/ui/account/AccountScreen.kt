@@ -32,10 +32,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.commerceos.android.data.local.LocalProfileManager
 import com.commerceos.android.model.CustomerProfile
+import com.commerceos.android.ui.theme.PlusJakartaSans
 import java.io.File
 
 /**
@@ -598,32 +601,87 @@ fun AccountScreen(
     }
 
     if (showRefillDialog) {
-        AlertDialog(
+        Dialog(
             onDismissRequest = { showRefillDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.DateRange, contentDescription = null, tint = Color(0xFF059669))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Refill Reminders Active", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Text(
-                    "Automatic reminders are configured for your chronic medications. You will be notified 3 days prior to your refill cycle to ensure uninterrupted dosage.",
-                    fontSize = 14.sp,
-                    color = Color(0xFF475569),
-                    lineHeight = 20.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showRefillDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = Color.White,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .wrapContentHeight()
+                    .padding(vertical = 20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
                 ) {
-                    Text("Understood", color = Color.White, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFECFDF5),
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.DateRange,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0E675E),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                "Refill Reminders Active",
+                                fontSize = 16.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+                        IconButton(
+                            onClick = { showRefillDialog = false },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        "Automatic reminders are configured for your chronic medications. You will be notified 3 days prior to your refill cycle to ensure uninterrupted dosage.",
+                        fontSize = 13.sp,
+                        fontFamily = PlusJakartaSans,
+                        color = Color(0xFF475569),
+                        lineHeight = 19.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(
+                        onClick = { showRefillDialog = false },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                    ) {
+                        Text("Understood", color = Color.White, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-        )
+        }
     }
 }
 
@@ -669,27 +727,64 @@ private fun EditProfileDialog(
 
     val hasPhoto = !removePhotoFlag && (pickedBitmap != null || pickedUri != null || (currentAvatarFile != null && currentAvatarFile.exists()))
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Edit Profile",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A)
-            )
-        },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .wrapContentHeight()
+                .padding(vertical = 20.dp)
+        ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
             ) {
+                // Header Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Edit Profile",
+                            fontSize = 18.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Update your display name & photo",
+                            fontSize = 11.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(16.dp))
+
                 // Large Avatar Preview
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(88.dp)
+                        .align(Alignment.CenterHorizontally)
                         .clip(CircleShape)
-                        .border(2.dp, Color(0xFF10B981), CircleShape),
+                        .border(2.5.dp, Color(0xFF0E675E), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     when {
@@ -697,7 +792,7 @@ private fun EditProfileDialog(
                             Surface(color = Color(0xFFECFDF5), modifier = Modifier.fillMaxSize()) {
                                 Box(contentAlignment = Alignment.Center) {
                                     val initial = nameInput.trim().firstOrNull()?.uppercaseChar() ?: 'C'
-                                    Text("$initial", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF065F46))
+                                    Text("$initial", fontSize = 34.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF065F46))
                                 }
                             }
                         }
@@ -729,7 +824,7 @@ private fun EditProfileDialog(
                             Surface(color = Color(0xFFECFDF5), modifier = Modifier.fillMaxSize()) {
                                 Box(contentAlignment = Alignment.Center) {
                                     val initial = nameInput.trim().firstOrNull()?.uppercaseChar() ?: 'C'
-                                    Text("$initial", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF065F46))
+                                    Text("$initial", fontSize = 34.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF065F46))
                                 }
                             }
                         }
@@ -740,11 +835,15 @@ private fun EditProfileDialog(
 
                 // Photo action buttons: Camera & Gallery
                 Row(
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
-                        onClick = {
+                    Surface(
+                        color = Color(0xFFF0FDF4),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                        modifier = Modifier.clickable {
                             val hasCamera = ContextCompat.checkSelfPermission(
                                 context,
                                 Manifest.permission.CAMERA
@@ -754,48 +853,70 @@ private fun EditProfileDialog(
                             } else {
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             }
-                        },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        }
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Camera", fontSize = 12.sp)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Camera", fontSize = 12.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+                        }
                     }
 
-                    OutlinedButton(
-                        onClick = { pickGalleryImage.launch("image/*") },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    Surface(
+                        color = Color(0xFFEFF6FF),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                        modifier = Modifier.clickable { pickGalleryImage.launch("image/*") }
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Gallery", fontSize = 12.sp)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Image, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Gallery", fontSize = 12.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
+                        }
                     }
 
                     if (hasPhoto) {
-                        TextButton(
-                            onClick = {
+                        Surface(
+                            color = Color(0xFFFEF2F2),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                            modifier = Modifier.clickable {
                                 removePhotoFlag = true
                                 pickedBitmap = null
                                 pickedUri = null
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                            }
                         ) {
-                            Text("Remove", color = Color(0xFFDC2626), fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Remove", color = Color(0xFFDC2626), fontSize = 12.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
                 // Full Name input field
                 OutlinedTextField(
                     value = nameInput,
                     onValueChange = { nameInput = it },
-                    label = { Text("Full Name") },
+                    label = { Text("Full Name", fontFamily = PlusJakartaSans) },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF0E675E),
+                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -803,9 +924,9 @@ private fun EditProfileDialog(
 
                 // Privacy / On-Device Storage Notice
                 Surface(
-                    color = Color(0xFFF1F5F9),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(0.5.dp, Color(0xFFCBD5E1)),
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -815,37 +936,51 @@ private fun EditProfileDialog(
                         Icon(
                             Icons.Default.Lock,
                             contentDescription = null,
-                            tint = Color(0xFF475569),
-                            modifier = Modifier.size(14.dp)
+                            tint = Color(0xFF0E675E),
+                            modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Photo stays securely on device — zero cloud memory overhead.",
                             fontSize = 11.sp,
+                            fontFamily = PlusJakartaSans,
                             color = Color(0xFF475569),
                             fontWeight = FontWeight.Medium
                         )
                     }
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onSave(nameInput.trim(), pickedBitmap, pickedUri, removePhotoFlag)
-                },
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-            ) {
-                Text("Save Changes", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF64748B))
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                    ) {
+                        Text("Cancel", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                    }
+                    Button(
+                        onClick = {
+                            onSave(nameInput.trim(), pickedBitmap, pickedUri, removePhotoFlag)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                    ) {
+                        Text("Save Changes", color = Color.White, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 @Composable
