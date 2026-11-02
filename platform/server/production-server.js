@@ -222,6 +222,17 @@ async function osrmRouteResolver(lat1, lon1, lat2, lon2, withWaypoints = true) {
   }
 }
 
+function normalizePrivateKey(rawKey) {
+  if (!rawKey) return rawKey;
+  let key = String(rawKey);
+  if (key.includes('\\n')) key = key.replace(/\\n/g, '\n');
+  key = key.replace(/-----BEGIN[\s\S]*?KEY-----/i, (m) => m.replace(/\s+/g, ' ').trim());
+  key = key.replace(/-----END[\s\S]*?KEY-----/i, (m) => m.replace(/\s+/g, ' ').trim());
+  key = key.replace(/(-----BEGIN[^-]+-----)\s*/i, '$1\n');
+  key = key.replace(/\s*(-----END[^-]+-----)/i, '\n$1');
+  return key;
+}
+
 function parseServiceAccountJson(raw) {
   if (!raw) return null;
   try {
@@ -310,7 +321,7 @@ async function getProductionFcmOAuthToken() {
     const payload = base64UrlEncode(JSON.stringify(claim));
     const toSign = `${header}.${payload}`;
 
-    const cleanKey = String(privateKey).includes('\\n') ? String(privateKey).replace(/\\n/g, '\n') : privateKey;
+    const cleanKey = normalizePrivateKey(privateKey);
     const signer = crypto.createSign('RSA-SHA256');
     signer.update(toSign);
     const signature = signer.sign(cleanKey, 'base64url');
