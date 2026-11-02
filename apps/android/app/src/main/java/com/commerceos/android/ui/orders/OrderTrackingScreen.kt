@@ -66,7 +66,7 @@ fun OrderTrackingScreen(
         isMapExpanded = false
     }
 
-    if (isMapExpanded && detail is OrderDetailUiState.Content && !detail.order.orderStatus.equals("DELIVERED", ignoreCase = true)) {
+    if (isMapExpanded && detail is OrderDetailUiState.Content && !detail.order.effectiveStatus.equals("DELIVERED", ignoreCase = true) && !detail.order.effectiveStatus.equals("CANCELLED", ignoreCase = true)) {
         CustomerLiveMapTrackingView(
             order = detail.order,
             liveTracking = liveTracking,
@@ -240,12 +240,13 @@ fun OrderTrackingContent(
     onReorderOrder: (CustomerOrderApiResponse) -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
-    val presentation = OrderStatusPresentationMapper.present(order.orderStatus)
+    val currentStatus = order.effectiveStatus
+    val presentation = OrderStatusPresentationMapper.present(currentStatus)
     val context = LocalContext.current
     val items = order.items.orEmpty()
-    val isDelivered = order.orderStatus.uppercase() == "DELIVERED"
-    val isCancelled = presentation.isCancelled
-    val isActive = !presentation.isTerminal
+    val isDelivered = currentStatus.equals("DELIVERED", ignoreCase = true)
+    val isCancelled = currentStatus.equals("CANCELLED", ignoreCase = true) || presentation.isCancelled
+    val isActive = !presentation.isTerminal && !isDelivered && !isCancelled
     var showSupportSheet by remember { mutableStateOf(false) }
 
     // Pulsing radar animation for active status
@@ -277,8 +278,8 @@ fun OrderTrackingContent(
         ) {
         // 1. FIRST ELEMENT AT VERY TOP:
         // Active delivery -> Live interactive Google Map tracking
-        // Delivered order -> Clean top app bar with Back button and Order ID (NO MAP)
-        if (!isDelivered) {
+        // Delivered / Cancelled order -> Clean top app bar with Back button and Order ID (NO MAP)
+        if (!isDelivered && !isCancelled) {
             CustomerLiveMapTrackingView(
                 order = order,
                 liveTracking = liveTracking,
@@ -289,7 +290,7 @@ fun OrderTrackingContent(
                     .height(300.dp)
             )
         } else {
-            // Dedicated Order Details Top Bar for Delivered Order (Map is hidden)
+            // Dedicated Order Details Top Bar for Delivered or Cancelled Order (Map is hidden)
             Surface(
                 color = Color.White,
                 shadowElevation = 1.dp,
@@ -308,8 +309,17 @@ fun OrderTrackingContent(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text("Order Details", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                            Text("Summary & Receipt", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text(
+                                if (isCancelled) "Order Cancelled" else "Order Details",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCancelled) Color(0xFFDC2626) else Color(0xFF0F172A)
+                            )
+                            Text(
+                                if (isCancelled) "Cancellation & Refund Status" else "Summary & Receipt",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
                         }
                     }
 
@@ -791,7 +801,7 @@ fun OrderTrackingContent(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = when (order.orderStatus.uppercase()) {
+                                        text = when (currentStatus.uppercase()) {
                                             "OUT_FOR_DELIVERY" -> "ON THE WAY"
                                             "SELLER_ACCEPTED", "PACKED" -> "BEING PACKED"
                                             else -> "ORDER CONFIRMED"
@@ -807,7 +817,7 @@ fun OrderTrackingContent(
 
                                 val dynamicEtaMins = order.deliverySlaMins.coerceAtLeast(8)
                                 Text(
-                                    text = when (order.orderStatus.uppercase()) {
+                                    text = when (currentStatus.uppercase()) {
                                         "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> "At your doorstep ⚡"
                                         else -> "Arriving in $dynamicEtaMins mins ⚡"
                                     },
@@ -853,7 +863,7 @@ fun OrderTrackingContent(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // Stepper Progress Line
-                        val progressFloat = when (order.orderStatus.uppercase()) {
+                        val progressFloat = when (currentStatus.uppercase()) {
                             "OUT_FOR_DELIVERY", "REACHING_YOU" -> 0.75f
                             "PACKED" -> 0.55f
                             "SELLER_ACCEPTED" -> 0.35f

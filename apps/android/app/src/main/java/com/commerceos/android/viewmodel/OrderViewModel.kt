@@ -124,7 +124,10 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
                         result.data
                     }
                     detail = OrderDetailUiState.Content(finalOrder)
-                    startLiveTrackingPolling(orderId)
+                    val status = finalOrder.effectiveStatus.uppercase()
+                    if (status !in listOf("DELIVERED", "CANCELLED", "FAILED")) {
+                        startLiveTrackingPolling(orderId)
+                    }
                 }
                 is ApiResult.Failure -> {
                     if (result.error is AppError.Network) {
@@ -207,7 +210,7 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
                         is ApiResult.Success -> {
                             detail = OrderDetailUiState.Content(orderResult.data)
                             isOffline = false
-                            val status = orderResult.data.orderStatus.uppercase()
+                            val status = orderResult.data.effectiveStatus.uppercase()
                             if (status == "DELIVERED" || status == "CANCELLED" || status == "FAILED") {
                                 break
                             }

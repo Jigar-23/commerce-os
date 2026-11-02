@@ -66,7 +66,9 @@ fun CustomerLiveMapTrackingView(
         cachedRiderLng = realRiderLng
     }
 
-    val activeStage = liveTracking?.stage ?: when (order.orderStatus.uppercase()) {
+    val currentStatus = order.effectiveStatus
+    val activeStage = liveTracking?.stage ?: when (currentStatus.uppercase()) {
+        "CANCELLED" -> "CANCELLED"
         "DELIVERED" -> "DELIVERED"
         "ARRIVED_CUSTOMER", "HANDOFF_STARTED" -> "AT_DOORSTEP"
         "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU" -> "OUT_FOR_DELIVERY"
@@ -514,9 +516,10 @@ fun CustomerLiveMapTrackingView(
                                 .scale(if (hasGpsData && !isStale) beaconScale else 1.0f)
                                 .background(
                                     when {
+                                        currentStatus.equals("CANCELLED", ignoreCase = true) -> Color(0xFFEF4444)
                                         hasGpsData && !isStale -> Color(0xFF10B981).copy(alpha = beaconAlpha)
                                         hasGpsData && isStale -> Color(0xFFF59E0B)
-                                        order.orderStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
+                                        currentStatus == "SELLER_ACCEPTED" -> Color(0xFF38BDF8)
                                         else -> Color(0xFF38BDF8)
                                     },
                                     CircleShape
@@ -525,13 +528,14 @@ fun CustomerLiveMapTrackingView(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = when {
-                                order.orderStatus == "DELIVERED" -> "Order Delivered"
-                                order.orderStatus == "HANDOFF_STARTED" -> "Partner at your door"
-                                order.orderStatus == "ARRIVED_CUSTOMER" -> "Partner has arrived"
-                                order.orderStatus == "OUT_FOR_DELIVERY" || order.orderStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
-                                order.orderStatus == "PICKED_UP" -> "Order packed & picked up"
-                                order.orderStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"
-                                order.orderStatus == "SELLER_ACCEPTED" -> "Order accepted & packing"
+                                currentStatus.equals("CANCELLED", ignoreCase = true) -> "Order Cancelled"
+                                currentStatus == "DELIVERED" -> "Order Delivered"
+                                currentStatus == "HANDOFF_STARTED" -> "Partner at your door"
+                                currentStatus == "ARRIVED_CUSTOMER" -> "Partner has arrived"
+                                currentStatus == "OUT_FOR_DELIVERY" || currentStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
+                                currentStatus == "PICKED_UP" -> "Order packed & picked up"
+                                currentStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"
+                                currentStatus == "SELLER_ACCEPTED" -> "Order accepted & packing"
                                 hasGpsData -> "Partner is on the way"
                                 else -> "Assigning delivery partner..."
                             },

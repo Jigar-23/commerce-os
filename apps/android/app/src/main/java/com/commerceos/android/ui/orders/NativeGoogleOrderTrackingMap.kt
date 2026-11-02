@@ -156,11 +156,12 @@ fun NativeGoogleOrderTrackingMap(
         LatLng(if (customerLat != 0.0) customerLat else 20.5937, if (customerLng != 0.0) customerLng else 78.9629)
     }
     val stageUpper = activeStage.uppercase()
-    val isPostPickup = stageUpper in listOf(
+    val isCancelled = stageUpper == "CANCELLED"
+    val isPostPickup = !isCancelled && stageUpper in listOf(
         "PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU",
         "NEARBY", "ARRIVED_CUSTOMER", "AT_DOORSTEP", "HANDOFF_STARTED"
     )
-    val isHeadingToStore = stageUpper in listOf(
+    val isHeadingToStore = !isCancelled && stageUpper in listOf(
         "HEADING_TO_STORE", "ACCEPTED", "EN_ROUTE_PICKUP", "EN_ROUTE_STORE",
         "ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_MERCHANT", "AT_STORE", "PACKED",
         "SELLER_ACCEPTED", "ASSIGNED", "DISPATCHED", "RIDER_ASSIGNED", "RIDER_ACCEPTED"
@@ -402,21 +403,23 @@ fun NativeGoogleOrderTrackingMap(
             properties = mapProperties,
             uiSettings = mapUiSettings
         ) {
-            // 1. Dark Store Hub Pin (Store Pin is ALWAYS visible unconditionally)
-            Marker(
-                state = storeMarkerState,
-                icon = storeMarkerBitmap,
-                title = "Shop / Dark Store Hub",
-                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
-            )
+            // 1. Dark Store Hub Pin (Store Pin is visible unless order is cancelled)
+            if (!isCancelled) {
+                Marker(
+                    state = storeMarkerState,
+                    icon = storeMarkerBitmap,
+                    title = "Shop / Dark Store Hub",
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
+                )
 
-            // 2. Customer Destination Pin (Home Pin is ALWAYS visible unconditionally)
-            Marker(
-                state = customerMarkerState,
-                icon = customerMarkerBitmap,
-                title = "Home / Delivery Location",
-                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
-            )
+                // 2. Customer Destination Pin (Home Pin is visible unless order is cancelled)
+                Marker(
+                    state = customerMarkerState,
+                    icon = customerMarkerBitmap,
+                    title = "Home / Delivery Location",
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
+                )
+            }
 
             // 3. Signature Zepto Purple Active Navigation Ribbon (ONLY when rider is actively navigating)
             if (shouldShowRoute && activeDeliveryRoute.size >= 2) {

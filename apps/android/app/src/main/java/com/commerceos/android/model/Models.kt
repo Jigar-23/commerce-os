@@ -386,6 +386,7 @@ data class CustomerDeliverySessionDto(
 data class CustomerOrderApiResponse(
     val id: String = "",
     val orderStatus: String = "PLACED",
+    val status: String? = null,
     val totalAmount: BigDecimal = BigDecimal.ZERO,
     val total_amount: BigDecimal? = null,
     val deliveryFee: BigDecimal? = null,
@@ -452,6 +453,9 @@ data class CustomerOrderApiResponse(
 
     val displayOrderDate: String
         get() = formatOrderDateOnly(createdAt ?: created_at ?: orderDate ?: order_date)
+
+    val effectiveStatus: String
+        get() = status?.takeIf { it.isNotBlank() } ?: orderStatus
 
     val displayOrderTime: String
         get() = formatOrderTimeOnly(createdAt ?: created_at ?: orderDate ?: order_date)

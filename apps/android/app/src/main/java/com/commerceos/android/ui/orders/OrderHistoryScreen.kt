@@ -213,11 +213,12 @@ private fun OrderHistoryCard(
     onReorderOrder: (CustomerOrderApiResponse) -> Unit = {},
     onTrackOrder: () -> Unit
 ) {
-    val presented = OrderStatusPresentationMapper.present(order.orderStatus)
+    val currentStatus = order.effectiveStatus
+    val presented = OrderStatusPresentationMapper.present(currentStatus)
     val items = order.items.orEmpty()
-    val isDelivered = order.orderStatus.uppercase() == "DELIVERED"
-    val isCancelled = order.orderStatus.uppercase() == "CANCELLED"
-    val isActive = !presented.isTerminal
+    val isDelivered = currentStatus.equals("DELIVERED", ignoreCase = true)
+    val isCancelled = currentStatus.equals("CANCELLED", ignoreCase = true) || presented.isCancelled
+    val isActive = !presented.isTerminal && !isCancelled && !isDelivered
 
     val effectiveTotal = when {
         order.effectiveTotalAmount > java.math.BigDecimal.ZERO -> order.effectiveTotalAmount
@@ -372,14 +373,26 @@ private fun OrderHistoryCard(
                 }
 
                 Surface(
-                    color = Color(0xFFF1F5F9),
+                    color = when {
+                        isCancelled -> Color(0xFFFEF2F2)
+                        isDelivered -> Color(0xFFEFF6FF)
+                        else -> Color(0xFFECFDF5)
+                    },
                     shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
-                        text = if (isDelivered) "Delivered on ${order.displayOrderDate}" else "In Progress",
+                        text = when {
+                            isDelivered -> "Delivered on ${order.displayOrderDate}"
+                            isCancelled -> "Cancelled"
+                            else -> "In Progress"
+                        },
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isDelivered) Color(0xFF1D4ED8) else Color(0xFF059669),
+                        color = when {
+                            isDelivered -> Color(0xFF1D4ED8)
+                            isCancelled -> Color(0xFFDC2626)
+                            else -> Color(0xFF059669)
+                        },
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
@@ -426,8 +439,8 @@ private fun OrderHistoryCard(
                 }
             }
 
-            // Reorder Option for Delivered Orders (Tata 1mg Benchmark)
-            if (isDelivered && items.isNotEmpty()) {
+            // Reorder Option for Delivered or Cancelled Orders (Tata 1mg Benchmark)
+            if ((isDelivered || isCancelled) && items.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
                 HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
                 Spacer(modifier = Modifier.height(6.dp))
