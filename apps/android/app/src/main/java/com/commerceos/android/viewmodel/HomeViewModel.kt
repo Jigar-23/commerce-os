@@ -23,6 +23,11 @@ import kotlinx.coroutines.launch
  */
 class HomeViewModel(private val repository: AppRepository) : ViewModel() {
 
+    companion object {
+        /** Stale-While-Revalidate memory cache for instantaneous 0ms cold-render. */
+        private val feedMemoryCache = java.util.concurrent.ConcurrentHashMap<String, HomeFeedResponse>()
+    }
+
     var isLoading by mutableStateOf(false)
         private set
 
@@ -52,6 +57,16 @@ class HomeViewModel(private val repository: AppRepository) : ViewModel() {
             return
         }
 
+        val cacheKey = "$customerId:${addressId.orEmpty()}"
+        val cached = feedMemoryCache[cacheKey]
+        // Instantaneous Stale-While-Revalidate render: pre-populate if currently empty
+        if (cached != null && sections.isEmpty()) {
+            sections = mapFeedToSections(cached)
+            verticals = cached.verticals
+            storefrontSuggestions = buildStorefrontSuggestions(cached)
+            generatedAt = cached.generatedAt ?: System.currentTimeMillis()
+        }
+
         val requestId = java.util.UUID.randomUUID().toString()
         activeHomeRequestId = requestId
         android.util.Log.d("HomeViewModel", "loadHomeData called: customerId=$customerId, addressId=$addressId, requestId=$requestId")
@@ -64,6 +79,7 @@ class HomeViewModel(private val repository: AppRepository) : ViewModel() {
                     android.util.Log.d("HomeViewModel", "getHomeFeed SUCCESS: hero=${result.data.hero?.title}, sectionsCount=${result.data.sections?.size}, feedCount=${result.data.feed.size}")
                     // Latest-request-wins protection: discard if address changed or newer request initiated
                     if (activeHomeRequestId == requestId) {
+                        feedMemoryCache[cacheKey] = result.data
                         sections = mapFeedToSections(result.data)
                         verticals = result.data.verticals
                         storefrontSuggestions = buildStorefrontSuggestions(result.data)
@@ -78,9 +94,16 @@ class HomeViewModel(private val repository: AppRepository) : ViewModel() {
                     if (activeHomeRequestId == requestId) {
                         // Non-destructive error handling: if content already exists, keep it & expose error message
                         if (sections.isEmpty()) {
-                            sections = emptyList()
-                            verticals = emptyList()
-                            storefrontSuggestions = emptyList()
+                            if (cached != null) {
+                                sections = mapFeedToSections(cached)
+                                verticals = cached.verticals
+                                storefrontSuggestions = buildStorefrontSuggestions(cached)
+                                generatedAt = cached.generatedAt ?: System.currentTimeMillis()
+                            } else {
+                                sections = emptyList()
+                                verticals = emptyList()
+                                storefrontSuggestions = emptyList()
+                            }
                         }
                         errorMessage = result.error.message
                     }
