@@ -412,6 +412,8 @@ data class CustomerOrderApiResponse(
     val order_date: String? = null,
     val deliveryAddress: ApiAddress? = null,
     val items: List<OrderItem>? = null,
+    val prescriptionId: String? = null,
+    val prescription_id: String? = null,
     val pharmacistVerification: PharmacistVerification? = null,
     val storeName: String? = null,
     val storeId: String? = null,
@@ -561,14 +563,48 @@ fun formatOrderTimeOnly(raw: String?): String {
 
 data class OrderItem(
     val productId: String = "",
-    val sku: String,
-    val name: String,
-    val unitPrice: BigDecimal,
-    val quantity: Int,
+    val sku: String = "",
+    val name: String = "",
+    val unitPrice: BigDecimal = BigDecimal.ZERO,
+    val price: BigDecimal? = null,
+    val quantity: Int = 1,
+    val qty: Int? = null,
+    val lineTotal: BigDecimal? = null,
     val verticalId: String = "general",
     val merchantId: String? = null,
-    val rxRequired: Boolean = false
-)
+    val rxRequired: Boolean = false,
+    val isRxRequired: Boolean? = null,
+    val image: String? = null,
+    val imageUrl: String? = null
+) {
+    val effectiveSku: String
+        get() = sku.takeIf { it.isNotBlank() } ?: productId.takeIf { it.isNotBlank() } ?: "SKU_ITEM"
+
+    val effectiveName: String
+        get() = name.takeIf { it.isNotBlank() } ?: sku.takeIf { it.isNotBlank() } ?: "Item"
+
+    val effectivePrice: BigDecimal
+        get() = if (unitPrice > BigDecimal.ZERO) unitPrice
+                else price ?: lineTotal?.let {
+                    val q = effectiveQuantity
+                    if (q > 0) it.divide(BigDecimal(q), 2, java.math.RoundingMode.HALF_UP) else it
+                } ?: BigDecimal.ZERO
+
+    val effectiveQuantity: Int
+        get() = if (quantity > 0) quantity else (qty ?: 1)
+
+    val effectiveRxRequired: Boolean
+        get() = rxRequired || isRxRequired == true
+
+    val effectiveImage: String?
+        get() = image?.takeIf { it.isNotBlank() } ?: imageUrl?.takeIf { it.isNotBlank() }
+
+    val effectiveProductId: String
+        get() = productId.takeIf { it.isNotBlank() } ?: effectiveSku
+
+    val effectiveVerticalId: String
+        get() = verticalId.takeIf { it.isNotBlank() } ?: "general"
+}
 
 data class PharmacistVerification(
     val status: String,

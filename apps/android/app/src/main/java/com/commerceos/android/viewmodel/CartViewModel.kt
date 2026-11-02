@@ -281,16 +281,22 @@ class CartViewModel(
     fun addReorderItem(item: OrderItem) {
         viewModelScope.launch {
             cartMutex.withLock {
-                val pharmacyAttr = if (item.rxRequired) PharmacyCartAttributes(prescriptionRequired = true, coldChain = false) else null
+                val sku = item.effectiveSku
+                val name = item.effectiveName
+                val price = item.effectivePrice
+                val qty = item.effectiveQuantity.coerceAtLeast(1)
+                val prodId = item.effectiveProductId
+                val vertId = item.effectiveVerticalId
+                val pharmacyAttr = if (item.effectiveRxRequired) PharmacyCartAttributes(prescriptionRequired = true, coldChain = false) else null
                 val cartItem = CartItem(
-                    productId = item.productId.ifBlank { item.sku },
-                    sku = item.sku,
-                    name = item.name,
-                    unitPrice = item.unitPrice,
-                    quantity = item.quantity.coerceAtLeast(1),
-                    verticalId = item.verticalId,
+                    productId = prodId,
+                    sku = sku,
+                    name = name,
+                    unitPrice = price,
+                    quantity = qty,
+                    verticalId = vertId,
                     merchantId = item.merchantId,
-                    mrp = item.unitPrice,
+                    mrp = price,
                     pharmacyAttributes = pharmacyAttr
                 )
 
@@ -301,7 +307,7 @@ class CartViewModel(
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
-                            _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))
+                            _addEvents.trySend(CartAddEvent.Success(sku, name))
                             if (cartDao != null) {
                                 try {
                                     cartDao.clearCart(customerId)
@@ -333,8 +339,79 @@ class CartViewModel(
                             cartDao.insertOrUpdate(CartItemEntity.fromCartItem(updatedItem, LOCAL_OFFLINE_CART_KEY))
                         } catch (_: Exception) {}
                     }
-                    _addEvents.trySend(CartAddEvent.Success(item.sku, item.name))
+                    _addEvents.trySend(CartAddEvent.Success(sku, name))
                 }
+            }
+        }
+    }
+
+    fun reorderAll(items: List<OrderItem>) {
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            cartMutex.withLock {
+                items.forEach { item ->
+                    val sku = item.effectiveSku
+                    val name = item.effectiveName
+                    val price = item.effectivePrice
+                    val qty = item.effectiveQuantity.coerceAtLeast(1)
+                    val prodId = item.effectiveProductId
+                    val vertId = item.effectiveVerticalId
+                    val pharmacyAttr = if (item.effectiveRxRequired) PharmacyCartAttributes(prescriptionRequired = true, coldChain = false) else null
+
+                    val cartItem = CartItem(
+                        productId = prodId,
+                        sku = sku,
+                        name = name,
+                        unitPrice = price,
+                        quantity = qty,
+                        verticalId = vertId,
+                        merchantId = item.merchantId,
+                        mrp = price,
+                        pharmacyAttributes = pharmacyAttr
+                    )
+
+                    if (customerId.isNotBlank()) {
+                        try {
+                            when (val updated = repository.addCartItem(customerId, cartItem)) {
+                                is ApiResult.Success -> {
+                                    val backendItems = updated.data.items ?: (cartItems + cartItem)
+                                    cartItems = backendItems
+                                    totals = updated.data
+                                    errorMessage = null
+                                }
+                                is ApiResult.Failure -> {
+                                    val existingIndex = cartItems.indexOfFirst { it.sku == cartItem.sku }
+                                    cartItems = if (existingIndex >= 0) {
+                                        cartItems.toMutableList().also { it[existingIndex] = it[existingIndex].copy(quantity = it[existingIndex].quantity + cartItem.quantity) }
+                                    } else {
+                                        cartItems + cartItem
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {
+                            val existingIndex = cartItems.indexOfFirst { it.sku == cartItem.sku }
+                            cartItems = if (existingIndex >= 0) {
+                                cartItems.toMutableList().also { it[existingIndex] = it[existingIndex].copy(quantity = it[existingIndex].quantity + cartItem.quantity) }
+                            } else {
+                                cartItems + cartItem
+                            }
+                        }
+                    } else {
+                        val existingIndex = cartItems.indexOfFirst { it.sku == cartItem.sku }
+                        cartItems = if (existingIndex >= 0) {
+                            cartItems.toMutableList().also { it[existingIndex] = it[existingIndex].copy(quantity = it[existingIndex].quantity + cartItem.quantity) }
+                        } else {
+                            cartItems + cartItem
+                        }
+                    }
+                }
+                if (cartDao != null && customerId.isNotBlank()) {
+                    try {
+                        cartDao.clearCart(customerId)
+                        cartDao.insertAll(cartItems.map { CartItemEntity.fromCartItem(it, customerId) })
+                    } catch (_: Exception) {}
+                }
+                _addEvents.trySend(CartAddEvent.Success("REORDER_ALL", "All order items added to cart"))
             }
         }
     }

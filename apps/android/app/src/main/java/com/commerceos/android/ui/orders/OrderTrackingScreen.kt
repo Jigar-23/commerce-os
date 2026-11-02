@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -54,7 +56,8 @@ fun OrderTrackingScreen(
     onRefresh: () -> Unit = {},
     onBack: () -> Unit,
     onContactSupport: () -> Unit = {},
-    onReorderItem: (OrderItem) -> Unit = {}
+    onReorderItem: (OrderItem) -> Unit = {},
+    onReorderOrder: (CustomerOrderApiResponse) -> Unit = {}
 ) {
     var isMapExpanded by remember { mutableStateOf(false) }
 
@@ -167,7 +170,8 @@ fun OrderTrackingScreen(
                     onBack = onBack,
                     onContactSupport = onContactSupport,
                     onExpandMap = { isMapExpanded = true },
-                    onReorderItem = onReorderItem
+                    onReorderItem = onReorderItem,
+                    onReorderOrder = onReorderOrder
                 )
             }
         }
@@ -232,7 +236,8 @@ fun OrderTrackingContent(
     onBack: () -> Unit,
     onContactSupport: () -> Unit,
     onExpandMap: () -> Unit = {},
-    onReorderItem: (OrderItem) -> Unit = {}
+    onReorderItem: (OrderItem) -> Unit = {},
+    onReorderOrder: (CustomerOrderApiResponse) -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     val presentation = OrderStatusPresentationMapper.present(order.orderStatus)
@@ -241,6 +246,7 @@ fun OrderTrackingContent(
     val isDelivered = order.orderStatus.uppercase() == "DELIVERED"
     val isCancelled = presentation.isCancelled
     val isActive = !presentation.isTerminal
+    var showSupportSheet by remember { mutableStateOf(false) }
 
     // Pulsing radar animation for active status
     val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
@@ -292,7 +298,6 @@ fun OrderTrackingContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -567,7 +572,13 @@ fun OrderTrackingContent(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         TextButton(
-                                            onClick = { items.firstOrNull()?.let { onReorderItem(it) } }
+                                            onClick = {
+                                                if (items.isNotEmpty()) {
+                                                    onReorderOrder(order)
+                                                } else {
+                                                    items.firstOrNull()?.let { onReorderItem(it) }
+                                                }
+                                            }
                                         ) {
                                             Text(
                                                 text = "Reorder",
@@ -582,7 +593,7 @@ fun OrderTrackingContent(
                                                 .width(1.dp)
                                                 .background(Color(0xFFE2E8F0))
                                         )
-                                        TextButton(onClick = onContactSupport) {
+                                        TextButton(onClick = { showSupportSheet = true; onContactSupport() }) {
                                             Text(
                                                 text = "Need Help?",
                                                 fontSize = 13.5.sp,
@@ -636,7 +647,7 @@ fun OrderTrackingContent(
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFFE11D48),
-                                        modifier = Modifier.clickable { onContactSupport() }
+                                        modifier = Modifier.clickable { showSupportSheet = true; onContactSupport() }
                                     )
                                 }
                             }
@@ -651,96 +662,101 @@ fun OrderTrackingContent(
                         }
                     }
 
-                    // 4. Prescriptions Attached (1) Card (Tata 1mg Benchmark)
-                    Surface(
-                        color = Color.White,
-                        shape = RoundedCornerShape(16.dp),
-                        shadowElevation = 0.5.dp,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Prescriptions attached (1)",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFFBCFE8)),
-                                    modifier = Modifier.size(width = 72.dp, height = 90.dp)
+                    // 4. Prescriptions Attached Card (Only shown when order actually contains prescription/Rx items)
+                    val hasPrescription = !order.prescriptionId.isNullOrBlank() || order.pharmacistVerification != null || items.any { it.effectiveRxRequired }
+                    if (hasPrescription) {
+                        Surface(
+                            color = Color.White,
+                            shape = RoundedCornerShape(16.dp),
+                            shadowElevation = 0.5.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = if (!order.prescriptionId.isNullOrBlank()) "Prescription Attached" else "Medical Verification",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(Color(0xFFFDF2F8))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFFBCFE8)),
+                                        modifier = Modifier.size(width = 72.dp, height = 90.dp)
                                     ) {
-                                        Column(
+                                        Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .padding(6.dp),
-                                            verticalArrangement = Arrangement.SpaceBetween
+                                                .background(Color(0xFFFDF2F8))
                                         ) {
-                                            Surface(
-                                                color = Color(0xFFDB2777),
-                                                shape = RoundedCornerShape(4.dp)
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(6.dp),
+                                                verticalArrangement = Arrangement.SpaceBetween
                                             ) {
+                                                Surface(
+                                                    color = Color(0xFFDB2777),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (order.prescriptionId != null) "PRESCRIPTION" else "VERIFIED RX",
+                                                        fontSize = 7.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
                                                 Text(
-                                                    text = "OPD CARD",
-                                                    fontSize = 8.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    text = "Rx Verified\nDr. Approved",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xFF831843),
+                                                    lineHeight = 11.sp
                                                 )
                                             }
-                                            Text(
-                                                text = "Rx Verified\nDr. Approved",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = Color(0xFF831843),
-                                                lineHeight = 11.sp
-                                            )
-                                        }
 
-                                        // Green verified check badge at top right
-                                        Surface(
-                                            color = Color(0xFF00B57A),
-                                            shape = CircleShape,
-                                            modifier = Modifier
-                                                .size(18.dp)
-                                                .align(Alignment.TopEnd)
-                                                .offset(x = (-4).dp, y = 4.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Default.Check,
-                                                    contentDescription = "Verified",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(12.dp)
-                                                )
+                                            // Green verified check badge at top right
+                                            Surface(
+                                                color = Color(0xFF00B57A),
+                                                shape = CircleShape,
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .align(Alignment.TopEnd)
+                                                    .offset(x = (-4).dp, y = 4.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        Icons.Default.Check,
+                                                        contentDescription = "Verified",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = "Verified by Chief Pharmacist",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
-                                    )
-                                    Text(
-                                        text = "1 valid prescription digitised & verified under CDSCO medical standards.",
-                                        fontSize = 11.5.sp,
-                                        color = Color(0xFF64748B),
-                                        lineHeight = 15.sp
-                                    )
+                                    val verificationNote = order.pharmacistVerification?.licenseNo?.let { "Verified by Pharmacist ($it)" }
+                                        ?: "Verified by Registered Pharmacist"
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = verificationNote,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "Prescription verified under CDSCO schedule drug safety standards.",
+                                            fontSize = 11.5.sp,
+                                            color = Color(0xFF64748B),
+                                            lineHeight = 15.sp
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -955,8 +971,12 @@ fun OrderTrackingContent(
 
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items.forEach { item ->
-                            val resolvedUrl = remember(item.sku, item.name) {
-                                MedicineImageResolver.resolve(item.sku, item.name)
+                            val sku = item.effectiveSku
+                            val name = item.effectiveName
+                            val price = item.effectivePrice
+                            val qty = item.effectiveQuantity
+                            val resolvedUrl = remember(sku, name) {
+                                MedicineImageResolver.resolve(sku, name)
                             }
 
                             Row(
@@ -972,7 +992,7 @@ fun OrderTrackingContent(
                                 ) {
                                     ProductImage(
                                         imageUrl = resolvedUrl,
-                                        contentDescription = item.name,
+                                        contentDescription = name,
                                         contentScale = ContentScale.Fit,
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -986,7 +1006,7 @@ fun OrderTrackingContent(
                                 // Item Details & Anatomy
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = item.name,
+                                        text = name,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color(0xFF0F172A),
@@ -1000,7 +1020,7 @@ fun OrderTrackingContent(
                                             shape = RoundedCornerShape(4.dp)
                                         ) {
                                             Text(
-                                                text = "Qty: ${item.quantity}",
+                                                text = "Qty: $qty",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF334155),
@@ -1009,7 +1029,7 @@ fun OrderTrackingContent(
                                         }
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "₹${item.unitPrice.toInt()} each",
+                                            text = "₹${price.toInt()} each",
                                             fontSize = 12.sp,
                                             color = Color(0xFF64748B)
                                         )
@@ -1018,7 +1038,7 @@ fun OrderTrackingContent(
 
                                 // Total for item
                                 Text(
-                                    text = "₹${item.unitPrice.toInt() * item.quantity}",
+                                    text = "₹${price.toInt() * qty}",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF0F172A)
@@ -1420,15 +1440,7 @@ fun OrderTrackingContent(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                val storePhone = order.storePhone?.takeIf { it.isNotBlank() }
-                                    ?: order.merchantPhone?.takeIf { it.isNotBlank() }
-                                    ?: "+919991416180"
-                                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${storePhone.replace(" ", "")}"))
-                                try {
-                                    context.startActivity(dialIntent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Cannot launch dialer: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
+                                showSupportSheet = true
                                 onContactSupport()
                             },
                             shape = RoundedCornerShape(10.dp),
@@ -1442,8 +1454,7 @@ fun OrderTrackingContent(
                         if (items.isNotEmpty()) {
                             Button(
                                 onClick = {
-                                    items.forEach { onReorderItem(it) }
-                                    Toast.makeText(context, "Reordered ${items.size} items to cart", Toast.LENGTH_SHORT).show()
+                                    onReorderOrder(order)
                                 },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
@@ -1561,5 +1572,177 @@ fun OrderTrackingContent(
             }
         }
     }
+
+    if (showSupportSheet) {
+        OrderSupportBottomSheet(
+            order = order,
+            onDismiss = { showSupportSheet = false }
+        )
+    }
 }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OrderSupportBottomSheet(
+    order: CustomerOrderApiResponse,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val supportPhone = order.storePhone?.takeIf { it.isNotBlank() }
+        ?: order.merchantPhone?.takeIf { it.isNotBlank() }
+        ?: "+91 1800-208-9999"
+    val cleanPhone = supportPhone.replace(" ", "").replace("-", "")
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Need Help With Your Order?",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "Order #${order.displayOrderId}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFFF1F5F9))
+
+            // Option 1: Call Store / Support
+            Surface(
+                color = Color(0xFFF8FAFC),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        try {
+                            val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
+                            context.startActivity(dialIntent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "Support phone: $supportPhone", Toast.LENGTH_LONG).show()
+                        }
+                        onDismiss()
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFF059669).copy(alpha = 0.12f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Call Pharmacy / Support", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
+                        Text("Available 24x7 for prescription and order assistance ($supportPhone)", fontSize = 11.5.sp, color = Color(0xFF64748B))
+                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                }
+            }
+
+            // Option 2: WhatsApp Chat
+            Surface(
+                color = Color(0xFFF8FAFC),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        try {
+                            val url = "https://wa.me/9118002089999?text=Hello,%20I%20need%20help%20with%20Commerce%20OS%20Order%20%23${order.displayOrderId}"
+                            val waIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            context.startActivity(waIntent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "WhatsApp support at +91 1800-208-9999", Toast.LENGTH_LONG).show()
+                        }
+                        onDismiss()
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFF25D366).copy(alpha = 0.12f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Chat on WhatsApp", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
+                        Text("Instant resolution with licensed pharmacist assistant", fontSize = 11.5.sp, color = Color(0xFF64748B))
+                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                }
+            }
+
+            // Option 3: Report Damaged / Missing Item
+            Surface(
+                color = Color(0xFFF8FAFC),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        Toast.makeText(context, "Support ticket opened for Order #${order.displayOrderId}. Support team will contact you shortly.", Toast.LENGTH_LONG).show()
+                        onDismiss()
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFFE11D48).copy(alpha = 0.12f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ReportProblem, contentDescription = null, tint = Color(0xFFE11D48), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Report Issue with Order / Items", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
+                        Text("Damaged packing, missing medicine, or wrong delivery", fontSize = 11.5.sp, color = Color(0xFF64748B))
+                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
 }

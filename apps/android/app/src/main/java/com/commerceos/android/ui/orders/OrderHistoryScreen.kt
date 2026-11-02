@@ -37,6 +37,7 @@ fun OrderHistoryScreen(
     onRefresh: () -> Unit,
     onCancelOrder: (CustomerOrderApiResponse) -> Unit,
     onReorderItem: (OrderItem) -> Unit = {},
+    onReorderOrder: (CustomerOrderApiResponse) -> Unit = {},
     onTrackOrder: (CustomerOrderApiResponse) -> Unit = {}
 ) {
     var selectedFilterTab by remember { mutableStateOf("ALL") }
@@ -190,6 +191,7 @@ fun OrderHistoryScreen(
                                 order = order,
                                 onCancelOrder = { onCancelOrder(order) },
                                 onReorderItem = onReorderItem,
+                                onReorderOrder = onReorderOrder,
                                 onTrackOrder = { onTrackOrder(order) }
                             )
                         }
@@ -208,6 +210,7 @@ private fun OrderHistoryCard(
     order: CustomerOrderApiResponse,
     onCancelOrder: () -> Unit,
     onReorderItem: (OrderItem) -> Unit,
+    onReorderOrder: (CustomerOrderApiResponse) -> Unit = {},
     onTrackOrder: () -> Unit
 ) {
     val presented = OrderStatusPresentationMapper.present(order.orderStatus)
@@ -218,7 +221,7 @@ private fun OrderHistoryCard(
 
     val effectiveTotal = when {
         order.effectiveTotalAmount > java.math.BigDecimal.ZERO -> order.effectiveTotalAmount
-        items.isNotEmpty() -> items.map { it.unitPrice * java.math.BigDecimal(it.quantity) }.fold(java.math.BigDecimal.ZERO, java.math.BigDecimal::add) + (order.effectiveDeliveryFee)
+        items.isNotEmpty() -> items.map { it.effectivePrice * java.math.BigDecimal(it.effectiveQuantity) }.fold(java.math.BigDecimal.ZERO, java.math.BigDecimal::add) + (order.effectiveDeliveryFee)
         else -> java.math.BigDecimal.ZERO
     }
 
@@ -432,7 +435,13 @@ private fun OrderHistoryCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    TextButton(onClick = { items.firstOrNull()?.let { onReorderItem(it) } }) {
+                    TextButton(onClick = {
+                        if (items.isNotEmpty()) {
+                            onReorderOrder(order)
+                        } else {
+                            items.firstOrNull()?.let { onReorderItem(it) }
+                        }
+                    }) {
                         Text(
                             text = "Reorder",
                             fontSize = 13.5.sp,
@@ -507,8 +516,10 @@ private fun OrderHistoryCard(
  */
 @Composable
 private fun ProductThumbTile(item: OrderItem) {
-    val resolvedUrl = remember(item.sku, item.name) {
-        MedicineImageResolver.resolve(item.sku, item.name)
+    val sku = item.effectiveSku
+    val name = item.effectiveName
+    val resolvedUrl = remember(sku, name) {
+        MedicineImageResolver.resolve(sku, name)
     }
 
     Surface(
@@ -519,7 +530,7 @@ private fun ProductThumbTile(item: OrderItem) {
     ) {
         ProductImage(
             imageUrl = resolvedUrl,
-            contentDescription = item.name,
+            contentDescription = name,
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxSize()

@@ -749,13 +749,39 @@ fun CommerceOSApp(
                     isReconnecting = orderViewModel.isStreamReconnecting,
                     onRefresh = { orderViewModel.loadDetail(screen.orderId) },
                     onBack = { goBack() },
-                    onReorderItem = { item -> cartViewModel.addReorderItem(item) }
+                    onReorderOrder = { order ->
+                        val items = order.items.orEmpty()
+                        if (items.isNotEmpty()) {
+                            cartViewModel.reorderAll(items)
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Added ${items.size} items to cart")
+                            }
+                            navigate(Screen.Cart)
+                        }
+                    },
+                    onReorderItem = { item ->
+                        cartViewModel.addReorderItem(item)
+                        navigate(Screen.Cart)
+                    }
                 )
                 is Screen.OrderHistory -> OrderHistoryScreen(
                     history = orderViewModel.history,
                     onRefresh = { orderViewModel.loadHistory(authenticatedCustomerId) },
                     onCancelOrder = { order -> orderViewModel.openCancelDialog(order) },
-                    onReorderItem = { item -> cartViewModel.addReorderItem(item) },
+                    onReorderOrder = { order ->
+                        val items = order.items.orEmpty()
+                        if (items.isNotEmpty()) {
+                            cartViewModel.reorderAll(items)
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Added ${items.size} items to cart")
+                            }
+                            navigate(Screen.Cart)
+                        }
+                    },
+                    onReorderItem = { item ->
+                        cartViewModel.addReorderItem(item)
+                        navigate(Screen.Cart)
+                    },
                     onTrackOrder = { order ->
                         orderViewModel.loadDetail(order.id)
                         navigate(Screen.OrderTracking(order.id))

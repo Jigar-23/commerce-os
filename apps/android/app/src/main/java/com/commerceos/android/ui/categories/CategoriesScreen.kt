@@ -403,8 +403,7 @@ fun CategoriesScreen(
                         colors = listOf(Color(0xFF005844), Color(0xFF067A5E))
                     )
                 )
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             // Location & Delivery Strip
             Row(
