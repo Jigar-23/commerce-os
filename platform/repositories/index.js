@@ -3897,7 +3897,14 @@ class TransactionalOrderRepository {
        ORDER BY created_at DESC LIMIT $2`,
       [customerId, limit]
     );
-    return res.rows;
+    return res.rows.map(r => ({
+      ...r,
+      id: r.order_id || r.id,
+      orderId: r.order_id || r.id,
+      orderStatus: r.status,
+      order_status: r.status,
+      status: r.status
+    }));
   }
 
   async acceptOrderBySeller(orderId, storeId, sellerId) {

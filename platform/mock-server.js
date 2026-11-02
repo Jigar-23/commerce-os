@@ -8456,7 +8456,24 @@ async function handleRequest(port, req, res) {
           try {
             const dbOrders = await appRepositories.orderRepo.findOrdersByCustomerId(targetCustId);
             if (dbOrders && dbOrders.length > 0) {
-              return json(res, 200, dbOrders.map(stripOtp));
+              const mappedDbOrders = dbOrders.map(r => ({
+                ...r,
+                id: r.order_id || r.id,
+                orderId: r.order_id || r.id,
+                status: r.status,
+                orderStatus: r.status,
+                order_status: r.status,
+                totalAmount: Number(r.total_amount || 0),
+                total_amount: Number(r.total_amount || 0),
+                deliveryFee: Number(r.delivery_fee || 0),
+                delivery_fee: Number(r.delivery_fee || 0),
+                paymentMethod: r.payment_method,
+                paymentStatus: r.payment_status,
+                deliveryAddress: typeof r.delivery_address === 'string' ? JSON.parse(r.delivery_address) : r.delivery_address,
+                items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+                createdAt: r.created_at
+              }));
+              return json(res, 200, mappedDbOrders.map(stripOtp));
             }
           } catch (_) {}
         }
