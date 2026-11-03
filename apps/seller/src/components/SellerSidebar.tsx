@@ -230,7 +230,9 @@ export default function SellerSidebar({
               <IndianRupee className="w-4 h-4" />
               <span>Settlements & Payouts</span>
             </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+            <span className="px-1.5 py-0.5 text-3xs font-extrabold uppercase tracking-wider rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+              Soon
+            </span>
           </Link>
 
           <Link
