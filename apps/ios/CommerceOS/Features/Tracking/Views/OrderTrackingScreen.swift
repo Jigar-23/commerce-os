@@ -97,7 +97,7 @@ public struct OrderTrackingScreen: View {
         let s = effectiveStatus.uppercased()
         return s == "PLACED" || s == "ORDER_PLACED" || s == "CREATED" ||
                s == "CONFIRMED" || s == "ACCEPTED" || s == "SELLER_ACCEPTED" ||
-               s == "ORDER_SELLER_ACCEPTED" || s == "ALLOCATED_DARK_STORE" ||
+               s == "ORDER_SELLER_ACCEPTED" || s == "ALLOCATED_DARK_STORE" || s == "ALLOCATED_STORE" ||
                s == "PAYMENT_PENDING" || s == "PRESCRIPTION_VERIFICATION_PENDING" ||
                s == "PACKED" || s == "PACKED_FEFO" || s == "READY_FOR_PICKUP" ||
                s == "SEARCHING_FOR_RIDER" || s == "LOOKING_FOR_RIDER"
@@ -1229,7 +1229,11 @@ public struct OrderTrackingScreen: View {
         if let lat = trackingData?.merchantLat, let lng = trackingData?.merchantLng, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
-        return nil
+        if let cust = resolvedCustomerCoordinate {
+            // Dark Store Hub offset (~1 km north-east of delivery point)
+            return CLLocationCoordinate2D(latitude: cust.latitude + 0.0075, longitude: cust.longitude + 0.0065)
+        }
+        return CLLocationCoordinate2D(latitude: 28.1995, longitude: 76.6145)
     }
     
     private var resolvedCustomerCoordinate: CLLocationCoordinate2D? {
@@ -1239,7 +1243,7 @@ public struct OrderTrackingScreen: View {
         if let lat = orderDetail?.deliveryAddress?.latitude, let lng = orderDetail?.deliveryAddress?.longitude, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
-        return nil
+        return CLLocationCoordinate2D(latitude: 28.1920, longitude: 76.6080)
     }
     
     private func copyOrderIdToClipboard() {

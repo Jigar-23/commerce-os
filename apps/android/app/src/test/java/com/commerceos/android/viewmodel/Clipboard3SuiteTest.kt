@@ -116,15 +116,66 @@ class Clipboard3SuiteTest {
     fun testSharedCartEngine_saveForLaterAndCoupons() {
         val viewModel = CartViewModel(object : com.commerceos.android.repository.AppRepository() {})
         viewModel.init("cust_101")
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.updateAvailableCampaigns(CartViewModel.DEFAULT_CAMPAIGNS)
+
+        val prod = CommerceProduct(id = "p1", sku = "sku1", name = "Syrup", price = 250.0, sellingPrice = 250.0)
+        viewModel.addItem(prod)
+        testDispatcher.scheduler.advanceUntilIdle()
 
         val applied = viewModel.applyCoupon("SAVE10")
         assertTrue(applied)
         assertEquals("SAVE10", viewModel.appliedCouponCode)
-        assertEquals(java.math.BigDecimal.valueOf(100.0), viewModel.couponDiscountAmount)
+        assertEquals(0, java.math.BigDecimal.valueOf(100.0).compareTo(viewModel.couponDiscountAmount))
 
         viewModel.removeCoupon()
         assertNull(viewModel.appliedCouponCode)
         assertEquals(java.math.BigDecimal.ZERO, viewModel.couponDiscountAmount)
+    }
+
+    @Test
+    fun testTieredCampaigns_Welcome20_Health30_AndRemoval() {
+        val viewModel = CartViewModel(object : com.commerceos.android.repository.AppRepository() {})
+        viewModel.init("")
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.updateAvailableCampaigns(CartViewModel.DEFAULT_CAMPAIGNS)
+
+        // 1. Empty cart: WELCOME20 fails minOrderValue threshold (>= 299)
+        val res1 = viewModel.applyCouponWithFeedback("WELCOME20")
+        assertFalse(res1.success)
+        assertTrue(res1.message.contains("more to apply WELCOME20"))
+
+        // 2. Add product below threshold: 1x ₹150 = ₹150
+        val prod1 = CommerceProduct(id = "p1", sku = "sku1", name = "Syrup", price = 150.0, sellingPrice = 150.0)
+        viewModel.addItem(prod1)
+        testDispatcher.scheduler.advanceUntilIdle()
+        val res2 = viewModel.applyCouponWithFeedback("WELCOME20")
+        assertFalse(res2.success)
+
+        // 3. Add more: total = ₹300 (eligible for WELCOME20: 20% of 300 = ₹60.00)
+        viewModel.addItem(prod1) // qty = 2, total = ₹300
+        testDispatcher.scheduler.advanceUntilIdle()
+        val res3 = viewModel.applyCouponWithFeedback("WELCOME20")
+        assertTrue(res3.success)
+        assertEquals("WELCOME20", viewModel.appliedCouponCode)
+        assertEquals(java.math.BigDecimal("60.00"), viewModel.couponDiscountAmount)
+
+        // 4. Test removeCoupon
+        viewModel.removeCoupon()
+        assertNull(viewModel.appliedCouponCode)
+        assertEquals(java.math.BigDecimal.ZERO, viewModel.couponDiscountAmount)
+
+        // 5. Test HEALTH30 (requires >= 799 for flat ₹150 off)
+        val res4 = viewModel.applyCouponWithFeedback("HEALTH30")
+        assertFalse(res4.success)
+
+        val prodHigh = CommerceProduct(id = "p2", sku = "sku2", name = "Monitor", price = 600.0, sellingPrice = 600.0)
+        viewModel.addItem(prodHigh) // total = 300 + 600 = 900 >= 799
+        testDispatcher.scheduler.advanceUntilIdle()
+        val res5 = viewModel.applyCouponWithFeedback("HEALTH30")
+        assertTrue(res5.success)
+        assertEquals("HEALTH30", viewModel.appliedCouponCode)
+        assertEquals(java.math.BigDecimal("150.00"), viewModel.couponDiscountAmount)
     }
 
     @Test

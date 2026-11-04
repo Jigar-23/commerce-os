@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 
 public struct PrescriptionVaultScreen: View {
     @EnvironmentObject private var container: AppContainer
@@ -7,19 +10,36 @@ public struct PrescriptionVaultScreen: View {
     @State private var isLoading: Bool = false
     @State private var errorMessage: String? = nil
     @State private var prescriptions: [PrescriptionItem] = []
+    @State private var previewItem: PrescriptionItem? = nil
     
-    public init() {}
+    public var onBack: (() -> Void)? = nil
+    
+    public init(onBack: (() -> Void)? = nil) {
+        self.onBack = onBack
+    }
     
     public var body: some View {
         NavigationView {
             VStack(alignment: .leading, spacing: 16) {
                 // Header description & Refresh
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 10) {
+                    if let onBack = onBack {
+                        Button(action: onBack) {
+                            Image(systemName: "arrow.left")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(Color(hex: "0F172A"))
+                                .padding(8)
+                                .background(Color(hex: "F1F5F9"))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Prescription Vault")
+                        Text("Prescriptions")
                             .font(.system(size: 24, weight: .bold))
                             .foregroundColor(.primary)
-                        Text("Upload, track review status, and attach approved prescriptions.")
+                        Text("Saved prescriptions ready to share with pharmacy")
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
                     }
@@ -38,7 +58,7 @@ public struct PrescriptionVaultScreen: View {
                     HStack(spacing: 8) {
                         Image(systemName: "plus")
                             .font(.system(size: 14, weight: .bold))
-                        Text("Upload prescription")
+                        Text("Upload Prescription")
                             .font(.system(size: 15, weight: .bold))
                     }
                     .foregroundColor(.white)
@@ -68,7 +88,11 @@ public struct PrescriptionVaultScreen: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(prescriptions) { rx in
-                                PrescriptionCardView(item: rx)
+                                PrescriptionCardView(
+                                    item: rx,
+                                    onPreview: { previewItem = rx },
+                                    onDelete: { deletePrescription(item: rx) }
+                                )
                             }
                         }
                         .padding(.horizontal)
@@ -83,6 +107,12 @@ public struct PrescriptionVaultScreen: View {
                     showingUploadSheet = false
                 })
                 .environmentObject(container)
+            }
+            .sheet(item: $previewItem) { item in
+                PrescriptionQuickPreviewModal(
+                    prescription: item,
+                    onAttach: nil
+                )
             }
             .onAppear {
                 loadPrescriptions()
@@ -99,7 +129,7 @@ public struct PrescriptionVaultScreen: View {
             Text("No prescriptions uploaded")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(.primary)
-            Text("Upload a clear photo when an item requires pharmacist review.")
+            Text("Upload a clear photo of your prescription to share with the vendor pharmacy during order checkout.")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -112,23 +142,30 @@ public struct PrescriptionVaultScreen: View {
     private func loadPrescriptions() {
         isLoading = true
         errorMessage = nil
+        let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        
+        // 1. Instantly surface all local device prescriptions
+        let localRecords = LocalPrescriptionManager.shared.getPrescriptions(customerId: customerId)
+        var merged: [PrescriptionItem] = localRecords.map { $0.toPrescriptionItem() }
+        self.prescriptions = merged
+        
         Task {
             do {
-                let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
                 let list: [PrescriptionServerDto] = try await container.apiClient.get(endpoint: "/api/v1/prescriptions/customer/\(customerId)")
-                let mapped = list.map { dto in
+                let localIds = Set(localRecords.map { $0.id })
+                let mappedRemote = list.filter { !localIds.contains($0.id) }.map { dto in
                     PrescriptionItem(
                         id: dto.id,
-                        doctorName: dto.doctorName ?? "Licensed Practitioner",
-                        doctorRegNo: "CDSCO-VERIFIED",
-                        patientName: dto.patientName ?? "Self Patient",
+                        doctorName: dto.doctorName ?? "",
+                        doctorRegNo: "",
+                        patientName: dto.patientName ?? "Patient",
                         extractedMedicines: [],
                         pharmacistStatus: dto.status ?? "PENDING",
-                        uploadedDate: dto.createdAt ?? "Recent"
+                        uploadedDate: dto.createdAt ?? "Recently uploaded"
                     )
                 }
                 await MainActor.run {
-                    self.prescriptions = mapped
+                    self.prescriptions = merged + mappedRemote
                     self.isLoading = false
                 }
             } catch {
@@ -137,6 +174,12 @@ public struct PrescriptionVaultScreen: View {
                 }
             }
         }
+    }
+    
+    private func deletePrescription(item: PrescriptionItem) {
+        let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        LocalPrescriptionManager.shared.deletePrescription(customerId: customerId, rxId: item.id)
+        prescriptions.removeAll { $0.id == item.id }
     }
 }
 
@@ -152,6 +195,8 @@ public struct PrescriptionItem: Identifiable {
 
 public struct PrescriptionCardView: View {
     let item: PrescriptionItem
+    var onPreview: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -173,6 +218,35 @@ public struct PrescriptionCardView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
+                
+                if let onPreview = onPreview {
+                    Button(action: onPreview) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "eye.fill")
+                                .font(.system(size: 11))
+                            Text("Preview")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundColor(Color(hex: "0284C7"))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(hex: "F0F9FF"))
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                if let onDelete = onDelete {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .padding(6)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
             }
             
             if !item.extractedMedicines.isEmpty {
@@ -243,6 +317,8 @@ public struct UploadPrescriptionModal: View {
     @EnvironmentObject private var container: AppContainer
     @State private var isAnalyzing: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var showingFilePicker: Bool = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var scanErrorMessage: String? = nil
     @State private var showingManualInput: Bool = false
     @State private var manualPatientName: String = ""
@@ -256,7 +332,7 @@ public struct UploadPrescriptionModal: View {
                     VStack(spacing: 12) {
                         ProgressView()
                             .scaleEffect(1.5)
-                        Text("Uploading & Submitting to Pharmacist Desk...")
+                        Text("Saving & Submitting to Pharmacist Desk...")
                             .font(.system(size: 14, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -264,7 +340,9 @@ public struct UploadPrescriptionModal: View {
                     Form {
                         Section(header: Text("Prescription Details")) {
                             TextField("Patient Full Name *", text: $manualPatientName)
-                            TextField("Doctor / Clinic Name", text: $manualDoctorName)
+                                .foregroundColor(Color(hex: "0F172A"))
+                            TextField("Doctor / Clinic Name (Optional)", text: $manualDoctorName)
+                                .foregroundColor(Color(hex: "0F172A"))
                         }
                         Section {
                             Button(action: uploadManualPrescription) {
@@ -282,12 +360,12 @@ public struct UploadPrescriptionModal: View {
                     Image(systemName: "doc.viewfinder.fill")
                         .font(.system(size: 64))
                         .foregroundColor(CommerceOSTheme.Colors.brandPrimary)
-                        .padding(.top, 40)
+                        .padding(.top, 30)
                     
-                    Text("Upload Prescription Document")
-                        .font(.system(size: 18, weight: .bold))
+                    Text("Upload Prescription")
+                        .font(.system(size: 20, weight: .bold))
                     
-                    Text("Upload or capture a clear photo of the prescription for pharmacist review.")
+                    Text("Upload a clear photo or document of your prescription for pharmacist verification.")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -295,15 +373,16 @@ public struct UploadPrescriptionModal: View {
                     
                     if let error = scanErrorMessage {
                         Text(error)
-                            .font(.system(size: 12))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.red)
                             .padding(.horizontal)
                     }
                     
                     Spacer()
                     
+                    // 4 Enterprise Upload Options: Camera, Photo Gallery, Files/Documents, Manual
                     VStack(spacing: 12) {
-                        // Camera Scanner Button
+                        // 1. Scan with Camera
                         Button(action: {
                             if VisionKitDocumentScanner.isAvailable {
                                 showingCameraScanner = true
@@ -313,30 +392,76 @@ public struct UploadPrescriptionModal: View {
                         }) {
                             HStack {
                                 Image(systemName: "camera.fill")
+                                    .font(.system(size: 16))
                                 Text("Scan with Camera")
+                                    .font(.system(size: 15, weight: .bold))
                             }
-                            .font(.system(size: 15, weight: .bold))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding()
+                            .padding(.vertical, 14)
                             .background(CommerceOSTheme.Colors.brandPrimaryDark)
-                            .cornerRadius(10)
+                            .cornerRadius(12)
                             .padding(.horizontal)
                         }
                         
-                        // Manual entry fallback
+                        // 2. Photo Gallery (PhotosPicker)
+                        PhotosPicker(
+                            selection: $selectedPhotoItem,
+                            matching: .images,
+                            photoLibrary: .shared()
+                        ) {
+                            HStack {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 16))
+                                Text("Choose from Photo Gallery")
+                                    .font(.system(size: 15, weight: .bold))
+                            }
+                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(CommerceOSTheme.Colors.brandPrimarySoft)
+                            .cornerRadius(12)
+                            .padding(.horizontal)
+                        }
+                        .onChange(of: selectedPhotoItem) { newItem in
+                            guard let newItem = newItem else { return }
+                            Task {
+                                if let data = try? await newItem.loadTransferable(type: Data.self),
+                                   let img = UIImage(data: data) {
+                                    uploadImageRecord(image: img, sourceLabel: "Gallery Photo")
+                                }
+                            }
+                        }
+                        
+                        // 3. Choose from Files / Documents (PDF / Images)
+                        Button(action: { showingFilePicker = true }) {
+                            HStack {
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: 16))
+                                Text("Upload from Files (PDF, Images)")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(Color(hex: "0284C7"))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color(hex: "F0F9FF"))
+                            .cornerRadius(12)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "BAE6FD"), lineWidth: 1))
+                            .padding(.horizontal)
+                        }
+                        
+                        // 4. Manual entry fallback
                         Button(action: { showingManualInput = true }) {
                             HStack {
                                 Image(systemName: "square.and.pencil")
                                 Text("Enter Prescription Details Manually")
                             }
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(CommerceOSTheme.Colors.brandPrimaryDark)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .padding(.vertical, 8)
                         }
                     }
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 24)
                 }
             }
             .navigationTitle("Upload Rx")
@@ -344,6 +469,20 @@ public struct UploadPrescriptionModal: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { presentationMode.wrappedValue.dismiss() }
+                }
+            }
+            .fileImporter(
+                isPresented: $showingFilePicker,
+                allowedContentTypes: [.pdf, .image, .jpeg, .png],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let firstUrl = urls.first {
+                        handleFilePicked(url: firstUrl)
+                    }
+                case .failure(let error):
+                    self.scanErrorMessage = "File selection failed: \(error.localizedDescription)"
                 }
             }
             .sheet(isPresented: $showingCameraScanner) {
@@ -364,9 +503,118 @@ public struct UploadPrescriptionModal: View {
         }
     }
     
+    private func handleFilePicked(url: URL) {
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+        
+        if let data = try? Data(contentsOf: url) {
+            if let image = UIImage(data: data) {
+                uploadImageRecord(image: image, sourceLabel: url.lastPathComponent)
+            } else {
+                // PDF document handling
+                uploadRawDocument(data: data, fileName: url.lastPathComponent)
+            }
+        }
+    }
+    
+    private func uploadImageRecord(image: UIImage, sourceLabel: String) {
+        isAnalyzing = true
+        let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        let record = LocalPrescriptionManager.shared.savePrescriptionImage(
+            image: image,
+            customerId: customerId,
+            patientName: "Patient",
+            doctorName: ""
+        )
+        
+        let payload = PrescriptionUploadPayload(
+            patientName: "Patient",
+            doctorName: nil,
+            doctorRegistrationNo: nil,
+            attachments: record?.attachments ?? [],
+            note: "Uploaded via \(sourceLabel)"
+        )
+        
+        Task {
+            do {
+                let resp: PrescriptionUploadResponse = try await container.apiClient.post(
+                    endpoint: "/api/v1/prescriptions",
+                    body: payload
+                )
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    let item = PrescriptionItem(
+                        id: resp.id,
+                        doctorName: "",
+                        doctorRegNo: "",
+                        patientName: "Patient",
+                        extractedMedicines: [],
+                        pharmacistStatus: "PENDING_VERIFICATION",
+                        uploadedDate: "Just Now"
+                    )
+                    onUploadSuccess(item)
+                    presentationMode.wrappedValue.dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    // If backend is offline or mock, local prescription item is already safely persisted!
+                    let item = record?.toPrescriptionItem() ?? PrescriptionItem(
+                        id: UUID().uuidString,
+                        doctorName: "",
+                        doctorRegNo: "",
+                        patientName: "Patient",
+                        extractedMedicines: [],
+                        pharmacistStatus: "PENDING_VERIFICATION",
+                        uploadedDate: "Just Now"
+                    )
+                    onUploadSuccess(item)
+                    presentationMode.wrappedValue.dismiss()
+                }
+            }
+        }
+    }
+    
+    private func uploadRawDocument(data: Data, fileName: String) {
+        isAnalyzing = true
+        let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        let safeName = "doc_\(Int(Date().timeIntervalSince1970))_\(fileName)"
+        let targetURL = LocalPrescriptionManager.shared.prescriptionsDirectory.appendingPathComponent(safeName)
+        try? data.write(to: targetURL)
+        
+        let record = LocalPrescriptionRecord(
+            customerId: customerId,
+            doctorName: "",
+            patientName: "Patient",
+            pharmacistStatus: "PENDING_VERIFICATION",
+            attachments: [targetURL.path]
+        )
+        LocalPrescriptionManager.shared.savePrescription(record)
+        
+        let payload = PrescriptionUploadPayload(
+            patientName: "Patient",
+            doctorName: nil,
+            doctorRegistrationNo: nil,
+            attachments: [targetURL.path],
+            note: "Document: \(fileName)"
+        )
+        
+        Task {
+            let _: PrescriptionUploadResponse? = try? await container.apiClient.post(
+                endpoint: "/api/v1/prescriptions",
+                body: payload
+            )
+            await MainActor.run {
+                self.isAnalyzing = false
+                onUploadSuccess(record.toPrescriptionItem())
+                presentationMode.wrappedValue.dismiss()
+            }
+        }
+    }
+    
     private func uploadScannedResult(_ result: ScannedPrescriptionResult) {
         isAnalyzing = true
-        let pName = result.patientName.isEmpty ? "Self Patient" : result.patientName
+        let pName = result.patientName.isEmpty ? "Patient" : result.patientName
         let dName = result.doctorName.isEmpty ? nil : result.doctorName
         let regNo = result.doctorRegNo.isEmpty ? nil : result.doctorRegNo
         let meds = result.extractedMedicines
@@ -389,8 +637,8 @@ public struct UploadPrescriptionModal: View {
                     self.isAnalyzing = false
                     let item = PrescriptionItem(
                         id: resp.id,
-                        doctorName: dName ?? "Pending Verification",
-                        doctorRegNo: regNo ?? "Pending Review",
+                        doctorName: dName ?? "",
+                        doctorRegNo: regNo ?? "",
                         patientName: pName,
                         extractedMedicines: meds,
                         pharmacistStatus: "PENDING_VERIFICATION",
@@ -433,8 +681,8 @@ public struct UploadPrescriptionModal: View {
                     self.isAnalyzing = false
                     let item = PrescriptionItem(
                         id: resp.id,
-                        doctorName: dName.isEmpty ? "Pending Verification" : dName,
-                        doctorRegNo: "Pending Review",
+                        doctorName: dName,
+                        doctorRegNo: "",
                         patientName: pName,
                         extractedMedicines: [],
                         pharmacistStatus: "PENDING_VERIFICATION",

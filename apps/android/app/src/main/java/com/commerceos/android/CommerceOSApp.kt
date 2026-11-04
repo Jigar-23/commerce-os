@@ -123,6 +123,9 @@ fun CommerceOSApp(
         if (targetScreen is Screen.Catalog) {
             catalogViewModel.open(targetScreen.query)
         }
+        if (query.text.isNotBlank()) {
+            universalSearchViewModel.executeSearch(query.text)
+        }
         navigate(targetScreen)
     }
 
@@ -697,14 +700,19 @@ fun CommerceOSApp(
                         navigate(Screen.Catalog(catalogQuery))
                     }
                 )
-                is Screen.ProductDetail -> ProductDetailScreen(
-                    uiState = productDetailViewModel.uiState,
-                    cartItems = cartViewModel.cartItems,
-                    onAddToCart = { cartViewModel.addItem(it) },
-                    onQuantityChange = { sku, quantity -> cartViewModel.updateQuantity(sku, quantity) },
-                    onRemoveItem = { cartViewModel.removeItem(it) },
-                    onRetry = { productDetailViewModel.load(screen.productId) }
-                )
+                is Screen.ProductDetail -> {
+                    LaunchedEffect(screen.productId) {
+                        productDetailViewModel.load(screen.productId)
+                    }
+                    ProductDetailScreen(
+                        uiState = productDetailViewModel.uiState,
+                        cartItems = cartViewModel.cartItems,
+                        onAddToCart = { cartViewModel.addItem(it) },
+                        onQuantityChange = { sku, quantity -> cartViewModel.updateQuantity(sku, quantity) },
+                        onRemoveItem = { cartViewModel.removeItem(it) },
+                        onRetry = { productDetailViewModel.load(screen.productId) }
+                    )
+                }
                 is Screen.Cart -> CartScreen(
                     cartItems = cartViewModel.cartItems,
                     cartSubtotal = cartViewModel.effectiveSubtotal,
@@ -712,8 +720,16 @@ fun CommerceOSApp(
                     freeDeliveryEligible = cartViewModel.freeDeliveryEligible,
                     remainingForFreeDelivery = cartViewModel.remainingForFreeDelivery,
                     itemsSubtotal = MoneyFormatter.format(cartViewModel.effectiveSubtotal),
+                    mrpSavings = if (cartViewModel.itemMrpSavings > java.math.BigDecimal.ZERO) MoneyFormatter.format(cartViewModel.itemMrpSavings) else null,
                     totalSavings = MoneyFormatter.format(cartViewModel.totalSavings),
                     couponDiscount = if (cartViewModel.couponDiscountAmount > java.math.BigDecimal.ZERO) MoneyFormatter.format(cartViewModel.couponDiscountAmount) else null,
+                    appliedCouponCode = cartViewModel.appliedCouponCode,
+                    couponDiscountAmount = cartViewModel.couponDiscountAmount,
+                    availableCampaigns = cartViewModel.availableCampaigns,
+                    couponFeedbackMessage = cartViewModel.couponFeedbackMessage,
+                    isCouponError = cartViewModel.isCouponError,
+                    onApplyCoupon = { code -> cartViewModel.applyCouponWithFeedback(code) },
+                    onRemoveCoupon = { cartViewModel.removeCoupon() },
                     expressFee = MoneyFormatter.format(cartViewModel.effectiveExpressFee),
                     coldChainFee = if (cartViewModel.containsColdChain) MoneyFormatter.format(cartViewModel.effectiveColdChainFee) else null,
                     grandTotal = MoneyFormatter.format(cartViewModel.effectiveGrandTotal),
@@ -723,7 +739,7 @@ fun CommerceOSApp(
                         ?: addressViewModel.addresses.firstOrNull { it.isDefault }
                         ?: addressViewModel.addresses.firstOrNull(),
                     onChangeAddress = {
-                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
                         addressViewModel.init(authenticatedCustomerId, force = true)
                         navigate(Screen.AddressSelection(fromCheckout = true))
                     },
@@ -738,12 +754,15 @@ fun CommerceOSApp(
 
                         val isCompleteSavedAddress = currentSelected != null &&
                             !currentSelected.id.startsWith("temp_gps_") &&
-                            !currentSelected.tag.equals("Current Location", ignoreCase = true)
+                            !currentSelected.tag.equals("Current Location", ignoreCase = true) &&
+                            !currentSelected.city.equals("Wadgaon", ignoreCase = true) &&
+                            (currentSelected.latitude ?: 0.0) != 0.0 &&
+                            kotlin.math.abs((currentSelected.latitude ?: 0.0) - 20.5937) > 0.01
 
-                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
 
-                        if (isCompleteSavedAddress) {
-                            checkoutViewModel.selectAddress(currentSelected!!)
+                        if (isCompleteSavedAddress && currentSelected != null) {
+                            checkoutViewModel.selectAddress(currentSelected)
                             navigate(Screen.PaymentGateway)
                         } else {
                             addressViewModel.init(authenticatedCustomerId, force = true)
@@ -766,9 +785,15 @@ fun CommerceOSApp(
                         onSelectAddress = { address ->
                             if (isFromCheckout) {
                                 if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
-                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
                                 }
                                 checkoutViewModel.selectAddress(address)
+                                addressViewModel.select(address)
+                                if (backStack.lastOrNull() is Screen.PaymentGateway) {
+                                    goBack()
+                                } else {
+                                    navigate(Screen.PaymentGateway)
+                                }
                             } else if (isFromProfile) {
                                 addressViewModel.setDefaultAddress(address.id)
                                 addressViewModel.select(address)
@@ -780,18 +805,6 @@ fun CommerceOSApp(
                                 goBack()
                             }
                         },
-                        onProceedToPayment = if (isFromCheckout) {
-                            {
-                                if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
-                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
-                                }
-                                val addr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
-                                if (addr != null) {
-                                    checkoutViewModel.selectAddress(addr)
-                                }
-                                navigate(Screen.PaymentGateway)
-                            }
-                        } else null,
                         onSavedSuccessfully = {
                             val saved = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
                             if (saved != null) {
@@ -799,7 +812,7 @@ fun CommerceOSApp(
                             }
                             if (isFromCheckout) {
                                 if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
-                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
                                 }
                                 if (saved != null) checkoutViewModel.selectAddress(saved)
                                 if (backStack.lastOrNull() is Screen.PaymentGateway) {
@@ -816,7 +829,7 @@ fun CommerceOSApp(
                 is Screen.PaymentGateway -> {
                     if ((checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) ||
                         checkoutViewModel.customerId.isBlank()) {
-                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount)
+                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
                         val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
                         if (activeAddr != null && checkoutViewModel.uiState.address == null) {
                             checkoutViewModel.selectAddress(activeAddr)
@@ -951,7 +964,7 @@ fun CommerceOSApp(
                         openUniversalSearch(searchQuery)
                     },
                     onSelectSearchResult = { res ->
-                        navigate(router.resolve(res.toDestination(), clientConfig))
+                        resolveShortcutDestination(res.toDestination())
                     },
                     onAddToCart = { res ->
                         cartViewModel.addItem(
@@ -959,10 +972,11 @@ fun CommerceOSApp(
                                 id = res.entityId,
                                 sku = res.sku ?: res.entityId,
                                 name = res.title,
+                                brandName = res.subtitle,
                                 price = res.price ?: 0.0,
                                 sellingPrice = res.price ?: 0.0,
                                 image = res.image,
-                                verticalId = res.vertical
+                                verticalId = res.vertical.ifBlank { "pharmacy" }
                             )
                         )
                     },

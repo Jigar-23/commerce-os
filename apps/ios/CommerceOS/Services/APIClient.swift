@@ -64,6 +64,7 @@ public class APIClient: ObservableObject {
     }
     @Published public var authToken: String? = nil
     @Published public var currentCustomerId: String? = nil
+    @Published public var refreshToken: String? = nil
 
     private let session: URLSession
 
@@ -95,15 +96,25 @@ public class APIClient: ObservableObject {
             config.requestCachePolicy = .reloadIgnoringLocalCacheData
             self.session = URLSession(configuration: config)
         }
-        // Dual-layer Keychain + UserDefaults Loading
-        let token = KeychainHelper.shared.get(key: "auth_token") ?? UserDefaults.standard.string(forKey: "auth_token")
+        // Secure Enclave / Keychain Token Storage (Scrub legacy UserDefaults tokens)
+        if let legacyToken = UserDefaults.standard.string(forKey: "auth_token") {
+            KeychainHelper.shared.save(key: "auth_token", data: legacyToken)
+            UserDefaults.standard.removeObject(forKey: "auth_token")
+        }
+        if let legacyRefreshToken = UserDefaults.standard.string(forKey: "refresh_token") {
+            KeychainHelper.shared.save(key: "refresh_token", data: legacyRefreshToken)
+            UserDefaults.standard.removeObject(forKey: "refresh_token")
+        }
+        let token = KeychainHelper.shared.get(key: "auth_token")
         var customerId = KeychainHelper.shared.get(key: "customer_id") ?? UserDefaults.standard.string(forKey: "customer_id")
+        let rToken = KeychainHelper.shared.get(key: "refresh_token")
         if let token = token, !token.isEmpty {
             if customerId == nil || customerId?.isEmpty == true {
                 customerId = APIClient.extractSubFromJwt(token)
             }
             self.authToken = token
             self.currentCustomerId = customerId
+            self.refreshToken = rToken
         }
     }
 
@@ -111,22 +122,28 @@ public class APIClient: ObservableObject {
         return authToken != nil && !authToken!.isEmpty
     }
 
-    public func setAuth(token: String, customerId: String) {
+    public func setAuth(token: String, customerId: String, refreshToken: String? = nil) {
         self.authToken = token
         self.currentCustomerId = customerId
         KeychainHelper.shared.save(key: "auth_token", data: token)
         KeychainHelper.shared.save(key: "customer_id", data: customerId)
-        UserDefaults.standard.set(token, forKey: "auth_token")
         UserDefaults.standard.set(customerId, forKey: "customer_id")
+        if let refreshToken = refreshToken, !refreshToken.isEmpty {
+            self.refreshToken = refreshToken
+            KeychainHelper.shared.save(key: "refresh_token", data: refreshToken)
+        }
     }
 
     public func clearAuth() {
         self.authToken = nil
         self.currentCustomerId = nil
+        self.refreshToken = nil
         KeychainHelper.shared.delete(key: "auth_token")
         KeychainHelper.shared.delete(key: "customer_id")
+        KeychainHelper.shared.delete(key: "refresh_token")
         UserDefaults.standard.removeObject(forKey: "auth_token")
         UserDefaults.standard.removeObject(forKey: "customer_id")
+        UserDefaults.standard.removeObject(forKey: "refresh_token")
     }
 
     public struct OtpChallengeResponse: Codable {
@@ -154,9 +171,40 @@ public class APIClient: ObservableObject {
     public struct CustomerVerifyResponse: Codable {
         public let ok: Bool?
         public let accessToken: String
+        public let refreshToken: String?
         public let userId: String?
         public let phone: String?
         public let customer: CustomerDetailsResponse?
+    }
+
+    public struct TokenRefreshResponse: Codable {
+        public let ok: Bool?
+        public let accessToken: String
+        public let refreshToken: String?
+        public let token: String?
+    }
+
+    public func refreshAuthToken(_ refreshToken: String) async throws -> TokenRefreshResponse {
+        guard let url = URL(string: "\(baseURLString)/api/v1/auth/refresh") else {
+            throw APIError.invalidURL
+        }
+        var refreshReq = URLRequest(url: url)
+        refreshReq.httpMethod = "POST"
+        refreshReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        refreshReq.setValue("application/json", forHTTPHeaderField: "Accept")
+        refreshReq.httpBody = try JSONSerialization.data(withJSONObject: ["refreshToken": refreshToken])
+        let (data, response) = try await session.data(for: refreshReq)
+        guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
+            throw APIError.unauthenticated
+        }
+        let decoded = try JSONDecoder().decode(TokenRefreshResponse.self, from: data)
+        await MainActor.run {
+            self.authToken = decoded.accessToken
+            if let cid = self.currentCustomerId {
+                self.setAuth(token: decoded.accessToken, customerId: cid, refreshToken: decoded.refreshToken ?? refreshToken)
+            }
+        }
+        return decoded
     }
 
     public func sendOtp(phone: String) async throws -> OtpSendResult {
@@ -204,10 +252,10 @@ public class APIClient: ObservableObject {
             name: customerName,
             roles: ["ROLE_CUSTOMER"],
             accessToken: res.accessToken,
-            refreshToken: nil
+            refreshToken: res.refreshToken
         )
         await MainActor.run {
-            self.setAuth(token: authRes.accessToken, customerId: authRes.userId)
+            self.setAuth(token: authRes.accessToken, customerId: authRes.userId, refreshToken: authRes.refreshToken)
         }
         return authRes
     }
@@ -219,7 +267,7 @@ public class APIClient: ObservableObject {
         }
         let response: CustomerAuthResponse = try await post(endpoint: "/api/v1/auth/customer/verify-otp", body: LoginBody(phone: phone, otp: otp))
         await MainActor.run {
-            self.setAuth(token: response.accessToken, customerId: response.userId)
+            self.setAuth(token: response.accessToken, customerId: response.userId, refreshToken: response.refreshToken)
         }
         return response
     }
@@ -265,7 +313,16 @@ public class APIClient: ObservableObject {
                 print("[APIClient] \(method) \(url.path) -> HTTP \(httpRes.statusCode)")
 
                 if httpRes.statusCode == 401 {
-                    if let authHdr = req.value(forHTTPHeaderField: "Authorization"), !authHdr.isEmpty {
+                    if let authHdr = req.value(forHTTPHeaderField: "Authorization"), !authHdr.isEmpty, attempts < maxAttempts {
+                        if let rToken = self.refreshToken, !rToken.isEmpty {
+                            do {
+                                let newTokens = try await self.refreshAuthToken(rToken)
+                                req.setValue("Bearer \(newTokens.accessToken)", forHTTPHeaderField: "Authorization")
+                                continue
+                            } catch {
+                                print("[APIClient] Token refresh failed: \(error.localizedDescription)")
+                            }
+                        }
                         await MainActor.run {
                             self.clearAuth()
                             NotificationCenter.default.post(name: APIClient.sessionExpiredNotification, object: nil)

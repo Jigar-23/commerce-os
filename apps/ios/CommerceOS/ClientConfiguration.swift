@@ -62,7 +62,7 @@ struct ClientTheme: Codable {
 }
 
 extension Color {
-    init(hex: String) {
+    public init(hex: String) {
         let cleanHex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: cleanHex).scanHexInt64(&int)

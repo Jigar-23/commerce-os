@@ -227,9 +227,17 @@ export default function CategoriesHubPage() {
                 Deliver to {localityName}
               </span>
             </div>
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-black uppercase tracking-wide">
-              <Zap className="w-3 h-3 text-yellow-300 fill-yellow-300" />
-              10 Mins
+            <div className="flex items-center gap-2">
+              <Link
+                href="/account"
+                className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/20 hover:bg-white/30 text-[10px] font-black uppercase text-white transition-colors"
+              >
+                <span>Dashboard</span>
+              </Link>
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-black uppercase tracking-wide">
+                <Zap className="w-3 h-3 text-yellow-300 fill-yellow-300" />
+                10 Mins
+              </div>
             </div>
           </div>
 

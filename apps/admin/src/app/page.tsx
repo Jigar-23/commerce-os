@@ -28,7 +28,7 @@ interface SellerKycItem {
   id: string;
   businessName: string;
   tradeName: string;
-  category: 'RETAIL_PHARMACY' | 'DARK_STORE' | 'HOSPITAL_DISPENSARY';
+  category: 'RETAIL_PHARMACY' | 'STORE' | 'HOSPITAL_DISPENSARY';
   drugLicenseNumber: string;
   gstin: string;
   fssaiNumber: string;
@@ -124,9 +124,9 @@ export default function PharmacistAdminDashboard() {
     },
     {
       id: 'SELLER-KYC-02',
-      businessName: 'BlinkDark Quick Commerce Store #04',
-      tradeName: 'BlinkDark Hub',
-      category: 'DARK_STORE',
+      businessName: 'BlinkQuick Commerce Store #04',
+      tradeName: 'Blink Store Hub',
+      category: 'STORE',
       drugLicenseNumber: 'KA-B1-88392-DL',
       gstin: '29ZZZZZ9876A1Z2',
       fssaiNumber: '11559922883311',
@@ -251,7 +251,7 @@ export default function PharmacistAdminDashboard() {
       riderName: 'Rahul Verma',
       phone: '+91 98765 43210',
       vehicleType: 'Electric Scooter (Ather 450X)',
-      originStore: 'Blinkit-Grade DarkStore #1',
+      originStore: 'Blinkit-Grade Store #1',
       destination: 'Flat 402, Green Glen Heights, Bellandur',
       stage: 'EN_ROUTE_CUSTOMER',
       etaMinutes: 6,

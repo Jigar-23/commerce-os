@@ -410,7 +410,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                             {order.sellerApprovalStatus === 'PENDING'
                               ? '⏳ Awaiting Merchant Acceptance (Dispatch Held)'
                               : order.sellerApprovalStatus === 'AUTO_ACCEPTED'
-                              ? '⚡ Auto-Accepted into Fulfillment (Dark Store Mode)'
+                              ? '⚡ Auto-Accepted into Fulfillment (Store Mode)'
                               : '✓ Accepted by Store Operator'}
                           </p>
                         </div>
@@ -775,6 +775,26 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                     </>
                   )}
 
+                  {(order.sellerApprovalStatus === 'ACCEPTED' || order.orderStatus === 'SELLER_ACCEPTED' || order.status === 'SELLER_ACCEPTED') && (
+                    <button
+                      onClick={() => handleDomainTransition('pack')}
+                      className="px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer"
+                    >
+                      <Box className="w-4 h-4" />
+                      <span>Pack Order</span>
+                    </button>
+                  )}
+
+                  {(order.orderStatus === 'PACKED' || order.status === 'PACKED' || order.orderStatus === 'SELLER_ACCEPTED' || order.status === 'SELLER_ACCEPTED') && order.orderStatus !== 'READY_FOR_PICKUP' && order.status !== 'READY_FOR_PICKUP' && (
+                    <button
+                      onClick={() => handleDomainTransition('ready-pickup')}
+                      className="px-5 py-3 bg-action-speedBg hover:bg-action-speedHover text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer"
+                    >
+                      <Package className="w-4 h-4" />
+                      <span>Mark Ready for Pickup</span>
+                    </button>
+                  )}
+
                   {(order.sellerApprovalStatus === 'ACCEPTED' || order.orderStatus === 'SELLER_ACCEPTED' || order.orderStatus === 'READY_FOR_PICKUP') && !order.riderId && order.orderStatus !== 'RIDER_ASSIGNED' && (
                     <button
                       onClick={() => handleDomainTransition('accept')}
@@ -786,7 +806,7 @@ export default function DedicatedSingleOrderPage({ params }: { params?: { id?: s
                     </button>
                   )}
 
-                  {order.paymentMethod === 'COD' && order.paymentStatus === 'COD_PENDING_COLLECTION' && (
+                  {(order.paymentMethod === 'COD' || order.is_cod) && (order.paymentStatus === 'COD_PENDING_COLLECTION' || order.paymentStatus === 'COD_PENDING' || order.paymentStatus === 'PENDING') && order.orderStatus !== 'CANCELLED' && (
                     <button
                       onClick={() => { setCodModal(true); setCollectedCashInput(String(order.totalAmount)); }}
                       className="px-5 py-3 bg-action-warningBg hover:opacity-90 text-white rounded-xl font-bold text-xs shadow-md cursor-pointer"

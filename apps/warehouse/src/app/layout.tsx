@@ -3,8 +3,8 @@ import React from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Commerce OS — FEFO Dark Store Wave Picker',
-  description: 'Dark Store FEFO Barcode Scanner and Cold-Chain Verification App',
+  title: 'Commerce OS — FEFO Store Wave Picker',
+  description: 'Store FEFO Barcode Scanner and Cold-Chain Verification App',
 };
 
 export default function RootLayout({

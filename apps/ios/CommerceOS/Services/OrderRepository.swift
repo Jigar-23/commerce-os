@@ -201,6 +201,9 @@ public struct ServerOrderItemResponse: Codable {
 public struct ServerOrderResponse: Identifiable, Codable {
     public let id: String
     public let orderId: String?
+    public let shortOrderId: String?
+    public let displayOrderId: String?
+    public let numericOrderId: Int64?
     public let customerId: String?
     public let status: String
     public let orderStatus: String?
@@ -233,9 +236,28 @@ public struct ServerOrderResponse: Identifiable, Codable {
         return max(deliverySlaMins ?? 10, 8)
     }
 
+    public var displayOrderCode: String {
+        if let display = displayOrderId, !display.isEmpty {
+            return display
+        }
+        if let shortId = shortOrderId, !shortId.isEmpty {
+            if shortId.count == 10 {
+                let start = shortId.prefix(4)
+                let mid = shortId.dropFirst(4).prefix(3)
+                let end = shortId.suffix(3)
+                return "\(start)-\(mid)-\(end)"
+            }
+            return shortId
+        }
+        return String((orderId ?? id).suffix(8)).uppercased()
+    }
+
     public init(
         id: String,
         orderId: String? = nil,
+        shortOrderId: String? = nil,
+        displayOrderId: String? = nil,
+        numericOrderId: Int64? = nil,
         customerId: String? = nil,
         status: String = "PLACED",
         orderStatus: String? = nil,
@@ -259,6 +281,9 @@ public struct ServerOrderResponse: Identifiable, Codable {
     ) {
         self.id = id
         self.orderId = orderId ?? id
+        self.shortOrderId = shortOrderId
+        self.displayOrderId = displayOrderId
+        self.numericOrderId = numericOrderId
         self.customerId = customerId
         self.status = status
         self.orderStatus = orderStatus ?? status
@@ -285,6 +310,12 @@ public struct ServerOrderResponse: Identifiable, Codable {
         case id
         case orderId = "order_id"
         case orderIdCamel = "orderId"
+        case shortOrderId = "short_order_id"
+        case shortOrderIdCamel = "shortOrderId"
+        case displayOrderId = "display_order_id"
+        case displayOrderIdCamel = "displayOrderId"
+        case numericOrderId = "numeric_order_id"
+        case numericOrderIdCamel = "numericOrderId"
         case customerId = "customer_id"
         case customerIdCamel = "customerId"
         case status
@@ -367,6 +398,12 @@ public struct ServerOrderResponse: Identifiable, Codable {
         self.orderId = (try? container.decode(String.self, forKey: .orderId))
             ?? (try? container.decode(String.self, forKey: .orderIdCamel))
             ?? resolvedId
+        self.shortOrderId = (try? container.decode(String.self, forKey: .shortOrderId))
+            ?? (try? container.decode(String.self, forKey: .shortOrderIdCamel))
+        self.displayOrderId = (try? container.decode(String.self, forKey: .displayOrderId))
+            ?? (try? container.decode(String.self, forKey: .displayOrderIdCamel))
+        self.numericOrderId = (try? container.decode(Int64.self, forKey: .numericOrderId))
+            ?? (try? container.decode(Int64.self, forKey: .numericOrderIdCamel))
         self.customerId = (try? container.decode(String.self, forKey: .customerId))
             ?? (try? container.decode(String.self, forKey: .customerIdCamel))
         self.status = (try? container.decode(String.self, forKey: .status))

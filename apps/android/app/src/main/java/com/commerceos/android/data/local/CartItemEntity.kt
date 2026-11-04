@@ -25,32 +25,34 @@ data class CartItemEntity(
     val coldChain: Boolean = false,
     val updatedAt: Long = System.currentTimeMillis()
 ) {
-    fun toCartItem(): CartItem = CartItem(
-        productId = productId.ifBlank { sku },
-        sku = sku,
-        name = name.ifBlank { "Medicine Item" },
-        unitPrice = BigDecimal.valueOf(unitPrice),
-        quantity = quantity.coerceAtLeast(1),
-        verticalId = verticalId.ifBlank { "general" },
-        merchantId = merchantId,
-        mrp = BigDecimal.valueOf(if (mrp > 0.0) mrp else unitPrice),
-        brand = brand,
-        packSize = packSize,
-        image = image,
-        pharmacyAttributes = if (prescriptionRequired || coldChain) {
-            PharmacyCartAttributes(
-                prescriptionRequired = prescriptionRequired,
-                coldChain = coldChain
-            )
-        } else null
-    )
+    fun toCartItem(): CartItem {
+        return CartItem(
+            productId = productId.ifBlank { sku },
+            sku = sku,
+            name = name.ifBlank { sku },
+            unitPrice = BigDecimal.valueOf(unitPrice),
+            quantity = quantity,
+            verticalId = verticalId.ifBlank { "general" },
+            merchantId = merchantId,
+            mrp = BigDecimal.valueOf(if (mrp > 0.0) mrp else unitPrice),
+            brand = brand,
+            packSize = packSize,
+            image = image,
+            pharmacyAttributes = if (prescriptionRequired || coldChain) {
+                PharmacyCartAttributes(
+                    prescriptionRequired = prescriptionRequired,
+                    coldChain = coldChain
+                )
+            } else null
+        )
+    }
 
     companion object {
         fun fromCartItem(item: CartItem, customerId: String): CartItemEntity = CartItemEntity(
             sku = item.sku,
             customerId = customerId,
             productId = (item.productId ?: item.sku).ifBlank { item.sku },
-            name = (item.name ?: "Medicine Item").ifBlank { "Medicine Item" },
+            name = (item.name ?: item.sku).ifBlank { item.sku.ifBlank { "Prescribed Medicine" } },
             unitPrice = (item.unitPrice ?: BigDecimal.ZERO).toDouble(),
             quantity = (item.quantity ?: 1).coerceAtLeast(1),
             verticalId = (item.verticalId ?: "general").ifBlank { "general" },

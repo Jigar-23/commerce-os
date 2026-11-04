@@ -23,19 +23,26 @@ import GenericSubstituteCard from '@/components/search/GenericSubstituteCard';
 interface FlagshipSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
-  products: MedicineProduct[];
+  products?: MedicineProduct[];
   onSelectProduct?: (product: MedicineProduct) => void;
 }
 
-const POPULAR_SEARCHES = [
-  'Paracetamol 650',
-  'Augmentin 625',
-  'Vitamin C & Zinc',
-  'Diabetes Care',
-  'Dolo 650',
-  'ORS Electrolytes',
-  'Cetirizine 10mg',
-  'Bandages & First Aid',
+const TRENDING_SEARCHES = [
+  { rank: 1, text: 'Dolo 650mg Tablet', badge: '🔥 Trending', salt: 'Paracetamol 650mg' },
+  { rank: 2, text: 'Pan-D Capsule', badge: '⚡ Acidity', salt: 'Pantoprazole + Domperidone' },
+  { rank: 3, text: 'Shelcal 500 Tablet', badge: '🦴 Calcium', salt: 'Calcium + Vitamin D3' },
+  { rank: 4, text: 'Augmentin 625 Duo', badge: '💊 Antibiotic', salt: 'Amoxyclav 625mg' },
+  { rank: 5, text: 'Electral ORS Powder', badge: '💧 Hydration', salt: 'Oral Rehydration Salts' },
+  { rank: 6, text: 'Becosules Z Capsule', badge: '🛡️ Immunity', salt: 'B-Complex + Zinc' },
+];
+
+const CYCLING_HINTS = [
+  'Search medicines, brands, salt compositions...',
+  'Search "Dolo 650" or "Paracetamol"...',
+  'Search "Pan-D" for acidity & gas...',
+  'Search "Shelcal 500" for calcium...',
+  'Search "Augmentin 625 Duo"...',
+  'Search "Electral ORS Powder"...',
 ];
 
 const RECENT_SEARCHES_KEY = 'commerce_os_recent_searches';
@@ -43,13 +50,21 @@ const RECENT_SEARCHES_KEY = 'commerce_os_recent_searches';
 export default function FlagshipSearchModal({
   isOpen,
   onClose,
-  products,
+  products = [],
   onSelectProduct,
 }: FlagshipSearchModalProps) {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [hintIndex, setHintIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setHintIndex((prev) => (prev + 1) % CYCLING_HINTS.length);
+    }, 2600);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -186,8 +201,8 @@ export default function FlagshipSearchModal({
                 saveRecentSearch(query);
               }
             }}
-            placeholder="Search medicines, brands, salt compositions..."
-            className="w-full bg-transparent text-sm sm:text-base font-bold text-content-primary placeholder:text-content-muted outline-none"
+            placeholder={CYCLING_HINTS[hintIndex]}
+            className="w-full bg-transparent text-sm sm:text-base font-bold text-content-primary placeholder:text-content-muted outline-none transition-all"
           />
 
           {query && (
@@ -212,6 +227,25 @@ export default function FlagshipSearchModal({
           {/* STATE 1: IDLE / NO QUERY -> SHOW RECENT & POPULAR SEARCHES */}
           {!query.trim() && (
             <div className="space-y-6">
+              {/* TRUEMEDS-STYLE PROMOTIONAL DISCOUNT TICKET */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-xs shrink-0">
+                    %
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-emerald-900">FLAT 27% OFF</span>
+                      <span className="text-2xs font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">⚡ 10-Min Delivery</span>
+                    </div>
+                    <p className="text-2xs text-emerald-700">Licensed pharmacist verified genuine batches</p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-700 font-extrabold text-xs">
+                  FIRST27
+                </span>
+              </div>
+
               {/* RECENT SEARCHES */}
               {recentSearches.length > 0 && (
                 <div className="space-y-2.5">
@@ -247,25 +281,40 @@ export default function FlagshipSearchModal({
                 </div>
               )}
 
-              {/* POPULAR SEARCHES */}
+              {/* TRENDING SEARCHES (TATA 1MG & BLINKIT BENCHMARK WITH RANKINGS) */}
               <div className="space-y-2.5">
                 <span className="text-xs font-extrabold text-content-muted uppercase tracking-wider flex items-center gap-1.5">
                   <TrendingUp className="h-3.5 w-3.5 text-content-brand" />
-                  Trending Health Essentials
+                  Trending Health Searches
                 </span>
 
-                <div className="flex flex-wrap gap-2">
-                  {POPULAR_SEARCHES.map((term) => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {TRENDING_SEARCHES.map((item) => (
                     <button
-                      key={term}
+                      key={item.text}
                       onClick={() => {
-                        setQuery(term);
-                        saveRecentSearch(term);
+                        setQuery(item.text);
+                        saveRecentSearch(item.text);
                       }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-surface-brandSubtle text-content-primary hover:text-content-brand text-xs font-bold border border-border-subtle transition-all cursor-pointer"
+                      className="flex items-center gap-2.5 p-2.5 rounded-xl bg-surface-subtle hover:bg-surface-brandSubtle border border-border-subtle transition-all text-left cursor-pointer group"
                     >
-                      <Sparkles className="h-3 w-3 text-content-brand" />
-                      <span>{term}</span>
+                      <span className={`w-5 h-5 rounded-md flex items-center justify-center text-2xs font-black shrink-0 ${
+                        item.rank === 1 ? 'bg-amber-100 text-amber-800' :
+                        item.rank === 2 ? 'bg-indigo-100 text-indigo-800' :
+                        item.rank === 3 ? 'bg-emerald-100 text-emerald-800' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        #{item.rank}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-content-primary group-hover:text-content-brand truncate">
+                          {item.text}
+                        </div>
+                        <div className="text-2xs text-content-muted truncate">
+                          {item.salt}
+                        </div>
+                      </div>
+                      <ArrowRight className="h-3.5 w-3.5 text-content-muted group-hover:text-content-brand opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                     </button>
                   ))}
                 </div>
@@ -278,7 +327,7 @@ export default function FlagshipSearchModal({
                     ⚡
                   </div>
                   <div>
-                    <h4 className="text-xs font-extrabold text-content-primary">10-Minute Dark Store Dispatch</h4>
+                    <h4 className="text-xs font-extrabold text-content-primary">10-Minute Store Dispatch</h4>
                     <p className="text-2xs text-content-secondary">Temperature controlled & verified by licensed pharmacists</p>
                   </div>
                 </div>

@@ -9,6 +9,9 @@ import SellerAuthGuard from '../../components/SellerAuthGuard';
 import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
 import DatePickerDDMMYYYY from '../../components/DatePickerDDMMYYYY';
+import { AutocompleteInput } from '../../components/AutocompleteInput';
+import { SafetyAdviceTagInput } from '../../components/SafetyAdviceTagInput';
+import { COMMON_MANUFACTURERS, COMMON_PHARMA_SALTS, COMMON_STORAGE_INSTRUCTIONS, PHARMA_CATEGORIES, THERAPEUTIC_CLASSES } from '@/lib/pharmaReferenceData';
 
 function formatDateToDDMMYYYY(dateStr?: string | null): string {
   if (!dateStr) return '';
@@ -49,6 +52,11 @@ interface ProductItem {
   inStock?: boolean;
   rxRequirement?: string;
   coldChainRequired?: boolean;
+  manufacturer?: string;
+  saltComposition?: string;
+  activeSalt?: string;
+  safetyAdvice?: string[];
+  storageCondition?: string;
   imageUrl?: string;
   image_url?: string;
   images?: string[];
@@ -98,8 +106,13 @@ export default function ProductsPage() {
   // Form Fields
   const [newSku, setNewSku] = useState('');
   const [newName, setNewName] = useState('');
+  const [newManufacturer, setNewManufacturer] = useState('');
+  const [newSaltComposition, setNewSaltComposition] = useState('');
+  const [newSafetyAdvice, setNewSafetyAdvice] = useState<string[]>([]);
+  const [newStorageCondition, setNewStorageCondition] = useState('');
   const [newPackSize, setNewPackSize] = useState('');
   const [newCategory, setNewCategory] = useState('Pharmacy & OTC');
+  const [newTherapeuticClass, setNewTherapeuticClass] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newMrp, setNewMrp] = useState('');
   const [newStock, setNewStock] = useState('50');
@@ -225,8 +238,14 @@ export default function ProductsPage() {
       const payload = {
         sku: newSku.trim(),
         name: newName.trim(),
+        manufacturer: newManufacturer.trim() || undefined,
+        saltComposition: newSaltComposition.trim() || undefined,
+        safetyAdvice: newSafetyAdvice,
+        storageCondition: newStorageCondition.trim() || undefined,
         packSize: newPackSize.trim() || '1 Unit',
         category: newCategory.trim(),
+        therapeuticClass: newTherapeuticClass.trim() || undefined,
+        therapeuticCategory: newTherapeuticClass.trim() || newCategory.trim(),
         price: priceNum,
         mrp: mrpNum,
         initialStock: stockNum,
@@ -249,8 +268,13 @@ export default function ProductsPage() {
           setFormSuccess(false);
           setNewSku('');
           setNewName('');
+          setNewManufacturer('');
+          setNewSaltComposition('');
+          setNewSafetyAdvice([]);
+          setNewStorageCondition('');
           setNewPackSize('');
           setNewCategory(existingProductCategories[0] || 'Pharmacy & OTC');
+          setNewTherapeuticClass('');
           setIsCustomCategory(false);
           setNewPrice('');
           setNewMrp('');
@@ -331,7 +355,7 @@ export default function ProductsPage() {
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
     existingProductCategories.forEach(c => set.add(c));
-    STANDARD_CATEGORIES.forEach(c => set.add(c));
+    PHARMA_CATEGORIES.forEach(c => set.add(c));
     return Array.from(set);
   }, [existingProductCategories]);
 
@@ -455,10 +479,14 @@ export default function ProductsPage() {
                     </tr>
                   ) : (
                     filteredProducts.map(p => (
-                      <tr key={p.id || p.sku} className="hover:bg-surface-subtle/50 transition">
+                      <tr key={p.id || p.sku} className="hover:bg-surface-subtle/50 transition group/row">
                         <td className="px-6 py-4">
                           <div className="flex items-start space-x-3">
-                            <div className="relative w-11 h-11 rounded-xl bg-surface-subtle border border-border-default flex items-center justify-center overflow-hidden shrink-0 shadow-sm mt-0.5">
+                            <Link
+                              href={`/products/${encodeURIComponent(p.sku || p.id)}`}
+                              className="relative w-11 h-11 rounded-xl bg-surface-subtle border border-border-default flex items-center justify-center overflow-hidden shrink-0 shadow-sm mt-0.5 hover:ring-2 hover:ring-brand-primary transition block"
+                              title="Click to view full SKU and inventory details"
+                            >
                               {(p.imageUrl || p.image_url || (Array.isArray(p.images) && p.images[0])) ? (
                                 <img
                                   src={p.imageUrl || p.image_url || (Array.isArray(p.images) ? p.images[0] : '')}
@@ -476,10 +504,16 @@ export default function ProductsPage() {
                                   +{p.images.length - 1}
                                 </span>
                               )}
-                            </div>
+                            </Link>
                             <div className="min-w-0">
-                              <div className="font-mono text-xs font-bold text-content-accent truncate">{p.sku}</div>
-                              <div className="font-bold text-content-primary text-sm truncate">{p.name}</div>
+                              <Link
+                                href={`/products/${encodeURIComponent(p.sku || p.id)}`}
+                                className="group/link block"
+                                title="Click to view full SKU and inventory details"
+                              >
+                                <div className="font-mono text-xs font-bold text-content-accent group-hover/link:underline truncate">{p.sku}</div>
+                                <div className="font-bold text-content-primary text-sm group-hover/link:text-content-accent transition truncate">{p.name}</div>
+                              </Link>
                               {p.description && (
                                 <p className="text-2xs text-content-muted line-clamp-1 max-w-[220px] mt-0.5" title={p.description}>
                                   {p.description}
@@ -561,14 +595,23 @@ export default function ProductsPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => openDeleteModal(p)}
-                            className="p-1.5 text-content-muted hover:text-content-danger hover:bg-surface-dangerSubtle rounded-xl transition inline-flex items-center space-x-1 border border-transparent hover:border-border-danger"
-                            title={`Delete SKU ${p.sku}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end space-x-1.5">
+                            <Link
+                              href={`/products/${encodeURIComponent(p.sku || p.id)}`}
+                              className="p-1.5 text-content-muted hover:text-content-accent hover:bg-surface-accentSubtle rounded-xl transition inline-flex items-center border border-border-default hover:border-border-accent shadow-2xs"
+                              title={`Open details for SKU ${p.sku}`}
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(p)}
+                              className="p-1.5 text-content-muted hover:text-content-danger hover:bg-surface-dangerSubtle rounded-xl transition inline-flex items-center border border-transparent hover:border-border-danger"
+                              title={`Delete SKU ${p.sku}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -607,7 +650,7 @@ export default function ProductsPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-2xs font-bold uppercase text-content-muted mb-1">SKU *</label>
                     <input
@@ -620,78 +663,86 @@ export default function ProductsPage() {
                     />
                   </div>
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-2xs font-bold uppercase text-content-muted">Category *</label>
-                      {isCustomCategory ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsCustomCategory(false);
-                            setNewCategory(existingProductCategories[0] || availableCategories[0] || 'Pharmacy & OTC');
-                          }}
-                          className="text-3xs text-content-brand hover:underline font-semibold"
-                        >
-                          Pick Existing
-                        </button>
-                      ) : null}
-                    </div>
-                    {!isCustomCategory ? (
-                      <select
-                        value={newCategory}
-                        onChange={e => {
-                          if (e.target.value === '__CUSTOM__') {
-                            setIsCustomCategory(true);
-                            setNewCategory('');
-                          } else {
-                            setNewCategory(e.target.value);
-                          }
-                        }}
-                        className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
-                      >
-                        {existingProductCategories.length > 0 && (
-                          <optgroup label="Existing Store Categories">
-                            {existingProductCategories.map(cat => (
-                              <option key={`existing-${cat}`} value={cat}>
-                                {cat}
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                        <optgroup label={existingProductCategories.length > 0 ? "Standard Categories" : "Catalog Categories"}>
-                          {STANDARD_CATEGORIES.filter(cat => !existingProductCategories.includes(cat)).map(cat => (
-                            <option key={`std-${cat}`} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <option value="__CUSTOM__">+ Add New Category...</option>
-                      </select>
-                    ) : (
-                      <div className="space-y-1">
-                        <input
-                          type="text"
-                          required
-                          autoFocus
-                          placeholder="e.g. Skin Care, Ayurvedic Powders..."
-                          value={newCategory}
-                          onChange={e => setNewCategory(e.target.value)}
-                          className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
-                        />
-                        <p className="text-3xs text-content-muted">Type custom category name or click &apos;Pick Existing&apos; above.</p>
-                      </div>
-                    )}
+                    <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Product Title *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Paracetamol 500mg Strip of 10"
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
+                      className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                    />
                   </div>
                 </div>
 
+                {/* Category & Therapeutic Class Dropdowns */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <AutocompleteInput
+                      label="Category"
+                      required
+                      value={newCategory}
+                      onChange={setNewCategory}
+                      options={availableCategories}
+                      placeholder="e.g. Pain & Fever — Press Tab to autofill"
+                      helperText="Standard pharmacy category or enter custom"
+                    />
+                  </div>
+                  <div>
+                    <AutocompleteInput
+                      label="Therapeutic Class"
+                      value={newTherapeuticClass}
+                      onChange={setNewTherapeuticClass}
+                      options={THERAPEUTIC_CLASSES}
+                      placeholder="e.g. Non-Steroidal Anti-Inflammatory Drugs (NSAIDs)"
+                      helperText="Standard pharmacological/ATC classification"
+                    />
+                  </div>
+                </div>
+
+                {/* Active Salt Composition (API) Autocomplete */}
                 <div>
-                  <label className="block text-2xs font-bold uppercase text-content-muted mb-1">Product Title *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Paracetamol 500mg Strip of 10"
-                    value={newName}
-                    onChange={e => setNewName(e.target.value)}
-                    className="w-full bg-surface-subtle border border-border-default rounded-xl px-3 py-2 text-xs text-content-primary focus:outline-none focus:border-border-accent"
+                  <AutocompleteInput
+                    label="Active Salt Composition (API)"
+                    value={newSaltComposition}
+                    onChange={setNewSaltComposition}
+                    options={COMMON_PHARMA_SALTS}
+                    placeholder="e.g. Paracetamol (650mg) — Type & press Tab to autofill"
+                    helperText="Search over 1,500+ pharmaceutical salt compositions with keyboard Tab / click auto-completion"
+                  />
+                </div>
+
+                {/* Manufacturer & Storage Instructions */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <AutocompleteInput
+                      label="Manufacturer / Marketer"
+                      value={newManufacturer}
+                      onChange={setNewManufacturer}
+                      options={COMMON_MANUFACTURERS}
+                      placeholder="e.g. Sun Pharmaceutical Industries Ltd"
+                      helperText="Prominent pharma companies with Tab/click autofill"
+                    />
+                  </div>
+                  <div>
+                    <AutocompleteInput
+                      label="Storage Instructions"
+                      value={newStorageCondition}
+                      onChange={setNewStorageCondition}
+                      options={COMMON_STORAGE_INSTRUCTIONS}
+                      placeholder="e.g. Store below 25°C in a dry place"
+                      helperText="Standard pharmaceutical storage condition"
+                    />
+                  </div>
+                </div>
+
+                {/* Safety Advice & Warning Hashtags (YouTube #tag style) */}
+                <div>
+                  <SafetyAdviceTagInput
+                    tags={newSafetyAdvice}
+                    onChange={setNewSafetyAdvice}
+                    label="Safety Advice & Clinical Warnings (#Hashtags)"
+                    placeholder="Type # or search warnings (e.g. #alcohol, #pregnancy, #driving, #kidney)..."
                   />
                 </div>
 

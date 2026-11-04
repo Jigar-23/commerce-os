@@ -101,8 +101,12 @@ public final class RiderAPIClient: ObservableObject {
     
     public init(session: URLSession = .shared) {
         self.session = session
-        // Dual-layer Keychain + UserDefaults Loading
-        var token = RiderKeychainHelper.shared.get(key: "rider_auth_token") ?? UserDefaults.standard.string(forKey: "rider_auth_token")
+        // Secure Enclave / Keychain Token Storage (Scrub legacy UserDefaults tokens)
+        if let legacyToken = UserDefaults.standard.string(forKey: "rider_auth_token") {
+            RiderKeychainHelper.shared.save(key: "rider_auth_token", data: legacyToken)
+            UserDefaults.standard.removeObject(forKey: "rider_auth_token")
+        }
+        var token = RiderKeychainHelper.shared.get(key: "rider_auth_token")
         var riderId = RiderKeychainHelper.shared.get(key: "rider_id") ?? UserDefaults.standard.string(forKey: "rider_id")
 
         // Cleanse legacy hardcoded test tokens if present in local device storage
@@ -130,7 +134,6 @@ public final class RiderAPIClient: ObservableObject {
         self.currentRiderId = riderId
         RiderKeychainHelper.shared.save(key: "rider_auth_token", data: token)
         RiderKeychainHelper.shared.save(key: "rider_id", data: riderId)
-        UserDefaults.standard.set(token, forKey: "rider_auth_token")
         UserDefaults.standard.set(riderId, forKey: "rider_id")
         if let p = phone { UserDefaults.standard.set(p, forKey: "rider_phone") }
         if let n = name { UserDefaults.standard.set(n, forKey: "rider_name") }

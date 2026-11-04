@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
         insetsController.isAppearanceLightNavigationBars = true
 
         requestRequiredPermissions()
+        checkBatteryOptimization()
         startLocationService()
         initFirebaseMessagingToken()
         checkIntentOfferAck(intent)
@@ -135,28 +136,37 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Subscribe to fleet-wide broadcast topic for background quick-commerce delivery offers
-            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
-                .addOnCompleteListener { subTask ->
-                    if (subTask.isSuccessful) {
-                        android.util.Log.d("MainActivity", "Successfully subscribed to topic: riders_broadcast")
-                    } else {
-                        android.util.Log.w("MainActivity", "Failed to subscribe to topic riders_broadcast: ${subTask.exception?.message}")
+            val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+
+            // Strictly enforce double-condition gate: ONLY subscribe to broadcast topic if logged in AND shift is online
+            if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline()) {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
+                    .addOnCompleteListener { subTask ->
+                        if (subTask.isSuccessful) {
+                            android.util.Log.d("MainActivity", "Successfully subscribed to topic: riders_broadcast")
+                        } else {
+                            android.util.Log.w("MainActivity", "Failed to subscribe to topic riders_broadcast: ${subTask.exception?.message}")
+                        }
                     }
-                }
+            } else {
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                    val notifManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+                    notifManager?.cancelAll()
+                } catch (_: Exception) {}
+            }
 
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful && task.result != null) {
                         val token = task.result
                         android.util.Log.d("MainActivity", "FCM Token retrieved on launch: $token")
-                        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
                         sessionMgr.saveFcmToken(token)
 
                         val baseUrl = sessionMgr.getBaseUrl()
                         val authToken = sessionMgr.getAuthToken()
 
-                        if (baseUrl.isNotBlank() && authToken.isNotBlank()) {
+                        if (baseUrl.isNotBlank() && authToken.isNotBlank() && sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline()) {
                             val repo = com.commerceos.rider.repository.RiderDeliveryRepository(
                                 baseUrlProvider = { baseUrl },
                                 authTokenProvider = { authToken }
@@ -192,6 +202,21 @@ class MainActivity : ComponentActivity() {
 
         if (missingPermissions.isNotEmpty()) {
             permissionLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
+
+    private fun checkBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+            val pkg = packageName
+            if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(pkg)) {
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = android.net.Uri.parse("package:$pkg")
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            }
         }
     }
 }

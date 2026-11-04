@@ -85,6 +85,8 @@ public struct AddressSelectionBottomSheet: View {
 
                 TextField("Search for area, street name...", text: $searchQuery)
                     .font(.system(size: 14))
+                    .foregroundColor(Color(hex: "0F172A"))
+                    .accentColor(Color(hex: "0E675E"))
                     .onChange(of: searchQuery) { val in
                         performPlacesSearch(query: val)
                     }

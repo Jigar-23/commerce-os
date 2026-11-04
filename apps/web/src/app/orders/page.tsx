@@ -23,6 +23,7 @@ import {
   MessageCircle,
   X,
   HelpCircle,
+  Navigation,
 } from 'lucide-react';
 import {
   fetchOrders,
@@ -159,6 +160,14 @@ export default function CustomerOrderHistoryPage() {
   const isOrderActive = (status: string) =>
     !['DELIVERED', 'COMPLETED', 'CANCELLED', 'FAILED'].includes(status);
 
+  const [filterTab, setFilterTab] = useState<'ALL' | 'ACTIVE' | 'DELIVERED'>('ALL');
+
+  const filteredOrders = orders.filter((o) => {
+    if (filterTab === 'ACTIVE') return isOrderActive(o.status);
+    if (filterTab === 'DELIVERED') return o.status === 'DELIVERED' || o.status === 'COMPLETED';
+    return true;
+  });
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col font-sans antialiased pb-28">
       {/* 1. DEEP EMERALD CANOPY HEADER (MATCHING ANDROID) */}
@@ -172,7 +181,7 @@ export default function CustomerOrderHistoryPage() {
               <ArrowLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-lg sm:text-xl font-extrabold tracking-tight">Order History</h1>
+              <h1 className="text-lg sm:text-xl font-extrabold tracking-tight">Your Orders</h1>
               <p className="text-[11.5px] text-white/85">Live order tracking &amp; 1-tap reorders</p>
             </div>
           </div>
@@ -184,6 +193,30 @@ export default function CustomerOrderHistoryPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
+        </div>
+
+        {/* Filter Pills matching Android OrderHistoryScreen */}
+        <div className="max-w-3xl mx-auto flex items-center gap-2 mt-3 pt-2 border-t border-white/15">
+          {[
+            { id: 'ALL', label: 'All Orders' },
+            { id: 'ACTIVE', label: 'Active Deliveries' },
+            { id: 'DELIVERED', label: 'Delivered' },
+          ].map((tab) => {
+            const isSelected = filterTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setFilterTab(tab.id as any)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-white text-[#0E675E] shadow-xs'
+                    : 'bg-white/15 text-white/85 hover:bg-white/25'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
       </header>
 
@@ -211,13 +244,19 @@ export default function CustomerOrderHistoryPage() {
               Try Again
             </button>
           </div>
-        ) : orders.length === 0 ? (
+        ) : filteredOrders.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-4 my-8 shadow-xs">
             <div className="w-16 h-16 rounded-full bg-emerald-50 border border-emerald-100 text-[#0E675E] flex items-center justify-center mx-auto">
               <ShoppingBag className="h-8 w-8" />
             </div>
             <div>
-              <h3 className="text-base font-extrabold text-slate-900">No Orders Placed Yet</h3>
+              <h3 className="text-base font-extrabold text-slate-900">
+                {filterTab === 'ACTIVE'
+                  ? 'No Active Deliveries Right Now'
+                  : filterTab === 'DELIVERED'
+                  ? 'No Delivered Orders Found'
+                  : 'No Orders Placed Yet'}
+              </h3>
               <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1 leading-relaxed">
                 When you order medicines and health essentials, you can track real-time dispatch and reorder in 1-tap here.
               </p>
@@ -232,7 +271,7 @@ export default function CustomerOrderHistoryPage() {
           </div>
         ) : (
           <div className="space-y-4 pt-1">
-            {orders.map((ord) => {
+            {filteredOrders.map((ord) => {
               const isActive = isOrderActive(ord.status);
               const isDelivered = ord.status === 'DELIVERED' || ord.status === 'COMPLETED';
               const isCancelled = ord.status === 'CANCELLED' || ord.status === 'FAILED';
@@ -330,6 +369,15 @@ export default function CustomerOrderHistoryPage() {
 
                       {/* CLEAN CENTERED ACTIONS */}
                       <div className="flex items-center gap-2">
+                        {/* View & Track Live Map Button */}
+                        <Link
+                          href={`/orders/${ord.orderId}`}
+                          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-2xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                        >
+                          <Navigation className="h-3.5 w-3.5 text-emerald-400 rotate-45" />
+                          <span>Track Map</span>
+                        </Link>
+
                         {isDelivered && (
                           <button
                             onClick={() => handleReorder(ord)}

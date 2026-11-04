@@ -67,6 +67,17 @@ object RiderOfferEventPipeline {
         offer: ServerOffer,
         source: OfferEventSource = OfferEventSource.RECONCILIATION
     ): ServerOffer? {
+        // Internal Storage Check: Only show / notify if BOTH logged in AND online
+        val sessionMgr = RiderSessionManager.getInstance(context)
+        if (!sessionMgr.isLoggedIn()) {
+            Log.d(TAG, "[$source] LOGGED_OUT_DROPPED: Rider is not logged in. Suppressing offer ${offer.offerId} completely.")
+            return null
+        }
+        if (!sessionMgr.isShiftOnline()) {
+            Log.d(TAG, "[$source] OFFLINE_SHIFT_MUTED: Rider is logged in but status is OFFLINE. Suppressing offer ${offer.offerId}.")
+            return null
+        }
+
         // 1. Silently persist notification in on-device local database
         val notifItem = com.commerceos.rider.model.RiderNotificationItem(
             notificationId = offer.notificationId.ifBlank { "notif_${offer.offerId}" },
@@ -90,20 +101,6 @@ object RiderOfferEventPipeline {
             isAvailable = true
         )
         RiderLocalNotificationStore.saveNotification(context, notifItem)
-
-        // 2. Offline Suppression Check: If rider has turned off duty, do NOT buzz, ring, or post notifications
-        val sessionMgr = RiderSessionManager.getInstance(context)
-        val isShiftOnline = sessionMgr.isShiftOnline()
-        if (!isShiftOnline) {
-            Log.d(TAG, "[$source] OFFLINE_SHIFT_MUTED: Rider is offline. Silently stored offer ${offer.offerId} into personal on-device db without pestering rider.")
-            if (source == OfferEventSource.FCM) {
-                if (!RiderNotificationManager.isDeviceReceiptAcked(context, offer.eventId)) {
-                    RiderNotificationManager.markDeviceReceiptAcked(context, offer.eventId)
-                    sendAckTelemetry(context, offer.offerId, "DEVICE_RECEIVED_SILENT_OFFLINE")
-                }
-            }
-            return offer
-        }
 
         // 3. Online State: Emit into live in-app SharedFlow so RiderMainScreen renders interactive card
         _incomingOfferEvents.tryEmit(offer)

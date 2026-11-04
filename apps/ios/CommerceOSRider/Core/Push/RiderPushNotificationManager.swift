@@ -26,6 +26,10 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
     }
 
     public func postOfferNotification(offer: DispatchOfferDto) {
+        guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
+            print("[RiderPushNotificationManager] Suppressing local notification: Rider is logged out or offline.")
+            return
+        }
         let content = UNMutableNotificationContent()
         content.title = "🚀 New Delivery Dispatch Offer • ₹\(Int(offer.payoutAmount))"
         content.subtitle = "Order #\(offer.orderId.suffix(8).uppercased())"
@@ -64,6 +68,19 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
     }
 
     public func handleRemoteNotification(userInfo: [AnyHashable: Any]) {
+        guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
+            print("[RiderPushNotificationManager] Dropped remote notification: Rider is logged out or offline.")
+            return
+        }
+
+        // Handle Silent Watchdog PING_LOCATION Wakeups
+        let action = (userInfo["action"] as? String) ?? (userInfo["type"] as? String) ?? ""
+        if action.caseInsensitiveCompare("PING_LOCATION") == .orderedSame || action.caseInsensitiveCompare("WAKEUP_LOCATION") == .orderedSame {
+            print("[RiderPushNotificationManager] Received silent watchdog PING_LOCATION. Triggering location tracking.")
+            RiderBackgroundLocationManager.shared.startBackgroundTracking()
+            return
+        }
+
         if let offer = OfferPayloadValidator.validate(payload: userInfo) {
             RiderOfferEventPipeline.shared.receiveOffer(offer: offer)
         }
@@ -77,9 +94,14 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
     ) {
         let info = notification.request.content.userInfo
         Task { @MainActor in
+            guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
+                print("[RiderPushNotificationManager] Suppressing foreground notification banner: Rider is logged out or offline.")
+                completionHandler([])
+                return
+            }
             RiderPushNotificationManager.shared.handleRemoteNotification(userInfo: info)
+            completionHandler([.banner, .sound, .badge, .list])
         }
-        completionHandler([.banner, .sound, .badge, .list])
     }
 
     nonisolated public func userNotificationCenter(
@@ -89,8 +111,13 @@ public final class RiderPushNotificationManager: NSObject, ObservableObject, UNU
     ) {
         let info = response.notification.request.content.userInfo
         Task { @MainActor in
+            guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
+                print("[RiderPushNotificationManager] Discarding notification click: Rider is logged out or offline.")
+                completionHandler()
+                return
+            }
             RiderPushNotificationManager.shared.handleRemoteNotification(userInfo: info)
+            completionHandler()
         }
-        completionHandler()
     }
 }

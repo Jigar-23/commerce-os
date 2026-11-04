@@ -87,6 +87,8 @@ public struct AuthScreen: View {
                         .keyboardType(.numberPad)
                         .disabled(isOtpSent || isLoading)
                         .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(Color(hex: "0F172A"))
+                        .accentColor(Color(hex: "059669"))
                         .padding(.horizontal, 14)
                         .frame(height: 52)
                         .background(Color.white)
@@ -131,6 +133,8 @@ public struct AuthScreen: View {
                             ))
                             .keyboardType(.numberPad)
                             .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                            .accentColor(Color(hex: "059669"))
                             .frame(height: 52)
                         }
                         .background(Color.white)

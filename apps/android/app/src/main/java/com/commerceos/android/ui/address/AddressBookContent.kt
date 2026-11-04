@@ -49,7 +49,6 @@ fun AddressBookContent(
     onDeleteAddress: (String) -> Unit,
     onSetDefaultAddress: (String) -> Unit,
     onAddNewLocation: () -> Unit,
-    onProceedToPayment: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     fromProfile: Boolean = false,
     getDistanceMeters: (ApiAddress) -> Double? = { null },
@@ -245,22 +244,6 @@ fun AddressBookContent(
                         )
                     }
                 }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(Spacing.sm))
-
-        // Bottom CTA (Only visible during checkout flow)
-        if (onProceedToPayment != null) {
-            val isServiceable = serviceability !is ServiceabilityState.Unavailable
-            Button(
-                onClick = onProceedToPayment,
-                enabled = selectedAddressId != null && isServiceable,
-                colors = ButtonDefaults.buttonColors(containerColor = CommerceColors.Primary),
-                shape = RoundedCornerShape(Radius.Button),
-                modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) {
-                Text("Proceed to Checkout", style = CommerceTypography.Label, fontWeight = FontWeight.Bold)
             }
         }
     }

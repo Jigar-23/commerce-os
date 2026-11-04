@@ -26,6 +26,8 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_jwt_secret_for_producti
 process.env.JWT_ISSUER = 'https://auth.commerceos.internal';
 process.env.JWT_AUDIENCE = 'commerceos-platform-clients';
 process.env.COMMERCEOS_OTP_PEPPER = 'test_otp_pepper_salt_value';
+process.env.ALLOW_MASTER_OTP = 'true';
+process.env.ALLOW_DEBUG_OTP = 'true';
 process.env.FCM_SERVER_KEY = 'test_fcm_server_key';
 process.env.FCM_ENDPOINT_URL = 'https://fcm.googleapis.com/fcm/send';
 process.env.PORT = '8195';
@@ -472,18 +474,22 @@ async function run() {
     const deliveryId = 'deliv_ios_test_01';
     const offerId = 'off_ios_test_01';
     await pool.query(
+      `UPDATE delivery_sessions SET state = 'DELIVERED', updated_at = NOW() WHERE rider_id = $1`,
+      [riderId]
+    );
+    await pool.query(
       `INSERT INTO delivery_sessions (
          id, delivery_id, order_id, store_id, rider_id, rider_name, rider_phone, rider_vehicle,
          state, merchant_name, merchant_address, merchant_lat, merchant_lng,
          customer_name, customer_phone, customer_address, customer_lat, customer_lng,
          distance_km, is_cod, cod_amount, created_at, updated_at
        ) VALUES (
-         $1, $1, $2, $3, $4, 'Vikram iOS Rider', '+919811223344', 'DL-01-XY-9999',
+         $1, $1, $2, $3, NULL, 'Vikram iOS Rider', '+919811223344', 'DL-01-XY-9999',
          'LOOKING_FOR_RIDER', 'iOS Test Store', 'Connaught Place', 28.6315, 77.2167,
          'Ananya Sharma', '+919876501234', 'Connaught Residency', 28.6320, 77.2180,
          1.5, TRUE, 240.00, NOW(), NOW()
-       ) ON CONFLICT (id) DO UPDATE SET state = 'LOOKING_FOR_RIDER', rider_id = $4, order_id = $2`,
-      [deliveryId, targetOrderId, storeId, riderId]
+       ) ON CONFLICT (id) DO UPDATE SET state = 'LOOKING_FOR_RIDER', rider_id = NULL, order_id = $2`,
+      [deliveryId, targetOrderId, storeId]
     );
 
     const expiresAt = Date.now() + 600000;

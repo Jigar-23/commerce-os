@@ -19,6 +19,7 @@ const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { OrderCodeCodec } = require('../order-code-codec');
 
 process.on('uncaughtException', (err) => {
   console.error('💥 [CRITICAL PROCESS UNCAUGHT EXCEPTION]:', err);
@@ -144,7 +145,10 @@ if (DATABASE_URL) {
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
-    ssl: isLocalDb ? false : { rejectUnauthorized: false }
+    ssl: isLocalDb ? false : {
+      rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED === 'true' || Boolean(process.env.PGSSLROOTCERT || process.env.DATABASE_SSL_CA),
+      ...(process.env.DATABASE_SSL_CA ? { ca: process.env.DATABASE_SSL_CA } : {})
+    }
   });
   pool.on('error', (err) => {
     console.error('⚠️ [PostgreSQL Pool Error - Idle Client]:', err.message);
@@ -166,6 +170,16 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);`).catch(() => {});
   pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_summary JSONB;`).catch(() => {});
+  pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS short_order_id VARCHAR(16);`).catch(() => {});
+  pool.query(`CREATE SEQUENCE IF NOT EXISTS order_code_seq START WITH 1000000001;`).catch(() => {});
+  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS unq_orders_short_order_id ON orders(short_order_id) WHERE short_order_id IS NOT NULL;`).catch(() => {});
+  pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_short_id ON orders(short_order_id);`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(255);`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS salt_composition TEXT;`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS safety_advice JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS storage_condition VARCHAR(255);`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS therapeutic_class VARCHAR(255);`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
   pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
 
   // ---------------------------------------------------------------------------
@@ -869,19 +883,105 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
 // Pre-warm repositories
 getAppRepositories().catch(() => {});
 
-// Helper: Resolve Authorized Store ID for Sellers
+// ---------------------------------------------------------------------------
+// 5b. Active Delivery Heartbeat & Telemetry Watchdog
+// Monitors deliveries in transit. If telemetry stalls for > 30s:
+// 1. Sends high-priority silent FCM PING_LOCATION to wake rider app.
+// 2. Broadcasts dead-reckoned kinematic update to customer so tracking never stutters.
+// ---------------------------------------------------------------------------
+const lastWatchdogPingSentMap = new Map();
+
+function startActiveDeliveryWatchdog() {
+  const watchdogIntervalMs = 15000;
+  const watchdogTimer = setInterval(async () => {
+    try {
+      if (!pool) return;
+      const res = await pool.query(`
+        SELECT ds.id, ds.delivery_id, ds.order_id, ds.rider_id, ds.state, 
+               ds.merchant_lat, ds.merchant_lng, ds.customer_lat, ds.customer_lng, 
+               ds.current_lat, ds.current_lng, ds.waypoints, ds.updated_at
+        FROM delivery_sessions ds
+        WHERE ds.state IN ('ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'EN_ROUTE_CUSTOMER', 'ARRIVED_CUSTOMER')
+          AND ds.rider_id IS NOT NULL
+        LIMIT 50
+      `);
+      if (!res || !res.rows || res.rows.length === 0) return;
+
+      const now = Date.now();
+      const repos = await getAppRepositories();
+
+      for (const row of res.rows) {
+        const delId = row.delivery_id || row.id;
+        const riderId = row.rider_id;
+        if (!delId || !riderId) continue;
+
+        let latestTelem = null;
+        if (repos && repos.telemetryRepo && typeof repos.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
+          try {
+            latestTelem = await repos.telemetryRepo.getLatestTelemetryForDelivery(delId);
+          } catch (_) {}
+        }
+
+        const telemTime = latestTelem?.serverTimestamp || latestTelem?.recordedAt || 
+          (latestTelem?.recorded_at ? new Date(latestTelem.recorded_at).getTime() : 
+          (row.updated_at ? new Date(row.updated_at).getTime() : now));
+        
+        const silenceSec = (now - telemTime) / 1000;
+
+        // Stage 1: Silence > 30s -> Send high-priority FCM Silent Ping to wake rider app
+        if (silenceSec >= 30) {
+          const lastPing = lastWatchdogPingSentMap.get(delId) || 0;
+          if (now - lastPing >= 25000) {
+            lastWatchdogPingSentMap.set(delId, now);
+            console.log(`[Watchdog] Active delivery ${delId} rider ${riderId} silent for ${Math.round(silenceSec)}s. Dispatching high-priority FCM PING_LOCATION.`);
+            try {
+              if (fcmSenderInstance && typeof fcmSenderInstance.sendPushToTopic === 'function') {
+                fcmSenderInstance.sendPushToTopic(`rider_${riderId}`, {
+                  action: 'PING_LOCATION',
+                  type: 'PING_LOCATION',
+                  deliveryId: delId,
+                  orderId: row.order_id,
+                  riderId: riderId
+                }).catch(() => {});
+              }
+            } catch (_) {}
+          }
+        }
+
+        // Stage 2: Silence >= 45s -> Broadcast kinematic dead-reckoning update to customer stream
+        if (silenceSec >= 45 && sseBroadcasterInstance) {
+          const waypoints = Array.isArray(row.waypoints) ? row.waypoints : [];
+          if (waypoints.length >= 2 && latestTelem && latestTelem.speedKmh > 3) {
+            const enrichedDto = buildEnrichedTrackingDTO(row, {
+              ...latestTelem,
+              isStale: true,
+              isDeadReckoned: true,
+              serverTimestamp: now,
+              recordedAt: now
+            }, null, waypoints);
+            if (enrichedDto) {
+              sseBroadcasterInstance.broadcastOrderTrackingUpdate(row.order_id, enrichedDto);
+            }
+          }
+        }
+      }
+
+      if (lastWatchdogPingSentMap.size > 200) {
+        for (const [k, v] of lastWatchdogPingSentMap.entries()) {
+          if (now - v > 3600000) lastWatchdogPingSentMap.delete(k);
+        }
+      }
+    } catch (_) {}
+  }, watchdogIntervalMs);
+
+  if (watchdogTimer.unref) watchdogTimer.unref();
+}
+
+setTimeout(startActiveDeliveryWatchdog, 10000);
+
+// Helper: Resolve Authorized Store ID for Sellers (Fail-closed: strictly requires DB mapping)
 async function resolveAuthorizedSellerStoreId(authClaims) {
   if (!authClaims || !authClaims.sub) return null;
-  const repos = await getAppRepositories();
-  if (repos && repos.sellerRepo) {
-    const seller = await repos.sellerRepo.getSellerById(authClaims.sub);
-    if (seller) {
-      if (seller.status && seller.status !== 'ACTIVE') {
-        return null;
-      }
-      return seller.store_id || seller.storeId || authClaims.storeId || authClaims.store_id || null;
-    }
-  }
   if (pool) {
     try {
       const sellerRes = await pool.query(
@@ -892,11 +992,24 @@ async function resolveAuthorizedSellerStoreId(authClaims) {
         if (sellerRes.rows[0].status && sellerRes.rows[0].status !== 'ACTIVE') {
           return null;
         }
-        return sellerRes.rows[0].store_id || authClaims.storeId || authClaims.store_id || null;
+        return sellerRes.rows[0].store_id || null;
       }
-    } catch {}
+      return null;
+    } catch {
+      return null;
+    }
   }
-  return authClaims.storeId || authClaims.store_id || null;
+  const repos = await getAppRepositories();
+  if (repos && repos.sellerRepo) {
+    const seller = await repos.sellerRepo.getSellerById(authClaims.sub);
+    if (seller) {
+      if (seller.status && seller.status !== 'ACTIVE') {
+        return null;
+      }
+      return seller.store_id || seller.storeId || null;
+    }
+  }
+  return null;
 }
 
 const sseTicketStore = new Map();
@@ -924,7 +1037,6 @@ function verifyAndDecodeJwt(req, secret = JWT_SECRET, expectedIssuer = JWT_ISSUE
         }
         sseTicketStore.delete(ticket);
       }
-      token = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('access_token');
     } catch (_) {}
   }
 
@@ -943,6 +1055,11 @@ function verifyAndDecodeJwt(req, secret = JWT_SECRET, expectedIssuer = JWT_ISSUE
     }
 
     if (decoded.exp == null || typeof decoded.exp !== 'number') {
+      return null;
+    }
+
+    // Purpose separation: Do NOT accept refresh tokens for general API requests
+    if (decoded.type === 'REFRESH_TOKEN' || decoded.token_use === 'refresh' || decoded.purpose === 'refresh') {
       return null;
     }
 
@@ -979,10 +1096,23 @@ function stripNullBytes(obj) {
   return obj;
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB Maximum Payload Limit
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', chunk => { raw += chunk; });
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.resume();
+        const err = new Error('Payload Too Large: Maximum allowed body size is 10MB');
+        err.statusCode = 413;
+        err.code = 'PAYLOAD_TOO_LARGE';
+        return reject(err);
+      }
+      raw += chunk;
+    });
     req.on('end', () => {
       if (!raw || raw.trim() === '') return resolve({});
       try {
@@ -999,19 +1129,45 @@ function parseJsonBody(req) {
 function parseRawBody(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', chunk => { raw += chunk; });
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.resume();
+        const err = new Error('Payload Too Large: Maximum allowed body size is 10MB');
+        err.statusCode = 413;
+        err.code = 'PAYLOAD_TOO_LARGE';
+        return reject(err);
+      }
+      raw += chunk;
+    });
     req.on('end', () => { resolve(raw); });
     req.on('error', reject);
   });
 }
 
-function sendJson(res, statusCode, data, extraHeaders = {}) {
-  const origin = res.reqOrigin || '*';
+const TRUSTED_ORIGIN_PATTERNS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/.*\.vercel\.app$/,
+  /^https?:\/\/.*\.onrender\.com$/,
+  /^https?:\/\/.*\.commerce-os\.com$/
+];
+const envAllowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+function isTrustedOrigin(origin) {
+  if (!origin) return false;
+  if (envAllowedOrigins.includes(origin)) return true;
+  return TRUSTED_ORIGIN_PATTERNS.some(pat => pat.test(origin));
+}
+
+function getCorsHeaders(origin, extraHeaders = {}) {
+  const isTrusted = isTrustedOrigin(origin);
+  const allowOrigin = isTrusted ? origin : (origin ? origin : '*');
   const headers = {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept, Idempotency-Key, X-Webhook-Signature, X-Razorpay-Signature, Stripe-Signature',
     'X-Content-Type-Options': 'nosniff',
@@ -1020,6 +1176,16 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     ...extraHeaders
   };
+  // ONLY set credentials: true if origin is strictly in the trusted allowlist!
+  if (isTrusted) {
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
+  return headers;
+}
+
+function sendJson(res, statusCode, data, extraHeaders = {}) {
+  const origin = res.reqOrigin;
+  const headers = getCorsHeaders(origin, extraHeaders);
   if (res.clientPlatform) {
     headers['X-Client-Platform'] = res.clientPlatform;
   }
@@ -1033,7 +1199,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = parsedUrl.pathname;
   const method = req.method;
 
-  const origin = req.headers.origin || '*';
+  const origin = req.headers.origin || null;
   res.reqOrigin = origin;
 
   // Support X-Client-Platform & X-Client-Version for native iOS / iOS-Rider / Android clients
@@ -1048,16 +1214,21 @@ const server = http.createServer(async (req, res) => {
 
   // Handle CORS preflight options
   if (method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': origin,
-      'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Platform, X-Client-Version, Accept, Idempotency-Key, X-Webhook-Signature, X-Razorpay-Signature, Stripe-Signature',
-      'Access-Control-Max-Age': '86400',
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'DENY'
+    const corsHeaders = getCorsHeaders(origin, {
+      'Access-Control-Max-Age': '86400'
     });
+    res.writeHead(204, corsHeaders);
     return res.end();
+  }
+
+  // Global Request Body Cap (DoS Mitigation)
+  const contentLength = Number(req.headers['content-length'] || 0);
+  if (contentLength > MAX_BODY_SIZE) {
+    req.resume();
+    return sendJson(res, 413, {
+      error: 'PAYLOAD_TOO_LARGE',
+      message: 'Request payload exceeds maximum allowed size (10MB).'
+    });
   }
 
   try {
@@ -1190,6 +1361,21 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      // Enforce token TTL disconnect
+      if (authClaims.exp) {
+        const ttlMs = (authClaims.exp * 1000) - Date.now();
+        if (ttlMs <= 0) {
+          return sendJson(res, 401, { error: 'TOKEN_EXPIRED', message: 'JWT token has expired.' });
+        }
+        const expiryTimer = setTimeout(() => {
+          try {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: 'TOKEN_EXPIRED', message: 'Session expired. Please reconnect.' })}\n\n`);
+            res.end();
+          } catch (_) {}
+        }, ttlMs);
+        req.on('close', () => clearTimeout(expiryTimer));
+      }
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -1199,15 +1385,24 @@ const server = http.createServer(async (req, res) => {
 
       const lastEventId = req.headers['last-event-id'] || null;
 
+      const isRiderCaller = authClaims.role?.includes('RIDER') || authClaims.roles?.includes('ROLE_RIDER') || authClaims.scope?.includes('rider');
+      const isSellerCaller = authClaims.role?.includes('SELLER') || authClaims.roles?.includes('ROLE_SELLER');
+
       // Subscribe primary identity
       sseBroadcasterInstance.subscribe(authClaims.sub, res, lastEventId);
-      sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res, lastEventId);
-      sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res, lastEventId);
-      sseBroadcasterInstance.subscribe('riders', res, lastEventId);
-      sseBroadcasterInstance.subscribe('all_riders', res, lastEventId);
-      if (authClaims.storeId) {
-        sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res, lastEventId);
-        sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res, lastEventId);
+
+      if (isRiderCaller) {
+        sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res, lastEventId);
+        sseBroadcasterInstance.subscribe('riders', res, lastEventId);
+        sseBroadcasterInstance.subscribe('all_riders', res, lastEventId);
+        sseBroadcasterInstance.subscribe('riders_broadcast', res, lastEventId);
+      } else if (isSellerCaller) {
+        if (authClaims.storeId) {
+          sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res, lastEventId);
+          sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res, lastEventId);
+        }
+      } else {
+        sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res, lastEventId);
       }
 
       // Subscribe specific order/session channel if requested via URI
@@ -1366,7 +1561,7 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     // Pharmacist Prescription Verification Decision
     // -------------------------------------------------------------
-    if (pathname === '/api/v1/orders/verify-prescription' && method === 'POST') {
+    if ((pathname === '/api/v1/orders/verify-prescription' || pathname === '/api/v1/prescriptions/verify') && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for prescription verification.' });
@@ -1392,25 +1587,83 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (pool) {
+        const client = await pool.connect();
         try {
-          await pool.query(`
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+          // 1. Lock prescription row FOR UPDATE
+          const rxRes = await client.query(`SELECT * FROM prescriptions WHERE id = $1 FOR UPDATE`, [verificationId]);
+          if (rxRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'PRESCRIPTION_NOT_FOUND', message: 'Prescription not found.' });
+          }
+
+          // 2. Update prescription record
+          await client.query(`
             UPDATE prescriptions
             SET status = $1, license_no = $2, rejection_reason = $3, reviewed_at = NOW(), updated_at = NOW()
             WHERE id = $4
           `, [decision, licenseNo, decision === 'REJECTED' ? notes : null, verificationId]);
 
-          const newOrderStatus = decision === 'APPROVED' ? 'READY_FOR_PICKUP' : 'CANCELLED';
-          await pool.query(`
-            UPDATE orders
-            SET status = $1, updated_at = NOW()
-            WHERE (id = $2 OR order_id = $2)
-          `, [newOrderStatus, verificationId]);
+          // 3. Find and lock all pending orders linked to this prescription FOR UPDATE
+          const matchedOrders = await client.query(`
+            SELECT id, order_id, store_id, total_amount, status, items
+            FROM orders
+            WHERE prescription_id = $1 AND status = 'PRESCRIPTION_VERIFICATION_PENDING'
+            FOR UPDATE
+          `, [verificationId]);
 
-          await pool.query(`
+          for (const ord of matchedOrders.rows) {
+            const targetOrderId = ord.order_id || ord.id;
+            if (decision === 'APPROVED') {
+              await client.query(`
+                UPDATE orders
+                SET status = 'READY_FOR_PICKUP', updated_at = NOW()
+                WHERE id = $1
+              `, [ord.id]);
+
+              // Emit dispatch event to outbox so background worker assigns rider
+              const outboxPayload = {
+                orderId: targetOrderId,
+                storeId: ord.store_id,
+                type: 'DISPATCH_REQUESTED',
+                timestamp: new Date().toISOString()
+              };
+              await client.query(`
+                INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+                VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())
+              `, ['evt_' + crypto.randomUUID(), targetOrderId, JSON.stringify(outboxPayload)]);
+            } else {
+              // REJECTED: Release stock in the same transaction and mark order cancelled
+              const ordItems = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
+              if (appRepositories && appRepositories.inventoryRepo && appRepositories.inventoryRepo.releaseStockTransactionally && ord.store_id && ordItems.length > 0) {
+                await appRepositories.inventoryRepo.releaseStockTransactionally(client, ord.store_id, ordItems);
+              }
+
+              await client.query(`
+                UPDATE orders
+                SET status = 'CANCELLED', updated_at = NOW()
+                WHERE id = $1
+              `, [ord.id]);
+              await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [targetOrderId]).catch(() => {});
+              await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [targetOrderId]).catch(() => {});
+              await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [targetOrderId]).catch(() => {});
+            }
+          }
+
+          await client.query(`
             INSERT INTO audit_logs (actor_id, actor_role, action, details, metadata, created_at)
             VALUES ($1, 'PHARMACIST', 'PRESCRIPTION_VERIFIED', $2, $3, NOW())
           `, [licenseNo, `Prescription ${verificationId} ${decision}`, JSON.stringify({ verificationId, decision, notes, licenseNo })]);
-        } catch (_) {}
+
+          await client.query('COMMIT');
+        } catch (e) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error('[Pharmacist] verify processing error:', e);
+          return sendJson(res, 500, { error: 'VERIFICATION_TRANSACTION_FAILED', message: e.message });
+        } finally {
+          client.release();
+        }
       }
 
       sseBroadcasterInstance.broadcast('admin', 'PRESCRIPTION_VERIFIED', {
@@ -2579,23 +2832,24 @@ const server = http.createServer(async (req, res) => {
       } catch (_) {}
 
       let authClaims = null;
-      const rawRefreshToken = body.refreshToken || body.refresh_token || body.token;
-      if (rawRefreshToken && typeof rawRefreshToken === 'string' && rawRefreshToken.trim()) {
-        try {
-          authClaims = jwt.verify(rawRefreshToken.trim(), JWT_SECRET, {
-            algorithms: ['HS256'],
-            issuer: JWT_ISSUER,
-            audience: JWT_AUDIENCE
-          });
-        } catch (err) {
-          return sendJson(res, 401, { error: 'INVALID_REFRESH_TOKEN', message: 'The provided refresh token is expired or invalid.' });
-        }
-      } else {
-        authClaims = verifyAndDecodeJwt(req);
+      const rawRefreshToken = body.refreshToken || body.refresh_token || req.headers['x-refresh-token'];
+      if (!rawRefreshToken || typeof rawRefreshToken !== 'string' || !rawRefreshToken.trim()) {
+        return sendJson(res, 400, { error: 'REFRESH_TOKEN_REQUIRED', message: 'A valid refresh token is required to refresh sessions.' });
       }
 
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid token required for refresh.' });
+      try {
+        authClaims = jwt.verify(rawRefreshToken.trim(), JWT_SECRET, {
+          algorithms: ['HS256'],
+          issuer: JWT_ISSUER,
+          audience: JWT_AUDIENCE
+        });
+      } catch (err) {
+        return sendJson(res, 401, { error: 'INVALID_REFRESH_TOKEN', message: 'The provided refresh token is expired or invalid.' });
+      }
+
+      // Enforce purpose separation: reject access tokens used as refresh tokens
+      if (authClaims.type !== 'REFRESH_TOKEN') {
+        return sendJson(res, 400, { error: 'INVALID_TOKEN_TYPE', message: 'The provided token is not a refresh token. Access tokens cannot be used to refresh sessions.' });
       }
 
       const newAccessToken = jwt.sign(
@@ -2749,8 +3003,12 @@ const server = http.createServer(async (req, res) => {
         },
         verticals,
         buyAgain: products.slice(0, 4),
-        topDeals: products.filter(p => p.discountedPrice < p.price).slice(0, 6),
-        popular: products.slice(0, 8),
+        topDeals: products
+          .filter(p => p.discountPercentage >= 20)
+          .sort((a, b) => b.discountPercentage - a.discountPercentage)
+          .concat(products.filter(p => p.discountPercentage < 20 && p.discountedPrice < p.price).sort((a, b) => b.discountPercentage - a.discountPercentage))
+          .slice(0, 8),
+        popular: products.filter(p => ['Pain & Fever', 'Cough & Cold', 'Acidity & Digestion', 'Antibiotics'].includes(p.category)).concat(products.filter(p => !['Pain & Fever', 'Cough & Cold', 'Acidity & Digestion', 'Antibiotics'].includes(p.category))).slice(0, 8),
         popularLabel: 'High-demand catalog items',
         categories: categoryGroups,
         brands,
@@ -2780,16 +3038,158 @@ const server = http.createServer(async (req, res) => {
       ]);
     }
 
+    // -------------------------------------------------------------
+    // Tiered Promotions & Campaigns: GET /api/v1/promotions
+    // -------------------------------------------------------------
+    if ((pathname === '/api/v1/promotions' || pathname === '/api/v1/campaigns') && method === 'GET') {
+      let activePromotions = [];
+      try {
+        const dbRes = await productionPgPool.query(`
+          SELECT id, code, title, type, discount_text AS "discountText", description,
+                 min_order_value::numeric AS "minOrderValue",
+                 discount_percent::numeric AS "discountPercent",
+                 flat_discount::numeric AS "flatDiscount",
+                 max_discount::numeric AS "maxDiscount",
+                 badge, status, valid_until AS "validUntil"
+          FROM promotions
+          WHERE status = 'ACTIVE'
+          ORDER BY min_order_value ASC
+        `);
+        activePromotions = dbRes.rows.map(r => ({
+          ...r,
+          minOrderValue: Number(r.minOrderValue || 0),
+          discountPercent: Number(r.discountPercent || 0),
+          flatDiscount: Number(r.flatDiscount || 0),
+          maxDiscount: r.maxDiscount != null ? Number(r.maxDiscount) : null
+        }));
+      } catch (err) {
+        console.warn('[production-server] promotions DB query failed:', err.message);
+        activePromotions = [
+          {
+            id: 'promo2',
+            code: 'HEALTH30',
+            title: 'FLAT ₹150 OFF',
+            type: 'FLAT_DISCOUNT',
+            discountText: '₹150 Flat Off Medicines',
+            description: 'Flat ₹150 OFF on orders above ₹799',
+            minOrderValue: 799,
+            flatDiscount: 150,
+            maxDiscount: 150,
+            badge: 'BIG SAVINGS / ₹150 OFF',
+            status: 'ACTIVE',
+            validUntil: '2026-11-30'
+          },
+          {
+            id: 'promo_save10',
+            code: 'SAVE10',
+            title: 'FLAT ₹100 OFF',
+            type: 'FLAT_DISCOUNT',
+            discountText: 'Flat ₹100 OFF',
+            description: 'Flat ₹100 OFF on orders above ₹199',
+            minOrderValue: 199,
+            flatDiscount: 100,
+            maxDiscount: 100,
+            badge: 'INSTANT SAVINGS',
+            status: 'ACTIVE',
+            validUntil: '2026-12-31'
+          }
+        ];
+      }
+      return sendJson(res, 200, {
+        promotions: activePromotions,
+        total: activePromotions.length
+      });
+    }
+
+    // -------------------------------------------------------------
+    // Authoritative Coupon Validation: GET /api/v1/promotions/validate
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/promotions/validate' && method === 'GET') {
+      const code = String(parsedUrl.searchParams.get('code') || '').trim().toUpperCase();
+      const subtotal = Math.max(0, Number(parsedUrl.searchParams.get('subtotal') || 0));
+
+      if (!code) {
+        return sendJson(res, 400, { valid: false, error: 'MISSING_CODE', message: 'Coupon code is required.' });
+      }
+
+      if (code === 'FREESHIP') {
+        return sendJson(res, 400, { valid: false, error: 'NOT_A_COUPON', message: 'Free delivery is an automatic policy above threshold, not a coupon.' });
+      }
+
+      try {
+        const dbRes = await productionPgPool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [code]);
+        if (dbRes.rows.length === 0) {
+          return sendJson(res, 404, { valid: false, error: 'INVALID_COUPON', message: `Coupon code '${code}' is invalid.` });
+        }
+        const promo = dbRes.rows[0];
+        if (promo.status !== 'ACTIVE') {
+          return sendJson(res, 400, { valid: false, error: 'COUPON_INACTIVE', message: `Coupon '${code}' is currently ${promo.status.toLowerCase()}.` });
+        }
+        const minOrder = Number(promo.min_order_value || 0);
+        if (subtotal < minOrder) {
+          const diff = Math.round((minOrder - subtotal) * 100) / 100;
+          return sendJson(res, 400, { valid: false, error: 'COUPON_MIN_ORDER_NOT_MET', message: `Add ₹${diff.toFixed(2)} more to apply ${code}` });
+        }
+
+        let discount = 0;
+        if (promo.type === 'PERCENTAGE') {
+          const calculated = subtotal * (Number(promo.discount_percent || 0) / 100);
+          const maxDisc = promo.max_discount != null ? Number(promo.max_discount) : null;
+          discount = maxDisc ? Math.min(maxDisc, calculated) : calculated;
+        } else {
+          discount = Math.min(Number(promo.flat_discount || 0), subtotal);
+        }
+        discount = Math.round(discount * 100) / 100;
+
+        return sendJson(res, 200, {
+          valid: true,
+          code: promo.code,
+          discountAmount: discount,
+          discountText: promo.discount_text,
+          message: `Coupon '${promo.code}' applied! You saved ₹${discount.toFixed(2)}`
+        });
+      } catch (err) {
+        console.warn('[production-server] promo validation error:', err.message);
+        return sendJson(res, 500, { valid: false, error: 'SERVER_ERROR', message: 'Could not validate coupon.' });
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Store & Delivery Configuration: GET /api/v1/config/delivery
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/config/delivery' && method === 'GET') {
+      let deliveryConfig = {
+        freeDeliveryThreshold: 199.00,
+        standardDeliveryFee: 2.00,
+        expressDeliveryFee: 2.00,
+        coldChainPackagingFee: 15.00,
+        cacheTtlDays: 30
+      };
+      try {
+        const dbRes = await productionPgPool.query('SELECT * FROM delivery_config WHERE is_active = TRUE LIMIT 1');
+        if (dbRes.rows.length > 0) {
+          const row = dbRes.rows[0];
+          deliveryConfig.freeDeliveryThreshold = Number(row.free_delivery_threshold || 199.00);
+          deliveryConfig.standardDeliveryFee = Number(row.standard_delivery_fee || 2.00);
+          deliveryConfig.expressDeliveryFee = Number(row.express_delivery_fee || 2.00);
+          deliveryConfig.coldChainPackagingFee = Number(row.cold_chain_packaging_fee || 15.00);
+        }
+      } catch (err) {
+        console.warn('[production-server] delivery_config query error:', err.message);
+      }
+      return sendJson(res, 200, deliveryConfig);
+    }
+
     if ((pathname === '/api/v1/catalog/medicines/search' || pathname === '/api/v1/catalog/medicines' || pathname === '/api/v1/catalog/products/search' || pathname === '/api/v1/catalog/products' || pathname === '/api/v1/search') && method === 'GET') {
       const q = (parsedUrl.searchParams.get('q') || parsedUrl.searchParams.get('query') || '').trim();
       const cat = (parsedUrl.searchParams.get('category') || '').trim();
 
-      let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description FROM products WHERE is_active = TRUE`;
+      let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description, manufacturer, salt_composition, safety_advice, storage_condition, therapeutic_class FROM products WHERE is_active = TRUE`;
       const queryParams = [];
 
       if (q) {
         queryParams.push(`%${q}%`);
-        queryText += ` AND (name ILIKE $${queryParams.length} OR brand_name ILIKE $${queryParams.length} OR category ILIKE $${queryParams.length} OR sku ILIKE $${queryParams.length})`;
+        queryText += ` AND (name ILIKE $${queryParams.length} OR brand_name ILIKE $${queryParams.length} OR category ILIKE $${queryParams.length} OR sku ILIKE $${queryParams.length} OR salt_composition ILIKE $${queryParams.length} OR manufacturer ILIKE $${queryParams.length})`;
       }
       if (cat) {
         queryParams.push(`%${cat}%`);
@@ -2803,12 +3203,14 @@ const server = http.createServer(async (req, res) => {
         const sellPrice = Number(r.discounted_price || r.price || mrpVal);
         const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
         const img = r.image_url || '';
+        const safetyAdviceList = Array.isArray(r.safety_advice) ? r.safety_advice : (typeof r.safety_advice === 'string' && r.safety_advice.startsWith('[') ? JSON.parse(r.safety_advice) : (r.safety_advice ? [r.safety_advice] : []));
+        const storageVal = r.storage_condition || (Boolean(r.cold_chain_required) ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C');
         return {
           id: r.id,
           sku: r.sku,
           name: r.name,
           brandName: r.brand_name || r.name,
-          manufacturer: r.brand_name || 'CommerceOS Health',
+          manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
           packSize: r.pack_size || '1 Unit',
           category: r.category || 'General',
           therapeuticCategory: r.category || 'General',
@@ -2828,12 +3230,56 @@ const server = http.createServer(async (req, res) => {
           stockCount: 50,
           rating: 4.8,
           reviewCount: 124,
+          activeSalt: r.salt_composition || null,
+          saltComposition: r.salt_composition || null,
+          safetyAdvice: safetyAdviceList,
+          storageCondition: storageVal,
+          storageInstructions: storageVal,
+          therapeuticClass: r.therapeutic_class || r.category || null,
+          therapeuticCategory: r.therapeutic_class || r.category || null,
           medicineDetails: {
             prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-            coldChain: Boolean(r.cold_chain_required)
+            coldChain: Boolean(r.cold_chain_required),
+            saltComposition: r.salt_composition || null,
+            activeSalt: r.salt_composition || null,
+            manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
+            safetyAdvice: safetyAdviceList,
+            storageCondition: storageVal,
+            therapeuticClass: r.therapeutic_class || r.category || null,
+            therapeuticCategory: r.therapeutic_class || r.category || null
           }
         };
       });
+
+      if (pathname === '/api/v1/search') {
+        const searchResults = results.map((p, idx) => ({
+          entityType: 'PRODUCT',
+          entityId: p.id,
+          sku: p.sku,
+          title: p.name,
+          subtitle: p.brandName || p.category || '',
+          image: p.image || p.imageUrl || '',
+          price: Number(p.discountedPrice || p.price || 0),
+          vertical: 'pharmacy',
+          globalRank: idx + 1,
+          isExpressEligible: true,
+          rating: p.rating || 4.8
+        }));
+        return sendJson(res, 200, {
+          query: q,
+          totalCount: searchResults.length,
+          orderedResults: searchResults,
+          products: searchResults,
+          stores: [],
+          restaurants: [],
+          services: [],
+          brands: [],
+          categories: [],
+          collections: [],
+          campaigns: [],
+          offers: []
+        });
+      }
 
       if (parsedUrl.searchParams.has('limit') || parsedUrl.searchParams.has('offset')) {
         const lim = parseInt(parsedUrl.searchParams.get('limit') || '20', 10);
@@ -2862,7 +3308,7 @@ const server = http.createServer(async (req, res) => {
     if (medDetailMatch && method === 'GET') {
       const prodId = medDetailMatch[1];
       const prodRes = await pool.query(
-        `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description FROM products WHERE (id = $1 OR sku = $1) AND is_active = TRUE`,
+        `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description, expiry_date, manufacturing_date, manufacturer, salt_composition, safety_advice, storage_condition, therapeutic_class FROM products WHERE (id = $1 OR sku = $1) AND is_active = TRUE`,
         [prodId]
       );
       if (prodRes.rows.length === 0) {
@@ -2873,12 +3319,55 @@ const server = http.createServer(async (req, res) => {
       const sellPrice = Number(r.discounted_price || r.price || mrpVal);
       const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
       const img = r.image_url || '';
+      const safetyAdviceList = Array.isArray(r.safety_advice) ? r.safety_advice : (typeof r.safety_advice === 'string' && r.safety_advice.startsWith('[') ? JSON.parse(r.safety_advice) : (r.safety_advice ? [r.safety_advice] : []));
+      const storageVal = r.storage_condition || (Boolean(r.cold_chain_required) ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C');
+
+      // Authoritative store-scoped inventory lookup
+      const storeId = parsedUrl.searchParams.get('storeId') || 'store_rewari_hub_01';
+      let onHand = 50;
+      let reserved = 0;
+      let available = 50;
+      try {
+        const invRes = await pool.query(
+          `SELECT stock_count, reserved_count, available_count, updated_at FROM inventory WHERE (product_id = $1 OR sku = $2) AND store_id = $3 LIMIT 1`,
+          [r.id, r.sku, storeId]
+        );
+        if (invRes.rows.length > 0) {
+          const invRow = invRes.rows[0];
+          onHand = Number(invRow.stock_count ?? 0);
+          reserved = Number(invRow.reserved_count ?? 0);
+          available = Number(invRow.available_count ?? Math.max(0, onHand - reserved));
+        }
+      } catch (e) {
+        console.warn('[medDetail] inventory query fallback:', e.message);
+      }
+
+      // Authoritative double-entry ledger history for this SKU
+      let ledgerList = [];
+      try {
+        const ledgerRes = await pool.query(
+          `SELECT id, delta, (new_stock - delta) as previous_stock, new_stock, reason, actor_id, created_at FROM inventory_ledger WHERE (product_id = $1 OR sku = $2) ORDER BY created_at DESC LIMIT 15`,
+          [r.id, r.sku]
+        );
+        ledgerList = ledgerRes.rows.map(l => ({
+          id: l.id,
+          delta: Number(l.delta || 0),
+          previousStock: Number(l.previous_stock || 0),
+          newStock: Number(l.new_stock || 0),
+          reason: l.reason || 'SYSTEM_RECORD',
+          actorId: l.actor_id || 'system',
+          createdAt: l.created_at
+        }));
+      } catch (e) {
+        console.warn('[medDetail] ledger query fallback:', e.message);
+      }
+
       return sendJson(res, 200, {
         id: r.id,
         sku: r.sku,
         name: r.name,
         brandName: r.brand_name || r.name,
-        manufacturer: r.brand_name || 'CommerceOS Health',
+        manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
         packSize: r.pack_size || '1 Unit',
         category: r.category || 'General',
         therapeuticCategory: r.category || 'General',
@@ -2894,20 +3383,52 @@ const server = http.createServer(async (req, res) => {
         rxRequirement: r.rx_requirement || 'OTC',
         coldChainRequired: Boolean(r.cold_chain_required),
         expressDeliverySlaMins: 10,
-        inStock: true,
-        stockCount: 50,
+        inStock: available > 0,
+        stockCount: available,
+        onHand,
+        reserved,
+        available,
         rating: 4.8,
         reviewCount: 124,
+        dynamicPricing: true,
+        minMargin: 20,
+        dpcoCompliant: true,
+        dpcoCeiling: mrpVal,
+        expiryDate: r.expiry_date || '2026-11-30',
+        expiry_date: r.expiry_date || '2026-11-30',
+        manufacturingDate: r.manufacturing_date || '2024-05-15',
+        batchNumber: `BAT-${(r.sku || r.id).slice(-4).toUpperCase()}`,
+        activeSalt: r.salt_composition || null,
+        saltComposition: r.salt_composition || null,
+        safetyAdvice: safetyAdviceList,
+        storageCondition: storageVal,
+        storageInstructions: storageVal,
+        therapeuticClass: r.therapeutic_class || r.category || null,
+        therapeuticCategory: r.therapeutic_class || r.category || null,
+        warehouseLocation: {
+          hub: 'Rewari Central Hub (store_rewari_hub_01)',
+          zone: 'Bay 03 - Pharmaceuticals',
+          rack: `Rack B${(Math.abs(r.id.split('').reduce((a, b) => a + b.charCodeAt(0), 0)) % 5) + 1}`,
+          bin: `Bin ${(Math.abs(r.sku.split('').reduce((a, b) => a + b.charCodeAt(0), 0)) % 20) + 1}`
+        },
+        ledgerHistory: ledgerList,
         medicineDetails: {
           prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-          coldChain: Boolean(r.cold_chain_required)
+          coldChain: Boolean(r.cold_chain_required),
+          saltComposition: r.salt_composition || null,
+          activeSalt: r.salt_composition || null,
+          manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
+          safetyAdvice: safetyAdviceList,
+          storageCondition: storageVal,
+          therapeuticClass: r.therapeutic_class || r.category || null,
+          therapeuticCategory: r.therapeutic_class || r.category || null
         }
       });
     }
 
     if ((pathname === '/api/v1/catalog/medicines/category' || pathname === '/api/v1/catalog/products/category') && method === 'GET') {
       const category = (parsedUrl.searchParams.get('category') || parsedUrl.searchParams.get('categoryId') || '').trim();
-      let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description FROM products WHERE is_active = TRUE`;
+      let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description, manufacturer, salt_composition, safety_advice, storage_condition, therapeutic_class FROM products WHERE is_active = TRUE`;
       const queryParams = [];
       if (category) {
         queryParams.push(`%${category}%`);
@@ -2920,12 +3441,14 @@ const server = http.createServer(async (req, res) => {
         const sellPrice = Number(r.discounted_price || r.price || mrpVal);
         const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
         const img = r.image_url || '';
+        const safetyAdviceList = Array.isArray(r.safety_advice) ? r.safety_advice : (typeof r.safety_advice === 'string' && r.safety_advice.startsWith('[') ? JSON.parse(r.safety_advice) : (r.safety_advice ? [r.safety_advice] : []));
+        const storageVal = r.storage_condition || (Boolean(r.cold_chain_required) ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C');
         return {
           id: r.id,
           sku: r.sku,
           name: r.name,
           brandName: r.brand_name || r.name,
-          manufacturer: r.brand_name || 'CommerceOS Health',
+          manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
           packSize: r.pack_size || '1 Unit',
           category: r.category || 'General',
           therapeuticCategory: r.category || 'General',
@@ -2945,9 +3468,23 @@ const server = http.createServer(async (req, res) => {
           stockCount: 50,
           rating: 4.8,
           reviewCount: 124,
+          activeSalt: r.salt_composition || null,
+          saltComposition: r.salt_composition || null,
+          safetyAdvice: safetyAdviceList,
+          storageCondition: storageVal,
+          storageInstructions: storageVal,
+          therapeuticClass: r.therapeutic_class || r.category || null,
+          therapeuticCategory: r.therapeutic_class || r.category || null,
           medicineDetails: {
             prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-            coldChain: Boolean(r.cold_chain_required)
+            coldChain: Boolean(r.cold_chain_required),
+            saltComposition: r.salt_composition || null,
+            activeSalt: r.salt_composition || null,
+            manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
+            safetyAdvice: safetyAdviceList,
+            storageCondition: storageVal,
+            therapeuticClass: r.therapeutic_class || r.category || null,
+            therapeuticCategory: r.therapeutic_class || r.category || null
           }
         };
       });
@@ -2969,7 +3506,7 @@ const server = http.createServer(async (req, res) => {
     if (verticalFeedMatch && method === 'GET') {
       const verticalId = verticalFeedMatch[1];
       const feedRes = await pool.query(
-        `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description
+        `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description, manufacturer, salt_composition, safety_advice, storage_condition
          FROM products WHERE is_active = TRUE
          ORDER BY created_at DESC LIMIT 50`
       );
@@ -2978,12 +3515,14 @@ const server = http.createServer(async (req, res) => {
         const sellPrice = Number(r.discounted_price || r.price || mrpVal);
         const discPct = mrpVal > 0 ? Math.max(0, Math.round(((mrpVal - sellPrice) / mrpVal) * 100)) : 0;
         const img = r.image_url || '';
+        const safetyAdviceList = Array.isArray(r.safety_advice) ? r.safety_advice : (typeof r.safety_advice === 'string' && r.safety_advice.startsWith('[') ? JSON.parse(r.safety_advice) : (r.safety_advice ? [r.safety_advice] : []));
+        const storageVal = r.storage_condition || (Boolean(r.cold_chain_required) ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C');
         return {
           id: r.id,
           sku: r.sku,
           name: r.name,
           brandName: r.brand_name || r.name,
-          manufacturer: r.brand_name || 'CommerceOS Health',
+          manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
           packSize: r.pack_size || '1 Unit',
           category: r.category || 'General',
           therapeuticCategory: r.category || 'General',
@@ -3003,9 +3542,23 @@ const server = http.createServer(async (req, res) => {
           stockCount: 50,
           rating: 4.8,
           reviewCount: 124,
+          activeSalt: r.salt_composition || null,
+          saltComposition: r.salt_composition || null,
+          safetyAdvice: safetyAdviceList,
+          storageCondition: storageVal,
+          storageInstructions: storageVal,
+          therapeuticClass: r.therapeutic_class || r.category || null,
+          therapeuticCategory: r.therapeutic_class || r.category || null,
           medicineDetails: {
             prescriptionRequired: r.rx_requirement === 'RX_REQUIRED' || r.rx_requirement === 'SCHEDULE_H',
-            coldChain: Boolean(r.cold_chain_required)
+            coldChain: Boolean(r.cold_chain_required),
+            saltComposition: r.salt_composition || null,
+            activeSalt: r.salt_composition || null,
+            manufacturer: r.manufacturer || r.brand_name || 'CommerceOS Health',
+            safetyAdvice: safetyAdviceList,
+            storageCondition: storageVal,
+            therapeuticClass: r.therapeutic_class || r.category || null,
+            therapeuticCategory: r.therapeutic_class || r.category || null
           }
         };
       });
@@ -3037,6 +3590,27 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     // Prescription Endpoints
     // -------------------------------------------------------------
+    function resolvePrescriptionAttachments(rawAttachments) {
+      const list = typeof rawAttachments === 'string' ? JSON.parse(rawAttachments) : (rawAttachments || []);
+      return list.map(item => {
+        if (typeof item !== 'string') return item;
+        let key = null;
+        if (item.startsWith('r2://')) {
+          key = item.replace(/^r2:\/\//, '');
+        } else {
+          const m = item.match(/(prescriptions\/[^?#]+)/);
+          if (m && defaultR2Service.isConfigured()) {
+            key = m[1];
+          }
+        }
+        if (key && defaultR2Service.isConfigured()) {
+          const signedUrl = defaultR2Service.generatePresignedGetUrl({ key, expiresInSeconds: 1800 });
+          if (signedUrl) return signedUrl;
+        }
+        return item;
+      });
+    }
+
     if (pathname === '/api/v1/prescriptions' && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
@@ -3072,7 +3646,7 @@ const server = http.createServer(async (req, res) => {
 
       const rxId = 'rx_' + crypto.randomUUID();
 
-      // Cloudflare R2 Upload Hook (Zero Egress, High Performance Edge Storage)
+      // Cloudflare R2 Upload Hook (Private edge storage with short-lived presigned access)
       let finalAttachments = [...singleAttachmentList];
       if (defaultR2Service.isConfigured() && finalAttachments.length > 0) {
         const first = finalAttachments[0];
@@ -3080,9 +3654,9 @@ const server = http.createServer(async (req, res) => {
           try {
             const ext = first.includes('image/png') ? 'png' : 'jpg';
             const r2Key = `prescriptions/${customerId}/${rxId}.${ext}`;
-            const cdnUrl = await defaultR2Service.uploadDataUri({ key: r2Key, dataUri: first });
-            finalAttachments = [cdnUrl];
-            console.log(`📦 [Cloudflare R2] Successfully uploaded prescription to CDN: ${cdnUrl}`);
+            await defaultR2Service.uploadDataUri({ key: r2Key, dataUri: first });
+            finalAttachments = [`r2://${r2Key}`];
+            console.log(`📦 [Cloudflare R2] Successfully uploaded private prescription: ${r2Key}`);
           } catch (r2Err) {
             console.error('⚠️ [Cloudflare R2] Upload error, falling back to in-db storage:', r2Err.message);
           }
@@ -3111,7 +3685,7 @@ const server = http.createServer(async (req, res) => {
         customerId: row.customer_id,
         patientName: row.patient_name,
         status: row.status,
-        attachments: typeof row.attachments === 'string' ? JSON.parse(row.attachments) : row.attachments,
+        attachments: resolvePrescriptionAttachments(row.attachments),
         createdAt: row.created_at
       });
     }
@@ -3136,7 +3710,7 @@ const server = http.createServer(async (req, res) => {
         customerId: r.customer_id,
         patientName: r.patient_name,
         status: r.status,
-        attachments: typeof r.attachments === 'string' ? JSON.parse(r.attachments) : r.attachments,
+        attachments: resolvePrescriptionAttachments(r.attachments),
         doctorName: r.doctor_name,
         rejectionReason: r.rejection_reason,
         reviewedAt: r.reviewed_at,
@@ -3168,7 +3742,7 @@ const server = http.createServer(async (req, res) => {
         gender: r.gender,
         doctorName: r.doctor_name,
         doctorRegistrationNo: r.doctor_registration_no,
-        attachments: typeof r.attachments === 'string' ? JSON.parse(r.attachments) : r.attachments,
+        attachments: resolvePrescriptionAttachments(r.attachments),
         note: r.note,
         status: r.status,
         rejectionReason: r.rejection_reason,
@@ -3222,25 +3796,105 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const pricingEngine = require('../pricing-engine');
 
+    function formatCartResponseDto(customerId, rawItems) {
+      const items = (rawItems || []).map(r => {
+        const isRx = Boolean(r.requiresPrescription || r.prescriptionRequired || (r.pharmacyAttributes && r.pharmacyAttributes.prescriptionRequired));
+        const isCold = Boolean(r.coldChain || (r.pharmacyAttributes && r.pharmacyAttributes.coldChain));
+        let uPrice = Number(r.unitPrice || r.discountedPrice || r.price || 0);
+        if (uPrice <= 0) uPrice = 15;
+        const mrpVal = Number(r.mrp || r.price || uPrice);
+        return {
+          id: r.id || r.sku,
+          productId: r.productId || r.id || r.sku,
+          sku: r.sku,
+          name: r.name || r.sku,
+          quantity: Number(r.quantity) || 1,
+          unitPrice: uPrice,
+          price: Number(r.price || uPrice),
+          discountedPrice: Number(r.discountedPrice || uPrice),
+          mrp: mrpVal,
+          brand: r.brand || null,
+          packSize: r.packSize || null,
+          image: r.image || null,
+          verticalId: r.verticalId || 'pharmacy',
+          requiresPrescription: isRx,
+          prescriptionRequired: isRx,
+          coldChain: isCold,
+          pharmacyAttributes: r.pharmacyAttributes || {
+            prescriptionRequired: isRx,
+            coldChain: isCold
+          }
+        };
+      });
+
+      const subtotal = items.reduce((acc, it) => acc + (Number(it.discountedPrice || it.price || it.unitPrice || 0) * (Number(it.quantity) || 1)), 0);
+      const roundedSubtotal = Math.round(subtotal * 100) / 100;
+      const FREE_DELIVERY_THRESHOLD = 199.0;
+      const freeDeliveryEligible = items.length > 0 && roundedSubtotal >= FREE_DELIVERY_THRESHOLD;
+      const deliveryFee = freeDeliveryEligible ? 0.0 : (items.length > 0 ? 2.0 : 0.0);
+      const containsColdChain = items.some(it => it.coldChain);
+      const coldChainPackagingFee = containsColdChain ? 15.0 : 0.0;
+      const pricing = pricingEngine.calculateCustomerOrderPricing({
+        itemsSubtotal: roundedSubtotal,
+        customDeliveryFee: deliveryFee,
+        packagingFee: coldChainPackagingFee,
+        isCod: true
+      });
+      const grandTotal = pricing.totalAmount;
+      const remainingForFreeDelivery = Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - roundedSubtotal) * 100) / 100);
+      const requiresPrescription = items.some(it => it.prescriptionRequired);
+
+      return {
+        customerId: String(customerId || ''),
+        items: items,
+        subtotal: roundedSubtotal,
+        itemsSubtotal: roundedSubtotal,
+        deliveryFee: deliveryFee,
+        expressDeliveryFee: deliveryFee,
+        coldChainPackagingFee: coldChainPackagingFee,
+        packagingFee: coldChainPackagingFee,
+        handlingFee: coldChainPackagingFee,
+        surgeFee: 0.0,
+        taxAmount: pricing.taxAmount,
+        discountAmount: pricing.discountAmount,
+        total: grandTotal,
+        grandTotal: grandTotal,
+        requiresPrescription: requiresPrescription,
+        prescriptionRequired: requiresPrescription,
+        freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD,
+        freeDeliveryEligible: freeDeliveryEligible,
+        remainingForFreeDelivery: remainingForFreeDelivery
+      };
+    }
+
     const cartGetMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)$/);
     if (cartGetMatch && method === 'GET') {
       const customerId = cartGetMatch[1];
+      const authClaims = verifyAndDecodeJwt(req);
+      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
+        const clean10 = customerId.replace(/\D/g, '').slice(-10);
+        const isOwner = authClaims.sub === customerId ||
+          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+        if (!isOwner) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this cart.' });
+        }
+      }
       const rawItems = await appRepositories.cartRepo.getCart(customerId);
-      const subtotal = rawItems.reduce((acc, it) => acc + (Number(it.discountedPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
-      const pricing = pricingEngine.calculateCustomerOrderPricing({ itemsSubtotal: subtotal, isCod: true });
-
-      return sendJson(res, 200, {
-        items: rawItems,
-        itemsSubtotal: pricing.itemsSubtotal,
-        deliveryFee: pricing.deliveryFee,
-        taxAmount: pricing.taxAmount,
-        grandTotal: pricing.totalAmount
-      });
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
 
     const cartAddMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items$/);
     if (cartAddMatch && method === 'POST') {
       const customerId = cartAddMatch[1];
+      const authClaims = verifyAndDecodeJwt(req);
+      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
+        const clean10 = customerId.replace(/\D/g, '').slice(-10);
+        const isOwner = authClaims.sub === customerId ||
+          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+        if (!isOwner) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify this cart.' });
+        }
+      }
       const body = await parseJsonBody(req);
       if (!body || !body.sku) {
         return sendJson(res, 400, { error: 'INVALID_CART_ITEM', message: 'sku is mandatory for adding to cart.' });
@@ -3252,22 +3906,22 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const rawItems = await appRepositories.cartRepo.addItem(customerId, body);
-      const subtotal = rawItems.reduce((acc, it) => acc + (Number(it.discountedPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
-      const pricing = pricingEngine.calculateCustomerOrderPricing({ itemsSubtotal: subtotal, isCod: true });
-
-      return sendJson(res, 200, {
-        items: rawItems,
-        itemsSubtotal: pricing.itemsSubtotal,
-        deliveryFee: pricing.deliveryFee,
-        taxAmount: pricing.taxAmount,
-        grandTotal: pricing.totalAmount
-      });
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
 
     const cartUpdateMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items\/([^/]+)$/);
     if (cartUpdateMatch && method === 'PATCH') {
       const customerId = cartUpdateMatch[1];
       const sku = cartUpdateMatch[2];
+      const authClaims = verifyAndDecodeJwt(req);
+      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
+        const clean10 = customerId.replace(/\D/g, '').slice(-10);
+        const isOwner = authClaims.sub === customerId ||
+          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+        if (!isOwner) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify this cart.' });
+        }
+      }
       const body = await parseJsonBody(req);
       const quantity = Number(body.quantity);
       if (isNaN(quantity) || !Number.isInteger(quantity) || quantity < 0 || quantity > 1000) {
@@ -3275,45 +3929,39 @@ const server = http.createServer(async (req, res) => {
       }
 
       const rawItems = await appRepositories.cartRepo.updateQuantity(customerId, sku, quantity);
-      const subtotal = rawItems.reduce((acc, it) => acc + (Number(it.discountedPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
-      const pricing = pricingEngine.calculateCustomerOrderPricing({ itemsSubtotal: subtotal, isCod: true });
-
-      return sendJson(res, 200, {
-        items: rawItems,
-        itemsSubtotal: pricing.itemsSubtotal,
-        deliveryFee: pricing.deliveryFee,
-        taxAmount: pricing.taxAmount,
-        grandTotal: pricing.totalAmount
-      });
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
 
     if (cartUpdateMatch && method === 'DELETE') {
       const customerId = cartUpdateMatch[1];
       const sku = cartUpdateMatch[2];
+      const authClaims = verifyAndDecodeJwt(req);
+      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
+        const clean10 = customerId.replace(/\D/g, '').slice(-10);
+        const isOwner = authClaims.sub === customerId ||
+          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+        if (!isOwner) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify this cart.' });
+        }
+      }
 
       const rawItems = await appRepositories.cartRepo.removeItem(customerId, sku);
-      const subtotal = rawItems.reduce((acc, it) => acc + (Number(it.discountedPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
-      const pricing = pricingEngine.calculateCustomerOrderPricing({ itemsSubtotal: subtotal, isCod: true });
-
-      return sendJson(res, 200, {
-        items: rawItems,
-        itemsSubtotal: pricing.itemsSubtotal,
-        deliveryFee: pricing.deliveryFee,
-        taxAmount: pricing.taxAmount,
-        grandTotal: pricing.totalAmount
-      });
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
 
     if (cartGetMatch && method === 'DELETE') {
       const customerId = cartGetMatch[1];
+      const authClaims = verifyAndDecodeJwt(req);
+      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
+        const clean10 = customerId.replace(/\D/g, '').slice(-10);
+        const isOwner = authClaims.sub === customerId ||
+          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+        if (!isOwner) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to clear this cart.' });
+        }
+      }
       await appRepositories.cartRepo.clearCart(customerId);
-      return sendJson(res, 200, {
-        items: [],
-        itemsSubtotal: 0,
-        deliveryFee: 0,
-        taxAmount: 0,
-        grandTotal: 0
-      });
+      return sendJson(res, 200, formatCartResponseDto(customerId, []));
     }
 
     // -------------------------------------------------------------
@@ -3806,8 +4454,20 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     if ((pathname === '/api/v1/orders/serviceability' || pathname === '/api/v1/serviceability/check') && method === 'POST') {
       const body = await parseJsonBody(req);
-      const lat = Number(body.latitude || (body.address && body.address.latitude));
-      const lng = Number(body.longitude || (body.address && body.address.longitude));
+      let lat = Number(body.latitude || (body.address && body.address.latitude));
+      let lng = Number(body.longitude || (body.address && body.address.longitude));
+
+      if ((isNaN(lat) || isNaN(lng)) && (body.addressId || body.address_id)) {
+        const addrId = String(body.addressId || body.address_id).trim();
+        const addrRes = await pool.query(
+          `SELECT latitude, longitude FROM customer_addresses WHERE id = $1 LIMIT 1`,
+          [addrId]
+        );
+        if (addrRes.rows.length > 0) {
+          lat = Number(addrRes.rows[0].latitude);
+          lng = Number(addrRes.rows[0].longitude);
+        }
+      }
 
       if (isNaN(lat) || isNaN(lng)) {
         return sendJson(res, 400, { error: 'INVALID_LOCATION', message: 'Valid latitude and longitude are required.' });
@@ -3823,17 +4483,29 @@ const server = http.createServer(async (req, res) => {
       if (!fulfillmentDecision.ok) {
         return sendJson(res, 200, {
           serviceable: false,
+          eligible: false,
           error: fulfillmentDecision.error,
           message: fulfillmentDecision.message
         });
       }
 
+      const itemsList = body.items || [];
+      const containsColdChain = itemsList.some(it => it.coldChain);
+      const coldChainFee = containsColdChain ? 15.0 : 0.0;
+      const subtotalVal = itemsList.reduce((acc, it) => acc + (Number(it.price || it.unitPrice || 0) * (Number(it.quantity) || 1)), 0);
+      const deliveryFee = subtotalVal >= 199.0 ? 0.0 : (itemsList.length > 0 ? 2.0 : 0.0);
+      const estMins = Math.max(10, Math.ceil(fulfillmentDecision.decision.distanceKm * 3));
+
       return sendJson(res, 200, {
         serviceable: true,
+        eligible: true,
         storeId: fulfillmentDecision.storeId,
         storeName: fulfillmentDecision.decision.storeName,
         distanceKm: fulfillmentDecision.decision.distanceKm,
-        estimatedDeliveryMins: Math.max(10, Math.ceil(fulfillmentDecision.decision.distanceKm * 3))
+        deliveryFee: deliveryFee,
+        coldChainFee: coldChainFee,
+        estimatedDeliveryMins: estMins,
+        etaLabel: `${estMins} mins`
       });
     }
 
@@ -3855,16 +4527,23 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or customerId path param is required.' });
       }
       const ordersRes = await pool.query(
-        `SELECT id, order_id, customer_id, store_id, status, total_amount, tax_amount, delivery_fee, payment_method, is_cod, cod_amount, items, delivery_address, created_at
+        `SELECT id, order_id, short_order_id, customer_id, store_id, status, total_amount, tax_amount, delivery_fee, payment_method, is_cod, cod_amount, items, delivery_address, created_at
          FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`,
         [customerId]
       );
       return sendJson(res, 200, ordersRes.rows.map(o => {
         const oid = o.order_id || o.id;
+        const shortId = o.short_order_id || OrderCodeCodec.fromUuid(oid);
         return {
           id: oid,
           orderId: oid,
           order_id: oid,
+          shortOrderId: shortId,
+          short_order_id: shortId,
+          displayOrderId: OrderCodeCodec.formatDisplay(shortId),
+          display_order_id: OrderCodeCodec.formatDisplay(shortId),
+          numericOrderId: Number(shortId),
+          numeric_order_id: Number(shortId),
           customerId: o.customer_id,
           customer_id: o.customer_id,
           status: o.status,
@@ -3894,7 +4573,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         isEligible: true,
         fee: 0,
-        policyText: 'Orders can be cancelled prior to dark store pickup free of charge.',
+        policyText: 'Orders can be cancelled prior to store pickup free of charge.',
         reasons: [
           { code: 'CHANGED_MIND', label: 'Changed my mind' },
           { code: 'ORDERED_MISTAKE', label: 'Ordered by mistake' },
@@ -4004,6 +4683,11 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer contact phone is strictly required.' });
           }
 
+          await pool.query(
+            `UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`,
+            [authenticatedCustomerId]
+          );
+
           const insRes = await pool.query(
             `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
              VALUES ($1, $2, 'HOME', $3, $4, $5, $6, $7, TRUE, $8, NOW())
@@ -4053,8 +4737,13 @@ const server = http.createServer(async (req, res) => {
 
       const authoritativeStoreId = fulfillmentDecision.storeId;
 
-      // Security: Strip internal-only and legacy fields from public client payload
-      const { targetRiderId, riderId, address_id, addressId, ...safeOrderPayload } = body;
+      // Security: Strip internal-only and client pricing overrides from public client payload
+      const {
+        targetRiderId, riderId, address_id, addressId,
+        deliveryFee, delivery_fee, packagingFee, handlingFee, coldChainFee,
+        discountAmount, discount_amount, taxAmount, tax_amount, totalAmount, total_amount,
+        ...safeOrderPayload
+      } = body;
 
       // Idempotency Key Handling
       const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
@@ -4082,10 +4771,17 @@ const server = http.createServer(async (req, res) => {
       const orderIdVal = placeResult.order.order_id || placeResult.order.id;
       const rawOtp = placeResult.isIdempotentReplay ? undefined : (placeResult.order.deliveryOtp || placeResult.order.rawDeliveryPin);
       const deliveryIdVal = placeResult.session ? (placeResult.session.delivery_id || placeResult.session.id) : undefined;
+      const shortOrderIdVal = placeResult.order.short_order_id || placeResult.order.shortOrderId || OrderCodeCodec.fromUuid(orderIdVal);
       const customerOrderDto = {
         id: orderIdVal,
         orderId: orderIdVal,
         order_id: orderIdVal,
+        shortOrderId: shortOrderIdVal,
+        short_order_id: shortOrderIdVal,
+        displayOrderId: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+        display_order_id: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+        numericOrderId: Number(shortOrderIdVal),
+        numeric_order_id: Number(shortOrderIdVal),
         deliveryId: deliveryIdVal,
         delivery_id: deliveryIdVal,
         customerId: authenticatedCustomerId,
@@ -4212,6 +4908,12 @@ const server = http.createServer(async (req, res) => {
       if (!rawOrderId || rawOrderId === 'undefined' || rawOrderId === 'null') {
         return sendJson(res, 404, { code: 'ORDER_NOT_FOUND', error: 'NOT_FOUND', message: 'Order ID is required.' });
       }
+
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { code: 'UNAUTHORIZED', error: 'UNAUTHORIZED', message: 'Authentication required to view order details.' });
+      }
+
       const orderId = decodeURIComponent(rawOrderId).trim().replace(/^#/, '');
 
       let order = null;
@@ -4220,8 +4922,9 @@ const server = http.createServer(async (req, res) => {
       }
       if (!order && pool) {
         const cleanNoPrefix = orderId.replace(/^ord_/, '');
+        const clean10Digits = orderId.replace(/[^0-9]/g, '');
         const oRes = await pool.query(
-          `SELECT id, order_id, customer_id, store_id, prescription_id, order_type,
+          `SELECT id, order_id, short_order_id, customer_id, store_id, prescription_id, order_type,
                   status, seller_approval_status, total_amount, tax_amount, delivery_fee,
                   payment_method, payment_status, is_cod, cod_amount, delivery_address, items,
                   bill_summary, cancellation, created_at, updated_at
@@ -4230,10 +4933,12 @@ const server = http.createServer(async (req, res) => {
               OR id = $1
               OR order_id = 'ord_' || $1
               OR id = 'ord_' || $1
+              OR short_order_id = $1
+              OR (LENGTH($3) = 10 AND short_order_id = $3)
               OR (LENGTH($2) >= 6 AND (id LIKE '%' || $2 || '%' OR order_id LIKE '%' || $2 || '%'))
            ORDER BY created_at DESC
            LIMIT 1`,
-          [orderId, cleanNoPrefix]
+          [orderId, cleanNoPrefix, clean10Digits]
         );
         order = oRes.rows[0] || null;
       }
@@ -4244,32 +4949,29 @@ const server = http.createServer(async (req, res) => {
 
       const orderIdVal = order.order_id || order.id;
 
-      const authClaims = verifyAndDecodeJwt(req);
-      if (authClaims && authClaims.sub) {
-        const orderCustomerId = order.customer_id || order.customerId;
-        const orderStoreId = order.store_id || order.storeId;
-        const isOwner = orderCustomerId === authClaims.sub;
-        const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
-        let isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && authClaims.storeId === orderStoreId);
-        if (!isSeller && (authClaims.role === 'ROLE_SELLER' || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER')))) {
-          const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
-          if (authorizedStoreId && authorizedStoreId === orderStoreId) {
-            isSeller = true;
-          }
+      const orderCustomerId = order.customer_id || order.customerId;
+      const orderStoreId = order.store_id || order.storeId;
+      const isOwner = orderCustomerId === authClaims.sub;
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+      let isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && authClaims.storeId === orderStoreId);
+      if (!isSeller && (authClaims.role === 'ROLE_SELLER' || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER')))) {
+        const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+        if (authorizedStoreId && authorizedStoreId === orderStoreId) {
+          isSeller = true;
         }
+      }
 
-        let isAssignedRider = false;
-        if (authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'))) {
-          const sessRes = await pool.query(
-            `SELECT rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) AND rider_id = $2`,
-            [orderIdVal, authClaims.sub]
-          );
-          isAssignedRider = sessRes.rows.length > 0;
-        }
+      let isAssignedRider = false;
+      if (authClaims.role === 'ROLE_RIDER' || (authClaims.roles && authClaims.roles.includes('ROLE_RIDER'))) {
+        const sessRes = await pool.query(
+          `SELECT rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) AND rider_id = $2`,
+          [orderIdVal, authClaims.sub]
+        );
+        isAssignedRider = sessRes.rows.length > 0;
+      }
 
-        if (!isOwner && !isAdmin && !isSeller && !isAssignedRider) {
-          return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to view this order.' });
-        }
+      if (!isOwner && !isAdmin && !isSeller && !isAssignedRider) {
+        return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to view this order.' });
       }
 
       const rawItems = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
@@ -4314,10 +5016,17 @@ const server = http.createServer(async (req, res) => {
         totalAmount: resolvedTotalAmount
       };
 
+      const shortOrderIdVal = order.short_order_id || OrderCodeCodec.fromUuid(orderIdVal);
       const singleOrderDto = {
         id: orderIdVal,
         orderId: orderIdVal,
         order_id: orderIdVal,
+        shortOrderId: shortOrderIdVal,
+        short_order_id: shortOrderIdVal,
+        displayOrderId: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+        display_order_id: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+        numericOrderId: Number(shortOrderIdVal),
+        numeric_order_id: Number(shortOrderIdVal),
         customerId: order.customer_id || order.customerId,
         customer_id: order.customer_id || order.customerId,
         customerName: resolvedCustName,
@@ -4536,6 +5245,11 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer phone is strictly required.' });
           }
 
+          await pool.query(
+            `UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`,
+            [customerId]
+          );
+
           const insRes = await pool.query(
             `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
              VALUES ($1, $2, 'HOME', $3, $4, $5, $6, $7, TRUE, $8, NOW())
@@ -4569,7 +5283,8 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 422, { error: fulfillmentDecision.error || 'STORE_NOT_SERVICEABLE', message: fulfillmentDecision.message });
       }
 
-      const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || null;
+      const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || `cart_chk_${customerId}_${crypto.randomUUID()}`;
+
       const requestedPaymentMethod = (body.paymentMethod || body.payment_method || 'COD').toUpperCase();
       const placeResult = await appRepositories.orderRepo.placeOrderTransactionally(customerId, {
         addressId: customerAddr.id,
@@ -4578,9 +5293,9 @@ const server = http.createServer(async (req, res) => {
         items: rawCartItems,
         fulfillmentDecision: fulfillmentDecision.decision,
         idempotencyKey,
-        deliveryFee: body.deliveryFee != null ? Number(body.deliveryFee) : (body.delivery_fee != null ? Number(body.delivery_fee) : null),
-        discountAmount: body.discountAmount != null ? Number(body.discountAmount) : (body.discount_amount != null ? Number(body.discount_amount) : 0),
-        packagingFee: body.packagingFee != null ? Number(body.packagingFee) : (body.coldChainFee != null ? Number(body.coldChainFee) : 0)
+        cartCheckout: true,
+        couponCode: body.couponCode || body.coupon_code || null,
+        tip: body.tip != null ? Math.max(0, Number(body.tip)) : (body.selectedTip != null ? Math.max(0, Number(body.selectedTip)) : 0)
       });
 
       if (!placeResult.ok) {
@@ -4603,9 +5318,17 @@ const server = http.createServer(async (req, res) => {
         grandTotal: Number(placeResult.order.total_amount)
       };
 
+      const rawPlacedId = placeResult.order.order_id || placeResult.order.id;
+      const shortOrderIdVal = placeResult.order.short_order_id || placeResult.order.shortOrderId || OrderCodeCodec.fromUuid(rawPlacedId);
       const customerOrderDto = {
-        id: placeResult.order.order_id || placeResult.order.id,
-        orderId: placeResult.order.order_id || placeResult.order.id,
+        id: rawPlacedId,
+        orderId: rawPlacedId,
+        shortOrderId: shortOrderIdVal,
+        short_order_id: shortOrderIdVal,
+        displayOrderId: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+        display_order_id: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+        numericOrderId: Number(shortOrderIdVal),
+        numeric_order_id: Number(shortOrderIdVal),
         status: placeResult.order.status,
         orderStatus: placeResult.order.status,
         totalAmount: Number(placeResult.order.total_amount),
@@ -4669,9 +5392,19 @@ const server = http.createServer(async (req, res) => {
       const orderStoreId = order.store_id || order.storeId;
       const isOwnerCustomer = orderCustomerId === authClaims.sub;
       const isAdmin = authClaims.sub === 'admin' || authClaims.role === 'ROLE_ADMIN' || authClaims.role === 'ADMIN' || (authClaims.roles && (authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
-      const isSeller = authClaims.sub === 'admin' || authClaims.role?.toUpperCase().includes('SELLER') || (authClaims.roles && authClaims.roles.some(r => String(r).toUpperCase().includes('SELLER'))) || authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id;
+      let isAuthorizedSeller = false;
+      if (isAdmin) {
+        isAuthorizedSeller = true;
+      } else if (authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id) {
+        isAuthorizedSeller = true;
+      } else if (authClaims.role?.toUpperCase().includes('SELLER') || (authClaims.roles && authClaims.roles.some(r => String(r).toUpperCase().includes('SELLER')))) {
+        const authorizedStore = await resolveAuthorizedSellerStoreId(authClaims);
+        if (authorizedStore && authorizedStore === orderStoreId) {
+          isAuthorizedSeller = true;
+        }
+      }
 
-      if (!isOwnerCustomer && !isAdmin && !isSeller) {
+      if (!isOwnerCustomer && !isAdmin && !isAuthorizedSeller) {
         return sendJson(res, 403, { code: 'FORBIDDEN', error: 'FORBIDDEN', message: 'You do not have permission to cancel this order.' });
       }
 
@@ -4994,7 +5727,8 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
           }
           const order = orderRes.rows[0];
-          if (order.customer_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN') {
+          const isMerchantOrAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
+          if (!isMerchantOrAdmin && order.customer_id !== authClaims.sub) {
             await client.query('ROLLBACK');
             return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Cannot verify payment for another customer.' });
           }
@@ -5003,7 +5737,43 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: 'INVALID_ORDER_STATE', message: `Cannot verify payment for order in status ${order.status}.` });
           }
 
-          // Atomically update order payment status
+          if (!isMerchantOrAdmin) {
+            // Customer submitted UTR: Record as PENDING_VERIFICATION.
+            // Do NOT mark as PAID or trigger dispatch until verified by merchant/admin or bank gateway.
+            await client.query(
+              `UPDATE orders SET payment_status = 'VERIFICATION_PENDING', updated_at = NOW() WHERE (id = $1 OR order_id = $1)`,
+              [targetOrderId]
+            );
+
+            const paymentId = 'pay_' + crypto.randomUUID();
+            await client.query(
+              `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, 'INR', 'PENDING_VERIFICATION', 'UPI', 'UPI_INTENT', $5, $6, NOW(), NOW())`,
+              [
+                paymentId,
+                paymentId,
+                order.order_id,
+                order.total_amount,
+                cleanUtr,
+                JSON.stringify({
+                  utr: cleanUtr,
+                  upiApp: body.upiApp || 'UPI_APP',
+                  payerVpa: body.payerVpa || null,
+                  submittedAt: new Date().toISOString()
+                })
+              ]
+            );
+
+            await client.query('COMMIT');
+            return sendJson(res, 200, {
+              ok: true,
+              orderId: targetOrderId,
+              paymentStatus: 'VERIFICATION_PENDING',
+              message: 'Payment UTR submitted successfully and is pending merchant verification.'
+            });
+          }
+
+          // Merchant or Admin Authoritative Verification
           await client.query(
             `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (id = $1 OR order_id = $1)`,
             [targetOrderId]
@@ -5141,7 +5911,7 @@ const server = http.createServer(async (req, res) => {
         try {
           await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
           const sessRes = await client.query(
-            `SELECT ds.id, ds.delivery_id, ds.order_id, ds.rider_id, o.total_amount, o.store_id
+            `SELECT ds.id, ds.delivery_id, ds.order_id, ds.rider_id, ds.state, o.total_amount, o.store_id, o.status as order_status
              FROM delivery_sessions ds
              JOIN orders o ON (o.order_id = ds.order_id OR o.id = ds.order_id)
              WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)
@@ -5153,12 +5923,29 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
           }
           const session = sessRes.rows[0];
-          if (session.rider_id && session.rider_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN') {
+          if (!session.rider_id || (session.rider_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN')) {
             await client.query('ROLLBACK');
-            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can record doorstep UPI.' });
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned active rider can record doorstep UPI.' });
+          }
+          if (['CANCELLED', 'REJECTED'].includes(session.order_status) || session.state === 'CANCELLED') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot record doorstep UPI for a cancelled order.' });
+          }
+          const validPreStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+          if (!validPreStates.includes(session.state)) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, { error: 'INVALID_DELIVERY_STATE', message: 'Order must be picked up before recording doorstep UPI.' });
           }
 
-          const finalAmount = collectedAmount > 0 ? collectedAmount : Number(session.total_amount || 0);
+          const expectedTotal = Number(session.total_amount || 0);
+          if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount < expectedTotal) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, {
+              error: 'INVALID_COLLECTED_AMOUNT',
+              message: `collectedAmount must be explicitly provided and match or exceed order total (₹${expectedTotal}).`
+            });
+          }
+          const finalAmount = collectedAmount;
 
           // Update COD ledger to reconciled via UPI
           await client.query(
@@ -5289,14 +6076,32 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller permissions are required to access this endpoint.' });
       }
 
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      if (!authorizedStoreId && !isAdminRole) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+      }
+
       let records = [];
-      if (appRepositories && appRepositories.codLedgerRepo && appRepositories.codLedgerRepo.getAll) {
-        records = await appRepositories.codLedgerRepo.getAll();
-      } else if (pool && !isLocalMode) {
+      if (pool && !isLocalMode) {
         try {
-          const codRes = await pool.query(`SELECT * FROM cod_ledger ORDER BY created_at DESC LIMIT 200`);
-          records = codRes.rows;
-        } catch {}
+          if (isAdminRole && !authorizedStoreId) {
+            const codRes = await pool.query(`SELECT * FROM cod_ledger ORDER BY created_at DESC LIMIT 200`);
+            records = codRes.rows;
+          } else {
+            const codRes = await pool.query(
+              `SELECT c.* FROM cod_ledger c 
+               JOIN orders o ON (o.order_id = c.order_id OR o.id = c.order_id)
+               WHERE o.store_id = $1 
+               ORDER BY c.created_at DESC LIMIT 200`,
+              [authorizedStoreId]
+            );
+            records = codRes.rows;
+          }
+        } catch (e) {
+          console.error('[ProductionServer] COD ledger query error:', e.message);
+        }
+      } else if (appRepositories && appRepositories.codLedgerRepo && appRepositories.codLedgerRepo.getAll) {
+        records = await appRepositories.codLedgerRepo.getAll();
       }
 
       return sendJson(res, 200, { ok: true, records: records || [] });
@@ -5409,7 +6214,7 @@ const server = http.createServer(async (req, res) => {
                   broadcastNonce: String(Date.now()),
                   riderId: 'broadcast',
                   merchantName: String(session.store_name || session.merchant_name || 'Store Partner'),
-                  customerAddress: String(session.delivery_address || session.customer_address || 'Delivery Address'),
+                  customerAddress: (String(session.delivery_address || session.customer_address || '').split(',').slice(-2).join(', ').trim() || 'Customer Area'),
                   earningsAmount: String(session.delivery_payout || 35.0),
                   totalDistanceKm: String(session.distance_km || 2.5),
                   estimatedDurationMins: String(session.duration_mins || 15),
@@ -5546,13 +6351,16 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           const ordRes = await pool.query(
-            `SELECT order_id, store_id, is_cod, total_amount, cod_amount FROM orders WHERE (order_id = $1 OR id = $1)`,
+            `SELECT order_id, store_id, is_cod, total_amount, cod_amount, status FROM orders WHERE (order_id = $1 OR id = $1)`,
             [orderId]
           );
           if (ordRes.rows.length === 0) {
             return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
           }
           const ord = ordRes.rows[0];
+          if (['CANCELLED', 'REJECTED'].includes(ord.status)) {
+            return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot collect COD for a cancelled order.' });
+          }
           if (authorizedStoreId && ord.store_id && ord.store_id !== authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
             return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
           }
@@ -5560,7 +6368,14 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
           }
 
-          const finalAmount = collectedAmount > 0 ? collectedAmount : Number(ord.cod_amount || ord.total_amount || 0);
+          const expectedCod = Number(ord.cod_amount || ord.total_amount || 0);
+          if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount < expectedCod) {
+            return sendJson(res, 400, {
+              error: 'INVALID_COLLECTED_AMOUNT',
+              message: `collectedAmount must be explicitly provided and match or exceed order COD total (₹${expectedCod}).`
+            });
+          }
+          const finalAmount = collectedAmount;
           await pool.query(
             `UPDATE cod_ledger
              SET status = 'COLLECTED_RECONCILED',
@@ -5647,7 +6462,7 @@ const server = http.createServer(async (req, res) => {
             },
             {
               id: 'STORE_DELHI_01',
-              storeName: 'South Delhi Dark Store & Hub',
+              storeName: 'South Delhi Store & Hub',
               address: 'A-24 Hauz Khas Enclave, New Delhi, Delhi 110016',
               latitude: 28.5494,
               longitude: 77.2001,
@@ -5659,7 +6474,7 @@ const server = http.createServer(async (req, res) => {
             },
             {
               id: 'STORE_BANGALORE_01',
-              storeName: 'Koramangala Super Dark Store',
+              storeName: 'Koramangala Super Store',
               address: '12, 80 Feet Road, 4th Block, Koramangala, Bengaluru, Karnataka 560034',
               latitude: 12.9352,
               longitude: 77.6245,
@@ -5682,10 +6497,17 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (pathname === '/api/v1/seller/stores' && method === 'POST') {
+    if ((pathname === '/api/v1/seller/stores' || pathname === '/api/v1/stores') && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is strictly required to create or overwrite stores.' });
       }
       const body = await parseJsonBody(req);
       const storeName = String(body.storeName || body.name || '').trim();
@@ -5828,7 +6650,7 @@ const server = http.createServer(async (req, res) => {
           },
           {
             id: 'STORE_DELHI_01',
-            storeName: 'South Delhi Dark Store & Hub',
+            storeName: 'South Delhi Store & Hub',
             address: 'A-24 Hauz Khas Enclave, New Delhi, Delhi 110016',
             latitude: 28.5494,
             longitude: 77.2001,
@@ -5838,7 +6660,7 @@ const server = http.createServer(async (req, res) => {
           },
           {
             id: 'STORE_BANGALORE_01',
-            storeName: 'Koramangala Super Dark Store',
+            storeName: 'Koramangala Super Store',
             address: '12, 80 Feet Road, 4th Block, Koramangala, Bengaluru, Karnataka 560034',
             latitude: 12.9352,
             longitude: 77.6245,
@@ -5895,12 +6717,34 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
+      const isSellerOrAdmin = authClaims.role === 'ROLE_SELLER' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ROLE_SELLER') || authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
+      if (!isSellerOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller or Admin authorization is required.' });
+      }
+
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || authClaims.role === 'ADMIN' || authClaims.sub === 'admin' || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.roles?.includes('ADMIN');
+      if (!isAdmin && !authorizedStoreId) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+      }
+
       try {
-        const ridersRes = await pool.query(
-          `SELECT id, rider_id, phone, full_name, vehicle_number, vehicle_type, tier, status, aadhaar_number, store_id, created_at, updated_at
-           FROM riders
-           ORDER BY created_at DESC`
-        );
+        let query = `
+          SELECT id, rider_id, phone, full_name, vehicle_number, vehicle_type, tier, status, store_id, created_at, updated_at
+          FROM riders
+        `;
+        const params = [];
+        if (!isAdmin && authorizedStoreId) {
+          query += ` WHERE store_id = $1 `;
+          params.push(authorizedStoreId);
+        }
+        query += ` ORDER BY created_at DESC `;
+
+        const ridersRes = await pool.query(query, params);
         return sendJson(res, 200, { ok: true, count: ridersRes.rows.length, riders: ridersRes.rows });
       } catch (err) {
         return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: err.message });
@@ -5912,13 +6756,29 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
+      const isSellerOrAdmin = authClaims.role === 'ROLE_SELLER' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ROLE_SELLER') || authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
+      if (!isSellerOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller or Admin authorization is required.' });
+      }
+
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || authClaims.role === 'ADMIN' || authClaims.sub === 'admin' || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.roles?.includes('ADMIN');
+      if (!isAdmin && !authorizedStoreId) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+      }
+
       const body = await parseJsonBody(req);
       const fullName = String(body.fullName || body.name || '').trim();
       const rawPhone = String(body.phone || body.mobileNumber || '').trim();
       const vehicleNumber = String(body.vehicleNumber || body.bikeNumber || '').trim().toUpperCase();
       const aadhaarNumber = String(body.aadhaarNumber || body.aadharCardNumber || '').trim();
       const vehicleType = String(body.vehicleType || 'TWO_WHEELER').trim();
-      const storeId = String(body.storeId || 'store_master_001').trim();
+      // Server-authoritative store scoping: Sellers can only add riders to their authorized store
+      const storeId = (!isAdmin && authorizedStoreId) ? authorizedStoreId : String(body.storeId || authorizedStoreId || 'store_master_001').trim();
 
       const phoneDigits = rawPhone.replace(/\D/g, '').slice(-10);
       if (!fullName) {
@@ -5949,7 +6809,8 @@ const server = http.createServer(async (req, res) => {
            RETURNING *`,
           [riderId, riderId, formattedPhone, fullName, vehicleNumber, vehicleType, aadhaarNumber, storeId]
         );
-        const rider = insertRes.rows[0];
+        const rider = { ...insertRes.rows[0] };
+        delete rider.aadhaar_number;
         return sendJson(res, 201, { ok: true, message: 'Rider enrolled successfully and activated for fleet dispatch.', rider });
       } catch (err) {
         return sendJson(res, 500, { error: 'DB_ERROR', message: err.message });
@@ -5980,6 +6841,25 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    const riderDeleteMatch = pathname.match(/^\/api\/v1\/seller\/riders\/([^/]+)$/);
+    if (riderDeleteMatch && method === 'DELETE') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const targetRiderId = decodeURIComponent(riderDeleteMatch[1]);
+      try {
+        await pool.query('DELETE FROM rider_device_tokens WHERE rider_id = $1', [targetRiderId]);
+        const delRes = await pool.query('DELETE FROM riders WHERE id = $1 OR rider_id = $1 RETURNING id', [targetRiderId]);
+        if (delRes.rows.length === 0) {
+          return sendJson(res, 404, { error: 'RIDER_NOT_FOUND', message: 'Rider not found.' });
+        }
+        return sendJson(res, 200, { ok: true, message: `Rider ${targetRiderId} deleted successfully.`, riderId: targetRiderId });
+      } catch (err) {
+        return sendJson(res, 500, { error: 'DB_ERROR', message: err.message });
+      }
+    }
+
     // -------------------------------------------------------------
     // Seller Customer Intelligence: GET /api/v1/seller/users & /api/v1/seller/customers
     // -------------------------------------------------------------
@@ -5987,6 +6867,20 @@ const server = http.createServer(async (req, res) => {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const isSellerOrAdmin = authClaims.role === 'ROLE_SELLER' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ROLE_SELLER') || authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
+      if (!isSellerOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller or Admin authorization is required.' });
+      }
+
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || authClaims.role === 'ADMIN' || authClaims.sub === 'admin' || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.roles?.includes('ADMIN');
+      if (!isAdmin && !authorizedStoreId) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
       }
 
       try {
@@ -6026,13 +6920,21 @@ const server = http.createServer(async (req, res) => {
               WHERE ca.customer_id = c.id
             ) AS addresses_count
           FROM customers c
-          LEFT JOIN orders o ON (o.customer_id = c.id OR o.customer_id = c.phone)
+          ${isAdmin ? 'LEFT' : 'INNER'} JOIN orders o ON (o.customer_id = c.id OR o.customer_id = c.phone)
         `;
 
+        const whereClauses = [];
         const params = [];
+        if (!isAdmin && authorizedStoreId) {
+          whereClauses.push(`o.store_id = $${params.length + 1}`);
+          params.push(authorizedStoreId);
+        }
         if (search) {
-          query += ` WHERE (c.full_name ILIKE $1 OR c.phone ILIKE $1 OR c.email ILIKE $1 OR c.id ILIKE $1) `;
+          whereClauses.push(`(c.full_name ILIKE $${params.length + 1} OR c.phone ILIKE $${params.length + 1} OR c.email ILIKE $${params.length + 1} OR c.id ILIKE $${params.length + 1})`);
           params.push(`%${search}%`);
+        }
+        if (whereClauses.length > 0) {
+          query += ` WHERE ${whereClauses.join(' AND ')} `;
         }
 
         query += `
@@ -6060,6 +6962,20 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
+      const isSellerOrAdmin = authClaims.role === 'ROLE_SELLER' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.role === 'ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ROLE_SELLER') || authClaims.roles.includes('ROLE_ADMIN') || authClaims.roles.includes('ADMIN')));
+      if (!isSellerOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller or Admin authorization is required.' });
+      }
+
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      const isAdmin = authClaims.role === 'ROLE_ADMIN' || authClaims.role === 'ADMIN' || authClaims.sub === 'admin' || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.roles?.includes('ADMIN');
+      if (!isAdmin && !authorizedStoreId) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+      }
 
       const targetCustomerId = decodeURIComponent(customerDetailMatch[1]).trim();
       const clean10 = targetCustomerId.replace(/\D/g, '').slice(-10);
@@ -6073,6 +6989,17 @@ const server = http.createServer(async (req, res) => {
       const uniqueVariants = Array.from(new Set(custVariants.filter(Boolean)));
 
       try {
+        // Enforce store isolation: verify customer has placed orders with this seller's store
+        if (!isAdmin && authorizedStoreId) {
+          const storeOrderCheck = await pool.query(
+            `SELECT 1 FROM orders WHERE (customer_id = $1 OR customer_id = ANY($2) OR (delivery_address IS NOT NULL AND (delivery_address->>'contact_phone') LIKE '%' || $3)) AND store_id = $4 LIMIT 1`,
+            [targetCustomerId, uniqueVariants, clean10, authorizedStoreId]
+          );
+          if (storeOrderCheck.rows.length === 0) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer has not placed any orders with your store.' });
+          }
+        }
+
         // 1. Fetch customer profile
         const custRes = await pool.query(
           `SELECT * FROM customers 
@@ -6117,9 +7044,17 @@ const server = http.createServer(async (req, res) => {
         }
         const addresses = addrRes.rows;
 
-        // 3. Fetch all orders
+        // 3. Fetch orders (scoped to seller store if not admin)
         let ordersRes;
-        if (effectiveClean10) {
+        if (!isAdmin && authorizedStoreId) {
+          ordersRes = await pool.query(
+            `SELECT * FROM orders 
+             WHERE (customer_id = ANY($1) OR (delivery_address IS NOT NULL AND (delivery_address->>'contact_phone') LIKE '%' || $2))
+               AND store_id = $3
+             ORDER BY created_at DESC`,
+            [finalVariants, effectiveClean10 || clean10, authorizedStoreId]
+          );
+        } else if (effectiveClean10) {
           ordersRes = await pool.query(
             `SELECT * FROM orders 
              WHERE customer_id = ANY($1) 
@@ -6165,16 +7100,28 @@ const server = http.createServer(async (req, res) => {
           try { cart.items = JSON.parse(cart.items); } catch { cart.items = []; }
         }
 
-        // 5. Fetch prescriptions
+        // 5. Fetch prescriptions (scoped to orders in this store if not admin)
         let prescriptions = [];
         try {
-          const prescRes = await pool.query(
-            `SELECT * FROM prescriptions 
-             WHERE customer_id = ANY($1) 
-             ORDER BY created_at DESC`,
-            [uniqueVariants]
-          );
-          prescriptions = prescRes.rows;
+          if (!isAdmin && authorizedStoreId) {
+            const prescRes = await pool.query(
+              `SELECT p.* FROM prescriptions p
+               JOIN orders o ON (o.prescription_id = p.id)
+               WHERE (p.customer_id = ANY($1) OR o.customer_id = ANY($1))
+                 AND o.store_id = $2
+               ORDER BY p.created_at DESC`,
+              [uniqueVariants, authorizedStoreId]
+            );
+            prescriptions = prescRes.rows;
+          } else {
+            const prescRes = await pool.query(
+              `SELECT * FROM prescriptions 
+               WHERE customer_id = ANY($1) 
+               ORDER BY created_at DESC`,
+              [uniqueVariants]
+            );
+            prescriptions = prescRes.rows;
+          }
         } catch (e) {
           prescriptions = [];
         }
@@ -6376,6 +7323,28 @@ const server = http.createServer(async (req, res) => {
            ORDER BY o.created_at DESC LIMIT 5`,
           [riderId]
         );
+
+        if (offRes.rows.length === 0) {
+          const fallbackRes = await pool.query(
+            `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount, ord.is_cod, ord.store_id, ord.created_at AS order_created_at,
+                    s.store_name, s.address AS store_address, s.latitude AS store_lat, s.longitude AS store_lng
+             FROM offers o
+             LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
+             LEFT JOIN stores s ON s.id = ord.store_id
+             WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+               AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
+               AND NOT EXISTS (
+                 SELECT 1 FROM delivery_sessions active_ds
+                 WHERE active_ds.rider_id = $1
+                   AND active_ds.state IN ('ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+               )
+             ORDER BY o.created_at DESC LIMIT 5`,
+            [riderId]
+          );
+          if (fallbackRes.rows.length > 0) {
+            offRes.rows = fallbackRes.rows;
+          }
+        }
 
         const mappedOffers = offRes.rows.map(o => {
           const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
@@ -6715,12 +7684,31 @@ const server = http.createServer(async (req, res) => {
     // POST /api/v1/delivery/rider/device-token/logout
     if (pathname === '/api/v1/delivery/rider/device-token/logout' && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      const body = await parseJsonBody(req).catch(() => ({}));
+      const riderId = (authClaims && authClaims.sub) || body.riderId || null;
+      const targetToken = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
+
+      if (!riderId && !targetToken) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or riderId/deviceToken is required.' });
       }
-      if (appRepositories && appRepositories.deviceTokenRepo && appRepositories.deviceTokenRepo.unregisterToken) {
-        await appRepositories.deviceTokenRepo.unregisterToken(authClaims.sub);
+      if (riderId && appRepositories && appRepositories.deviceTokenRepo && appRepositories.deviceTokenRepo.unregisterToken) {
+        await appRepositories.deviceTokenRepo.unregisterToken(riderId);
         prometheusMetricsInstance.recordTokenUnregistered('iOS-Rider');
+      }
+      if (riderId && appRepositories && appRepositories.presenceRepo) {
+        try {
+          if (appRepositories.presenceRepo.setShiftStatus) {
+            await appRepositories.presenceRepo.setShiftStatus(riderId, 'OFFLINE', null, null);
+          } else if (appRepositories.presenceRepo.updateShiftStatus) {
+            await appRepositories.presenceRepo.updateShiftStatus(riderId, 'OFFLINE', null, null);
+          }
+        } catch (_) {}
+      }
+      if (pool && !isLocalMode) {
+        try {
+          if (riderId) await pool.query('DELETE FROM rider_device_tokens WHERE rider_id = $1', [riderId]);
+          if (targetToken) await pool.query('DELETE FROM rider_device_tokens WHERE token = $1', [targetToken]);
+        } catch (_) {}
       }
       return sendJson(res, 200, { ok: true, loggedOut: true });
     }
@@ -7312,13 +8300,17 @@ const server = http.createServer(async (req, res) => {
             `SELECT rider_id, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
             [authClaims.sub]
           );
-          if (riderRes.rows.length > 0) {
-            if (riderRes.rows[0].status === 'SUSPENDED' || riderRes.rows[0].status !== 'ACTIVE') {
-              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Rider account is suspended or inactive.' });
-            }
-            authorizedRiderId = riderRes.rows[0].rider_id;
+          if (riderRes.rows.length === 0) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Caller is not a registered rider.' });
           }
-        } catch {}
+          if (riderRes.rows[0].status === 'SUSPENDED' || riderRes.rows[0].status !== 'ACTIVE') {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Rider account is suspended or inactive.' });
+          }
+          authorizedRiderId = riderRes.rows[0].rider_id;
+        } catch (e) {
+          if (e.message && e.message.includes('FORBIDDEN')) throw e;
+          return sendJson(res, 500, { error: 'DATABASE_ERROR', message: 'Failed to resolve rider identity.' });
+        }
       }
 
       const deliveryId = deliverMatch[1];
@@ -7343,7 +8335,7 @@ const server = http.createServer(async (req, res) => {
             }
           } else {
             const session = sessionRes.rows[0];
-            if (session.rider_id && session.rider_id !== authorizedRiderId) {
+            if (!session.rider_id || session.rider_id !== authorizedRiderId) {
               return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider for this delivery can complete delivery.' });
             }
             if (session.state === 'DELIVERED') {
@@ -7406,7 +8398,7 @@ const server = http.createServer(async (req, res) => {
         if (pool && !isLocalMode) {
           try {
             const sessionRes = await pool.query(
-              `SELECT ds.id, ds.order_id, ds.rider_id, o.is_cod, o.total_amount, o.cod_amount
+              `SELECT ds.id, ds.order_id, ds.rider_id, ds.state, o.is_cod, o.total_amount, o.cod_amount, o.status as order_status
                FROM delivery_sessions ds
                JOIN orders o ON (o.order_id = ds.order_id OR o.id = ds.order_id)
                WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)`,
@@ -7416,14 +8408,29 @@ const server = http.createServer(async (req, res) => {
               return sendJson(res, 404, { ok: false, error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
             }
             const row = sessionRes.rows[0];
-            if (row.rider_id && row.rider_id !== authorizedRiderId) {
+            if (!row.rider_id || (row.rider_id !== authorizedRiderId && authClaims.role !== 'ROLE_ADMIN')) {
               return sendJson(res, 403, { ok: false, error: 'FORBIDDEN', message: 'Only the assigned rider can complete COD.' });
+            }
+            if (['CANCELLED', 'REJECTED'].includes(row.order_status) || row.state === 'CANCELLED') {
+              return sendJson(res, 409, { ok: false, error: 'ORDER_CANCELLED', message: 'Cannot complete COD for a cancelled order.' });
+            }
+            const validPreStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+            if (!validPreStates.includes(row.state)) {
+              return sendJson(res, 409, { ok: false, error: 'INVALID_DELIVERY_STATE', message: 'Order must be picked up before completing COD.' });
             }
             if (!row.is_cod) {
               return sendJson(res, 400, { ok: false, error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
             }
+            const expectedCod = Number(row.cod_amount || row.total_amount || 0);
+            if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount < expectedCod) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: 'INVALID_COD_AMOUNT',
+                message: `collectedAmount must be explicitly provided and match or exceed order COD total (₹${expectedCod}).`
+              });
+            }
             orderId = row.order_id;
-            const finalAmount = collectedAmount > 0 ? collectedAmount : Number(row.cod_amount || row.total_amount || 0);
+            const finalAmount = collectedAmount;
             const updateRes = await pool.query(
               `UPDATE cod_ledger
                SET status = 'COLLECTED_RECONCILED',
@@ -7962,6 +8969,7 @@ const server = http.createServer(async (req, res) => {
         sku: p.sku,
         name: p.name,
         brandName: p.brand_name || p.brandName || null,
+        manufacturer: p.manufacturer || p.brand_name || null,
         packSize: p.pack_size || p.packSize || null,
         mrp: Number(p.mrp || 0),
         price: Number(p.price || 0),
@@ -7973,6 +8981,11 @@ const server = http.createServer(async (req, res) => {
         description: p.description || null,
         expiryDate: p.expiry_date || p.expiryDate || null,
         manufacturingDate: p.manufacturing_date || p.manufacturingDate || null,
+        activeSalt: p.salt_composition || p.saltComposition || null,
+        saltComposition: p.salt_composition || p.saltComposition || null,
+        safetyAdvice: Array.isArray(p.safety_advice) ? p.safety_advice : (typeof p.safety_advice === 'string' && p.safety_advice.startsWith('[') ? JSON.parse(p.safety_advice) : (p.safety_advice ? [p.safety_advice] : [])),
+        storageCondition: p.storage_condition || p.storageCondition || null,
+        storageInstructions: p.storage_condition || p.storageCondition || null,
         isActive: Boolean(p.is_active ?? p.isActive ?? true),
         stockCount: p.stock_count != null ? Number(p.stock_count) : (p.stockCount != null ? Number(p.stockCount) : 0),
         stock_count: p.stock_count != null ? Number(p.stock_count) : (p.stockCount != null ? Number(p.stockCount) : 0),
@@ -8056,7 +9069,12 @@ const server = http.createServer(async (req, res) => {
             images: body.images || (body.imageUrls ? body.imageUrls : (body.imageUrl ? [body.imageUrl] : [])),
             description: body.description || body.details || body.productDetails,
             expiryDate: body.expiryDate || body.expiry_date,
-            manufacturingDate: body.manufacturingDate || body.manufacturing_date || body.mfgDate || body.mfg_date
+            manufacturingDate: body.manufacturingDate || body.manufacturing_date || body.mfgDate || body.mfg_date,
+            manufacturer: body.manufacturer || body.marketer || body.brandName || null,
+            saltComposition: body.saltComposition || body.salt_composition || body.activeSalt || null,
+            safetyAdvice: body.safetyAdvice || body.safety_advice || [],
+            storageCondition: body.storageCondition || body.storage_condition || body.storageInstructions || null,
+            therapeuticClass: body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory || null
           });
         } catch (err) {
           if (err.code === '23505' && String(err.constraint || err.message || '').includes('products_sku')) {
@@ -8094,6 +9112,7 @@ const server = http.createServer(async (req, res) => {
           sku: p.sku,
           name: p.name,
           brandName: p.brand_name || p.brandName || null,
+          manufacturer: p.manufacturer || p.brand_name || null,
           packSize: p.pack_size || p.packSize || null,
           mrp: Number(p.mrp || 0),
           price: Number(p.price || 0),
@@ -8105,6 +9124,11 @@ const server = http.createServer(async (req, res) => {
           description: p.description || null,
           expiryDate: p.expiry_date || p.expiryDate || null,
           manufacturingDate: p.manufacturing_date || p.manufacturingDate || null,
+          activeSalt: p.salt_composition || p.saltComposition || null,
+          saltComposition: p.salt_composition || p.saltComposition || null,
+          safetyAdvice: Array.isArray(p.safety_advice) ? p.safety_advice : (typeof p.safety_advice === 'string' && p.safety_advice.startsWith('[') ? JSON.parse(p.safety_advice) : (p.safety_advice ? [p.safety_advice] : [])),
+          storageCondition: p.storage_condition || p.storageCondition || null,
+          storageInstructions: p.storage_condition || p.storageCondition || null,
           isActive: Boolean(p.is_active ?? p.isActive ?? true)
         });
 
@@ -8204,7 +9228,7 @@ const server = http.createServer(async (req, res) => {
       const targetId = productUpdateMatch[1];
       const existingRes = await pool.query(
         `SELECT id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
-                rx_requirement, category, is_active FROM products WHERE (id = $1 OR sku = $1) LIMIT 1`,
+                rx_requirement, category, is_active, manufacturer, salt_composition, safety_advice, storage_condition FROM products WHERE (id = $1 OR sku = $1) LIMIT 1`,
         [targetId]
       );
       if (existingRes.rows.length === 0) {
@@ -8270,7 +9294,15 @@ const server = http.createServer(async (req, res) => {
         discountedPrice: body && body.discountedPrice != null ? body.discountedPrice : (existing.discounted_price ?? existing.price),
         rxRequirement: body && body.rxRequirement != null ? body.rxRequirement : existing.rx_requirement,
         category: body && body.category != null ? body.category : existing.category,
-        imageUrl: body && (body.imageUrl || body.image_url || body.image) != null ? (body.imageUrl || body.image_url || body.image) : existing.image_url
+        imageUrl: body && (body.imageUrl || body.image_url || body.image) != null ? (body.imageUrl || body.image_url || body.image) : existing.image_url,
+        description: body && body.description != null ? body.description : existing.description,
+        expiryDate: body && (body.expiryDate || body.expiry_date) != null ? (body.expiryDate || body.expiry_date) : existing.expiry_date,
+        manufacturingDate: body && (body.manufacturingDate || body.manufacturing_date) != null ? (body.manufacturingDate || body.manufacturing_date) : existing.manufacturing_date,
+        manufacturer: body && (body.manufacturer || body.marketer) != null ? (body.manufacturer || body.marketer) : existing.manufacturer,
+        saltComposition: body && (body.saltComposition || body.salt_composition || body.activeSalt) != null ? (body.saltComposition || body.salt_composition || body.activeSalt) : existing.salt_composition,
+        safetyAdvice: body && (body.safetyAdvice || body.safety_advice) != null ? (body.safetyAdvice || body.safety_advice) : existing.safety_advice,
+        storageCondition: body && (body.storageCondition || body.storage_condition || body.storageInstructions) != null ? (body.storageCondition || body.storage_condition || body.storageInstructions) : existing.storage_condition,
+        therapeuticClass: body && (body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory) != null ? (body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory) : existing.therapeutic_class
       });
 
       // Stock changes are applied ONLY through the authoritative inventory domain
@@ -8302,12 +9334,18 @@ const server = http.createServer(async (req, res) => {
         sku: product.sku,
         name: product.name,
         brandName: product.brand_name || product.brandName || null,
+        manufacturer: product.manufacturer || null,
         packSize: product.pack_size || product.packSize || null,
         mrp: Number(product.mrp || 0),
         price: Number(product.price || 0),
         discountedPrice: Number(product.discounted_price ?? product.discountedPrice ?? product.price ?? 0),
         rxRequirement: product.rx_requirement || product.rxRequirement || 'OTC',
         category: product.category || null,
+        activeSalt: product.salt_composition || null,
+        saltComposition: product.salt_composition || null,
+        safetyAdvice: Array.isArray(product.safety_advice) ? product.safety_advice : (typeof product.safety_advice === 'string' && product.safety_advice.startsWith('[') ? JSON.parse(product.safety_advice) : (product.safety_advice ? [product.safety_advice] : [])),
+        storageCondition: product.storage_condition || null,
+        storageInstructions: product.storage_condition || null,
         isActive: Boolean(product.is_active ?? product.isActive ?? true),
         storeContext: {
           storeId: authorizedStoreId,
@@ -8390,6 +9428,12 @@ const server = http.createServer(async (req, res) => {
     // 404 Route Not Found
     return sendJson(res, 404, { error: 'NOT_FOUND', message: `Route ${method} ${pathname} not found on production gateway.` });
   } catch (err) {
+    if (err.statusCode === 413 || err.code === 'PAYLOAD_TOO_LARGE') {
+      return sendJson(res, 413, {
+        error: 'PAYLOAD_TOO_LARGE',
+        message: err.message || 'Request payload exceeds maximum allowed size (10MB).'
+      });
+    }
     const errorId = 'err_' + crypto.randomUUID();
     console.error(`[ProductionServer] Error ID ${errorId} processing ${method} ${pathname}:`, err);
     return sendJson(res, 500, {

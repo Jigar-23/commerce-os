@@ -81,33 +81,75 @@ data class PharmacyCartAttributes(
 )
 
 data class CartItem(
-    val productId: String,
-    val sku: String,
-    val name: String,
-    val unitPrice: BigDecimal,
-    var quantity: Int,
-    val verticalId: String,
+    @SerializedName(value = "productId", alternate = ["product_id", "id"])
+    val productId: String = "",
+    val sku: String = "",
+    val name: String = "",
+    @SerializedName(value = "unitPrice", alternate = ["unit_price", "price", "discountedPrice"])
+    val unitPrice: BigDecimal = BigDecimal.ZERO,
+    var quantity: Int = 1,
+    val verticalId: String = "pharmacy",
     val merchantId: String? = null,
     val mrp: BigDecimal = unitPrice,
     val brand: String? = null,
     val packSize: String? = null,
     val image: String? = null,
-    val pharmacyAttributes: PharmacyCartAttributes? = null
+    val pharmacyAttributes: PharmacyCartAttributes? = null,
+    @SerializedName(value = "requiresPrescription", alternate = ["prescriptionRequired", "rx_requirement"])
+    val requiresPrescription: Boolean? = null,
+    @SerializedName(value = "coldChain", alternate = ["cold_chain"])
+    val coldChainItem: Boolean? = null
 ) {
-    val prescriptionRequired: Boolean get() = pharmacyAttributes?.prescriptionRequired == true
-    val coldChain: Boolean get() = pharmacyAttributes?.coldChain == true
+    val prescriptionRequired: Boolean get() = requiresPrescription == true || pharmacyAttributes?.prescriptionRequired == true
+    val coldChain: Boolean get() = coldChainItem == true || pharmacyAttributes?.coldChain == true
 }
 
 data class CartResponse(
-    val customerId: String,
-    val items: List<CartItem>,
+    @SerializedName(value = "customerId", alternate = ["customer_id"])
+    val customerId: String = "",
+    val items: List<CartItem> = emptyList(),
+    @SerializedName(value = "itemsSubtotal", alternate = ["subtotal", "items_subtotal"])
     val itemsSubtotal: BigDecimal? = null,
+    @SerializedName(value = "expressDeliveryFee", alternate = ["deliveryFee", "delivery_fee", "express_delivery_fee"])
     val expressDeliveryFee: BigDecimal? = null,
+    @SerializedName(value = "coldChainPackagingFee", alternate = ["packagingFee", "handlingFee", "cold_chain_packaging_fee"])
     val coldChainPackagingFee: BigDecimal? = null,
+    @SerializedName(value = "grandTotal", alternate = ["total", "grand_total", "totalAmount", "total_amount"])
     val grandTotal: BigDecimal? = null,
+    @SerializedName(value = "freeDeliveryThreshold", alternate = ["free_delivery_threshold"])
     val freeDeliveryThreshold: BigDecimal? = null,
+    @SerializedName(value = "freeDeliveryEligible", alternate = ["free_delivery_eligible"])
     val freeDeliveryEligible: Boolean? = null,
+    @SerializedName(value = "remainingForFreeDelivery", alternate = ["remaining_for_free_delivery"])
     val remainingForFreeDelivery: BigDecimal? = null
+)
+
+enum class CouponDiscountType {
+    PERCENTAGE,
+    FLAT,
+    FREE_SHIPPING
+}
+
+data class CouponCampaign(
+    val id: String,
+    val code: String,
+    val title: String,
+    val description: String,
+    val minOrderValue: BigDecimal,
+    val discountType: CouponDiscountType = CouponDiscountType.PERCENTAGE,
+    val discountPercent: Int = 0,
+    val flatDiscount: BigDecimal = BigDecimal.ZERO,
+    val maxDiscount: BigDecimal? = null,
+    val isFreeShipping: Boolean = false,
+    val badge: String = "POPULAR",
+    val expiryText: String = "Limited Time",
+    val status: String = "ACTIVE"
+)
+
+data class CouponApplyResult(
+    val success: Boolean,
+    val message: String,
+    val discountAmount: BigDecimal = BigDecimal.ZERO
 )
 
 data class LoginRequest(
@@ -258,7 +300,9 @@ data class CartCheckoutRequest(
     val deliveryAddress: ApiAddress? = null,
     val deliveryFee: BigDecimal? = null,
     val discountAmount: BigDecimal? = null,
-    val packagingFee: BigDecimal? = null
+    val couponCode: String? = null,
+    val packagingFee: BigDecimal? = null,
+    val slotText: String? = null
 )
 
 data class BillSummaryDto(
@@ -394,6 +438,9 @@ data class CustomerOrderApiResponse(
     val id: String = "",
     val orderId: String? = null,
     val order_id: String? = null,
+    val shortOrderId: String? = null,
+    val short_order_id: String? = null,
+    val numericOrderId: Long? = null,
     val orderStatus: String = "PLACED",
     val status: String? = null,
     val totalAmount: BigDecimal = BigDecimal.ZERO,
@@ -458,6 +505,15 @@ data class CustomerOrderApiResponse(
             val rid = resolvedId
             if (rid.isNotBlank()) return rid
             return "ord_${System.currentTimeMillis()}"
+        }
+
+    val displayOrderCode: String
+        get() {
+            val shortId = shortOrderId?.takeIf { it.isNotBlank() } ?: short_order_id?.takeIf { it.isNotBlank() }
+            if (shortId != null) {
+                return if (shortId.length == 10) "${shortId.substring(0, 4)}-${shortId.substring(4, 7)}-${shortId.substring(7)}" else shortId
+            }
+            return displayOrderId
         }
 
     val displayOrderDateTime: String
@@ -619,7 +675,7 @@ data class OrderItem(
         get() = productId.takeIf { it.isNotBlank() } ?: effectiveSku
 
     val effectiveVerticalId: String
-        get() = verticalId.takeIf { it.isNotBlank() } ?: "general"
+        get() = (verticalId as? String)?.takeIf { it.isNotBlank() } ?: "general"
 }
 
 data class PharmacistVerification(

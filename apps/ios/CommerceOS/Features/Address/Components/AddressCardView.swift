@@ -1,13 +1,14 @@
 import SwiftUI
 
 /**
- * Production Address Card with overflow menu hierarchy.
- * Masks sensitive recipient contact details for privacy, limits long lines, and ensures accessible touch targets.
+ * Production Address Card matching Blinkit's visual hierarchy.
+ * Displays left badge with Home/Work icon and live proximity ("You're here" for <=100m or "X.XX km").
  * 1:1 Parity with Android AddressCard.kt
  */
 public struct AddressCardView: View {
     public let address: AddressDto
     public let isSelected: Bool
+    public let distanceMeters: Double?
     public let onSelect: () -> Void
     public let onEdit: () -> Void
     public let onDelete: () -> Void
@@ -16,6 +17,7 @@ public struct AddressCardView: View {
     public init(
         address: AddressDto,
         isSelected: Bool,
+        distanceMeters: Double? = nil,
         onSelect: @escaping () -> Void,
         onEdit: @escaping () -> Void,
         onDelete: @escaping () -> Void,
@@ -23,6 +25,7 @@ public struct AddressCardView: View {
     ) {
         self.address = address
         self.isSelected = isSelected
+        self.distanceMeters = distanceMeters
         self.onSelect = onSelect
         self.onEdit = onEdit
         self.onDelete = onDelete
@@ -31,23 +34,41 @@ public struct AddressCardView: View {
 
     public var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Left Column: House / Location Icon + Default/Saved Label
-            VStack(alignment: .center, spacing: 4) {
-                ZStack {
-                    Circle()
-                        .fill(Color(hex: "F8FAFC"))
-                        .frame(width: 36, height: 36)
+            // Left Column: Soft cream container with Icon + "You're here" / Distance badge (Blinkit Pattern)
+            VStack(alignment: .center, spacing: 3) {
+                Image(systemName: iconForTag(address.displayTag))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(Color(hex: "D97706"))
+                    .frame(height: 22)
 
-                    Image(systemName: iconForTag(address.displayTag))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(hex: "0F172A"))
+                let isAtLocation = distanceMeters != nil && (distanceMeters ?? 0) <= 100.0
+                if isAtLocation {
+                    Text("You're here")
+                        .font(.system(size: 8, weight: .heavy))
+                        .foregroundColor(Color(hex: "15803D"))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(Color(hex: "DCFCE7"))
+                        .cornerRadius(4)
+                } else if let meters = distanceMeters {
+                    Text(String(format: "%.2f km", meters / 1000.0))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(Color(hex: "92400E"))
+                        .lineLimit(1)
+                } else {
+                    Text(address.isDefault ? "Default" : "Saved")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(address.isDefault ? Color(hex: "16A34A") : Color(hex: "64748B"))
                 }
-
-                Text(address.isDefault ? "Default" : "Saved")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(address.isDefault ? Color(hex: "16A34A") : Color(hex: "64748B"))
             }
-            .frame(width: 44)
+            .frame(width: 54)
+            .padding(.vertical, 8)
+            .background(Color(hex: "FFFBEB"))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(hex: "FEF3C7"), lineWidth: 1)
+            )
 
             // Right Column: Tag, Full Address, Phone & Bottom Action Icons
             VStack(alignment: .leading, spacing: 3) {

@@ -34,15 +34,84 @@ public struct CartScreen: View {
     @State private var savedPrescriptions: [PrescriptionItem] = []
     @State private var attachedPrescription: PrescriptionItem? = nil
     
-    let onCheckoutSuccess: (String) -> Void
+    // Coupons & Offers State (1:1 Android Parity)
+    @State private var inputCouponCode: String = ""
+    @State private var appliedCouponCode: String? = nil
+    @State private var couponDiscountAmount: Double = 0.0
+    @State private var couponFeedbackMessage: String? = nil
+    @State private var isCouponError: Bool = false
     
-    public init(onCheckoutSuccess: @escaping (String) -> Void = { _ in }) {
+    private struct CouponCampaignItem: Identifiable {
+        let id: String
+        let code: String
+        let title: String
+        let description: String
+        let minOrderValue: Double
+        let flatDiscount: Double
+        let badge: String
+    }
+    
+    private let availableCampaigns: [CouponCampaignItem] = [
+        CouponCampaignItem(
+            id: "promo_save10",
+            code: "SAVE10",
+            title: "FLAT ₹100 OFF",
+            description: "Flat ₹100 OFF on orders above ₹199",
+            minOrderValue: 199.00,
+            flatDiscount: 100.00,
+            badge: "INSTANT SAVINGS"
+        ),
+        CouponCampaignItem(
+            id: "promo_health30",
+            code: "HEALTH30",
+            title: "FLAT ₹150 OFF",
+            description: "Flat ₹150 OFF on orders above ₹799",
+            minOrderValue: 799.00,
+            flatDiscount: 150.00,
+            badge: "₹150 OFF"
+        ),
+        CouponCampaignItem(
+            id: "promo_welcome20",
+            code: "WELCOME20",
+            title: "20% OFF",
+            description: "20% OFF up to ₹100 on orders above ₹299",
+            minOrderValue: 299.00,
+            flatDiscount: 60.00,
+            badge: "20% OFF"
+        )
+    ]
+    
+    let onCheckoutSuccess: (String) -> Void
+    public var onBack: (() -> Void)? = nil
+
+    public init(
+        onCheckoutSuccess: @escaping (String) -> Void = { _ in },
+        onBack: (() -> Void)? = nil
+    ) {
         self.onCheckoutSuccess = onCheckoutSuccess
+        self.onBack = onBack
     }
     
     public var body: some View {
         if cartStore.items.isEmpty {
             VStack(spacing: 16) {
+                if let onBack = onBack {
+                    HStack {
+                        Button(action: onBack) {
+                            Image(systemName: "arrow.left")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(Color(hex: "0F172A"))
+                                .padding(8)
+                                .background(Color.white)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                }
+
                 Spacer()
                 Image(systemName: "cart")
                     .font(.system(size: 64))
@@ -63,7 +132,19 @@ public struct CartScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) {
                     // Top Header (Matching Android CartScreen.kt)
-                    HStack(alignment: .center) {
+                    HStack(alignment: .center, spacing: 10) {
+                        if let onBack = onBack {
+                            Button(action: onBack) {
+                                Image(systemName: "arrow.left")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(Color(hex: "0F172A"))
+                                    .padding(8)
+                                    .background(Color.white)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text("My Cart")
                                 .font(.system(size: 20, weight: .bold))
@@ -79,19 +160,19 @@ public struct CartScreen: View {
 
                     // Delivery Address Card
                     HStack {
-                        Image(systemName: "house.fill")
-                            .foregroundColor(Color(hex: "059669"))
+                        Image(systemName: isAddressSelected ? "house.fill" : "mappin.circle.fill")
+                            .foregroundColor(isAddressSelected ? Color(hex: "059669") : Color(hex: "D97706"))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Delivering to Selected Address")
+                            Text(isAddressSelected ? "Delivering to \(addressRepository.selectedAddress?.displayTag.isEmpty == false ? addressRepository.selectedAddress!.displayTag : "Selected Address")" : "No Delivery Address Selected")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(Color(hex: "0F172A"))
-                            Text("\(addressRepository.locationHeaderTitle) • \(addressRepository.calculatedEtaMinutes) Mins")
+                            Text(isAddressSelected ? "\(addressRepository.locationHeaderTitle) • \(addressRepository.calculatedEtaMinutes) Mins" : "Select or add an address to proceed to checkout")
                                 .font(.system(size: 11))
                                 .foregroundColor(Color(hex: "64748B"))
                                 .lineLimit(1)
                         }
                         Spacer()
-                        Button("Change") {
+                        Button(isAddressSelected ? "Change" : "Select") {
                             activeCartSheet = .addressSelection
                         }
                         .font(.system(size: 12, weight: .bold))
@@ -373,6 +454,9 @@ public struct CartScreen: View {
                         )
                         .padding(.horizontal, 14)
                     }
+
+                    // Coupons & Offers Section (1:1 Android Parity)
+                    couponsSectionView
                     
                     // Bill Breakdown
                     VStack(spacing: 8) {
@@ -410,6 +494,22 @@ public struct CartScreen: View {
                                     .foregroundColor(Color(hex: "0F172A"))
                                 Spacer()
                                 Text("+₹\(selectedTip)")
+                                    .foregroundColor(Color(hex: "059669"))
+                                    .fontWeight(.bold)
+                            }
+                            .font(.system(size: 13))
+                        }
+
+                        if couponDiscountAmount > 0 {
+                            HStack {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "tag.fill")
+                                        .font(.system(size: 11))
+                                    Text("Coupon Discount (\(appliedCouponCode ?? ""))")
+                                }
+                                .foregroundColor(Color(hex: "059669"))
+                                Spacer()
+                                Text("-₹\(String(format: "%.2f", couponDiscountAmount))")
                                     .foregroundColor(Color(hex: "059669"))
                                     .fontWeight(.bold)
                             }
@@ -473,26 +573,38 @@ public struct CartScreen: View {
                         .padding(.horizontal, 14)
                     }
                     
-                    // Express COD Checkout Trigger Button
-                    Button(action: placeExpressOrder) {
+                    // Express COD Checkout / Review & Pay Trigger Button
+                    Button(action: {
+                        if !isAddressSelected {
+                            activeCartSheet = .addressSelection
+                        } else {
+                            AppNavigator.shared.push(.paymentGateway)
+                        }
+                    }) {
                         HStack {
                             Spacer()
                             if isPlacingOrder {
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             } else {
-                                Text("Place COD Order • ₹\(String(format: "%.2f", grandTotal))")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
+                                if isAddressSelected {
+                                    Text("Review and Pay • ₹\(String(format: "%.2f", grandTotal))")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                } else {
+                                    Text("Select Address to Proceed • ₹\(String(format: "%.2f", grandTotal))")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
                             }
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(Color(hex: "059669"))
+                        .background(isAddressSelected ? Color(hex: "059669") : Color(hex: "94A3B8"))
                         .cornerRadius(12)
                         .contentShape(Rectangle())
-                        .shadow(color: Color(hex: "059669").opacity(0.35), radius: 8, x: 0, y: 4)
+                        .shadow(color: isAddressSelected ? Color(hex: "059669").opacity(0.35) : Color.clear, radius: 8, x: 0, y: 4)
                     }
                     .buttonStyle(PlainButtonStyle())
                     .padding(.horizontal, 14)
@@ -518,6 +630,9 @@ public struct CartScreen: View {
                     AddAddressFlowView { newAddr in
                         addressRepository.selectAddress(newAddr)
                         activeCartSheet = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            AppNavigator.shared.push(.paymentGateway)
+                        }
                     }
                 case .vaultSheet:
                     SavedPrescriptionsBottomSheet(
@@ -557,31 +672,243 @@ public struct CartScreen: View {
         }
     }
     
+    // MARK: - Coupons & Offers Section View (1:1 Android Parity)
+    private var couponsSectionView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let appliedCode = appliedCouponCode {
+                // Applied Coupon Card
+                HStack {
+                    Image(systemName: "tag.fill")
+                        .foregroundColor(Color(hex: "059669"))
+                    Text("'\(appliedCode)' applied")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Color(hex: "065F46"))
+                    Text("•")
+                        .foregroundColor(Color(hex: "059669"))
+                    Text("Saved ₹\(String(format: "%.2f", couponDiscountAmount))")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(Color(hex: "059669"))
+                    Spacer()
+                    Button("Remove") {
+                        removeCoupon()
+                    }
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundColor(Color(hex: "DC2626"))
+                }
+                .padding(12)
+                .background(Color(hex: "F0FDF4"))
+                .cornerRadius(10)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: "A7F3D0"), lineWidth: 1))
+            } else {
+                // Header
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "tag.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(hex: "0E675E"))
+                            .padding(7)
+                            .background(Color(hex: "F0FDFA"))
+                            .cornerRadius(8)
+                        
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Coupons & Offers")
+                                .font(.system(size: 14, weight: .heavy))
+                                .foregroundColor(Color(hex: "0F172A"))
+                            Text("Save extra with tiered voucher discounts")
+                                .font(.system(size: 11))
+                                .foregroundColor(Color(hex: "64748B"))
+                        }
+                    }
+                    Spacer()
+                    Text("\(availableCampaigns.count) OFFERS")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundColor(Color(hex: "0E675E"))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: "F0FDFA"))
+                        .cornerRadius(6)
+                }
+                
+                // Code Input Field
+                HStack(spacing: 8) {
+                    TextField("Enter coupon code (e.g. HEALTH30)", text: $inputCouponCode)
+                        .font(.system(size: 13, weight: .bold))
+                        .autocapitalization(.allCharacters)
+                        .disableAutocorrection(true)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color(hex: "F8FAFC"))
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: "E2E8F0"), lineWidth: 1))
+                    
+                    Button(action: {
+                        applyCoupon(code: inputCouponCode)
+                    }) {
+                        Text("APPLY")
+                            .font(.system(size: 12, weight: .heavy))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(inputCouponCode.trimmingCharacters(in: .whitespaces).isEmpty ? Color(hex: "CBD5E1") : Color(hex: "0E675E"))
+                            .cornerRadius(8)
+                    }
+                    .disabled(inputCouponCode.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                
+                // Feedback Message
+                if let msg = couponFeedbackMessage {
+                    Text(msg)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(isCouponError ? Color(hex: "DC2626") : Color(hex: "059669"))
+                }
+                
+                Divider()
+                
+                // Tiered Campaign Cards
+                VStack(spacing: 8) {
+                    ForEach(availableCampaigns) { campaign in
+                        let isEligible = cartStore.subtotal >= campaign.minOrderValue
+                        let diffNeeded = campaign.minOrderValue - cartStore.subtotal
+                        
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(campaign.code)
+                                        .font(.system(size: 11.5, weight: .black))
+                                        .foregroundColor(Color(hex: "0E675E"))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 2)
+                                        .background(Color(hex: "F0FDFA"))
+                                        .cornerRadius(6)
+                                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: "99F6E4"), lineWidth: 1))
+                                    
+                                    Text(campaign.title)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(isEligible ? Color(hex: "059669") : Color(hex: "D97706"))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(isEligible ? Color(hex: "DCFCE7") : Color(hex: "FEF3C7"))
+                                        .cornerRadius(4)
+                                }
+                                
+                                Text(campaign.description)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Color(hex: "64748B"))
+                            }
+                            
+                            Spacer()
+                            
+                            if isEligible {
+                                Button("APPLY") {
+                                    applyCoupon(code: campaign.code)
+                                }
+                                .font(.system(size: 11, weight: .heavy))
+                                .foregroundColor(Color(hex: "059669"))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color(hex: "ECFDF5"))
+                                .cornerRadius(6)
+                            } else {
+                                Text("Add ₹\(Int(ceil(diffNeeded)))")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(Color(hex: "94A3B8"))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(hex: "F1F5F9"))
+                                    .cornerRadius(6)
+                            }
+                        }
+                        .padding(10)
+                        .background(isEligible ? Color(hex: "FAFDFA") : Color(hex: "FAFAFA"))
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(isEligible ? Color(hex: "86EFAC") : Color(hex: "E2E8F0"), lineWidth: 1))
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.white)
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "E2E8F0"), lineWidth: 1))
+        .padding(.horizontal, 14)
+    }
+    
+    private func applyCoupon(code: String) {
+        let clean = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !clean.isEmpty else {
+            couponFeedbackMessage = "Please enter a coupon code"
+            isCouponError = true
+            return
+        }
+        guard let campaign = availableCampaigns.first(where: { $0.code == clean }) else {
+            couponFeedbackMessage = "Invalid coupon code '\(clean)'"
+            isCouponError = true
+            return
+        }
+        if cartStore.subtotal < campaign.minOrderValue {
+            let diff = campaign.minOrderValue - cartStore.subtotal
+            couponFeedbackMessage = "Add ₹\(Int(ceil(diff))) more to apply \(campaign.code)"
+            isCouponError = true
+            return
+        }
+        
+        appliedCouponCode = campaign.code
+        couponDiscountAmount = campaign.flatDiscount
+        couponFeedbackMessage = "Coupon '\(campaign.code)' applied! Saved ₹\(Int(campaign.flatDiscount))"
+        isCouponError = false
+        inputCouponCode = ""
+    }
+    
+    private func removeCoupon() {
+        appliedCouponCode = nil
+        couponDiscountAmount = 0.0
+        couponFeedbackMessage = nil
+        isCouponError = false
+    }
+    
+    private var isAddressSelected: Bool {
+        guard let addr = addressRepository.selectedAddress else { return false }
+        return !addr.id.isEmpty &&
+               !addr.id.hasPrefix("temp_gps_") &&
+               (addr.tag?.caseInsensitiveCompare("Current Location") != .orderedSame) &&
+               !addr.addressLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
     private var grandTotal: Double {
         let delivery = cartStore.subtotal > 300 ? 0.0 : 25.0
         let handling = 5.00
         let tip = Double(selectedTip)
-        return cartStore.subtotal + delivery + handling + tip
+        let total = cartStore.subtotal + delivery + handling + tip - couponDiscountAmount
+        return max(0.0, total)
     }
 
     private func loadSavedPrescriptions() {
+        let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        let local = LocalPrescriptionManager.shared.getPrescriptions(customerId: customerId).map { $0.toPrescriptionItem() }
+        self.savedPrescriptions = local
+        if self.attachedPrescription == nil, let first = local.first {
+            self.attachedPrescription = first
+        }
         Task {
             do {
-                let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
                 let list: [PrescriptionServerDto] = try await container.apiClient.get(endpoint: "/api/v1/prescriptions/customer/\(customerId)")
-                let mapped = list.map { dto in
+                let localIds = Set(local.map { $0.id })
+                let mapped = list.filter { !localIds.contains($0.id) }.map { dto in
                     PrescriptionItem(
                         id: dto.id,
-                        doctorName: dto.doctorName ?? "Licensed Practitioner",
-                        doctorRegNo: "CDSCO-VERIFIED",
-                        patientName: dto.patientName ?? "Self Patient",
+                        doctorName: dto.doctorName ?? "",
+                        doctorRegNo: "",
+                        patientName: dto.patientName ?? "Patient",
                         extractedMedicines: [],
                         pharmacistStatus: dto.status ?? "PENDING",
-                        uploadedDate: dto.createdAt ?? "Recent"
+                        uploadedDate: dto.createdAt ?? "Recently uploaded"
                     )
                 }
                 await MainActor.run {
-                    self.savedPrescriptions = mapped
+                    self.savedPrescriptions = local + mapped
+                    if self.attachedPrescription == nil, let first = self.savedPrescriptions.first {
+                        self.attachedPrescription = first
+                    }
                 }
             } catch {
                 // Ignore silent fetch failures in background

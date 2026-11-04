@@ -154,7 +154,7 @@ fun ProductRowSection(
                     cartQuantityMap = cartQuantityMap,
                     modifier = Modifier
                         .width(responsiveCardWidth)
-                        .height(254.dp)
+                        .height(272.dp)
                 )
             }
         }

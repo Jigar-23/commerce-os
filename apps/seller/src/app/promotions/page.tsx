@@ -9,7 +9,7 @@ import { Tag, Plus, CheckCircle2, Percent, Sparkles, TrendingUp, Users, PauseCir
 interface Promotion {
   id: string;
   code: string;
-  type: 'PERCENTAGE' | 'FLAT_DISCOUNT' | 'FREE_SHIPPING';
+  type: 'PERCENTAGE' | 'FLAT_DISCOUNT';
   discountText: string;
   minOrderValue: number;
   usageCount: number;
@@ -20,25 +20,38 @@ interface Promotion {
 
 export default function PromotionsPage() {
   const [promotions, setPromotions] = useState<Promotion[]>([
-    { id: 'promo1', code: 'WELCOME20', type: 'PERCENTAGE', discountText: '20% OFF (Up to ₹100)', minOrderValue: 299, usageCount: 1420, maxUsage: 5000, status: 'ACTIVE', validUntil: '2026-12-31' },
+    { id: 'promo1', code: 'WELCOME20', type: 'PERCENTAGE', discountText: '20% OFF (Up to ₹100)', minOrderValue: 299, usageCount: 1420, maxUsage: 5000, status: 'PAUSED', validUntil: '2026-12-31' },
     { id: 'promo2', code: 'HEALTH30', type: 'FLAT_DISCOUNT', discountText: '₹150 Flat Off Medicines', minOrderValue: 799, usageCount: 890, maxUsage: 2000, status: 'ACTIVE', validUntil: '2026-11-30' },
-    { id: 'promo3', code: 'FREESHIP', type: 'FREE_SHIPPING', discountText: 'Free 10-Min SLA Priority Delivery', minOrderValue: 199, usageCount: 3450, maxUsage: 10000, status: 'ACTIVE', validUntil: '2026-12-15' }
+    { id: 'promo3', code: 'SAVE10', type: 'FLAT_DISCOUNT', discountText: 'Flat ₹100 OFF', minOrderValue: 199, usageCount: 650, maxUsage: 3000, status: 'ACTIVE', validUntil: '2026-12-31' }
   ]);
+
+  const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState<number>(199);
+  const [standardDeliveryFee, setStandardDeliveryFee] = useState<number>(2);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newCode, setNewCode] = useState('');
-  const [newType, setNewType] = useState<'PERCENTAGE' | 'FLAT_DISCOUNT' | 'FREE_SHIPPING'>('PERCENTAGE');
+  const [newType, setNewType] = useState<'PERCENTAGE' | 'FLAT_DISCOUNT'>('PERCENTAGE');
   const [newDiscount, setNewDiscount] = useState('');
   const [newMinOrder, setNewMinOrder] = useState<number>(299);
   const [newMaxUsage, setNewMaxUsage] = useState<number>(1000);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const toggleStatus = (id: string) => {
+  const toggleStatus = async (codeOrId: string) => {
+    let nextStatus: 'ACTIVE' | 'PAUSED' = 'ACTIVE';
     setPromotions(prev => prev.map(p => {
-      if (p.id !== id) return p;
-      const nextStatus = p.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+      if (p.id !== codeOrId && p.code !== codeOrId) return p;
+      nextStatus = p.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
       return { ...p, status: nextStatus };
     }));
+
+    try {
+      await fetch(`/api/v1/seller/promotions/${codeOrId}/toggle`, { method: 'POST' });
+    } catch (e) {
+      // offline / local fallback
+    }
+
+    setToastMessage(`Promotion ${codeOrId} status updated to ${nextStatus}`);
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   const handleCreatePromotion = (e: React.FormEvent) => {
@@ -133,6 +146,27 @@ export default function PromotionsPage() {
                 </div>
                 <div className="text-2xl font-black text-content-primary">+28.4% AOV</div>
                 <p className="text-2xs text-content-secondary">Driven by min-basket qualification criteria</p>
+              </div>
+            </div>
+
+            {/* Platform Delivery Fee & Free Delivery Threshold Policy */}
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-2xs font-black uppercase tracking-wider">
+                    Logistics Policy (Not a Coupon)
+                  </span>
+                  <span className="text-xs font-bold text-emerald-800">Database-Authoritative Dynamic Threshold</span>
+                </div>
+                <h3 className="text-base font-black text-emerald-950 mt-1">Automatic Free Delivery for Orders ≥ ₹{freeDeliveryThreshold}</h3>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  Standard delivery charge is ₹{standardDeliveryFee}.00. Orders reaching or exceeding ₹{freeDeliveryThreshold}.00 automatically waive the delivery fee during billing calculation. Mobile clients cache this threshold locally with a 30-day cadence.
+                </p>
+              </div>
+              <div className="flex items-center space-x-3 shrink-0">
+                <span className="px-3 py-1.5 bg-white border border-emerald-300 rounded-xl text-xs font-bold text-emerald-900 shadow-sm">
+                  Active Threshold: ₹{freeDeliveryThreshold}
+                </span>
               </div>
             </div>
 
@@ -245,7 +279,6 @@ export default function PromotionsPage() {
                   >
                     <option value="PERCENTAGE">Percentage Discount (%)</option>
                     <option value="FLAT_DISCOUNT">Flat Rupee Amount (₹)</option>
-                    <option value="FREE_SHIPPING">Free Priority Delivery (100% SLA fee waiver)</option>
                   </select>
                 </div>
 

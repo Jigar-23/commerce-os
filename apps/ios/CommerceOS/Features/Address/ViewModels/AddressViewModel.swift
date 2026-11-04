@@ -65,10 +65,20 @@ public final class AddressViewModel: ObservableObject {
         if let addr = selectedAddress {
             if addr.id.hasPrefix("temp_gps_") || addr.displayTag.caseInsensitiveCompare("Current Location") == .orderedSame {
                 let place = liveGpsPlace
-                let colony = place?.subLocality?.isEmpty == false ? place!.subLocality! :
-                    (place?.locality?.isEmpty == false ? place!.locality! :
-                    (addr.addressLine.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "Current Location"))
-                let city = place?.city.isEmpty == false ? place!.city : (addr.city ?? "")
+                let colony: String
+                if let subLoc = place?.subLocality, !subLoc.isEmpty {
+                    colony = subLoc
+                } else if let loc = place?.locality, !loc.isEmpty {
+                    colony = loc
+                } else {
+                    colony = addr.addressLine.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "Current Location"
+                }
+                let city: String
+                if let c = place?.city, !c.isEmpty {
+                    city = c
+                } else {
+                    city = addr.city ?? ""
+                }
                 return "\(colony), \(city)".trimmingCharacters(in: CharacterSet(charactersIn: ", "))
             }
             let tag = addr.displayTag.isEmpty ? "Home" : addr.displayTag

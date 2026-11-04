@@ -10,6 +10,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import java.math.BigDecimal
+import java.math.RoundingMode
 
 /**
  * Data gate to the CommerceOS API gateway. Every method returns [ApiResult]:
@@ -123,21 +124,21 @@ open class AppRepository {
     suspend fun getMedicineDetail(id: String): ApiResult<MedicineDetail> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.catalogApi.getMedicineDetail(id) } }
 
-    suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> =
+    open suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.getCart(customerId) } }
 
-    suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> =
+    open suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.addItem(customerId, item) } }
 
-    suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> =
+    open suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.removeItem(customerId, sku) } }
 
-    suspend fun updateCartQuantity(customerId: String, sku: String, quantity: Int): ApiResult<CartResponse> =
+    open suspend fun updateCartQuantity(customerId: String, sku: String, quantity: Int): ApiResult<CartResponse> =
         withContext(Dispatchers.IO) {
             Api.run { NetworkClient.cartApi.updateQuantity(customerId, sku, CartQuantityUpdateRequest(quantity)) }
         }
 
-    suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> =
+    open suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> =
         withContext(Dispatchers.IO) {
             Api.run { NetworkClient.orderApi.checkoutFromCart(customerId, request) }
         }
@@ -241,9 +242,32 @@ open class AppRepository {
     suspend fun setDefaultAddress(customerId: String, addressId: String): ApiResult<ApiAddress> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.customerApi.setDefaultAddress(customerId, addressId) } }
 
-    suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> =
+    open suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.prescriptionApi.upload(request) } }
 
-    suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> =
+    open suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.prescriptionApi.getCustomerPrescriptions(customerId) } }
+
+    open suspend fun getPromotions(): ApiResult<List<CouponCampaign>> =
+        withContext(Dispatchers.IO) {
+            Api.run {
+                val resp = NetworkClient.promotionsApi.getPromotions()
+                resp.promotions.map { p ->
+                    CouponCampaign(
+                        id = p.id,
+                        code = p.code,
+                        title = p.title,
+                        description = p.description ?: "",
+                        minOrderValue = BigDecimal.valueOf(p.minOrderValue).setScale(2, RoundingMode.HALF_UP),
+                        discountType = if (p.type.equals("PERCENTAGE", ignoreCase = true)) CouponDiscountType.PERCENTAGE else CouponDiscountType.FLAT,
+                        discountPercent = p.discountPercent.toInt(),
+                        flatDiscount = BigDecimal.valueOf(p.flatDiscount).setScale(2, RoundingMode.HALF_UP),
+                        maxDiscount = p.maxDiscount?.let { BigDecimal.valueOf(it).setScale(2, RoundingMode.HALF_UP) },
+                        badge = p.badge ?: "",
+                        expiryText = p.validUntil ?: "",
+                        status = p.status
+                    )
+                }
+            }
+        }
 }

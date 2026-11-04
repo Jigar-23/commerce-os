@@ -178,7 +178,7 @@ fun RiderMainScreen(
                     completedToday = 0,
                     earningsTodayFormatted = "₹0",
                     shiftStatus = if (savedDuty) "ONLINE_AVAILABLE" else "OFFLINE",
-                    assignedHub = "Koramangala Dark Store"
+                    assignedHub = "Koramangala Store"
                 )
                 isOnline = savedDuty
             }
@@ -1404,8 +1404,8 @@ fun RiderMainScreen(
                     onLogout = {
                         scope.launch {
                             try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
-                            repository.logoutDeviceToken()
-                            sessionManager.clearSession()
+                            try { repository.logoutDeviceToken() } catch (_: Exception) {}
+                            sessionManager.clearSession(context)
                             isOnline = false
                             onLogout()
                         }

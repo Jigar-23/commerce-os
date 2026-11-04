@@ -82,15 +82,28 @@ export default function CanopyHeader({
             </div>
           </button>
 
-          {/* Notifications Button */}
-          <button
-            onClick={() => {}}
-            className="w-9 h-9 rounded-full bg-white/15 border border-white/25 flex items-center justify-center hover:bg-white/25 active:scale-95 transition-all cursor-pointer relative"
-            aria-label="Notifications"
-          >
-            <Bell className="w-4 h-4 text-white" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
-          </button>
+          {/* Actions: Notifications & Account Dashboard */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onProfileClick()}
+              className="h-9 px-3 rounded-full bg-white/15 border border-white/25 flex items-center gap-1.5 hover:bg-white/25 active:scale-95 transition-all cursor-pointer"
+              aria-label="Account Dashboard"
+            >
+              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold">
+                👤
+              </div>
+              <span className="text-xs font-bold text-white hidden sm:inline">Dashboard</span>
+            </button>
+
+            <button
+              onClick={() => {}}
+              className="w-9 h-9 rounded-full bg-white/15 border border-white/25 flex items-center justify-center hover:bg-white/25 active:scale-95 transition-all cursor-pointer relative"
+              aria-label="Notifications"
+            >
+              <Bell className="w-4 h-4 text-white" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+            </button>
+          </div>
         </div>
 
         {/* Dual Stadium Capsules (Tata 1mg signature benchmark) */}

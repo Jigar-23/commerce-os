@@ -65,6 +65,8 @@ public struct DeliveryInstructionsField: View {
                 set: { onInstructionsChanged($0) }
             ))
             .font(.system(size: 13))
+            .foregroundColor(Color(hex: "0F172A"))
+            .accentColor(Color(hex: "0E675E"))
             .padding(10)
             .background(Color.white)
             .cornerRadius(8)

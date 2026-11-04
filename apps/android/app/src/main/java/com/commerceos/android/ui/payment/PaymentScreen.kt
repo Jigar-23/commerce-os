@@ -503,11 +503,18 @@ fun PaymentScreen(
                     )
                 }
 
+                val hasAddress = checkoutUiState.address != null
                 Button(
-                    onClick = { onAuthorize(selectedMethod) },
+                    onClick = {
+                        if (hasAddress) {
+                            onAuthorize(selectedMethod)
+                        } else {
+                            onChangeAddress?.invoke()
+                        }
+                    },
                     enabled = !checkoutUiState.isProcessing,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF059669),
+                        containerColor = if (hasAddress) Color(0xFF059669) else Color(0xFF94A3B8),
                         contentColor = Color.White,
                         disabledContainerColor = Color(0xFF94A3B8)
                     ),
@@ -520,6 +527,13 @@ fun PaymentScreen(
                             color = Color.White,
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp
+                        )
+                    } else if (!hasAddress) {
+                        Text(
+                            text = "Select Address",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                     } else {
                         Text(

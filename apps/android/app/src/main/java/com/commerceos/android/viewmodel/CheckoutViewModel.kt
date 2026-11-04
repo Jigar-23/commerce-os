@@ -7,7 +7,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
-import com.commerceos.android.network.AppError
 import com.commerceos.android.repository.AppRepository
 import java.math.BigDecimal
 import java.util.UUID
@@ -59,21 +58,44 @@ data class CheckoutUiState(
     val deliveryFee: BigDecimal = BigDecimal.ZERO,
     val coldChainFee: BigDecimal = BigDecimal.ZERO,
     val couponDiscount: BigDecimal = BigDecimal.ZERO,
+    val couponCode: String? = null,
     val grandTotal: BigDecimal = BigDecimal.ZERO,
     val serviceability: ServiceabilityState = ServiceabilityState.Idle,
     val state: CheckoutState = CheckoutState.Idle,
     val isProcessing: Boolean = false,
     val errorMessage: String? = null
 ) {
-    val cartValid: Boolean get() = items.isNotEmpty() || grandTotal > BigDecimal.ZERO
-    val addressValid: Boolean get() = address != null
-    val serviceabilityValid: Boolean get() = serviceability !is ServiceabilityState.Unavailable && serviceability !is ServiceabilityState.Error
-    val pricingValid: Boolean get() = grandTotal > BigDecimal.ZERO || itemsSubtotal > BigDecimal.ZERO || items.isNotEmpty()
+    val cartValid: Boolean
+        get() = items.isNotEmpty() && items.all {
+            it.sku.isNotBlank() &&
+                it.quantity > 0 &&
+                it.unitPrice > BigDecimal.ZERO
+        }
+
+    val addressValid: Boolean
+        get() = !address?.id.isNullOrBlank()
+
+    val serviceabilityValid: Boolean
+        get() = (serviceability as? ServiceabilityState.Success)?.addressId == address?.id &&
+            addressValid
+
+    val pricingValid: Boolean
+        get() = itemsSubtotal > BigDecimal.ZERO && grandTotal >= BigDecimal.ZERO
+
     val prescriptionValid: Boolean
-        get() = if (items.any { it.prescriptionRequired }) !prescriptionId.isNullOrBlank() else true
+        get() = if (items.any { it.prescriptionRequired }) {
+            !prescriptionId.isNullOrBlank()
+        } else {
+            true
+        }
 
     val readyForPayment: Boolean
-        get() = cartValid && addressValid && prescriptionValid && !isProcessing
+        get() = cartValid &&
+            addressValid &&
+            serviceabilityValid &&
+            pricingValid &&
+            prescriptionValid &&
+            !isProcessing
 }
 
 class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
@@ -88,30 +110,65 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
     val events = _events.receiveAsFlow()
 
     private var checkoutIdempotencyKey: String? = null
+    private var lastPayloadFingerprint: String? = null
+    private var serviceabilityJob: Job? = null
+    private var checkoutJob: Job? = null
+
+    private fun computePayloadFingerprint(
+        customerId: String,
+        addressId: String?,
+        items: List<CartItem>,
+        prescriptionId: String?,
+        couponCode: String?,
+        paymentMethod: String?
+    ): String {
+        val itemsSig = items.joinToString(",") { "${it.sku}:${it.quantity}:${it.unitPrice}" }
+        return "$customerId|$addressId|$itemsSig|$prescriptionId|$couponCode|$paymentMethod"
+    }
 
     /** Called when the customer reaches address selection: snapshot cart + totals. Preserves selected address/Rx if already set. */
-    fun start(customerId: String, cartItems: List<CartItem>, couponDiscount: BigDecimal = BigDecimal.ZERO) {
-        this.customerId = customerId
-        val existingAddress = uiState.address
-        val existingPrescription = uiState.prescriptionId
-        val existingSlot = uiState.selectedSlotText
-        val effectiveItems = if (cartItems.isNotEmpty()) cartItems else uiState.items
-        val subtotal = itemsSubtotal(effectiveItems)
+    fun start(
+        customerId: String,
+        cartItems: List<CartItem>,
+        couponDiscount: BigDecimal = BigDecimal.ZERO,
+        couponCode: String? = null
+    ) {
+        if (uiState.isProcessing) return
 
+        val targetCustomerId = customerId.trim()
+        val sameCustomer = this.customerId == targetCustomerId
+
+        if (!sameCustomer) {
+            serviceabilityJob?.cancel()
+            checkoutJob?.cancel()
+            checkoutIdempotencyKey = null
+            lastPayloadFingerprint = null
+            this.customerId = targetCustomerId
+        }
+
+        val old = uiState
+        val items = cartItems.toList()
+        val address = if (sameCustomer) old.address else null
+        val prescriptionId = if (sameCustomer) old.prescriptionId else null
+        val slotText = if (sameCustomer) old.selectedSlotText else null
+        val subtotal = itemsSubtotal(items)
+        val safeDiscount = couponDiscount.coerceAtLeast(BigDecimal.ZERO).min(subtotal)
+
+        serviceabilityJob?.cancel()
         uiState = CheckoutUiState(
-            items = effectiveItems,
-            address = existingAddress,
-            prescriptionId = existingPrescription,
-            selectedSlotText = existingSlot,
+            items = items,
+            address = address,
+            prescriptionId = prescriptionId,
+            selectedSlotText = slotText,
             itemsSubtotal = subtotal,
-            couponDiscount = couponDiscount,
-            grandTotal = subtotal.subtract(couponDiscount).coerceAtLeast(BigDecimal.ZERO),
-            serviceability = uiState.serviceability,
+            couponDiscount = safeDiscount,
+            couponCode = couponCode,
+            grandTotal = subtotal.subtract(safeDiscount).coerceAtLeast(BigDecimal.ZERO),
+            serviceability = ServiceabilityState.Idle,
             state = CheckoutState.Validating
         )
-        if (uiState.address != null) {
-            refreshServiceability()
-        }
+
+        if (address != null) refreshServiceability()
     }
 
     /** Address change triggers immediate universal serviceability. */
@@ -132,70 +189,82 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
     /** Address-aware & cart-aware server serviceability check. */
     fun refreshServiceability() {
-        val address = uiState.address ?: run {
-            uiState = uiState.copy(state = CheckoutState.Validating)
-            return
-        }
-        val addressId = address.id
-        if (customerId.isBlank()) {
-            uiState = uiState.copy(state = CheckoutState.Validating)
-            return
-        }
-
-        val serviceabilityItems = uiState.items.map { item ->
-            ServiceabilityItem(
-                sku = item.sku,
-                quantity = item.quantity,
-                coldChain = item.coldChain
+        val snapshot = uiState
+        val customerIdSnapshot = customerId.trim()
+        val address = snapshot.address
+        if (address == null || address.id.isBlank() || customerIdSnapshot.isBlank()) {
+            serviceabilityJob?.cancel()
+            uiState = snapshot.copy(
+                serviceability = ServiceabilityState.Idle,
+                deliveryFee = BigDecimal.ZERO,
+                coldChainFee = BigDecimal.ZERO,
+                state = CheckoutState.Validating
             )
+            return
         }
 
-        uiState = uiState.copy(serviceability = ServiceabilityState.Checking(addressId))
+        val addressId = address.id
+        val items = snapshot.items.toList()
+        val itemSignature = items.joinToString("|") { "${it.sku}:${it.quantity}" }
+        val requestItems = items.map {
+            ServiceabilityItem(it.sku, it.quantity, it.coldChain)
+        }
 
-        viewModelScope.launch {
-            when (val result = repository.getServiceability(customerId, addressId, serviceabilityItems)) {
+        serviceabilityJob?.cancel()
+        uiState = snapshot.copy(serviceability = ServiceabilityState.Checking(addressId))
+
+        serviceabilityJob = viewModelScope.launch {
+            val result = repository.getServiceability(customerIdSnapshot, addressId, requestItems)
+
+            val currentSignature = uiState.items.joinToString("|") { "${it.sku}:${it.quantity}" }
+            if (customerId.trim() != customerIdSnapshot ||
+                uiState.address?.id != addressId ||
+                currentSignature != itemSignature
+            ) return@launch
+
+            when (result) {
                 is ApiResult.Success -> {
-                    val resp = result.data
-                    if (resp.eligible) {
-                        val isFreeDelivery = uiState.itemsSubtotal >= BigDecimal("199.00")
-                        val deliveryFee = if (isFreeDelivery) BigDecimal.ZERO else BigDecimal.valueOf(resp.deliveryFee).takeIf { it > BigDecimal.ZERO } ?: BigDecimal("2.00")
-                        val coldChainFee = BigDecimal.valueOf(resp.coldChainFee)
-                        val serviceabilityStatus = ServiceabilityState.Success(addressId, resp.copy(deliveryFee = deliveryFee.toDouble()))
-
-                        val updated = uiState.copy(
-                            serviceability = serviceabilityStatus,
-                            deliveryFee = deliveryFee,
-                            coldChainFee = coldChainFee,
-                            grandTotal = uiState.itemsSubtotal.add(deliveryFee).add(coldChainFee).subtract(uiState.couponDiscount).coerceAtLeast(BigDecimal.ZERO)
-                        )
-
-                        uiState = updated.copy(
-                            state = if (rxGateClear(updated)) CheckoutState.ReadyForPayment else CheckoutState.Validating
-                        )
-                    } else {
-                        val serviceabilityStatus = ServiceabilityState.Unavailable(addressId)
-                        val updated = uiState.copy(
-                            serviceability = serviceabilityStatus,
+                    val response = result.data
+                    if (!response.eligible) {
+                        uiState = uiState.copy(
+                            serviceability = ServiceabilityState.Unavailable(addressId),
                             deliveryFee = BigDecimal.ZERO,
                             coldChainFee = BigDecimal.ZERO,
-                            grandTotal = uiState.itemsSubtotal.subtract(uiState.couponDiscount).coerceAtLeast(BigDecimal.ZERO)
+                            grandTotal = uiState.itemsSubtotal
+                                .subtract(uiState.couponDiscount)
+                                .coerceAtLeast(BigDecimal.ZERO),
+                            state = CheckoutState.Failed(
+                                "UNSERVICEABLE",
+                                "Selected address is currently outside our delivery zone."
+                            )
                         )
-                        uiState = updated.copy(
-                            state = CheckoutState.Failed("UNSERVICEABLE", "Selected address is currently outside our delivery zone.")
-                        )
+                        return@launch
                     }
-                }
-                is ApiResult.Failure -> {
-                    val errMsg = result.error.message ?: "Unable to verify address serviceability. Please check connection and retry."
-                    val serviceabilityStatus = ServiceabilityState.Error(addressId, errMsg)
+
+                    val deliveryFee = BigDecimal.valueOf(response.deliveryFee)
+                    val coldChainFee = BigDecimal.valueOf(response.coldChainFee)
                     val updated = uiState.copy(
-                        serviceability = serviceabilityStatus,
-                        deliveryFee = BigDecimal.ZERO,
-                        coldChainFee = BigDecimal.ZERO,
-                        grandTotal = uiState.itemsSubtotal.subtract(uiState.couponDiscount).coerceAtLeast(BigDecimal.ZERO)
+                        serviceability = ServiceabilityState.Success(addressId, response),
+                        deliveryFee = deliveryFee,
+                        coldChainFee = coldChainFee,
+                        grandTotal = uiState.itemsSubtotal
+                            .add(deliveryFee)
+                            .add(coldChainFee)
+                            .subtract(uiState.couponDiscount)
+                            .coerceAtLeast(BigDecimal.ZERO)
                     )
                     uiState = updated.copy(
-                        state = CheckoutState.Failed("SERVICEABILITY_ERROR", errMsg)
+                        state = if (updated.readyForPayment) CheckoutState.ReadyForPayment
+                        else CheckoutState.Validating
+                    )
+                }
+                is ApiResult.Failure -> {
+                    val message = result.error.message
+                    uiState = uiState.copy(
+                        serviceability = ServiceabilityState.Error(addressId, message),
+                        deliveryFee = BigDecimal.ZERO,
+                        coldChainFee = BigDecimal.ZERO,
+                        state = CheckoutState.Failed("SERVICEABILITY_ERROR", message)
                     )
                 }
             }
@@ -208,64 +277,121 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
         )
     }
 
-    private fun rxGateClear(state: CheckoutUiState): Boolean = state.prescriptionValid
-
     private fun itemsSubtotal(items: List<CartItem>): BigDecimal =
         items.fold(BigDecimal.ZERO) { acc, item -> acc.add(item.unitPrice.multiply(BigDecimal.valueOf(item.quantity.toLong()))) }
 
+    private fun failCheckout(code: String, message: String) {
+        uiState = uiState.copy(
+            state = CheckoutState.Failed(code, message),
+            errorMessage = message,
+            isProcessing = false
+        )
+    }
+
     fun executeCheckout(paymentMethod: String) {
-        if (!uiState.readyForPayment) {
+        val snapshot = uiState
+        val customerIdSnapshot = customerId.trim()
+
+        if (!snapshot.readyForPayment) {
             val reason = when {
-                !uiState.addressValid -> "Select a delivery address"
-                !uiState.serviceabilityValid -> "Resolve delivery availability first"
-                !uiState.cartValid -> "Cart is empty"
-                !uiState.pricingValid -> "Checkout quote is incomplete"
-                !uiState.prescriptionValid -> "Attach a pharmacist-approved prescription"
+                !snapshot.addressValid -> "Select a delivery address"
+                !snapshot.serviceabilityValid -> "Resolve delivery availability first"
+                !snapshot.cartValid -> "Cart is empty"
+                !snapshot.pricingValid -> "Checkout quote is incomplete"
+                !snapshot.prescriptionValid -> "Attach a pharmacist-approved prescription"
                 else -> "Checkout is not ready for payment"
             }
-            uiState = uiState.copy(state = CheckoutState.Failed("CHECKOUT_NOT_READY", reason), errorMessage = reason)
+            uiState = snapshot.copy(state = CheckoutState.Failed("CHECKOUT_NOT_READY", reason), errorMessage = reason)
             return
         }
-        if (customerId.isBlank()) {
-            uiState = uiState.copy(errorMessage = "Authentication required for checkout")
+        if (customerIdSnapshot.isBlank()) {
+            uiState = snapshot.copy(errorMessage = "Authentication required for checkout")
             return
         }
-        val address = uiState.address ?: return
+        val address = snapshot.address ?: return
 
-        viewModelScope.launch {
-            uiState = uiState.copy(isProcessing = true, errorMessage = null, state = CheckoutState.PlacingOrder)
+        checkoutJob?.cancel()
+        checkoutJob = viewModelScope.launch {
+            uiState = snapshot.copy(isProcessing = true, errorMessage = null, state = CheckoutState.PlacingOrder)
+
+            val prescriptionApproved = if (snapshot.items.any { it.prescriptionRequired }) {
+                val serverPrescriptions = when (
+                    val result = repository.getCustomerPrescriptions(customerIdSnapshot)
+                ) {
+                    is ApiResult.Success -> result.data
+                    is ApiResult.Failure -> {
+                        failCheckout("PRESCRIPTION_LOOKUP_FAILED", result.error.message)
+                        return@launch
+                    }
+                }
+
+                serverPrescriptions.any {
+                    it.id == snapshot.prescriptionId &&
+                        it.customerId == customerIdSnapshot &&
+                        it.status.equals("APPROVED", ignoreCase = true)
+                }
+            } else {
+                true
+            }
+
+            if (!prescriptionApproved) {
+                failCheckout(
+                    "PRESCRIPTION_NOT_APPROVED",
+                    "Attach a pharmacist-approved prescription before checkout."
+                )
+                return@launch
+            }
+
+            val currentFingerprint = computePayloadFingerprint(
+                customerIdSnapshot,
+                address.id,
+                snapshot.items,
+                snapshot.prescriptionId,
+                snapshot.couponCode,
+                paymentMethod
+            )
+            if (lastPayloadFingerprint != currentFingerprint) {
+                checkoutIdempotencyKey = null
+                lastPayloadFingerprint = currentFingerprint
+            }
+
             val idempotencyKey = checkoutIdempotencyKey
                 ?: UUID.randomUUID().toString().also { checkoutIdempotencyKey = it }
+
+            // SERVER-AUTHORITATIVE AMOUNTS: omit client-calculated fees/discounts to eliminate trust-boundary risk
             val request = CartCheckoutRequest(
                 addressId = address.id,
-                prescriptionId = uiState.prescriptionId,
+                prescriptionId = snapshot.prescriptionId,
                 paymentMethod = paymentMethod,
                 idempotencyKey = idempotencyKey,
                 deliveryAddress = address,
-                deliveryFee = uiState.deliveryFee,
-                discountAmount = uiState.couponDiscount,
-                packagingFee = uiState.coldChainFee
+                deliveryFee = null,
+                discountAmount = null,
+                couponCode = snapshot.couponCode,
+                packagingFee = null,
+                slotText = snapshot.selectedSlotText
             )
-            when (val result = repository.checkoutFromCart(customerId, request)) {
+
+            when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
                 is ApiResult.Success -> {
                     uiState = uiState.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
                     checkoutIdempotencyKey = null
+                    lastPayloadFingerprint = null
                     _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
                 }
                 is ApiResult.Failure -> {
-                    checkoutIdempotencyKey = null
-                    uiState = uiState.copy(
-                        state = CheckoutState.Failed("CHECKOUT_FAILED", result.error.message),
-                        errorMessage = result.error.message,
-                        isProcessing = false
-                    )
+                    // Keep checkoutIdempotencyKey for identical payload retry
+                    failCheckout("CHECKOUT_FAILED", result.error.message)
                 }
             }
         }
     }
 
     fun reset() {
+        serviceabilityJob?.cancel()
+        checkoutJob?.cancel()
         checkoutIdempotencyKey = null
+        lastPayloadFingerprint = null
         uiState = CheckoutUiState()
         customerId = ""
     }

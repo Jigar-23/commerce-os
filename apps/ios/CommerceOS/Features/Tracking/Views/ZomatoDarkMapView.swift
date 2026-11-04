@@ -110,8 +110,8 @@ struct GoogleOrderTrackingWebView: UIViewRepresentable {
         context.coordinator.webView = webView
         onCoordinatorCreated(context.coordinator)
 
-        let initialLat = riderCoordinate?.latitude ?? merchantCoordinate?.latitude ?? 20.5937
-        let initialLng = riderCoordinate?.longitude ?? merchantCoordinate?.longitude ?? 78.9629
+        let initialLat = customerCoordinate?.latitude ?? merchantCoordinate?.latitude ?? riderCoordinate?.latitude ?? 28.1920
+        let initialLng = customerCoordinate?.longitude ?? merchantCoordinate?.longitude ?? riderCoordinate?.longitude ?? 76.6080
         let html = generateGoogleMapsLiveTrackingHtml(initLat: initialLat, initLng: initialLng)
         webView.loadHTMLString(html, baseURL: URL(string: "https://maps.googleapis.com"))
 
@@ -657,6 +657,7 @@ private func generateGoogleMapsLiveTrackingHtml(initLat: Double, initLng: Double
                 riderOverlay = null;
             }
             riderPos = null;
+            fitBoundsIfAppropriate();
         }
 
         renderWaypoints(waypoints);

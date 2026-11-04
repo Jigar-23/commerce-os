@@ -96,10 +96,10 @@ fun NativeGoogleRiderNavMap(
     val coroutineScope = rememberCoroutineScope()
 
     val storeLatLng = remember(merchantLat, merchantLng) {
-        LatLng(if (merchantLat != 0.0) merchantLat else 20.5937, if (merchantLng != 0.0) merchantLng else 78.9629)
+        LatLng(if (merchantLat != 0.0) merchantLat else 28.191944, if (merchantLng != 0.0) merchantLng else 76.608042)
     }
     val customerLatLng = remember(customerLat, customerLng) {
-        LatLng(if (customerLat != 0.0) customerLat else 20.5937, if (customerLng != 0.0) customerLng else 78.9629)
+        LatLng(if (customerLat != 0.0) customerLat else 28.191944, if (customerLng != 0.0) customerLng else 76.608042)
     }
     val riderLatLng = remember(riderLat, riderLng) {
         if (riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0) {
@@ -217,7 +217,7 @@ fun NativeGoogleRiderNavMap(
             Marker(
                 state = storeMarkerState,
                 icon = storeMarkerBitmap,
-                title = "Shop / Dark Store Hub",
+                title = "Shop / Store Hub",
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
             )
 

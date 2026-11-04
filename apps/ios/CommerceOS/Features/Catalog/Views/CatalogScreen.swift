@@ -1,319 +1,352 @@
 import SwiftUI
 
+/**
+ * 1:1 Parity with Android CatalogScreen.kt (248 lines).
+ * Unified PLP: free-text search, category browsing, and full catalog share this destination.
+ * All filters (price band, destination) are applied server-side and the list paginates
+ * through limit/offset pages with a real hasMore flag.
+ */
 public struct CatalogScreen: View {
-    @EnvironmentObject private var container: AppContainer
-    @EnvironmentObject private var cartStore: CartLocalStore
-    @EnvironmentObject private var configProvider: ClientConfigProvider
-    
-    @State private var searchText: String = ""
-    @State private var filterColdChainOnly: Bool = false
-    @State private var searchResults: [ProductDto] = []
-    @State private var isLoading: Bool = false
-    @State private var errorMessage: String? = nil
-    @State private var searchTask: Task<Void, Never>? = nil
-    @State private var selectedProductForDetail: ProductDto? = nil
-    
-    public init() {}
-    
+    @ObservedObject public var viewModel: CatalogViewModel
+    public var onSelectProduct: (ProductDto) -> Void = { _ in }
+    public var onAddToCart: (ProductDto) -> Void = { _ in }
+    public var onBack: (() -> Void)? = nil
+
+    public init(
+        viewModel: CatalogViewModel = .shared,
+        onSelectProduct: @escaping (ProductDto) -> Void = { _ in },
+        onAddToCart: @escaping (ProductDto) -> Void = { _ in },
+        onBack: (() -> Void)? = nil
+    ) {
+        self.viewModel = viewModel
+        self.onSelectProduct = onSelectProduct
+        self.onAddToCart = onAddToCart
+        self.onBack = onBack
+    }
+
     public var body: some View {
-        NavigationView {
-            VStack(spacing: 12) {
-                // Search Input
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.gray)
-                    TextField("Search salt (e.g. Paracetamol, Atorvastatin)", text: $searchText)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                    if !searchText.isEmpty {
-                        Button(action: {
-                            searchText = ""
-                            loadProducts()
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.gray)
+        VStack(alignment: .leading, spacing: 12) {
+            // 1. Search Bar with optional back button
+            HStack(spacing: 8) {
+                if let onBack = onBack {
+                    Button(action: onBack) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                            .padding(8)
+                            .background(Color.white)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                CatalogSearchBar(viewModel: viewModel)
+            }
+
+            // 2. Destination Filter Row
+            if !viewModel.destinations.isEmpty {
+                DestinationRow(
+                    destinations: viewModel.destinations,
+                    selectedId: viewModel.selectedDestinationId,
+                    onSelect: { viewModel.setDestination($0) }
+                )
+            }
+
+            // 3. Price Band Row
+            PriceBandRow(
+                selected: viewModel.selectedPriceBand,
+                onSelect: { viewModel.setPriceBand($0) }
+            )
+
+            // 4. Main Catalog Content Area
+            switch viewModel.uiState {
+            case .loading:
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(0..<6, id: \.self) { _ in
+                            CatalogGridSkeleton()
                         }
                     }
+                    .padding(.top, 4)
                 }
-                .padding(12)
-                .background(Color(.systemGray6))
-                .cornerRadius(10)
-                .padding(.horizontal)
-                
-                // Filter Toggles
-                HStack(spacing: 12) {
-                    Toggle("Cold-Chain 2-8°C", isOn: $filterColdChainOnly)
-                        .toggleStyle(ButtonToggleStyle(activeColor: Color(hex: "0284C7")))
+
+            case .empty:
+                VStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 44))
+                        .foregroundColor(Color(hex: "94A3B8"))
+                        .padding(.top, 24)
+
+                    Text("No products match these filters")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Color(hex: "0F172A"))
+
+                    Text("Try a different search, category, or price range.")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "64748B"))
+
+                    Button(action: {
+                        viewModel.reset()
+                        viewModel.reload()
+                    }) {
+                        Text("Reset All Filters")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color(hex: "0E675E"))
+                            .cornerRadius(10)
+                    }
+                    .padding(.bottom, 24)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(hex: "E2E8F0"), lineWidth: 1))
+                .cornerRadius(16)
+                .padding(.top, 16)
+
+                Spacer()
+
+            case .error(let message):
+                VStack(spacing: 8) {
+                    Text(message)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Color(hex: "DC2626"))
+                        .multilineTextAlignment(.center)
+
+                    Button("Retry") {
+                        viewModel.reload()
+                    }
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Color(hex: "0E675E"))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+
+                Spacer()
+
+            case .content(let title, let results, let totalElements):
+                HStack {
+                    Text("\(title) • \(totalElements) items")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(Color(hex: "64748B"))
                     Spacer()
                 }
-                .padding(.horizontal)
-                
-                // Generic Substitute Callout Banner
-                if !searchText.isEmpty {
-                    HStack {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Bio-Equivalent Generic Engine Active")
-                                .font(.system(size: 12, weight: .bold))
-                            Text("Save up to 80% with identical active therapeutic salts.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
+
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(results) { product in
+                            CommerceProductCard(
+                                product: product,
+                                variant: .grid,
+                                onSelect: { prod in onSelectProduct(prod) }
+                            )
                         }
-                        Spacer()
                     }
-                    .padding(10)
-                    .background(Color.orange.opacity(0.12))
-                    .cornerRadius(8)
-                    .padding(.horizontal)
-                }
-                
-                // Status / Error Banner
-                if let err = errorMessage {
-                    HStack {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundColor(.orange)
-                        Text(err)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Spacer()
+
+                    if viewModel.hasMore || viewModel.isLoadingMore {
+                        LoadMoreRow(
+                            isLoadingMore: viewModel.isLoadingMore,
+                            onLoadMore: { viewModel.loadMore() }
+                        )
+                        .padding(.vertical, 14)
                     }
-                    .padding(8)
-                    .background(Color.orange.opacity(0.08))
-                    .cornerRadius(8)
-                    .padding(.horizontal)
-                }
-                
-                // Results List / Loading State
-                if isLoading && searchResults.isEmpty {
-                    VStack(spacing: 12) {
-                        Spacer()
-                        ProgressView("Loading dynamic medicines...")
-                            .progressViewStyle(CircularProgressViewStyle())
-                        Spacer()
-                    }
-                } else if filteredResults.isEmpty && !isLoading {
-                    VStack(spacing: 12) {
-                        Spacer()
-                        Image(systemName: "cross.case")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("No matching medicines found")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.secondary)
-                        Text("Try searching by generic salt composition or brand name.")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .padding()
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(filteredResults) { product in
-                                VStack(spacing: 8) {
-                                    // Main Product Row
-                                    ProductListRow(product: product, onSelect: { prod in
-                                        selectedProductForDetail = prod
-                                    })
-                                    
-                                    // Generic Bio-Equivalent Alternative Card if Available
-                                    if let generic = product.genericSubstitute {
-                                        GenericComparisonCard(brandProduct: product, substitute: generic)
-                                    }
-                                }
-                                .padding()
-                                .background(Color(.systemBackground))
-                                .cornerRadius(12)
-                                .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 2)
-                                .padding(.horizontal)
-                            }
-                        }
-                        .padding(.top, 4)
-                        Spacer(minLength: 80)
-                    }
-                }
-            }
-            .navigationTitle("Salt & Medicine Catalog")
-            .navigationBarTitleDisplayMode(.inline)
-            .sheet(item: $selectedProductForDetail) { prod in
-                ProductDetailSheet(product: prod)
-            }
-            .onAppear {
-                loadProducts()
-            }
-            .onChange(of: searchText) { newQuery in
-                performSearch(query: newQuery)
-            }
-        }
-        .navigationViewStyle(.stack)
-    }
-    
-    private var filteredResults: [ProductDto] {
-        var list = searchResults
-        if filterColdChainOnly {
-            list = list.filter { $0.isColdChain == true }
-        }
-        return list
-    }
-    
-    private func loadProducts() {
-        isLoading = true
-        errorMessage = nil
-        Task {
-            do {
-                // 1. Fetch live dynamic products from backend /api/v1/catalog/products
-                let res: CatalogProductsResponse = try await container.apiClient.get(endpoint: "/api/v1/catalog/products")
-                let dynamicItems = res.content.map { $0.toProductDto() }
-                
-                await MainActor.run {
-                    self.searchResults = dynamicItems
-                    self.isLoading = false
-                    self.errorMessage = nil
-                }
-            } catch {
-                // 2. Offline fallback using persistent OfflineCatalogCache
-                let cached = await container.offlineCache.getCachedProducts()
-                let dynamicCached = cached.map { $0.toProductDto() }
-                
-                await MainActor.run {
-                    if !dynamicCached.isEmpty {
-                        self.searchResults = dynamicCached
-                        self.errorMessage = "Offline Mode: Showing \(dynamicCached.count) cached catalog medicines."
-                    } else {
-                        self.errorMessage = "Unable to connect to live catalog server."
-                    }
-                    self.isLoading = false
+
+                    Spacer().frame(height: 60)
                 }
             }
         }
-    }
-    
-    private func performSearch(query: String) {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            loadProducts()
-            return
-        }
-        
-        searchTask?.cancel()
-        searchTask = Task {
-            // Debounce 250ms for responsive keystroke handling
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            if Task.isCancelled { return }
-            
-            await MainActor.run {
-                self.isLoading = true
-            }
-            
-            let serverMatches = await container.catalogRepository.searchProducts(query: trimmed)
-            let matches = serverMatches.map { $0.toProductDto() }
-            
-            await MainActor.run {
-                self.searchResults = matches
-                self.isLoading = false
-                self.errorMessage = matches.isEmpty ? "No medicines found matching '\(trimmed)'." : nil
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .background(Color(hex: "F8FAFC"))
+        .onAppear {
+            if case .loading = viewModel.uiState {
+                viewModel.reload()
             }
         }
     }
 }
 
-public struct ProductListRow: View {
-    @EnvironmentObject private var configProvider: ClientConfigProvider
-    let product: ProductDto
-    var onSelect: ((ProductDto) -> Void)? = nil
-
-    public init(product: ProductDto, onSelect: ((ProductDto) -> Void)? = nil) {
-        self.product = product
-        self.onSelect = onSelect
-    }
+// MARK: - Search Bar Component
+public struct CatalogSearchBar: View {
+    @ObservedObject public var viewModel: CatalogViewModel
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(product.name)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                if let salt = product.saltComposition {
-                    Text("Salt: \(salt)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16))
+                .foregroundColor(Color(hex: "64748B"))
+
+            TextField(
+                "Search in catalog...",
+                text: Binding(
+                    get: { viewModel.query },
+                    set: { viewModel.onQueryChange($0) }
+                ),
+                onCommit: {
+                    viewModel.submitQuery()
                 }
-                HStack(spacing: 6) {
-                    Text("₹\(String(format: "%.2f", product.price))")
-                        .font(.system(size: 16, weight: .black))
-                        .foregroundColor(configProvider.currentConfig.theme.primaryColor)
-                    if product.mrp > product.price {
-                        Text("₹\(String(format: "%.2f", product.mrp))")
-                            .font(.system(size: 12))
-                            .strikethrough()
-                            .foregroundColor(.secondary)
+            )
+            .font(.system(size: 14))
+            .foregroundColor(Color(hex: "0F172A"))
+            .accentColor(Color(hex: "0E675E"))
+
+            if !viewModel.query.isEmpty {
+                Button(action: {
+                    viewModel.onQueryChange("")
+                    viewModel.submitQuery()
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(hex: "94A3B8"))
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(Color.white)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color(hex: "CBD5E1"), lineWidth: 1)
+        )
+        .cornerRadius(18)
+    }
+}
+
+// MARK: - Destination Row Component
+public struct DestinationRow: View {
+    public let destinations: [Destination]
+    public let selectedId: String?
+    public let onSelect: (String?) -> Void
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("DELIVERY DESTINATION")
+                .font(.system(size: 9.5, weight: .heavy))
+                .foregroundColor(Color(hex: "64748B"))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(destinations) { dest in
+                        let isSelected = dest.id == selectedId
+                        Button(action: {
+                            onSelect(isSelected ? nil : dest.id)
+                        }) {
+                            Text(dest.name)
+                                .font(.system(size: 11, weight: isSelected ? .heavy : .medium))
+                                .foregroundColor(isSelected ? .white : Color(hex: "0F172A"))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .background(isSelected ? Color(hex: "0E675E") : Color.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(isSelected ? Color(hex: "0E675E") : Color(hex: "E2E8F0"), lineWidth: 1)
+                                )
+                                .cornerRadius(14)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onSelect?(product)
-            }
-            
-            Spacer()
-            
-            QuickAddToCartButton(product: product)
         }
     }
 }
 
-public struct GenericComparisonCard: View {
-    let brandProduct: ProductDto
-    let substitute: GenericSubstituteDto
-    
+// MARK: - Price Band Row Component
+public struct PriceBandRow: View {
+    public let selected: PriceBand
+    public let onSelect: (PriceBand) -> Void
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PRICE")
+                .font(.system(size: 9.5, weight: .heavy))
+                .foregroundColor(Color(hex: "64748B"))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(CATALOG_PRICE_BANDS) { band in
+                        let isSelected = band == selected
+                        Button(action: { onSelect(band) }) {
+                            Text(band.label)
+                                .font(.system(size: 11, weight: isSelected ? .heavy : .medium))
+                                .foregroundColor(isSelected ? .white : Color(hex: "0F172A"))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .background(isSelected ? Color(hex: "16A34A") : Color.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(isSelected ? Color(hex: "16A34A") : Color(hex: "E2E8F0"), lineWidth: 1)
+                                )
+                                .cornerRadius(12)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Skeleton Loading Component
+public struct CatalogGridSkeleton: View {
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle()
+                .fill(Color(hex: "E2E8F0"))
+                .aspectRatio(1, contentMode: .fit)
+                .cornerRadius(12)
+
+            Rectangle()
+                .fill(Color(hex: "E2E8F0"))
+                .frame(height: 14)
+                .cornerRadius(4)
+
+            Rectangle()
+                .fill(Color(hex: "E2E8F0"))
+                .frame(width: 80, height: 12)
+                .cornerRadius(4)
+
+            Rectangle()
+                .fill(Color(hex: "E2E8F0"))
+                .frame(width: 60, height: 14)
+                .cornerRadius(4)
+        }
+        .padding(10)
+        .background(Color.white)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(hex: "F1F5F9"), lineWidth: 1))
+        .cornerRadius(16)
+    }
+}
+
+// MARK: - Load More Row Component
+public struct LoadMoreRow: View {
+    public let isLoadingMore: Bool
+    public let onLoadMore: () -> Void
+
     public var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Image(systemName: "leaf.fill")
-                        .foregroundColor(.green)
-                        .font(.system(size: 11))
-                    Text(substitute.genericName)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.green)
-                }
-                Text("Same active salt • ₹\(String(format: "%.2f", substitute.genericPrice)) vs ₹\(String(format: "%.2f", substitute.brandPrice))")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            
             Spacer()
-            
-            Text("Save \(substitute.savingsPercentage)%")
-                .font(.system(size: 11, weight: .black))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.green.opacity(0.2))
-                .foregroundColor(.green)
-                .cornerRadius(6)
-        }
-        .padding(8)
-        .background(Color.green.opacity(0.06))
-        .cornerRadius(8)
-    }
-}
-
-public struct ButtonToggleStyle: ToggleStyle {
-    let activeColor: Color
-    public func makeBody(configuration: Configuration) -> some View {
-        Button(action: { configuration.isOn.toggle() }) {
-            HStack(spacing: 4) {
-                Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12))
-                configuration.label
-                    .font(.system(size: 12, weight: .semibold))
+            if isLoadingMore {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "0E675E")))
+                    .scaleEffect(1.1)
+            } else {
+                Button(action: onLoadMore) {
+                    Text("Load More Products")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Color(hex: "0E675E"))
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(Color(hex: "F0FDF4"))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(hex: "A7F3D0"), lineWidth: 1)
+                        )
+                        .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(configuration.isOn ? activeColor.opacity(0.15) : Color(.systemGray6))
-            .foregroundColor(configuration.isOn ? activeColor : .secondary)
-            .cornerRadius(16)
+            Spacer()
         }
     }
 }

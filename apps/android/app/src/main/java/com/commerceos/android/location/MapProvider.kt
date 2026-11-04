@@ -111,7 +111,8 @@ fun RealLocationMapViewport(
         if (hasValidCenter) {
             LatLng(centerPoint!!.latitude, centerPoint.longitude)
         } else {
-            LatLng(20.5937, 78.9629)
+            // Default to Rewari fulfillment hub (28.1919, 76.6080) rather than uninitialized India center (20.5937, 78.9629 -> Wadgaon, MH)
+            LatLng(28.191944, 76.608042)
         }
     }
 
@@ -150,7 +151,9 @@ fun RealLocationMapViewport(
         if (!cameraPositionState.isMoving && !useOsmEngine) {
             delay(150)
             val target = cameraPositionState.position.target
-            if (target.latitude != 0.0 && target.longitude != 0.0) {
+            // Only trigger geocoding if centerPoint is valid or user explicitly dragged away from uninitialized coordinates
+            val isIndiaCenterFallback = kotlin.math.abs(target.latitude - 20.5937) < 0.01 && kotlin.math.abs(target.longitude - 78.9629) < 0.01
+            if (target.latitude != 0.0 && target.longitude != 0.0 && !isIndiaCenterFallback && (hasValidCenter || cameraPositionState.position.zoom > 10.0f)) {
                 onMapCameraSettled(target.latitude, target.longitude)
             }
         }

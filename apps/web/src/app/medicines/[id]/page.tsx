@@ -269,6 +269,8 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
         cartTotalAmount={cartSubtotal}
         onOpenCart={() => setIsCartOpen(true)}
         onSearchChange={() => setIsSearchModalOpen(true)}
+        profileHref="/account"
+        ordersHref="/orders"
       />
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-8 w-full">
@@ -333,7 +335,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
               )}
             </div>
 
-            {/* DARK STORE INTEGRITY BANNER */}
+            {/* STORE INTEGRITY BANNER */}
             <div className="mt-4 w-full p-3 rounded-xl bg-surface-brandSubtle border border-border-brandSubtle flex items-center justify-between text-2xs font-bold text-content-brand">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-content-brand" />
@@ -346,8 +348,8 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
           <div className="flex flex-col justify-between space-y-6">
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-md bg-surface-subtle text-content-muted text-2xs font-black uppercase tracking-wider border border-border-subtle">
-                  {product.brandName || 'HEALTHCARE'}
+                <span className="px-2.5 py-0.5 rounded-md bg-surface-subtle text-content-primary text-2xs font-black uppercase tracking-wider border border-border-subtle">
+                  {product.manufacturer || product.brandName || 'HEALTHCARE'}
                 </span>
                 <span className="text-2xs text-content-muted">•</span>
                 <span className="text-2xs font-bold text-content-brand uppercase tracking-wider">
@@ -358,6 +360,13 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
               <h1 className="text-xl sm:text-2xl font-black text-content-primary tracking-tight leading-tight">
                 {product.name}
               </h1>
+
+              {(product.saltComposition || product.activeSalt) && (
+                <div className="p-2.5 rounded-xl bg-surface-brandSubtle border border-border-brandSubtle text-xs font-semibold text-content-brand flex items-center gap-2">
+                  <Pill className="h-4 w-4 shrink-0" />
+                  <span>Salt: <strong className="font-mono">{product.saltComposition || product.activeSalt}</strong></span>
+                </div>
+              )}
 
               {product.packSize && (
                 <p className="text-xs font-semibold text-content-secondary">
@@ -391,7 +400,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
                 <div>
                   <h4 className="text-xs font-extrabold text-content-primary">Lightning 10-Minute Dispatch</h4>
                   <p className="text-2xs text-content-secondary font-medium mt-0.5">
-                    Fulfilled directly from Sector 18 Dark Store. Temperature mapped and handled by licensed personnel.
+                    Fulfilled directly from Sector 18 Store. Temperature mapped and handled by licensed personnel.
                   </p>
                 </div>
               </div>
@@ -493,18 +502,22 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
           {activeTab === 'composition' && (
             <div className="space-y-4">
               <h3 className="text-sm font-extrabold text-content-primary">Active Pharmaceutical Ingredients (APIs)</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(details.saltCompositions || [
-                  { saltName: product.name, strength: product.packSize || 'Standard Therapeutic Dose' },
-                ]).map((salt, i) => (
-                  <div key={i} className="p-3.5 rounded-xl bg-surface-subtle border border-border-subtle flex items-center justify-between">
-                    <span className="text-xs font-bold text-content-primary">{salt.saltName}</span>
-                    <span className="text-2xs font-extrabold text-content-brand bg-surface-brandSubtle px-2 py-0.5 rounded border border-border-brandSubtle">
-                      {salt.strength}
-                    </span>
-                  </div>
-                ))}
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-border-subtle space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-content-primary">Active Salt Composition</span>
+                  <span className="text-2xs font-extrabold text-content-brand bg-surface-brandSubtle px-2.5 py-1 rounded-lg border border-border-brandSubtle font-mono">
+                    {product.packSize || 'Standard Formulation'}
+                  </span>
+                </div>
+                <p className="text-sm font-mono font-bold text-content-brand">
+                  {product.saltComposition || product.activeSalt || (details.saltCompositions ? details.saltCompositions.map(s => `${s.saltName} (${s.strength})`).join(' + ') : 'Pharmaceutical formulation verified by certified pharmacists')}
+                </p>
               </div>
+              {product.manufacturer && (
+                <div className="text-xs text-content-secondary">
+                  Manufactured / Marketed by: <strong className="text-content-primary">{product.manufacturer}</strong>
+                </div>
+              )}
             </div>
           )}
 
@@ -513,11 +526,25 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
             <div className="space-y-3">
               <h3 className="text-sm font-extrabold text-content-primary">Safety Advice & Warnings</h3>
               <div className="space-y-2.5">
-                {(details.warnings || [
-                  { category: 'Alcohol', rating: 'Caution', description: 'Consult your doctor before consuming alcohol with this medication.' },
-                  { category: 'Pregnancy', rating: 'Consult Doctor', description: 'Safety during pregnancy must be evaluated by a healthcare practitioner.' },
-                  { category: 'Driving', rating: 'Safe with Caution', description: 'May cause mild drowsiness in sensitive individuals.' },
-                ]).map((w, i) => (
+                {((product.safetyAdvice && product.safetyAdvice.length > 0)
+                  ? product.safetyAdvice.map((tag) => {
+                      const colonIdx = tag.indexOf(':');
+                      const cat = colonIdx > 0 ? tag.slice(0, colonIdx).replace(/^#+/, '').trim() : 'Warning';
+                      const desc = colonIdx > 0 ? tag.slice(colonIdx + 1).trim() : tag.replace(/^#+/, '').trim();
+                      const isCrit = desc.toLowerCase().includes('unsafe') || desc.toLowerCase().includes('critical') || desc.toLowerCase().includes('contraindicated');
+                      const isCaution = desc.toLowerCase().includes('caution') || desc.toLowerCase().includes('avoid');
+                      return {
+                        category: cat,
+                        rating: isCrit ? 'Critical Caution' : isCaution ? 'Caution Advised' : 'Safe / Informational',
+                        description: desc
+                      };
+                    })
+                  : (details.warnings || [
+                      { category: 'Alcohol', rating: 'Caution', description: 'Consult your doctor before consuming alcohol with this medication.' },
+                      { category: 'Pregnancy', rating: 'Consult Doctor', description: 'Safety during pregnancy must be evaluated by a healthcare practitioner.' },
+                      { category: 'Driving', rating: 'Safe with Caution', description: 'May cause mild drowsiness in sensitive individuals.' },
+                    ])
+                ).map((w, i) => (
                   <div key={i} className="p-3.5 rounded-xl bg-surface-subtle border border-border-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 text-content-warning shrink-0" />
@@ -539,7 +566,7 @@ export default function MedicineDetailsPage({ params }: { params: { id: string }
               <h3 className="text-sm font-extrabold text-content-primary">Storage & Quality Assurance</h3>
               <div className="p-4 rounded-2xl bg-surface-subtle border border-border-subtle space-y-2 text-xs text-content-secondary">
                 <p className="font-bold text-content-primary">
-                  Temperature: {product.coldChainRequired ? 'Store between 2°C and 8°C in refrigerator' : 'Store in a cool, dry place away from direct sunlight (below 25°C)'}
+                  Instructions: {product.storageCondition || product.storageInstructions || (product.coldChainRequired ? 'Cold Chain: Store between 2°C and 8°C in refrigerator' : 'Store in a cool, dry place away from direct sunlight (below 25°C)')}
                 </p>
                 <p>Keep out of reach of children. Do not freeze cold chain biologics.</p>
               </div>

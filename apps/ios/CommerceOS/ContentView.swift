@@ -350,13 +350,14 @@ struct IOSCartView: View {
                     }
                 }
 
+                let hasSavedAddress = !(UserDefaults.standard.string(forKey: "saved_address_line") ?? "").isEmpty
                 Button(action: onCheckout) {
-                    Text("Proceed to Checkout (₹\(String(format: "%.2f", grandTotal)))")
+                    Text(hasSavedAddress ? "Proceed to Checkout (₹\(String(format: "%.2f", grandTotal)))" : "Select Address to Checkout")
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color(hex: "10B981"))
+                        .background(hasSavedAddress ? Color(hex: "10B981") : Color(hex: "94A3B8"))
                         .cornerRadius(14)
                 }
                 .padding()

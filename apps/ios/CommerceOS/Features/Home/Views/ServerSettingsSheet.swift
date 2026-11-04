@@ -75,6 +75,7 @@ public struct ServerSettingsSheet: View {
                         .disableAutocorrection(true)
                         .keyboardType(.URL)
                         .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(Color(hex: "0F172A"))
 
                     Button("Apply Custom URL") {
                         serverConfig.setCustomURL(customURLText)

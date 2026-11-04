@@ -83,10 +83,25 @@ class RiderSessionManager private constructor(context: Context) {
         }
     }
 
-    fun clearSession() {
-        secureStore.clear(KEY_AUTH_TOKEN)
-        secureStore.clear(KEY_REFRESH_TOKEN)
+    fun isLoggedIn(): Boolean {
+        return getAuthToken().isNotBlank() && getRiderId().isNotBlank()
+    }
+
+    fun clearSession(context: Context? = null) {
+        saveShiftOnline(false)
+        secureStore.deleteKeyAndValue(KEY_AUTH_TOKEN)
+        secureStore.deleteKeyAndValue(KEY_REFRESH_TOKEN)
+        saveRiderId("")
         prefs.edit().clear().apply()
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+        } catch (_: Exception) {}
+        context?.let { ctx ->
+            try {
+                val notifManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                notifManager.cancelAll()
+            } catch (_: Exception) {}
+        }
     }
 
     fun getFcmToken(): String {
@@ -110,7 +125,8 @@ class RiderSessionManager private constructor(context: Context) {
     }
 
     fun isShiftOnline(): Boolean {
-        return prefs.getBoolean(KEY_IS_ONLINE, true)
+        if (!isLoggedIn()) return false
+        return prefs.getBoolean(KEY_IS_ONLINE, false)
     }
 
     fun saveShiftOnline(online: Boolean) {

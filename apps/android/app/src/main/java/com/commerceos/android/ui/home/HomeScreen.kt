@@ -182,6 +182,17 @@ fun HomeScreen(
                 )
             }
 
+            // 2b. Tiered Promotional Campaigns Strip (Active Authoritative Coupons)
+            item {
+                Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+                    PromotionalCampaignsStrip(
+                        onSelectCampaign = { code ->
+                            onSearchClick("")
+                        }
+                    )
+                }
+            }
+
             // 3. Assisted Commerce Ribbon (Upload Rx / WhatsApp / Call 24x7)
             item {
                 AssistedCommerceRibbon(
@@ -528,6 +539,146 @@ private fun HeroDualActionCards(
                             tint = Color(0xFF2563EB),
                             modifier = Modifier.size(12.dp)
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Tiered Promotional Campaigns Strip (HEALTH30, SAVE10 - Database Authoritative).
+ */
+@Composable
+private fun PromotionalCampaignsStrip(
+    onSelectCampaign: (String) -> Unit
+) {
+    val campaigns = remember {
+        listOf(
+            Triple(
+                "HEALTH30",
+                "FLAT ₹150 OFF",
+                "On orders > ₹799 (Medicines)"
+            ),
+            Triple(
+                "SAVE10",
+                "FLAT ₹100 OFF",
+                "On orders > ₹199 (Instant)"
+            )
+        )
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.LocalOffer,
+                    contentDescription = null,
+                    tint = Color(0xFF0E675E),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Special Offers & Discounts",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF0F172A)
+                )
+            }
+            Text(
+                text = "Apply at Cart",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0E675E)
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            campaigns.forEachIndexed { index, (code, title, desc) ->
+                val gradient = when (index) {
+                    0 -> Brush.horizontalGradient(listOf(Color(0xFF064E3B), Color(0xFF047857)))
+                    1 -> Brush.horizontalGradient(listOf(Color(0xFF1E1B4B), Color(0xFF4338CA)))
+                    else -> Brush.horizontalGradient(listOf(Color(0xFF155E75), Color(0xFF0891B2)))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    shadowElevation = 1.dp,
+                    modifier = Modifier
+                        .width(220.dp)
+                        .clickable { onSelectCampaign(code) }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(gradient)
+                            .padding(12.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = title,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ConfirmationNumber,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Text(
+                                text = desc,
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Surface(
+                                color = Color.White,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "USE CODE: ",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF475569)
+                                    )
+                                    Text(
+                                        text = code,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

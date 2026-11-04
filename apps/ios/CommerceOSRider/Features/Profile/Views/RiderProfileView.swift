@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct RiderProfileView: View {
     @EnvironmentObject private var sessionManager: RiderSessionManager
+    @State private var showLogoutConfirm: Bool = false
     
     public init() {}
     
@@ -71,7 +72,7 @@ public struct RiderProfileView: View {
                         
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("ASSIGNED DARK STORE")
+                                Text("ASSIGNED STORE")
                                     .font(.system(size: 9, weight: .black))
                                     .foregroundColor(Color(hex: "94A3B8"))
                                     .tracking(0.5)
@@ -139,7 +140,7 @@ public struct RiderProfileView: View {
                             HStack {
                                 Image(systemName: "phone.bubble.left.fill")
                                     .foregroundColor(Color(hex: "38BDF8"))
-                                Text("Call Dark Store Dispatcher")
+                                Text("Call Store Dispatcher")
                                     .font(.system(size: 13, weight: .bold))
                                     .foregroundColor(.white)
                                 Spacer()
@@ -173,6 +174,26 @@ public struct RiderProfileView: View {
                             .cornerRadius(12)
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "EF4444").opacity(0.4), lineWidth: 1))
                         }
+                        
+                        Button(action: {
+                            showLogoutConfirm = true
+                        }) {
+                            HStack {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                    .foregroundColor(Color(hex: "EF4444"))
+                                Text("End Shift & Log Out")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(Color(hex: "EF4444"))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(14)
+                            .background(Color(hex: "1F1616"))
+                            .cornerRadius(12)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "EF4444").opacity(0.3), lineWidth: 1))
+                        }
                     }
                     .padding(.horizontal, 16)
                     
@@ -183,6 +204,16 @@ public struct RiderProfileView: View {
             .background(Color(hex: "0D0F14").ignoresSafeArea())
             .navigationTitle("Partner Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Log Out", isPresented: $showLogoutConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Log Out", role: .destructive) {
+                    Task {
+                        await sessionManager.logout()
+                    }
+                }
+            } message: {
+                Text("Are you sure you want to end your shift and log out? You will no longer receive delivery offers or notifications.")
+            }
         }
         .navigationViewStyle(.stack)
     }

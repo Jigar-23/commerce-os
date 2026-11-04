@@ -191,7 +191,7 @@ export default function ExpressCheckoutPage() {
           </h1>
 
           <p className="text-xs sm:text-sm text-slate-600 mt-2 max-w-md leading-relaxed">
-            Your medicines are being packed at the dark store with batch verification. A licensed pharmacist has approved this dispatch.
+            Your medicines are being packed at the store with batch verification. A licensed pharmacist has approved this dispatch.
           </p>
 
           {/* ORDER & OTP CARD */}
@@ -233,10 +233,10 @@ export default function ExpressCheckoutPage() {
 
           <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md">
             <Link
-              href="/orders"
+              href={`/orders/${orderResult.orderId}`}
               className="flex-1 py-3.5 px-6 rounded-xl bg-[#0E675E] hover:bg-[#094640] text-white font-extrabold text-sm shadow-sm flex items-center justify-center gap-2 transition-all active:scale-98"
             >
-              <span>Track Live Delivery</span>
+              <span>Track Live Delivery Map</span>
               <ChevronRight className="h-4 w-4 stroke-[3]" />
             </Link>
 
@@ -274,7 +274,7 @@ export default function ExpressCheckoutPage() {
           </div>
           <h2 className="text-lg font-extrabold text-slate-900">Your cart is empty</h2>
           <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-            Add medicines and healthcare essentials for 10-minute dark store delivery in Rewari.
+            Add medicines and healthcare essentials for 10-minute store delivery in Rewari.
           </p>
           <div className="pt-2">
             <Link
@@ -629,12 +629,24 @@ export default function ExpressCheckoutPage() {
           </div>
 
           <button
-            onClick={handleAuthorizeOrder}
+            onClick={() => {
+              if (!currentAddress) {
+                setIsMapModalOpen(true);
+              } else {
+                handleAuthorizeOrder();
+              }
+            }}
             disabled={isProcessing}
-            className="flex-1 max-w-sm py-3.5 px-6 rounded-xl bg-[#0E675E] hover:bg-[#094640] active:scale-98 text-white font-extrabold text-sm sm:text-base shadow-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            className={`flex-1 max-w-sm py-3.5 px-6 rounded-xl font-extrabold text-sm sm:text-base shadow-sm transition-all flex items-center justify-center gap-2 ${
+              !currentAddress
+                ? 'bg-slate-300 text-slate-500 hover:bg-slate-300 shadow-none'
+                : 'bg-[#0E675E] hover:bg-[#094640] active:scale-98 text-white'
+            }`}
           >
             {isProcessing ? (
               <span>Authorizing Dispatch...</span>
+            ) : !currentAddress ? (
+              <span>Select Address to Proceed</span>
             ) : (
               <>
                 <span>Place Order ({paymentMethod})</span>

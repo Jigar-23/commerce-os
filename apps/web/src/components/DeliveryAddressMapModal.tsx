@@ -10,8 +10,8 @@ import { SavedAddress, createCustomerAddress, setDefaultCustomerAddress } from '
 interface DeliveryAddressMapModalProps {
   isOpen: boolean;
   onClose: () => void;
-  savedAddresses: SavedAddress[];
-  currentAddress: SavedAddress | null;
+  savedAddresses?: SavedAddress[];
+  currentAddress?: SavedAddress | null;
   onSelectAddress: (address: SavedAddress) => void;
   onAddressSaved?: () => void;
 }
@@ -35,8 +35,8 @@ const INSTRUCTION_OPTIONS = [
 export default function DeliveryAddressMapModal({
   isOpen,
   onClose,
-  savedAddresses,
-  currentAddress,
+  savedAddresses = [],
+  currentAddress = null,
   onSelectAddress,
   onAddressSaved,
 }: DeliveryAddressMapModalProps) {
@@ -292,7 +292,7 @@ export default function DeliveryAddressMapModal({
               mapStyle === 'dark' ? 'bg-surface-inverse' : mapStyle === 'satellite' ? 'bg-navy-900' : 'bg-surface-subtle'
             }`}
           >
-            {/* SIMULATED MAP ROADS & DARK STORE POLYGON */}
+            {/* SIMULATED MAP ROADS & STORE POLYGON */}
             {/* commerce-os:allow-vector-color */}
             <svg className="absolute inset-0 w-full h-full opacity-30 pointer-events-none">
               <defs>
@@ -361,7 +361,7 @@ export default function DeliveryAddressMapModal({
               </button>
             </div>
 
-            {/* DARK STORE COVERAGE SLA RIBBON */}
+            {/* STORE COVERAGE SLA RIBBON */}
             <div className="absolute bottom-4 left-4 z-20 bg-surface-inverse text-content-brand backdrop-blur-md px-3.5 py-1.5 rounded-xl shadow-lg border border-border-brand flex items-center space-x-2 text-2xs font-semibold">
               <Sparkles className="w-3.5 h-3.5 text-content-brand animate-pulse" />
               <span>Instant 10-Min <strong>Verified Delivery Coverage</strong></span>

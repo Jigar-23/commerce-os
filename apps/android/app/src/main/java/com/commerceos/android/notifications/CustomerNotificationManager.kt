@@ -79,9 +79,9 @@ object CustomerNotificationManager {
         val orderCode = orderId.takeLast(6).uppercase()
         val title = "💊 Order #$orderCode Confirmed"
         val summaryText = "$itemCount items • ₹$totalAmount"
-        val shortContent = "Order #$orderCode confirmed. Express dark store packing started (~$etaMins mins)."
+        val shortContent = "Order #$orderCode confirmed. Express store packing started (~$etaMins mins)."
         val bigContent = buildString {
-            append("Your pharmacy order has been confirmed and assigned to our local dark store.\n")
+            append("Your pharmacy order has been confirmed and assigned to our local store.\n")
             append("📦 Package: $itemCount medication(s) • ₹$totalAmount\n")
             append("⚡ Express Delivery: Estimated in ~$etaMins mins\n")
             append("🛡️ Temperature-controlled & tamper-evident sealed.")
@@ -327,7 +327,7 @@ object CustomerNotificationManager {
         val bigMessage = buildString {
             append("Refill Alert: $medicineName\n")
             append("📅 Supply Status: Estimated ~${daysRemaining} days remaining.\n")
-            append("⚡ Express Delivery: 10-15 minute delivery from your nearest dark store pharmacy.\n")
+            append("⚡ Express Delivery: 10-15 minute delivery from your nearest store pharmacy.\n")
             append("Tap below to add to cart instantly.")
         }
 

@@ -320,40 +320,6 @@ fun NotificationsScreen(
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Instant Test Notification Trigger (Helpful for quick verification)
-                Button(
-                    onClick = {
-                        val randomOrderId = "ORD" + (1000..9999).random()
-                        CustomerNotificationManager.postOrderPlacedNotification(
-                            context = context,
-                            orderId = randomOrderId,
-                            itemCount = 3,
-                            totalAmount = "685",
-                            etaMins = 12
-                        )
-                        notificationsList = LocalNotificationStorage.getNotifications(context)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ElectricBolt,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Simulate Order Notification",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                }
-
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // On-Device Notification Channel Preferences Card
@@ -385,7 +351,7 @@ fun NotificationsScreen(
                             icon = Icons.Default.LocalShipping,
                             iconTint = Color(0xFF2563EB),
                             title = "Order Dispatch & Live Rider SLA",
-                            subtitle = "Heads-up alert when dark store packs order & rider departs",
+                            subtitle = "Heads-up alert when store packs order & rider departs",
                             checked = orderAlertsEnabled,
                             onCheckedChange = {
                                 orderAlertsEnabled = it

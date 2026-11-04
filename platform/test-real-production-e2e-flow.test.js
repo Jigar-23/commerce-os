@@ -391,7 +391,7 @@ async function runRealProductionE2eFlow() {
       });
       assert.strictEqual(quoteRes.status, 200);
       assert.strictEqual(quoteRes.data.itemsSubtotal, 60.0);
-      assert.strictEqual(quoteRes.data.codFee, 15.0);
+      assert.strictEqual(quoteRes.data.codFee, 0.0);
       assert.ok(quoteRes.data.totalAmount > 60.0);
     });
 

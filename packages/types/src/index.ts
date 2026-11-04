@@ -105,6 +105,7 @@ export interface BatchInventory {
   coldChainStorageTempCelsius: number;
   warehouseId: string;
   darkStoreId?: string;
+  storeId?: string;
 }
 
 // --- ORDER & CHECKOUT TYPES ---
@@ -115,6 +116,7 @@ export type OrderStatus =
   | 'PRESCRIPTION_VERIFICATION_PENDING' 
   | 'PHARMACIST_APPROVED' 
   | 'ALLOCATED_DARK_STORE' 
+  | 'ALLOCATED_STORE' 
   | 'PACKED_FEFO' 
   | 'OUT_FOR_DELIVERY' 
   | 'DELIVERED' 

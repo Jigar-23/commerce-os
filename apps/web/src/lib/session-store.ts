@@ -24,6 +24,19 @@ export const useSession = create<SessionState>()(
       setUser: (user) => set({ user }),
       logout: () => set({ user: null }),
     }),
-    { name: 'commerceos-session' }
+    {
+      name: 'commerceos-session',
+      // Security: Partialize persistence to exclude accessToken from localStorage
+      partialize: (state) => ({
+        user: state.user
+          ? {
+              userId: state.user.userId,
+              email: state.user.email,
+              fullName: state.user.fullName,
+              roles: state.user.roles,
+            }
+          : null,
+      }),
+    }
   )
 );

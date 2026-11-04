@@ -190,6 +190,58 @@ class CloudflareR2Service {
     const buffer = Buffer.from(match[2], 'base64');
     return this.uploadBuffer({ key, buffer, contentType });
   }
+
+  /**
+   * Generates a temporary SigV4 presigned GET URL valid for expiresInSeconds.
+   * Securely authorizes access to private medical records/prescriptions without making them publicly accessible.
+   */
+  generatePresignedGetUrl({ key, expiresInSeconds = 900 }) {
+    if (!this.isConfigured() || !key) return null;
+    const cleanKey = key.replace(/^\/+/, '');
+    const pathname = `/${this.bucketName}/${cleanKey}`;
+    const host = `${this.accountId}.r2.cloudflarestorage.com`;
+    const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+    const dateStamp = amzDate.slice(0, 8);
+    const credentialScope = `${dateStamp}/${this.region}/s3/aws4_request`;
+
+    const queryParams = [
+      `X-Amz-Algorithm=AWS4-HMAC-SHA256`,
+      `X-Amz-Credential=${encodeURIComponent(`${this.accessKeyId}/${credentialScope}`)}`,
+      `X-Amz-Date=${amzDate}`,
+      `X-Amz-Expires=${expiresInSeconds}`,
+      `X-Amz-SignedHeaders=host`
+    ].sort();
+
+    const canonicalQueryString = queryParams.join('&');
+    const canonicalHeaders = `host:${host}\n`;
+    const signedHeaders = 'host';
+    const payloadHash = 'UNSIGNED-PAYLOAD';
+
+    const canonicalRequest = [
+      'GET',
+      pathname,
+      canonicalQueryString,
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash
+    ].join('\n');
+
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      credentialScope,
+      crypto.createHash('sha256').update(canonicalRequest, 'utf8').digest('hex')
+    ].join('\n');
+
+    const kDate = crypto.createHmac('sha256', `AWS4${this.secretAccessKey}`).update(dateStamp, 'utf8').digest();
+    const kRegion = crypto.createHmac('sha256', kDate).update(this.region, 'utf8').digest();
+    const kService = crypto.createHmac('sha256', kRegion).update('s3', 'utf8').digest();
+    const kSigning = crypto.createHmac('sha256', kService).update('aws4_request', 'utf8').digest();
+
+    const signature = crypto.createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex');
+
+    return `https://${host}${pathname}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
+  }
 }
 
 const defaultR2Service = new CloudflareR2Service();

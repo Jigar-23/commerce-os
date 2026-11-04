@@ -7,7 +7,7 @@ import SellerAuthGuard from '@/components/SellerAuthGuard';
 import { sellerApi } from '@/lib/apiClient';
 import {
   Bike, Plus, ShieldCheck, Phone, CheckCircle2,
-  AlertTriangle, RefreshCw, X, User, FileText
+  AlertTriangle, RefreshCw, X, User, FileText, Trash2
 } from 'lucide-react';
 
 interface FleetRider {
@@ -117,6 +117,8 @@ export default function FleetRidersPage() {
     }
   };
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const handleToggleStatus = async (riderId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     try {
@@ -126,6 +128,26 @@ export default function FleetRidersPage() {
       );
     } catch (err: any) {
       alert(`Failed to update status: ${err?.message}`);
+    }
+  };
+
+  const handleDeleteRider = async (riderId: string, riderName: string) => {
+    if (!confirm(`Are you sure you want to delete delivery partner "${riderName}"? They will be removed from the fleet dashboard and can no longer receive dispatch offers.`)) {
+      return;
+    }
+    setDeletingId(riderId);
+    try {
+      const res = await sellerApi.delete(`/api/v1/seller/riders/${encodeURIComponent(riderId)}`);
+      if (res && (res.ok || (res.data as any)?.ok)) {
+        setRiders((prev) => prev.filter((r) => r.id !== riderId && r.rider_id !== riderId));
+        setSuccessMessage(`Delivery partner "${riderName}" was successfully deleted from the fleet.`);
+      } else {
+        alert(res?.error || 'Failed to delete rider');
+      }
+    } catch (err: any) {
+      alert(`Failed to delete rider: ${err?.message}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -155,7 +177,7 @@ export default function FleetRidersPage() {
               </div>
               <div>
                 <h1 className="text-base font-black text-content-primary tracking-tight">Fleet &amp; Delivery Partners</h1>
-                <p className="text-2xs font-semibold text-content-muted">Hyperlocal Dispatch &amp; Dark Store Rider Operations</p>
+                <p className="text-2xs font-semibold text-content-muted">Hyperlocal Dispatch &amp; Store Rider Operations</p>
               </div>
             </div>
 
@@ -310,16 +332,27 @@ export default function FleetRidersPage() {
                           </td>
 
                           <td className="py-4 px-6 text-right">
-                            <button
-                              onClick={() => handleToggleStatus(rider.id || rider.rider_id, rider.status)}
-                              className={`px-3 py-1.5 rounded-lg text-2xs font-bold transition-all ${
-                                rider.status === 'ACTIVE'
-                                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                                  : 'bg-slate-900 hover:bg-slate-800 text-white'
-                              }`}
-                            >
-                              {rider.status === 'ACTIVE' ? 'Set Inactive' : 'Activate Rider'}
-                            </button>
+                            <div className="flex items-center justify-end space-x-2">
+                              <button
+                                onClick={() => handleToggleStatus(rider.id || rider.rider_id, rider.status)}
+                                className={`px-3 py-1.5 rounded-lg text-2xs font-bold transition-all ${
+                                  rider.status === 'ACTIVE'
+                                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                    : 'bg-slate-900 hover:bg-slate-800 text-white'
+                                }`}
+                              >
+                                {rider.status === 'ACTIVE' ? 'Set Inactive' : 'Activate Rider'}
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteRider(rider.id || rider.rider_id, rider.full_name)}
+                                disabled={deletingId === (rider.id || rider.rider_id)}
+                                className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 transition-all shadow-2xs"
+                                title={`Delete ${rider.full_name || 'rider'} from fleet`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

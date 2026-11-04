@@ -128,10 +128,12 @@ async function runDeepStressSuite() {
   `, [storeId]);
 
   const sellerId = `sel_deep_${Date.now()}`;
+  const sellerEmail = `seller_deep_${Date.now()}@commerceos.io`;
+  const sellerPhone = `97${Date.now().toString().slice(-8)}`;
   await pool.query(`
     INSERT INTO sellers (id, seller_id, email, phone, password_hash, store_id, store_name, merchant_name, status, is_primary, roles)
-    VALUES ($1, $1, 'seller_deep@commerceos.io', '9876543218', 'dummy_hash', $2, 'Apollo Pharmacy Deep', 'Apollo Deep Ltd', 'ACTIVE', TRUE, '["ROLE_SELLER"]'::jsonb)
-  `, [sellerId, storeId]);
+    VALUES ($1, $1, $2, $3, 'dummy_hash', $4, 'Apollo Pharmacy Deep', 'Apollo Deep Ltd', 'ACTIVE', TRUE, '["ROLE_SELLER"]'::jsonb)
+  `, [sellerId, sellerEmail, sellerPhone, storeId]);
 
   const sku = `SKU_DEEP_${Date.now()}`;
   const prodId = `prod_deep_${Date.now()}`;
@@ -341,9 +343,7 @@ async function runDeepStressSuite() {
   await new Promise(r => serverInstance.close(r));
   console.log('🔒 Deep stress server shut down cleanly.\n');
 
-  if (failedAssertions > 0) {
-    process.exit(1);
-  }
+  process.exit(failedAssertions > 0 ? 1 : 0);
 }
 
 runDeepStressSuite().catch(err => {

@@ -46,6 +46,9 @@ import com.commerceos.android.ui.theme.CommerceElevation
 import com.commerceos.android.ui.theme.CommerceTypography
 import com.commerceos.android.ui.theme.Radius
 import com.commerceos.android.ui.theme.Spacing
+import com.commerceos.android.model.CouponCampaign
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
 import com.commerceos.android.util.MoneyFormatter
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -59,7 +62,15 @@ fun CartScreen(
     remainingForFreeDelivery: BigDecimal?,
     itemsSubtotal: String?,
     totalSavings: String?,
+    mrpSavings: String? = null,
     couponDiscount: String? = null,
+    appliedCouponCode: String? = null,
+    couponDiscountAmount: BigDecimal = BigDecimal.ZERO,
+    availableCampaigns: List<CouponCampaign> = emptyList(),
+    couponFeedbackMessage: String? = null,
+    isCouponError: Boolean = false,
+    onApplyCoupon: ((String) -> Unit)? = null,
+    onRemoveCoupon: (() -> Unit)? = null,
     expressFee: String?,
     coldChainFee: String?,
     grandTotal: String?,
@@ -85,7 +96,11 @@ fun CartScreen(
     val isRxBlocked = rxRequiredInCart && attachedPrescriptionId.isNullOrBlank()
     val isAddressSaved = deliveryAddress != null &&
         !deliveryAddress.id.startsWith("temp_gps_") &&
-        !deliveryAddress.tag.equals("Current Location", ignoreCase = true)
+        !deliveryAddress.tag.equals("Current Location", ignoreCase = true) &&
+        !deliveryAddress.city.equals("Wadgaon", ignoreCase = true) &&
+        (deliveryAddress.latitude ?: 0.0) != 0.0 &&
+        kotlin.math.abs((deliveryAddress.latitude ?: 0.0) - 20.5937) > 0.01 &&
+        deliveryAddress.addressLine.isNotBlank()
 
     Column(
         modifier = Modifier
@@ -201,6 +216,20 @@ fun CartScreen(
                 )
             }
 
+            // Tiered Coupons & Offers Section
+            item {
+                CartCouponsOffersSection(
+                    cartSubtotal = cartSubtotal ?: BigDecimal.ZERO,
+                    appliedCouponCode = appliedCouponCode,
+                    couponDiscountAmount = couponDiscountAmount,
+                    availableCampaigns = availableCampaigns,
+                    couponFeedbackMessage = couponFeedbackMessage,
+                    isCouponError = isCouponError,
+                    onApplyCoupon = onApplyCoupon,
+                    onRemoveCoupon = onRemoveCoupon
+                )
+            }
+
             // Prescription verification card
             item {
                 val context = LocalContext.current
@@ -220,6 +249,7 @@ fun CartScreen(
             item {
                 SummaryCard(
                     itemsSubtotal = itemsSubtotal,
+                    mrpSavings = mrpSavings,
                     totalSavings = totalSavings,
                     couponDiscount = couponDiscount,
                     expressFee = expressFee,
@@ -1403,6 +1433,7 @@ private fun ClinicalPrescriptionCard(prescription: Prescription) {
 @Composable
 private fun SummaryCard(
     itemsSubtotal: String?,
+    mrpSavings: String? = null,
     totalSavings: String?,
     couponDiscount: String? = null,
     expressFee: String?,
@@ -1465,10 +1496,11 @@ private fun SummaryCard(
             )
 
             // Total Savings / Price Discount
-            if (!totalSavings.isNullOrBlank() && totalSavings != "₹0.00" && totalSavings != "₹0") {
+            val catalogDiscount = mrpSavings ?: totalSavings
+            if (!catalogDiscount.isNullOrBlank() && catalogDiscount != "₹0.00" && catalogDiscount != "₹0") {
                 SummaryRow(
                     label = "Price discount",
-                    value = "- $totalSavings",
+                    value = "- $catalogDiscount",
                     labelColor = Color(0xFF059669),
                     valueColor = Color(0xFF059669),
                     boldValue = true
@@ -1745,14 +1777,14 @@ private fun StickyCheckoutBar(
                     Button(
                         onClick = onProceed,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF0E675E),
+                            containerColor = Color(0xFF94A3B8),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                         modifier = Modifier.height(48.dp)
                     ) {
-                        Text("Select Address ➔", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Select Address to Proceed", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 } else {
                     Button(
@@ -1766,6 +1798,361 @@ private fun StickyCheckoutBar(
                         modifier = Modifier.height(48.dp)
                     ) {
                         Text("Continue ➔", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CartCouponsOffersSection(
+    cartSubtotal: BigDecimal,
+    appliedCouponCode: String?,
+    couponDiscountAmount: BigDecimal,
+    availableCampaigns: List<CouponCampaign>,
+    couponFeedbackMessage: String?,
+    isCouponError: Boolean,
+    onApplyCoupon: ((String) -> Unit)?,
+    onRemoveCoupon: (() -> Unit)?
+) {
+    if (!appliedCouponCode.isNullOrBlank()) {
+        // 1. Sleek Quick-Commerce Applied Coupon Card (Tata 1mg / Blinkit Benchmark)
+        Surface(
+            color = Color(0xFFF0FDF4),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocalOffer,
+                        contentDescription = "Applied",
+                        tint = Color(0xFF059669),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "'$appliedCouponCode' applied",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF065F46)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "•",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Saved ${MoneyFormatter.format(couponDiscountAmount)}",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF059669)
+                    )
+                }
+                Text(
+                    text = "Remove",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFFDC2626),
+                    modifier = Modifier
+                        .clickable { onRemoveCoupon?.invoke() }
+                        .padding(start = 8.dp, top = 2.dp, bottom = 2.dp)
+                )
+            }
+        }
+    } else {
+        // 2. Available Tiered Coupons Card & Custom Code Input
+        var inputCode by remember { mutableStateOf("") }
+
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            shadowElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color(0xFFF0FDFA), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalOffer,
+                                contentDescription = null,
+                                tint = Color(0xFF0E675E),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Coupons & Offers",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Save extra with tiered voucher discounts",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+                    if (availableCampaigns.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            color = Color(0xFFF0FDFA),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, Color(0xFFCCFBF1))
+                        ) {
+                            Text(
+                                text = "${availableCampaigns.size} OFFERS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0E675E),
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Custom Coupon Input Box
+                Surface(
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        BasicTextField(
+                            value = inputCode,
+                            onValueChange = { inputCode = it.uppercase().take(15) },
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                letterSpacing = 0.5.sp
+                            ),
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { innerTextField ->
+                                if (inputCode.isEmpty()) {
+                                    Text(
+                                        text = "Enter coupon code (e.g. HEALTH30)",
+                                        fontSize = 12.5.sp,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        val isInputEligible = inputCode.trim().isNotBlank()
+                        Button(
+                            onClick = {
+                                if (isInputEligible) {
+                                    onApplyCoupon?.invoke(inputCode.trim())
+                                }
+                            },
+                            enabled = isInputEligible,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF0E675E),
+                                disabledContainerColor = Color(0xFFE2E8F0),
+                                contentColor = Color.White,
+                                disabledContentColor = Color(0xFF94A3B8)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Text(
+                                text = "APPLY",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
+                // Feedback Message (error / success)
+                if (!couponFeedbackMessage.isNullOrBlank()) {
+                    Text(
+                        text = couponFeedbackMessage,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isCouponError) Color(0xFFDC2626) else Color(0xFF059669),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                // Available Tiered Voucher Cards
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    availableCampaigns.forEach { campaign ->
+                        val isEligible = cartSubtotal >= campaign.minOrderValue
+                        val diffNeeded = campaign.minOrderValue.subtract(cartSubtotal).coerceAtLeast(BigDecimal.ZERO)
+
+                        Surface(
+                            color = if (isEligible) Color(0xFFFAFDFA) else Color(0xFFFAFAFA),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isEligible) Color(0xFF86EFAC) else Color(0xFFE2E8F0)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            color = Color(0xFFF0FDFA),
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = BorderStroke(1.dp, Color(0xFF99F6E4))
+                                        ) {
+                                            Text(
+                                                text = campaign.code,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color(0xFF0E675E),
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = if (isEligible) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = campaign.title,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isEligible) Color(0xFF166534) else Color(0xFFB45309),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = campaign.description,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF1E293B)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    if (isEligible) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = Color(0xFF059669),
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "Cart eligible! Tap apply to save",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF059669)
+                                            )
+                                        }
+                                    } else {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Lock,
+                                                contentDescription = null,
+                                                tint = Color(0xFFD97706),
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "Add ${MoneyFormatter.format(diffNeeded)} more to unlock",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFFD97706)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                if (isEligible) {
+                                    Button(
+                                        onClick = { onApplyCoupon?.invoke(campaign.code) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF0E675E),
+                                            contentColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text(
+                                            text = "APPLY",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                } else {
+                                    Surface(
+                                        color = Color(0xFFF1F5F9),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "LOCKED",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF94A3B8),
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

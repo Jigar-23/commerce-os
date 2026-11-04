@@ -131,6 +131,12 @@ object RiderNotificationManager {
     }
 
     fun postDirectOfferNotification(context: Context, offer: ServerOffer): NotificationPostResult {
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(context)
+        if (!sessionMgr.isLoggedIn() || !sessionMgr.isShiftOnline()) {
+            Log.w(TAG, "DROPPED: Notification posting suppressed. Rider is not logged in or shift is offline.")
+            return NotificationPostResult.POST_FAILED
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 Log.w(TAG, "NOTIFICATION_PERMISSION_DENIED: Cannot post offer notification to system tray.")

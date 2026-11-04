@@ -92,8 +92,8 @@ struct RiderDarkMapWebView: UIViewRepresentable {
         context.coordinator.webView = webView
         onCoordinatorCreated(context.coordinator)
 
-        let initialLat = riderCoordinate?.latitude ?? merchantCoordinate?.latitude ?? 20.5937
-        let initialLng = riderCoordinate?.longitude ?? merchantCoordinate?.longitude ?? 78.9629
+        let initialLat = riderCoordinate?.latitude ?? merchantCoordinate?.latitude ?? 28.191944
+        let initialLng = riderCoordinate?.longitude ?? merchantCoordinate?.longitude ?? 76.608042
         let html = generateDarkMapHtml(initLat: initialLat, initLng: initialLng)
         webView.loadHTMLString(html, baseURL: URL(string: "https://commerceos.local"))
 

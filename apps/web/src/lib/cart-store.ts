@@ -98,7 +98,6 @@ export const useCart = create<CartState>()(
         if (!customerId) return;
 
         try {
-          set({ isLoading: true });
           const res = await fetch(`${API_GATEWAY_URL}/api/v1/cart/${customerId}/items`, {
             method: 'POST',
             headers: buildAuthHeaders(),
@@ -116,8 +115,6 @@ export const useCart = create<CartState>()(
           }
         } catch (err) {
           console.error('[CartStore] Failed to sync item addition with authoritative backend:', err);
-        } finally {
-          set({ isLoading: false });
         }
       },
 

@@ -1,52 +1,175 @@
 import SwiftUI
 
+/**
+ * 1:1 Parity with Android CommerceOSApp.kt Navigation Architecture.
+ * Central Orchestrator for Commerce OS Customer Application on iOS.
+ * 
+ * Features:
+ * - 4 Primary Bottom Navigation Tabs: Home, Categories, Orders, Account (Material 3 styling).
+ * - Full-Screen Navigation Stack (No modal popup sheets for Notifications, Search, Orders, Prescriptions, Cart, Tracking, or Addresses).
+ * - Floating GlobalCartBar synced across all primary screens with animated entrance/exit.
+ * - Live Category Taxonomy & Cart synchronization.
+ */
 public struct MainTabView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var cartStore: CartLocalStore
     @EnvironmentObject private var configProvider: ClientConfigProvider
-    @State private var selectedTab: Int = 0
-    @State private var trackingOrderId: String? = nil
+    @EnvironmentObject private var addressRepository: AddressRepository
+    @ObservedObject private var navigator = AppNavigator.shared
     
     public init() {}
     
     public var body: some View {
         ZStack {
-            if let orderId = trackingOrderId {
-                OrderTrackingScreen(
-                    orderId: orderId,
-                    onBack: {
-                        trackingOrderId = nil
-                        selectedTab = 2 // Returns directly to Orders tab
+            if let currentScreen = navigator.currentScreen {
+                // MARK: - Full Page Navigation Destinations (No Bottom Sheets)
+                Group {
+                    switch currentScreen {
+                    case .notifications:
+                        NotificationsScreen(
+                            onBack: { navigator.pop() },
+                            onNavigateToOrders: {
+                                navigator.switchTab(to: 2)
+                            },
+                            onNavigateToPrescriptions: {
+                                navigator.pop()
+                                navigator.push(.prescriptions)
+                            }
+                        )
+                    case .search(let query):
+                        UniversalSearchScreen(
+                            initialQuery: query,
+                            onBack: { navigator.pop() }
+                        )
+                    case .catalog(let query):
+                        CatalogScreen(
+                            onSelectProduct: { prod in
+                                navigator.push(.productDetail(product: prod))
+                            },
+                            onAddToCart: { prod in
+                                cartStore.add(product: prod)
+                            },
+                            onBack: { navigator.pop() }
+                        )
+                        .onAppear {
+                            if !query.isEmpty {
+                                CatalogViewModel.shared.onQueryChange(query)
+                                CatalogViewModel.shared.submitQuery()
+                            }
+                        }
+                    case .productDetail(let prod):
+                        ProductDetailSheet(
+                            product: prod,
+                            onDismiss: { navigator.pop() }
+                        )
+                    case .cart:
+                        CartScreen(
+                            onCheckoutSuccess: { orderId in
+                                navigator.pop()
+                                navigator.push(.orderTracking(orderId: orderId))
+                            },
+                            onBack: { navigator.pop() }
+                        )
+                    case .orderTracking(let orderId):
+                        OrderTrackingScreen(
+                            orderId: orderId,
+                            onBack: { navigator.pop() }
+                        )
+                    case .prescriptions:
+                        PrescriptionVaultScreen(
+                            onBack: { navigator.pop() }
+                        )
+                    case .addressSelection(let fromCheckout, let fromProfile):
+                        AddressScreenView(
+                            onSelectAddress: { addr in
+                                addressRepository.selectAddress(addr)
+                                navigator.pop()
+                                if fromCheckout {
+                                    navigator.push(.paymentGateway)
+                                }
+                            },
+                            onSavedSuccessfully: {
+                                navigator.pop()
+                                if fromCheckout {
+                                    navigator.push(.paymentGateway)
+                                }
+                            },
+                            onBack: { navigator.pop() },
+                            fromProfile: fromProfile,
+                            directAddFlow: false
+                        )
+                    case .addAddressFlow:
+                        AddAddressFlowView(
+                            onSaveAddress: { addr in
+                                addressRepository.selectAddress(addr)
+                                navigator.pop()
+                                navigator.push(.paymentGateway)
+                            }
+                        )
+                    case .paymentGateway:
+                        PaymentScreen(
+                            address: addressRepository.selectedAddress,
+                            onAuthorize: { orderId in
+                                navigator.pop() // pop payment
+                                navigator.pop() // pop cart
+                                navigator.push(.orderTracking(orderId: orderId))
+                            },
+                            onChangeAddress: {
+                                navigator.push(.addressSelection(fromCheckout: true, fromProfile: false))
+                            },
+                            onBack: { navigator.pop() }
+                        )
                     }
-                )
+                }
                 .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
             } else {
+                // MARK: - 4 Primary Bottom Tabs (Home, Categories, Orders, Account)
                 VStack(spacing: 0) {
-                    // Main Content Area
                     ZStack {
-                        switch selectedTab {
+                        switch navigator.selectedTab {
                         case 0:
-                            HomeScreen(onOpenCatalog: { selectedTab = 1 })
+                            HomeScreen(onOpenCatalog: { navigator.switchTab(to: 1) })
                         case 1:
-                            CategoriesScreen()
+                            CategoriesScreen(
+                                selectedAddress: addressRepository.selectedAddress,
+                                calculatedEtaMinutes: addressRepository.calculatedEtaMinutes,
+                                locationHeaderLabel: addressRepository.locationHeaderTitle,
+                                isLocating: addressRepository.isLoading,
+                                onChangeAddress: {
+                                    navigator.push(.addressSelection(fromCheckout: false, fromProfile: false))
+                                },
+                                onProfileClick: {
+                                    navigator.switchTab(to: 3)
+                                },
+                                onNotificationsClick: {
+                                    navigator.push(.notifications)
+                                },
+                                onSearchClick: { query in
+                                    navigator.push(.search(query: query))
+                                },
+                                onUploadPrescription: {
+                                    navigator.push(.prescriptions)
+                                },
+                                onSelectCategory: { category in
+                                    navigator.push(.search(query: category.name))
+                                }
+                            )
                         case 2:
                             OrderHistoryScreen(onTrackOrder: { id in
-                                trackingOrderId = id
+                                navigator.push(.orderTracking(orderId: id))
                             })
                         case 3:
-                            CartScreen(onCheckoutSuccess: { orderId in
-                                trackingOrderId = orderId
-                            })
+                            AccountScreen()
                         default:
-                            HomeScreen(onOpenCatalog: { selectedTab = 1 })
+                            HomeScreen(onOpenCatalog: { navigator.switchTab(to: 1) })
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     
                     // Global Sticky Cart Bar floating directly above bottom navigation
-                    if cartStore.totalItemCount > 0 && selectedTab != 3 {
+                    if cartStore.totalItemCount > 0 {
                         GlobalCartBar(onTap: {
-                            selectedTab = 3
+                            navigator.push(.cart)
                         })
                         .padding(.horizontal, 14)
                         .padding(.bottom, 8)
@@ -54,14 +177,14 @@ public struct MainTabView: View {
                         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: cartStore.totalItemCount)
                     }
                     
-                    // Android-style Material 3 Bottom Navigation Bar pinned strictly to the bottom
+                    // Android-style Material 3 Bottom Navigation Bar
                     androidBottomNavBar
                 }
                 .background(Color(hex: "F4F5F7").ignoresSafeArea())
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: trackingOrderId)
-        .onChange(of: selectedTab) { newTab in
+        .animation(.easeInOut(duration: 0.22), value: navigator.screenStack)
+        .onChange(of: navigator.selectedTab) { _, newTab in
             if newTab == 2 {
                 Task {
                     await OrderRepository.shared.fetchCustomerOrders()
@@ -70,7 +193,7 @@ public struct MainTabView: View {
         }
     }
 
-    // MARK: - Android Material 3 Bottom Navigation Bar (Matches Android NavigationBar verbatim)
+    // MARK: - Android Material 3 Bottom Navigation Bar (1:1 with Android CommerceOSApp.kt lines 445-472)
     private var androidBottomNavBar: some View {
         HStack(spacing: 0) {
             navBarItem(
@@ -90,9 +213,8 @@ public struct MainTabView: View {
             )
             navBarItem(
                 index: 3,
-                icon: "cart.fill",
-                label: configProvider.currentConfig.terminology.cartLabel,
-                badgeCount: cartStore.totalItemCount
+                icon: "person.fill",
+                label: "Account"
             )
         }
         .frame(maxWidth: .infinity)
@@ -110,13 +232,11 @@ public struct MainTabView: View {
         )
     }
 
-    private func navBarItem(index: Int, icon: String, label: String, badgeCount: Int = 0) -> some View {
-        let isSelected = selectedTab == index
+    private func navBarItem(index: Int, icon: String, label: String) -> some View {
+        let isSelected = navigator.selectedTab == index
 
         return Button(action: {
-            withAnimation(.easeInOut(duration: 0.16)) {
-                selectedTab = index
-            }
+            navigator.switchTab(to: index)
         }) {
             VStack(spacing: 3) {
                 ZStack {
@@ -127,23 +247,10 @@ public struct MainTabView: View {
                             .transition(.scale.combined(with: .opacity))
                     }
 
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: icon)
-                            .font(.system(size: 17, weight: isSelected ? .bold : .regular))
-                            .foregroundColor(isSelected ? Color(hex: "059669") : Color(hex: "64748B"))
-                            .frame(width: 22, height: 22)
-
-                        if badgeCount > 0 {
-                            Text(badgeCount > 99 ? "99+" : "\(badgeCount)")
-                                .font(.system(size: 10, weight: .black))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color(hex: "059669"))
-                                .clipShape(Capsule())
-                                .offset(x: 14, y: -6)
-                        }
-                    }
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: isSelected ? .bold : .regular))
+                        .foregroundColor(isSelected ? Color(hex: "059669") : Color(hex: "64748B"))
+                        .frame(width: 22, height: 22)
                 }
                 .frame(height: 28)
 

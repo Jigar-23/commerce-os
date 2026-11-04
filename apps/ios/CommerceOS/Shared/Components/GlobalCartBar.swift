@@ -1,41 +1,80 @@
 import SwiftUI
+import UIKit
 
 public struct GlobalCartBar: View {
     @EnvironmentObject private var cartStore: CartLocalStore
     @EnvironmentObject private var configProvider: ClientConfigProvider
-    let onTap: () -> Void
+    public let onTap: () -> Void
+    
+    public init(onTap: @escaping () -> Void) {
+        self.onTap = onTap
+    }
+    
+    private func triggerHaptic() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
+    }
     
     public var body: some View {
-        Button(action: onTap) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    let count = cartStore.totalItemCount
-                    let label = "\(count) \(count == 1 ? "ITEM" : "ITEMS") • ₹\(String(format: "%.2f", cartStore.subtotal))"
-                    Text(label)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
-                    Text("Arrives in 10-15 mins")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(CommerceOSTheme.Colors.brandPrimarySoft)
+        let count = cartStore.totalItemCount
+        if count > 0 {
+            Button(action: {
+                triggerHaptic()
+                onTap()
+            }) {
+                HStack(spacing: 12) {
+                    // Left Cart Icon Pill
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.2))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "cart.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    
+                    // Center Price & Speed Details
+                    VStack(alignment: .leading, spacing: 2) {
+                        let countLabel = "\(count) \(count == 1 ? "ITEM" : "ITEMS")"
+                        Text("\(countLabel) • ₹\(String(format: "%.2f", cartStore.subtotal))")
+                            .font(.system(size: 13.5, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("⚡ 10 MINS DELIVERY")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundColor(Color(hex: "A7F3D0"))
+                    }
+                    
+                    Spacer()
+                    
+                    // Right View Cart CTA
+                    HStack(spacing: 4) {
+                        Text("View Cart")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .heavy))
+                            .foregroundColor(.white)
+                    }
                 }
-                
-                Spacer()
-                
-                HStack(spacing: 6) {
-                    Text("View Cart")
-                        .font(.system(size: 13, weight: .black))
-                        .foregroundColor(.white)
-                    Image(systemName: "cart.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    LinearGradient(
+                        colors: [Color(hex: "047857"), Color(hex: "065F46")],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(14)
+                .shadow(color: Color(hex: "047857").opacity(0.35), radius: 8, x: 0, y: 4)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(CommerceOSTheme.Colors.brandPrimaryDark)
-            .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.20), radius: 10, x: 0, y: 5)
+            .buttonStyle(PlainButtonStyle())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: count)
         }
-        .buttonStyle(PlainButtonStyle())
     }
 }

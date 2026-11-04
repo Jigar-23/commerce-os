@@ -65,7 +65,7 @@ data class CommerceProduct(
             sellingPrice > 0 -> sellingPrice
             price > 0 -> price
             (mrp ?: 0.0) > 0 -> mrp!!
-            else -> 5.0
+            else -> 0.0
         }
 
     val displayPrice: Double
@@ -87,7 +87,7 @@ fun ApiMedicine.toCommerceProduct(verticalId: String = "health"): CommerceProduc
         discountedPrice > 0 -> discountedPrice
         price > 0 -> price
         (mrp ?: 0.0) > 0 -> mrp!!
-        else -> 5.0
+        else -> 0.0
     }
     val effectivePrice = when {
         (mrp ?: 0.0) > 0 -> mrp!!
@@ -101,6 +101,7 @@ fun ApiMedicine.toCommerceProduct(verticalId: String = "health"): CommerceProduc
         brand = brandName,
         price = effectivePrice,
         discountedPrice = effectiveSellingPrice,
+        sellingPrice = effectiveSellingPrice,
         mrp = effectivePrice,
         image = image ?: "",
         inStock = inStock,

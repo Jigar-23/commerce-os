@@ -58,6 +58,7 @@ object MedicineImageResolver {
         "azithral" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/310659/azithral-azithromycin-500mg-strip-of-5-tablets-front-2-1756922244-non-watermarked.jpg",
         "azithromycin" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/310659/azithral-azithromycin-500mg-strip-of-5-tablets-front-2-1756922244-non-watermarked.jpg",
         "pan 40" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/I00306/pan-40mg-strip-of-15-tablets-front-2-1756099995-non-watermarked.jpg",
+        "pan" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/I00306/pan-40mg-strip-of-15-tablets-front-2-1756099995-non-watermarked.jpg",
         "shelcal" to "https://cdn01.pharmeasy.in/dam/products_otc/K78299/shelcal-500mg-bottle-of-30-tablets-6.1-1787223246.jpg",
         "becosules" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg",
         "volini" to "https://cdn01.pharmeasy.in/dam/products_otc/I00392/volini-pain-relief-gel-tube-of-100-g-6.1-1712725504.jpg",
@@ -70,7 +71,13 @@ object MedicineImageResolver {
         "saridon" to "https://cdn01.pharmeasy.in/dam/products_otc/156565/saridon-headache-relief-tablet-strip-of-10-tablets-2-1671741035.jpg",
         "supradyn" to "https://cdn01.pharmeasy.in/dam/products_otc/164500/supradyn-daily-multivitamin-tablet-with-essential-zinc-15s-2-1671741088.jpg",
         "limcee" to "https://cdn01.pharmeasy.in/dam/products_otc/105900/limcee-vitamin-c-500mg-chewable-tablets-orange-flavour-strip-of-15-tablets-2-1671741085.jpg",
-        "vicks" to "https://cdn01.pharmeasy.in/dam/products_otc/182140/vicks-vaporub-50ml-relief-from-cold-cough-headache-and-body-pain-2-1671741087.jpg"
+        "vicks" to "https://cdn01.pharmeasy.in/dam/products_otc/182140/vicks-vaporub-50ml-relief-from-cold-cough-headache-and-body-pain-2-1671741087.jpg",
+        "zincovit" to "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg",
+        "zinc" to "https://cdn01.pharmeasy.in/dam/products_otc/164500/supradyn-daily-multivitamin-tablet-with-essential-zinc-15s-2-1671741088.jpg",
+        "multivitamin" to "https://cdn01.pharmeasy.in/dam/products_otc/164500/supradyn-daily-multivitamin-tablet-with-essential-zinc-15s-2-1671741088.jpg",
+        "calcium" to "https://cdn01.pharmeasy.in/dam/products_otc/K78299/shelcal-500mg-bottle-of-30-tablets-6.1-1787223246.jpg",
+        "gel" to "https://cdn01.pharmeasy.in/dam/products_otc/I00392/volini-pain-relief-gel-tube-of-100-g-6.1-1712725504.jpg",
+        "antacid" to "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
     )
 
     fun resolve(sku: String?, name: String? = null, rawImage: String? = null): String {
@@ -85,7 +92,7 @@ object MedicineImageResolver {
             }
         }
         if (!rawImage.isNullOrBlank() && rawImage.startsWith("http")) return rawImage
-        return ""
+        return "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
     }
 }
 

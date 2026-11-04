@@ -1250,24 +1250,9 @@ fun OrderTrackingContent(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Explicit Bill Date & Time Row (Quintessential Invoice Detail)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Bill Date & Time", fontSize = 13.sp, color = Color(0xFF64748B))
-                        Text(
-                            text = order.displayOrderDateTime,
-                            fontSize = 13.sp,
-                            color = Color(0xFF0F172A),
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     val bill = order.billSummary ?: order.bill_summary
                     val itemSubtotal = bill?.itemsSubtotal?.toDouble()?.takeIf { it > 0.0 }

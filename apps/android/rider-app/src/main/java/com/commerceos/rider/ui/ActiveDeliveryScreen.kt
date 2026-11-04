@@ -92,7 +92,7 @@ fun ActiveDeliveryScreen(
     val targetLat = if (isPhase1) merchantLat else customerLat
     val targetLng = if (isPhase1) merchantLng else customerLng
     val targetName = if (isPhase1) {
-        session.merchantName.takeIf { it.isNotBlank() && it != "null" } ?: "Dark Store Hub"
+        session.merchantName.takeIf { it.isNotBlank() && it != "null" } ?: "Store Hub"
     } else {
         session.customerName.takeIf { it.isNotBlank() && it != "null" } ?: "Customer"
     }

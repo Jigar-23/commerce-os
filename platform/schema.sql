@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     expiry_date VARCHAR(64),
     manufacturing_date VARCHAR(64),
+    manufacturer VARCHAR(255),
+    salt_composition TEXT,
+    safety_advice JSONB NOT NULL DEFAULT '[]'::jsonb,
+    storage_condition VARCHAR(255),
+    therapeutic_class VARCHAR(255),
     store_id VARCHAR(64) REFERENCES stores(id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0,
@@ -265,6 +270,7 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
 CREATE TABLE IF NOT EXISTS orders (
     id VARCHAR(64) PRIMARY KEY,
     order_id VARCHAR(64) UNIQUE NOT NULL,
+    short_order_id VARCHAR(16) UNIQUE,
     customer_id VARCHAR(64) REFERENCES customers(id),
     store_id VARCHAR(64) REFERENCES stores(id),
     prescription_id VARCHAR(64) REFERENCES prescriptions(id),
@@ -294,6 +300,8 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_short_id ON orders(short_order_id);
+CREATE SEQUENCE IF NOT EXISTS order_code_seq START WITH 1000000001;
 CREATE INDEX IF NOT EXISTS idx_orders_store ON orders(store_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
@@ -556,4 +564,46 @@ CREATE TABLE IF NOT EXISTS realtime_events (
 
 CREATE INDEX IF NOT EXISTS idx_realtime_events_channel ON realtime_events(channel, seq);
 CREATE INDEX IF NOT EXISTS idx_realtime_events_created_at ON realtime_events(created_at);
+
+-- -----------------------------------------------------------------------------
+-- 14. PROMOTIONS & MARKETING CAMPAIGNS
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS promotions (
+    id VARCHAR(64) PRIMARY KEY,
+    code VARCHAR(32) NOT NULL UNIQUE,
+    title VARCHAR(255) NOT NULL,
+    type VARCHAR(32) NOT NULL, -- 'PERCENTAGE', 'FLAT_DISCOUNT'
+    discount_text VARCHAR(255),
+    description TEXT,
+    min_order_value NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    discount_percent NUMERIC(5, 2) DEFAULT 0,
+    flat_discount NUMERIC(10, 2) DEFAULT 0,
+    max_discount NUMERIC(10, 2) DEFAULT 0,
+    badge VARCHAR(64),
+    usage_count INTEGER DEFAULT 0,
+    max_usage INTEGER DEFAULT 5000,
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'PAUSED', 'EXPIRED'
+    valid_until TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '1 year'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotions_code ON promotions(code);
+CREATE INDEX IF NOT EXISTS idx_promotions_status ON promotions(status);
+
+-- -----------------------------------------------------------------------------
+-- 15. STORE & APP DELIVERY CONFIGURATION
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS delivery_config (
+    id VARCHAR(64) PRIMARY KEY,
+    free_delivery_threshold NUMERIC(10, 2) NOT NULL DEFAULT 199.00,
+    standard_delivery_fee NUMERIC(10, 2) NOT NULL DEFAULT 2.00,
+    express_delivery_fee NUMERIC(10, 2) NOT NULL DEFAULT 2.00,
+    cold_chain_packaging_fee NUMERIC(10, 2) NOT NULL DEFAULT 15.00,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 

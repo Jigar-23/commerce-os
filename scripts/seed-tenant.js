@@ -6,7 +6,7 @@
  * Given a client configuration profile (e.g. clients/grocery-template.json),
  * connects to the target PostgreSQL database and seeds:
  * 1. Base relational schema (platform/schema.sql) if tables are not yet initialized
- * 2. Primary Dark Store / Fulfillment Hub record
+ * 2. Primary Store / Fulfillment Hub record
  * 3. Primary Store Seller admin account with scrypt KDF hashed credentials
  * 4. Vertical catalog taxonomy and seed products (Grocery, Pharmacy, or Quick Commerce)
  * 5. Initial store inventory balances with available_count
@@ -370,8 +370,8 @@ async function seedTenant(configPath) {
     `);
     logSuccess('PostgreSQL authoritative schema verified and active');
 
-    // 2. Seed Primary Dark Store / Fulfillment Hub
-    logStep(2, 'Seeding Primary Dark Store / Hub');
+    // 2. Seed Primary Store / Fulfillment Hub
+    logStep(2, 'Seeding Primary Store / Hub');
     const storeId = config.merchant?.defaultStoreId || 'store_main_01';
     const storeName = config.merchant?.upiName || `${config.clientName} Central Fulfillment Hub`;
     const storeAddress = config.merchant?.address || 'Building 4, Central Logistics Corridor';
@@ -400,8 +400,8 @@ async function seedTenant(configPath) {
     const sellerId = `seller_${config.clientId.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const sellerEmail = config.merchant?.supportEmail || `seller@${config.clientId}.com`;
     const sellerPhone = config.merchant?.supportPhone || '+1800000000';
-    const defaultPassword = 'SellerSecurePass2026!';
-    const passwordHash = hashPassword(defaultPassword);
+    const initialPassword = process.env.SEEDED_SELLER_PASSWORD || config.merchant?.initialPassword || (crypto.randomBytes(12).toString('base64url') + '!A9');
+    const passwordHash = hashPassword(initialPassword);
 
     await client.query(
       `INSERT INTO sellers (id, seller_id, email, phone, password_hash, store_id, store_name, merchant_name, is_primary, roles, status, updated_at)
@@ -417,6 +417,8 @@ async function seedTenant(configPath) {
       [sellerId, sellerEmail, sellerPhone, passwordHash, storeId, storeName, config.clientName]
     );
     logSuccess(`Primary seller initialized: ${sellerEmail} (store: ${storeId})`);
+    console.log(`  ${colors.yellow}🔑 Temporary Initial Password: ${initialPassword}${colors.reset}`);
+    console.log(`  ${colors.yellow}⚠️ Please rotate this password immediately upon first merchant login.${colors.reset}`);
 
     // 4. Seed Vertical Catalog Taxonomy & Products
     logStep(4, 'Seeding Vertical Catalog Products & Initial Inventory');

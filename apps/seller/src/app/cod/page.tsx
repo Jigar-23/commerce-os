@@ -51,15 +51,15 @@ export default function CodPage() {
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
-  const codOrders = useMemo(() => orders.filter(o => o.paymentMethod === 'COD'), [orders]);
+  const codOrders = useMemo(() => orders.filter(o => o.paymentMethod === 'COD' || o.is_cod), [orders]);
   const pendingCodAmount = useMemo(() => {
     return codOrders
-      .filter(o => o.paymentStatus === 'COD_PENDING_COLLECTION' && o.orderStatus !== 'CANCELLED')
+      .filter(o => (o.paymentStatus === 'COD_PENDING_COLLECTION' || o.paymentStatus === 'COD_PENDING' || o.paymentStatus === 'PENDING') && o.orderStatus !== 'CANCELLED' && o.paymentStatus !== 'PAID')
       .reduce((acc, o) => acc + Number(o.cod?.amountToCollect || o.totalAmount || 0), 0);
   }, [codOrders]);
   const collectedCodAmount = useMemo(() => {
     return codOrders
-      .filter(o => o.paymentStatus === 'COD_COLLECTED')
+      .filter(o => (o.paymentStatus === 'COD_COLLECTED' || o.paymentStatus === 'PAID'))
       .reduce((acc, o) => acc + Number(o.cod?.collectedAmount || o.totalAmount || 0), 0);
   }, [codOrders]);
 

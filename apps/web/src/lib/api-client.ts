@@ -40,6 +40,11 @@ export interface MedicineProduct {
   price: number;
   discountedPrice?: number;
   mrp?: number;
+  activeSalt?: string;
+  saltComposition?: string;
+  safetyAdvice?: string[];
+  storageCondition?: string;
+  storageInstructions?: string;
   expressDeliverySlaMins?: number;
   coldChainRequired?: boolean;
   category?: string;

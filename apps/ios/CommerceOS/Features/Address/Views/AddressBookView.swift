@@ -112,6 +112,8 @@ public struct AddressBookView: View {
                     .foregroundColor(Color(hex: "94A3B8"))
                 TextField("Search saved addresses...", text: $addressSearchQuery)
                     .font(.system(size: 14))
+                    .foregroundColor(Color(hex: "0F172A"))
+                    .accentColor(Color(hex: "0E675E"))
             }
             .padding(11)
             .background(Color.white)

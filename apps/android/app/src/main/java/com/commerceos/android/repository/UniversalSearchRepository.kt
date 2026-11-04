@@ -47,7 +47,12 @@ open class UniversalSearchRepository(
         }
 
         // Fallback to catalog medicines: match against therapeutic category, name, brand, etc.
-        val medicinesResult = appRepository.getMedicines("")
+        val searchAttempt = if (text.isNotBlank()) appRepository.getMedicines(text) else null
+        val medicinesResult = if (searchAttempt is ApiResult.Success && searchAttempt.data.isNotEmpty()) {
+            searchAttempt
+        } else {
+            appRepository.getMedicines("")
+        }
         if (medicinesResult is ApiResult.Success) {
             val queryLower = text.lowercase()
             val queryTokens = queryLower.split(Regex("[^a-zA-Z0-9]+")).filter { it.isNotBlank() }

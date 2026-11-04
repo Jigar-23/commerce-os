@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UserNotifications
 
 @MainActor
 public final class RiderSessionManager: ObservableObject {
@@ -35,13 +36,77 @@ public final class RiderSessionManager: ObservableObject {
         }
 
         if apiClient.isAuthenticated {
-            self.isShiftOnline = true
-            UserDefaults.standard.set(true, forKey: "rider_shift_online")
-            RiderOfferEventPipeline.shared.startListening()
-            Task {
-                await self.ensureOnlineShift()
+            self.isShiftOnline = UserDefaults.standard.bool(forKey: "rider_shift_online")
+            if self.isShiftOnline {
+                RiderOfferEventPipeline.shared.startListening()
+                Task {
+                    await self.ensureOnlineShift()
+                }
             }
+        } else {
+            self.isShiftOnline = false
+            UserDefaults.standard.set(false, forKey: "rider_shift_online")
         }
+    }
+
+    public func registerDeviceTokenIfNeeded() async {
+        guard apiClient.isAuthenticated && isShiftOnline else { return }
+        if let cachedToken = UserDefaults.standard.string(forKey: "rider_apns_device_token"), !cachedToken.isEmpty {
+            struct TokenPayload: Encodable {
+                let fcmToken: String
+                let deviceToken: String
+                let token: String
+                let platform: String
+            }
+            let tokenBody = TokenPayload(fcmToken: cachedToken, deviceToken: cachedToken, token: cachedToken, platform: "IOS")
+            try? await apiClient.postVoid(endpoint: .registerDeviceToken, body: tokenBody)
+        }
+    }
+
+    public func logout() async {
+        // 1. Immediately turn shift offline locally
+        isShiftOnline = false
+        UserDefaults.standard.set(false, forKey: "rider_shift_online")
+
+        // 2. Clear all delivered and pending notifications from system tray
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+
+        // 3. Stop pipelines, heartbeats and location tracking
+        stopHeartbeat()
+        RiderOfferEventPipeline.shared.stopListening()
+        RiderOfferEventPipeline.shared.dismissActiveOffer(reason: "LOGGED_OUT")
+        RiderBackgroundLocationManager.shared.stopBackgroundTracking()
+
+        // 4. Notify backend to unregister APNs push device token
+        if let cachedToken = UserDefaults.standard.string(forKey: "rider_apns_device_token"), !cachedToken.isEmpty {
+            struct TokenPayload: Encodable {
+                let fcmToken: String
+                let deviceToken: String
+                let token: String
+                let platform: String
+            }
+            let tokenBody = TokenPayload(fcmToken: cachedToken, deviceToken: cachedToken, token: cachedToken, platform: "IOS")
+            try? await apiClient.postVoid(endpoint: .logoutDeviceToken, body: tokenBody)
+        }
+
+        // 5. Notify backend shift is offline
+        struct ShiftPayload: Encodable {
+            let online: Bool
+            let isOnline: Bool
+            let shiftStatus: String
+            let status: String
+        }
+        let offlineBody = ShiftPayload(online: false, isOnline: false, shiftStatus: "OFFLINE", status: "OFFLINE")
+        try? await apiClient.postVoid(endpoint: .toggleShift(online: false), body: offlineBody)
+
+        // 6. Clear auth credentials & stored rider profile
+        activeSession = nil
+        profile = nil
+        apiClient.clearAuth()
+        UserDefaults.standard.removeObject(forKey: "rider_id")
+        UserDefaults.standard.removeObject(forKey: "rider_phone")
+        UserDefaults.standard.removeObject(forKey: "rider_name")
     }
 
     public func ensureOnlineShift() async {

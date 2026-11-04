@@ -11,6 +11,9 @@
 const isProduction = process.env.NODE_ENV === 'production';
 
 function resolveSellerApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    return '';
+  }
   const url = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
   if (url && url.trim().length > 0) {
     return url.trim().replace(/\/$/, '');
@@ -193,6 +196,9 @@ class SellerApiClient {
   }
 
   public getBaseUrl(): string {
+    if (typeof window !== 'undefined') {
+      return '';
+    }
     const url = process.env.NEXT_PUBLIC_API_GATEWAY_URL || process.env.NEXT_PUBLIC_API_URL;
     if (url && url.trim().length > 0) {
       return url.trim().replace(/\/$/, '');
@@ -261,10 +267,6 @@ class SellerApiClient {
     const s = this.getSession();
     if (s && s.token && isValidRenderToken(s.token)) return s;
     this.clearSession();
-    const res = await this.login('admin', '1234');
-    if (res.ok && res.session) {
-      return res.session;
-    }
     return null;
   }
 
@@ -307,18 +309,6 @@ class SellerApiClient {
   ): Promise<{ data: T; ok: boolean; status: number; error?: string }> {
     let session = this.getSession();
     
-    // Auto-login if session is missing or has an invalid token
-    if ((!session || !session.token || !isValidRenderToken(session.token)) && !endpoint.includes('/auth/seller/login')) {
-      try {
-        const loginRes = await this.login('admin', '1234');
-        if (loginRes.ok) {
-          session = this.getSession();
-        }
-      } catch {
-        // Continue if dev login fails
-      }
-    }
-
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -349,22 +339,9 @@ class SellerApiClient {
         data = await res.text();
       }
 
-      // If Render returns 200 [] on /orders/seller due to invalid/stale auth, force relogin & retry once
-      if (res.ok && endpoint.includes('/orders/seller') && Array.isArray(data) && data.length === 0 && !endpoint.includes('_retried=1')) {
-        this.clearSession();
-        const freshLogin = await this.login('admin', '1234');
-        if (freshLogin.ok && freshLogin.session) {
-          return this.request<T>(`${endpoint}${sep}_retried=1`, options);
-        }
-      }
-
       if (!res.ok) {
         if (res.status === 401 && !endpoint.includes('/auth/seller/login')) {
           this.clearSession();
-          const loginRes = await this.login('admin', '1234');
-          if (loginRes.ok) {
-            return this.request<T>(endpoint, options);
-          }
         }
         const errorMsg = (typeof data === 'object' && data?.message) || (typeof data === 'object' && data?.error) || `HTTP error ${res.status}`;
         return { data: data as T, ok: false, status: res.status, error: errorMsg };

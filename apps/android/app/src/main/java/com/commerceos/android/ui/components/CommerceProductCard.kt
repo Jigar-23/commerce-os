@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -16,10 +17,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -191,8 +194,8 @@ fun PharmacyProductCard(
     )
 }
 
-fun formatHealthcareTitle(raw: String): String {
-    val trimmed = raw.trim()
+fun formatHealthcareTitle(raw: String?): String {
+    val trimmed = raw?.trim().orEmpty()
     if (trimmed.isBlank()) return "Medicine"
     if (trimmed.equals("para", ignoreCase = true)) return "Paracetamol 650mg Tablets"
     if (trimmed.equals("crocin", ignoreCase = true)) return "Crocin 650 Advance Tablet"
@@ -210,10 +213,10 @@ fun formatHealthcareTitle(raw: String): String {
     } else trimmed
 }
 
-fun formatHealthcareBrand(raw: String?, title: String = ""): String {
+fun formatHealthcareBrand(raw: String?, title: String? = ""): String {
     val b = raw?.trim()
     if (b.isNullOrBlank() || b.equals("Seller Brand", ignoreCase = true) || b.equals("Generic", ignoreCase = true)) {
-        val lower = title.lowercase()
+        val lower = (title ?: "").lowercase()
         return when {
             lower.contains("dolo") -> "Micro Labs Ltd"
             lower.contains("crocin") -> "GlaxoSmithKline"
@@ -237,9 +240,9 @@ fun formatPackSize(packSize: String?): String {
     return p
 }
 
-fun formatHealthcareSalt(title: String, rawSalt: String? = null): String {
+fun formatHealthcareSalt(title: String?, rawSalt: String? = null): String {
     if (!rawSalt.isNullOrBlank() && !rawSalt.equals("null", ignoreCase = true)) return rawSalt
-    val lower = title.lowercase()
+    val lower = (title ?: "").lowercase()
     return when {
         lower.contains("para") || lower.contains("dolo") || lower.contains("crocin") -> "Paracetamol (650mg)"
         lower.contains("augmentin") || lower.contains("amox") -> "Amoxycillin (500mg) + Clavulanic Acid (125mg)"
@@ -357,7 +360,7 @@ private fun CompactProductCard(
                     onAddToCart = onAddToCart,
                     quantity = quantity,
                     onQuantityChange = onQuantityChange,
-                    modifier = Modifier.align(Alignment.End).widthIn(min = 96.dp)
+                    modifier = Modifier.align(Alignment.End).width(68.dp)
                 )
             }
         }
@@ -397,6 +400,24 @@ private fun GridProductCard(
                         .fillMaxSize()
                         .padding(6.dp)
                 )
+                // Discount chip anchored on the top-left of the image (Blinkit / Zepto signature benchmark)
+                if (model.discountPercent > 0) {
+                    Surface(
+                        color = Color(0xFF16A34A),
+                        shape = RoundedCornerShape(topStart = 10.dp, bottomEnd = 6.dp),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 6.dp, top = 6.dp)
+                    ) {
+                        Text(
+                            text = "${model.discountPercent}% OFF",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 // Rating pill anchored on the bottom-left of the image (Tata 1mg signature benchmark)
                 val ratingVal = model.rating ?: 4.4
                 Surface(
@@ -472,16 +493,42 @@ private fun GridProductCard(
                     )
                 }
 
-                Column {
-                    PriceBlock(model = model)
-                    Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 4.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            MoneyFormatter.format(model.sellingPrice),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (model.discountPercent > 0 && model.price > model.sellingPrice) {
+                            Text(
+                                MoneyFormatter.format(model.price),
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF94A3B8),
+                                textDecoration = TextDecoration.LineThrough,
+                                maxLines = 1
+                            )
+                        }
+                    }
                     CardAddToCartButton(
                         model = model,
                         isReorderCard = isReorderCard,
                         onAddToCart = onAddToCart,
                         quantity = quantity,
                         onQuantityChange = onQuantityChange,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.width(68.dp)
                     )
                 }
             }
@@ -716,12 +763,13 @@ private fun CardAddToCartButton(
 
     if (isReorderCard || outOfStock || quantity <= 0) {
         Surface(
-            color = if (outOfStock) CommerceColors.SurfaceSubtle else Color.White,
-            shape = RoundedCornerShape(10.dp),
-            border = if (!outOfStock) androidx.compose.foundation.BorderStroke(1.5.dp, brandTeal) else null,
-            shadowElevation = if (!outOfStock) 0.5.dp else 0.dp,
+            color = if (outOfStock) Color(0xFFF8FAFC) else Color.White,
+            shape = RoundedCornerShape(6.dp),
+            border = if (!outOfStock) androidx.compose.foundation.BorderStroke(1.2.dp, brandTeal) else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            shadowElevation = 0.dp,
             modifier = modifier
-                .height(36.dp)
+                .height(30.dp)
+                .clip(RoundedCornerShape(6.dp))
                 .then(
                     if (!outOfStock) Modifier.clickable(onClick = onAddToCart) else Modifier
                 )
@@ -729,13 +777,13 @@ private fun CardAddToCartButton(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 2.dp)
             ) {
                 if (isReorderCard) {
-                    Text("REORDER", color = brandTeal, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Text("REORDER", color = brandTeal, fontSize = 11.sp, fontWeight = FontWeight.Black)
                 } else if (outOfStock) {
-                    Text("OUT OF STOCK", color = CommerceColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("OOS", color = CommerceColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 } else {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -744,16 +792,16 @@ private fun CardAddToCartButton(
                         Text(
                             "ADD",
                             color = brandTeal,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 0.6.sp
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = null,
+                            contentDescription = "Add to cart",
                             tint = brandTeal,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
@@ -762,37 +810,56 @@ private fun CardAddToCartButton(
     } else {
         Surface(
             color = brandTeal,
-            shape = RoundedCornerShape(10.dp),
-            shadowElevation = 1.dp,
-            modifier = modifier.height(36.dp)
+            shape = RoundedCornerShape(6.dp),
+            shadowElevation = 0.dp,
+            modifier = modifier
+                .height(30.dp)
+                .clip(RoundedCornerShape(6.dp))
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 1.dp)
             ) {
-                IconButton(
-                    onClick = { onQuantityChange(quantity - 1) },
-                    modifier = Modifier.size(28.dp)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onQuantityChange(quantity - 1) },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("−", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "Decrease quantity",
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp)
+                    )
                 }
 
                 Text(
-                    "$quantity",
+                    text = "$quantity",
                     color = Color.White,
-                    fontSize = 13.5.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Black,
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 2.dp)
                 )
 
-                IconButton(
-                    onClick = { onQuantityChange(quantity + 1) },
-                    modifier = Modifier.size(28.dp)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onQuantityChange(quantity + 1) },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("+", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Increase quantity",
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp)
+                    )
                 }
             }
         }

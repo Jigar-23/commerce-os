@@ -150,7 +150,7 @@ export default function SettingsPage() {
                     <h3 className="text-sm font-bold text-content-primary">
                       {sellerApprovalRequired 
                         ? 'Manual Order Review (Marketplace Mode)' 
-                        : 'Instant Auto-Dispatch (Dark Store Mode)'}
+                        : 'Instant Auto-Dispatch (Store Mode)'}
                     </h3>
                     <span className={`text-xs uppercase font-black px-2 py-0.5 rounded-full border ${
                       sellerApprovalRequired 
@@ -167,7 +167,7 @@ export default function SettingsPage() {
                       </>
                     ) : (
                       <>
-                        <strong>Dark Store Express Active:</strong> New customer orders immediately emit <code className="text-content-brand font-mono bg-surface-brandSubtle px-1 py-0.5 rounded">DISPATCH_REQUESTED</code> and broadcast offers to the nearest riders within 1 second. No seller acceptance tap required. Ideal for automated quick-commerce warehouses.
+                        <strong>Store Express Active:</strong> New customer orders immediately emit <code className="text-content-brand font-mono bg-surface-brandSubtle px-1 py-0.5 rounded">DISPATCH_REQUESTED</code> and broadcast offers to the nearest riders within 1 second. No seller acceptance tap required. Ideal for automated quick-commerce warehouses.
                       </>
                     )}
                   </p>
@@ -180,7 +180,7 @@ export default function SettingsPage() {
                   className={`w-14 h-8 rounded-full transition-colors relative shrink-0 cursor-pointer p-0.5 ${
                     sellerApprovalRequired ? 'bg-surface-warning' : 'bg-surface-brand'
                   }`}
-                  title="Toggle between Manual Review (Marketplace) and Auto-Dispatch (Dark Store)"
+                  title="Toggle between Manual Review (Marketplace) and Auto-Dispatch (Store)"
                 >
                   <div
                     className={`w-7 h-7 rounded-full bg-white shadow-md transition-transform duration-200 flex items-center justify-center ${

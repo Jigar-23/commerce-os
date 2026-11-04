@@ -32,7 +32,7 @@ All notable changes, production releases, API additions, and version tags for Co
 **Status:** Completed & Integrated  
 
 ### Features & Applications
-- **FEFO Dark Store Picker Portal (`apps/warehouse`)**: Wave picking scanner sorting items by First-Expire-First-Out (FEFO) rules.
+- **FEFO Store Picker Portal (`apps/warehouse`)**: Wave picking scanner sorting items by First-Expire-First-Out (FEFO) rules.
 - **Delivery Partner Rider App (`apps/delivery`)**: Mobile responsive last-mile rider app with 10-minute SLA countdown and customer 4-digit OTP verification.
 - **Inventory Service (`services/inventory`)**: Batch allocation REST API (`POST /api/v1/inventory/fefo-allocate`), expiry alert ledgers, and 2-8°C cold-chain tracking.
 

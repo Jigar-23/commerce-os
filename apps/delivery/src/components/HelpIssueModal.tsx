@@ -148,7 +148,7 @@ export const HelpIssueModal: React.FC<HelpIssueModalProps> = ({
                     </div>
                     <div>
                       <h4 className="text-xs font-extrabold text-white">2. Store Closed / Order Delay</h4>
-                      <p className="text-2xs text-content-muted">Dark store shut or long prep delay</p>
+                      <p className="text-2xs text-content-muted">Store shut or long prep delay</p>
                     </div>
                   </div>
                 </button>
@@ -250,7 +250,7 @@ export const HelpIssueModal: React.FC<HelpIssueModalProps> = ({
               <textarea
                 value={issueNotes}
                 onChange={(e) => setIssueNotes(e.target.value)}
-                placeholder="Describe store issue (e.g., Dark store closed, item missing)..."
+                placeholder="Describe store issue (e.g., Store closed, item missing)..."
                 className="w-full p-3 bg-surface-inverse border border-border-strong rounded-xl text-xs text-white outline-none h-24"
               />
               <button

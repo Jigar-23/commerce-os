@@ -52,7 +52,8 @@ export interface PharmacistVerifiedEvent {
 
 export interface FEFOBatchAllocatedEvent {
   orderId: string;
-  darkStoreId: string;
+  darkStoreId?: string;
+  storeId?: string;
   allocatedBatchNo: string;
   expiryDate: string;
   coldChainRequired: boolean;

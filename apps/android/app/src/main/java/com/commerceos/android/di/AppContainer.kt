@@ -57,7 +57,7 @@ class AppContainer(context: Context) {
                 modelClass.isAssignableFrom(HomeViewModel::class.java) ->
                     HomeViewModel(repo) as T
                 modelClass.isAssignableFrom(CartViewModel::class.java) ->
-                    CartViewModel(repo, cartDao) as T
+                    CartViewModel(repo, cartDao, context.applicationContext) as T
                 modelClass.isAssignableFrom(CheckoutViewModel::class.java) ->
                     CheckoutViewModel(repo) as T
                 modelClass.isAssignableFrom(AddressViewModel::class.java) ->

@@ -109,8 +109,8 @@ public final class RiderOfferEventPipeline: ObservableObject {
     }
 
     public func pollActiveOffersOnce() async {
-        guard isListening || RiderAPIClient.shared.isAuthenticated else { return }
-        guard RiderAPIClient.shared.isAuthenticated else { return }
+        guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else { return }
+        guard isListening else { return }
 
         do {
             let response: ActiveOffersResponseDto = try await RiderAPIClient.shared.request(endpoint: .getActiveOffers)
@@ -131,7 +131,7 @@ public final class RiderOfferEventPipeline: ObservableObject {
         sseStreamTask = Task { [weak self] in
             guard let self = self else { return }
             while !Task.isCancelled {
-                guard RiderAPIClient.shared.isAuthenticated else {
+                guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     continue
                 }
@@ -179,6 +179,10 @@ public final class RiderOfferEventPipeline: ObservableObject {
     }
 
     public func receiveOffer(offer: DispatchOfferDto) {
+        guard RiderAPIClient.shared.isAuthenticated, RiderSessionManager.shared.isShiftOnline else {
+            print("[RiderOfferEventPipeline] Suppressed offer \(offer.offerId): Rider is logged out or offline.")
+            return
+        }
         self.activeOffer = offer
         if let exp = offer.expiresAt {
             let diff = Int(exp.timeIntervalSinceNow)

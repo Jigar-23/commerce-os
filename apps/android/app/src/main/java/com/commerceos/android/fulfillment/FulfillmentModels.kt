@@ -23,7 +23,7 @@ enum class ReservationState {
     RELEASED
 }
 
-/** Physical or virtual fulfillment node (Warehouse, Store, Dark Store, Merchant Outlet). */
+/** Physical or virtual fulfillment node (Warehouse, Store, Merchant Outlet). */
 data class FulfillmentNode(
     val nodeId: String,
     val name: String,

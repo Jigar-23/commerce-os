@@ -1,5 +1,6 @@
 package com.commerceos.rider.service
 
+import android.content.Intent
 import android.util.Log
 import com.commerceos.rider.repository.RiderDeliveryRepository
 import com.commerceos.rider.session.RiderSessionManager
@@ -21,21 +22,27 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
         val sessionMgr = RiderSessionManager.getInstance(applicationContext)
         sessionMgr.saveFcmToken(token)
 
-        try {
-            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
-                .addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        Log.d(TAG, "Subscribed to topic riders_broadcast on token refresh")
+        if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline()) {
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            Log.d(TAG, "Subscribed to topic riders_broadcast on token refresh")
+                        }
                     }
-                }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to subscribe to riders_broadcast on token refresh: ${e.message}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to subscribe to riders_broadcast on token refresh: ${e.message}")
+            }
+        } else {
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+            } catch (_: Exception) {}
         }
 
         val baseUrl = sessionMgr.getBaseUrl()
         val authToken = sessionMgr.getAuthToken()
 
-        if (baseUrl.isNotBlank() && authToken.isNotBlank()) {
+        if (baseUrl.isNotBlank() && authToken.isNotBlank() && sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline()) {
             val repository = RiderDeliveryRepository(
                 baseUrlProvider = { baseUrl },
                 authTokenProvider = { authToken }
@@ -59,16 +66,67 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
         if (data.isEmpty()) return
 
         val sessionMgr = RiderSessionManager.getInstance(applicationContext)
+        val isLoggedIn = sessionMgr.isLoggedIn()
+        val isOnline = sessionMgr.isShiftOnline()
         val authenticatedRiderId = sessionMgr.getRiderId().takeIf { it.isNotBlank() }
+
+        Log.d(TAG, "Rider Background Check: isLoggedIn=$isLoggedIn, isOnline=$isOnline, riderId=$authenticatedRiderId")
+
+        // Handle Silent Watchdog PING_LOCATION Wakeups
+        val action = data["action"] ?: data["type"] ?: ""
+        if (action.equals("PING_LOCATION", ignoreCase = true) || action.equals("WAKEUP_LOCATION", ignoreCase = true)) {
+            Log.i(TAG, "RECEIVED_FCM_PING_LOCATION: Watchdog requested location wakeup.")
+            val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+            val wakeLock = powerManager?.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "CommerceOsRider:FCMPingWakeLock"
+            )
+            wakeLock?.acquire(5000L)
+            try {
+                val serviceIntent = Intent(applicationContext, RiderForegroundLocationService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start RiderForegroundLocationService on FCM ping", e)
+            } finally {
+                if (wakeLock?.isHeld == true) {
+                    try { wakeLock.release() } catch (_: Exception) {}
+                }
+            }
+            return
+        }
+
+        // Strictly enforce: Notifications are shown ONLY if the rider is logged in AND status is ONLINE
+        if (!isLoggedIn) {
+            Log.w(TAG, "DROPPED_FCM_NOTIFICATION: Rider is logged out. Suppressing all alerts and discarding message.")
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                val notifManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                notifManager.cancelAll()
+            } catch (_: Exception) {}
+            return
+        }
+
+        if (!isOnline) {
+            Log.w(TAG, "DROPPED_FCM_NOTIFICATION: Rider is logged in but status is OFFLINE. Suppressing delivery notification.")
+            try {
+                val notifManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                notifManager.cancelAll()
+            } catch (_: Exception) {}
+            return
+        }
+
         val targetRiderId = data["riderId"] ?: data["rider_id"] ?: ""
         val isBroadcastOffer = targetRiderId.equals("ALL", ignoreCase = true) ||
             targetRiderId.equals("broadcast", ignoreCase = true) ||
             targetRiderId.equals("pool", ignoreCase = true) ||
             targetRiderId.isBlank()
 
-        // Allow delivery push notification if rider is authenticated OR if it's a broadcast offer from the store
-        if (authenticatedRiderId == null && !isBroadcastOffer) {
-            Log.w(TAG, "DROPPED_FCM_OFFER: Device is logged out and offer is not broadcast. Discarding incoming delivery push.")
+        if (!isBroadcastOffer && authenticatedRiderId != null && !targetRiderId.equals(authenticatedRiderId, ignoreCase = true)) {
+            Log.w(TAG, "DROPPED_FCM_OFFER: Target rider $targetRiderId does not match current rider $authenticatedRiderId.")
             return
         }
 

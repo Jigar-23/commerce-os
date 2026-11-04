@@ -41,6 +41,7 @@ import AssistedCommerceRibbon from '@/components/home/AssistedCommerceRibbon';
 import GenericSubstituteCard from '@/components/search/GenericSubstituteCard';
 import FloatingCartBar from '@/components/cart/FloatingCartBar';
 import MobileBottomNav from '@/components/navigation/MobileBottomNav';
+import UniversalHeader from '@/components/navigation/UniversalHeader';
 import {
   CommerceNavbar,
   CommerceProductCard,
@@ -62,7 +63,13 @@ export default function StorefrontHomePage() {
   const [query, setQuery] = useState('');
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
-  const [isLocationLockinVisible, setIsLocationLockinVisible] = useState(true);
+  const [isLocationLockinVisible, setIsLocationLockinVisible] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !sessionStorage.getItem('location_locked')) {
+      setIsLocationLockinVisible(true);
+    }
+  }, []);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [currentAddress, setCurrentAddress] = useState<SavedAddress | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -205,22 +212,39 @@ export default function StorefrontHomePage() {
       {isLocationLockinVisible && (
         <LocationLockinModal
           locality={currentAddress?.city || currentAddress?.tag || 'Rewari'}
-          onDismiss={() => setIsLocationLockinVisible(false)}
+          onDismiss={() => {
+            setIsLocationLockinVisible(false);
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('location_locked', 'true');
+            }
+          }}
         />
       )}
 
-      {/* 1. DEEP MEDICAL TEAL CANOPY HEADER (ANDROID REPLICA) */}
-      <CanopyHeader
-        locationLabel={locationDisplay}
-        etaMinutes={10}
-        onLocationClick={() => setIsMapModalOpen(true)}
-        onProfileClick={() => router.push('/profile')}
-        onSearchClick={(initialQ) => {
-          if (initialQ) setQuery(initialQ);
-          setIsSearchModalOpen(true);
-        }}
-        onUploadRxClick={() => router.push('/checkout')}
-      />
+      {/* 1A. UNIVERSAL HEADER (DESKTOP & TABLET VIEW) */}
+      <div className="hidden sm:block">
+        <UniversalHeader
+          locationLabel={locationDisplay}
+          etaMinutes={10}
+          onLocationClick={() => setIsMapModalOpen(true)}
+          onUploadRxClick={() => router.push('/prescriptions')}
+        />
+      </div>
+
+      {/* 1B. DEEP MEDICAL TEAL CANOPY HEADER (MOBILE VIEW) */}
+      <div className="block sm:hidden">
+        <CanopyHeader
+          locationLabel={locationDisplay}
+          etaMinutes={10}
+          onLocationClick={() => setIsMapModalOpen(true)}
+          onProfileClick={() => router.push('/account')}
+          onSearchClick={(initialQ) => {
+            if (initialQ) setQuery(initialQ);
+            setIsSearchModalOpen(true);
+          }}
+          onUploadRxClick={() => router.push('/prescriptions')}
+        />
+      </div>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 pt-4 space-y-5">
         {/* 2. DUAL ACTION HERO TILES (MEDICINES VS LAB TESTS) */}
@@ -237,7 +261,7 @@ export default function StorefrontHomePage() {
         {/* 3. ASSISTED COMMERCE RIBBON (UPLOAD RX / WHATSAPP / CALL 24X7) */}
         <section>
           <AssistedCommerceRibbon
-            onUploadRx={() => router.push('/checkout')}
+            onUploadRx={() => router.push('/prescriptions')}
           />
         </section>
 
@@ -397,7 +421,7 @@ export default function StorefrontHomePage() {
                 Government Certified Healthcare Platform
               </h3>
               <p className="text-xs text-content-secondary font-medium mt-0.5">
-                Every order is fulfilled from compliant dark stores with batch QR tracking and licensed pharmacist oversight.
+                Every order is fulfilled from compliant stores with batch QR tracking and licensed pharmacist oversight.
               </p>
             </div>
           </div>

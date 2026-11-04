@@ -47,7 +47,7 @@ interface PickTask {
   isLoading: boolean;
 }
 
-export default function DarkStorePickerDashboard() {
+export default function StorePickerDashboard() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'picking' | 'batches' | 'coldchain'>('dashboard');
   const [task, setTask] = useState<PickTask>({
     orderId: '',
@@ -195,7 +195,7 @@ export default function DarkStorePickerDashboard() {
           <div className="p-5 border-b border-border-subtle flex items-center justify-between">
             <div>
               <span className="inline-flex items-center px-2 py-0.5 rounded text-2xs font-bold bg-surface-operationalSubtle text-content-operational border border-border-operational">
-                Dark Store Warehouse
+                Store Warehouse
               </span>
               <h1 className="text-base font-extrabold text-content-primary mt-1">Commerce OS</h1>
             </div>
@@ -247,7 +247,7 @@ export default function DarkStorePickerDashboard() {
             W
           </div>
           <div className="overflow-hidden">
-            <p className="text-xs font-bold text-content-primary truncate">Dark Store Picker</p>
+            <p className="text-xs font-bold text-content-primary truncate">Store Picker</p>
             <p className="text-2xs text-content-muted truncate">FEFO Wave Operations</p>
           </div>
         </div>
@@ -276,7 +276,7 @@ export default function DarkStorePickerDashboard() {
           <div className="bg-surface-operationalSubtle border border-border-operational rounded-xl p-3.5 flex items-center justify-between text-xs text-content-operational shadow-sm">
             <div className="flex items-center space-x-2">
               <span className="w-2 h-2 rounded-full bg-action-operationalBg animate-pulse" />
-              <p>FEFO (First-Expire-First-Out) Inventory Allocation Engine active across 10-Minute Dark Stores.</p>
+              <p>FEFO (First-Expire-First-Out) Inventory Allocation Engine active across 10-Minute Stores.</p>
             </div>
           </div>
 

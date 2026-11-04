@@ -72,8 +72,8 @@ export default function StoresManagementPage() {
   const [isLocatingUser, setIsLocatingUser] = useState(false);
 
   // Proximity Store Capture Simulator State
-  const [simLat, setSimLat] = useState<string>('20.5937');
-  const [simLng, setSimLng] = useState<string>('78.9629');
+  const [simLat, setSimLat] = useState<string>('28.1919');
+  const [simLng, setSimLng] = useState<string>('76.6080');
   const [capturedStore, setCapturedStore] = useState<NearbyStoreResult | null>(null);
   const [nearbyRankings, setNearbyRankings] = useState<NearbyStoreResult[]>([]);
   const [simMessage, setSimMessage] = useState<string | null>(null);
@@ -231,7 +231,7 @@ export default function StoresManagementPage() {
     setFormError(null);
 
     if (!formStoreName.trim()) {
-      setFormError('Store or Dark Store Hub name is required.');
+      setFormError('Store or Store Hub name is required.');
       return;
     }
     if (!formAddress.trim()) {
@@ -316,7 +316,7 @@ export default function StoresManagementPage() {
                   Stores &amp; Fulfillment Hubs
                 </h1>
                 <p className="text-xs text-content-secondary mt-1">
-                  Manage dark stores, fulfillment centers, exact GPS pinpoint locations, and automatic customer proximity-capture routing.
+                  Manage stores, fulfillment centers, exact GPS pinpoint locations, and automatic customer proximity-capture routing.
                 </p>
               </div>
 
@@ -356,7 +356,7 @@ export default function StoresManagementPage() {
                   </div>
                 </div>
                 <p className="text-2xl font-black text-content-primary mt-2">{stores.length}</p>
-                <p className="text-2xs text-content-muted mt-1">Dark stores & fulfillment centers</p>
+                <p className="text-2xs text-content-muted mt-1">Stores & fulfillment centers</p>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-border-default shadow-sm">
@@ -527,7 +527,7 @@ export default function StoresManagementPage() {
             <div className="bg-white rounded-2xl border border-border-default shadow-sm overflow-hidden">
               <div className="p-6 border-b border-border-default flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-base font-black text-content-primary">Fulfillment Stores & Dark Store Hubs</h2>
+                  <h2 className="text-base font-black text-content-primary">Fulfillment Stores & Store Hubs</h2>
                   <p className="text-xs text-content-secondary mt-0.5">
                     Exact latitude/longitude pinpoint coordinates are used by the automated routing engine.
                   </p>
@@ -553,7 +553,7 @@ export default function StoresManagementPage() {
                   </p>
                   <p className="text-xs text-content-muted mt-1">
                     {stores.length === 0
-                      ? 'Add your first dark store or fulfillment hub using the button below to enable automatic proximity-capture routing.'
+                      ? 'Add your first store or fulfillment hub using the button below to enable automatic proximity-capture routing.'
                       : 'Try adjusting your search query or add a new fulfillment hub.'}
                   </p>
                   {stores.length === 0 && (
@@ -704,7 +704,7 @@ export default function StoresManagementPage() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Rewari Model Town Dark Store"
+                    placeholder="e.g. Rewari Model Town Store"
                     value={formStoreName}
                     onChange={(e) => setFormStoreName(e.target.value)}
                     className="w-full px-3.5 py-2 rounded-xl border border-border-default bg-surface-subtle text-content-primary focus:outline-none focus:border-slate-800"

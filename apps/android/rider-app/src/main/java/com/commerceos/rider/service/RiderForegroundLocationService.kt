@@ -42,6 +42,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
     private var locationManager: LocationManager? = null
     private var connectivityManager: ConnectivityManager? = null
     private var dbHelper: RiderTelemetryDbHelper? = null
+    private var locationWakeLock: android.os.PowerManager.WakeLock? = null
 
     companion object {
         private const val CHANNEL_ID = "rider_location_channel"
@@ -217,8 +218,61 @@ class RiderForegroundLocationService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        acquireWakeLock()
         requestLocationUpdates()
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (activeDeliveryId.isNotBlank()) {
+            try {
+                val restartServiceIntent = Intent(applicationContext, RiderForegroundLocationService::class.java).also {
+                    it.setPackage(packageName)
+                }
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    android.app.PendingIntent.FLAG_ONE_SHOT or android.app.PendingIntent.FLAG_IMMUTABLE
+                } else {
+                    android.app.PendingIntent.FLAG_ONE_SHOT
+                }
+                val restartServicePendingIntent = android.app.PendingIntent.getService(
+                    applicationContext, 1002, restartServiceIntent, flags
+                )
+                val alarmService = applicationContext.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+                alarmService?.setExactAndAllowWhileIdle(
+                    android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    android.os.SystemClock.elapsedRealtime() + 1000L,
+                    restartServicePendingIntent
+                )
+            } catch (_: Exception) {
+                // Fallback to OS START_STICKY resurrection
+            }
+        }
+    }
+
+    private fun acquireWakeLock() {
+        if (locationWakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            locationWakeLock = pm?.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                "CommerceOSRider:LocationTrackingWakeLock"
+            )?.apply {
+                setReferenceCounted(false)
+            }
+        }
+        if (locationWakeLock?.isHeld != true) {
+            try {
+                locationWakeLock?.acquire(30 * 60 * 1000L) // 30-minute safety cap
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun releaseWakeLock() {
+        if (locationWakeLock?.isHeld == true) {
+            try {
+                locationWakeLock?.release()
+            } catch (_: Exception) {}
+        }
     }
 
     private fun requestLocationUpdates() {
@@ -507,6 +561,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        releaseWakeLock()
         locationManager?.removeUpdates(this)
         serviceScope.cancel()
     }

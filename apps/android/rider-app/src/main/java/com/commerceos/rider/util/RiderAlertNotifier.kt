@@ -14,6 +14,11 @@ object RiderAlertNotifier {
     private var lastAlertTimeMs = 0L
 
     fun playNewJobAlert(context: Context, offerId: String? = null) {
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(context)
+        if (!sessionMgr.isLoggedIn() || !sessionMgr.isShiftOnline()) {
+            return
+        }
+
         val now = System.currentTimeMillis()
         if (offerId != null && offerId.isNotBlank()) {
             if (offerId == lastAlertedOfferId && (now - lastAlertTimeMs < 5000L)) {

@@ -96,7 +96,7 @@ public final class RiderGeofenceDetector: NSObject, ObservableObject, CLLocation
                 self.isInsideArrivalZone = true
                 if !hasTriggeredMerchantArrival {
                     self.hasTriggeredMerchantArrival = true
-                    TurnByTurnVoiceNotifier.shared.announceApproachingPickup(merchantName: "Dark Store Fulfillment Center")
+                    TurnByTurnVoiceNotifier.shared.announceApproachingPickup(merchantName: "Store Fulfillment Center")
                     onMerchantArrival?()
                 }
             } else if distance <= Self.proximityWarningRadiusMeters {

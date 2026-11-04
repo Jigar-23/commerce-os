@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import SellerSidebar from '../../components/SellerSidebar';
 import HeaderQuickSearch from '../../components/HeaderQuickSearch';
 import { sellerApi } from '@/lib/apiClient';
 import { useSellerSession } from '@/lib/useSellerSession';
-import { Layers, Search, CheckCircle2, RefreshCw, RotateCcw, AlertCircle } from 'lucide-react';
+import { Layers, Search, CheckCircle2, RefreshCw, RotateCcw, AlertCircle, ExternalLink, ArrowUpRight, Edit3 } from 'lucide-react';
 import SellerAuthGuard from '../../components/SellerAuthGuard';
 import { formatDateTime } from '@/lib/formatAddress';
 
@@ -343,11 +344,20 @@ export default function DedicatedInventoryPage() {
                     </tr>
                   ) : (
                     filteredInventory.map(item => (
-                      <tr key={item.id} className="hover:bg-surface-subtle/50 transition">
+                      <tr key={item.id} className="hover:bg-surface-subtle/50 transition group/row">
                         <td className="px-6 py-4">
-                          <div className="font-mono text-xs font-bold text-content-accent">{item.sku}</div>
-                          <div className="font-bold text-content-primary text-sm">{item.name}</div>
-                          <div className="text-2xs text-content-muted">{item.packSize}</div>
+                          <Link
+                            href={`/inventory/${encodeURIComponent(item.sku || item.productId || item.id)}`}
+                            className="group/link block"
+                            title="Click to view full SKU and inventory details"
+                          >
+                            <div className="font-mono text-xs font-bold text-content-accent group-hover/link:underline flex items-center space-x-1">
+                              <span>{item.sku}</span>
+                              <ArrowUpRight className="w-3 h-3 opacity-0 group-hover/link:opacity-100 transition" />
+                            </div>
+                            <div className="font-bold text-content-primary text-sm group-hover/link:text-content-accent transition">{item.name}</div>
+                            <div className="text-2xs text-content-muted">{item.packSize}</div>
+                          </Link>
                         </td>
                         <td className="px-4 py-4 text-xs text-content-muted">{item.category}</td>
                         <td className="px-4 py-4 font-bold text-content-primary">₹{Number(item.price || 0).toFixed(2)}</td>
@@ -425,6 +435,15 @@ export default function DedicatedInventoryPage() {
                               >
                                 Apply
                               </button>
+
+                              <Link
+                                href={`/inventory/${encodeURIComponent(item.sku || item.productId || item.id)}`}
+                                className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition shadow-xs"
+                                title="Edit medicine details, expiry date, category, and pricing"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit</span>
+                              </Link>
                             </div>
                           </div>
                         </td>

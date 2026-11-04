@@ -150,10 +150,10 @@ fun NativeGoogleOrderTrackingMap(
     val routesProvider = remember { GoogleRoutesProvider() }
 
     val storeLatLng = remember(merchantLat, merchantLng) {
-        LatLng(if (merchantLat != 0.0) merchantLat else 20.5937, if (merchantLng != 0.0) merchantLng else 78.9629)
+        LatLng(if (merchantLat != 0.0) merchantLat else 28.191944, if (merchantLng != 0.0) merchantLng else 76.608042)
     }
     val customerLatLng = remember(customerLat, customerLng) {
-        LatLng(if (customerLat != 0.0) customerLat else 20.5937, if (customerLng != 0.0) customerLng else 78.9629)
+        LatLng(if (customerLat != 0.0) customerLat else 28.191944, if (customerLng != 0.0) customerLng else 76.608042)
     }
     val stageUpper = activeStage.uppercase()
     val isCancelled = stageUpper == "CANCELLED"
@@ -403,12 +403,12 @@ fun NativeGoogleOrderTrackingMap(
             properties = mapProperties,
             uiSettings = mapUiSettings
         ) {
-            // 1. Dark Store Hub Pin (Store Pin is visible unless order is cancelled)
+            // 1. Store Hub Pin (Store Pin is visible unless order is cancelled)
             if (!isCancelled) {
                 Marker(
                     state = storeMarkerState,
                     icon = storeMarkerBitmap,
-                    title = "Shop / Dark Store Hub",
+                    title = "Shop / Store Hub",
                     anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
                 )
 

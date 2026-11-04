@@ -16,6 +16,25 @@
       "roles": [
         "ROLE_SELLER"
       ]
+    },
+    {
+      "id": "seller_hub_02",
+      "sellerId": "seller_hub_02",
+      "name": "Kathua Hub Merchant",
+      "storeId": "store_hub_02",
+      "storeName": "Second Fulfillment Hub 2",
+      "merchantName": "Kathua Hub Primary Merchant",
+      "address": "College Road, Kathua, Jammu and Kashmir 184104",
+      "coordinates": {
+        "latitude": 32.405605,
+        "longitude": 75.4916
+      },
+      "phone": "9817916181",
+      "roles": [
+        "ROLE_SELLER"
+      ],
+      "isPrimary": true,
+      "status": "ACTIVE"
     }
   ],
   "products": [],
@@ -37712,6 +37731,22 @@
       "pincode": "123401",
       "latitude": 28.1989,
       "longitude": 76.6186,
+      "status": "ACTIVE",
+      "sellerApprovalRequired": false
+    },
+    {
+      "id": "store_hub_02",
+      "storeId": "store_hub_02",
+      "name": "Second Fulfillment Hub 2",
+      "storeName": "Second Fulfillment Hub 2",
+      "merchantName": "Commerce OS Retail Ltd",
+      "address": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "streetAddress": "3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401",
+      "city": "Rewari",
+      "state": "Haryana",
+      "pincode": "123401",
+      "latitude": 32.405605,
+      "longitude": 75.4916,
       "status": "ACTIVE",
       "sellerApprovalRequired": false
     }

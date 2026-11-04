@@ -154,46 +154,61 @@ object LocalPrescriptionManager {
     fun getPrescriptions(context: Context, customerId: String): List<Prescription> {
         return try {
             val safeId = sanitizeCustomerId(customerId)
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val json = prefs.getString(KEY_PREFIX + safeId, null)
+            if (safeId.isBlank()) return emptyList()
+
+            // Try reading encrypted storage first via SecureCredentialStore
+            val secureStore = com.commerceos.android.session.SecureCredentialStore(context)
+            val json = secureStore.read(KEY_PREFIX + safeId)
+                ?: run {
+                    // Fallback / migration from legacy plaintext prefs
+                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.getString(KEY_PREFIX + safeId, null)?.also { legacyJson ->
+                        secureStore.save(KEY_PREFIX + safeId, legacyJson)
+                        prefs.edit().remove(KEY_PREFIX + safeId).apply()
+                    }
+                }
+
             if (json.isNullOrBlank()) {
-                return getAllPrescriptions(context)
+                return emptyList()
             }
             val type = object : TypeToken<List<Prescription>>() {}.type
             val list: List<Prescription> = gson.fromJson(json, type) ?: emptyList()
-            val filtered = list.filter { rx ->
-                val firstAtt = rx.attachments.firstOrNull()
-                if (firstAtt != null && (firstAtt.startsWith("/") || firstAtt.startsWith("file:"))) {
-                    val path = firstAtt.removePrefix("file://")
-                    File(path).exists()
-                } else {
-                    true
+            list.filter { rx ->
+                (rx.customerId == customerId || rx.customerId == safeId) && run {
+                    val firstAtt = rx.attachments.firstOrNull()
+                    if (firstAtt != null && (firstAtt.startsWith("/") || firstAtt.startsWith("file:"))) {
+                        val path = firstAtt.removePrefix("file://")
+                        File(path).exists()
+                    } else {
+                        true
+                    }
                 }
-            }
-            if (filtered.isEmpty()) {
-                getAllPrescriptions(context)
-            } else {
-                filtered
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get local prescriptions", e)
-            getAllPrescriptions(context)
+            emptyList()
         }
     }
 
     /**
-     * Stores or updates a [Prescription] in the device app's personal storage.
+     * Stores or updates a [Prescription] in the device app's personal encrypted storage.
      */
     fun savePrescription(context: Context, rx: Prescription) {
         try {
             val safeId = sanitizeCustomerId(rx.customerId)
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val existing = getPrescriptions(context, rx.customerId).toMutableList()
             existing.removeAll { it.id == rx.id }
             existing.add(0, rx) // Most recent first
             val type = object : TypeToken<List<Prescription>>() {}.type
             val json = gson.toJson(existing, type)
-            prefs.edit().putString(KEY_PREFIX + safeId, json).apply()
+
+            // Persist to Keystore-backed AES-GCM encrypted store
+            val secureStore = com.commerceos.android.session.SecureCredentialStore(context)
+            secureStore.save(KEY_PREFIX + safeId, json)
+
+            // Clear any old unencrypted preference
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().remove(KEY_PREFIX + safeId).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save prescription locally", e)
         }
@@ -205,7 +220,6 @@ object LocalPrescriptionManager {
     fun deletePrescription(context: Context, customerId: String, rxId: String) {
         try {
             val safeId = sanitizeCustomerId(customerId)
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val existing = getPrescriptions(context, customerId).toMutableList()
             val target = existing.firstOrNull { it.id == rxId }
             if (target != null) {
@@ -218,7 +232,8 @@ object LocalPrescriptionManager {
                 existing.removeAll { it.id == rxId }
                 val type = object : TypeToken<List<Prescription>>() {}.type
                 val json = gson.toJson(existing, type)
-                prefs.edit().putString(KEY_PREFIX + safeId, json).apply()
+                val secureStore = com.commerceos.android.session.SecureCredentialStore(context)
+                secureStore.save(KEY_PREFIX + safeId, json)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete prescription locally", e)

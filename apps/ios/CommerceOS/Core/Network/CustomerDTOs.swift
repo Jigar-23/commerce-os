@@ -169,7 +169,7 @@ public struct HomeBannerDto: Codable, Identifiable {
     public let deepLink: String?
 }
 
-public struct CategoryDto: Codable, Identifiable {
+public struct CategoryDto: Codable, Identifiable, Equatable {
     public let id: String
     public let name: String
     public let iconUrl: String?
@@ -281,6 +281,92 @@ public struct ServerCartDto: Codable {
     public let surgeFee: Double
     public let total: Double
     public let requiresPrescription: Bool
+    public let freeDeliveryThreshold: Double?
+    public let freeDeliveryEligible: Bool?
+    public let remainingForFreeDelivery: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case customerId, customer_id
+        case items
+        case subtotal, itemsSubtotal, items_subtotal
+        case deliveryFee, expressDeliveryFee, delivery_fee
+        case surgeFee, packagingFee, handlingFee, coldChainPackagingFee
+        case total, grandTotal, totalAmount, grand_total
+        case requiresPrescription, prescriptionRequired
+        case freeDeliveryThreshold, free_delivery_threshold
+        case freeDeliveryEligible, free_delivery_eligible
+        case remainingForFreeDelivery, remaining_for_free_delivery
+    }
+
+    public init(
+        customerId: String = "",
+        items: [CartItemDto] = [],
+        subtotal: Double = 0.0,
+        deliveryFee: Double = 0.0,
+        surgeFee: Double = 0.0,
+        total: Double = 0.0,
+        requiresPrescription: Bool = false,
+        freeDeliveryThreshold: Double? = 199.0,
+        freeDeliveryEligible: Bool? = nil,
+        remainingForFreeDelivery: Double? = nil
+    ) {
+        self.customerId = customerId
+        self.items = items
+        self.subtotal = subtotal
+        self.deliveryFee = deliveryFee
+        self.surgeFee = surgeFee
+        self.total = total
+        self.requiresPrescription = requiresPrescription
+        self.freeDeliveryThreshold = freeDeliveryThreshold
+        self.freeDeliveryEligible = freeDeliveryEligible
+        self.remainingForFreeDelivery = remainingForFreeDelivery
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.customerId = (try? container.decode(String.self, forKey: .customerId))
+            ?? (try? container.decode(String.self, forKey: .customer_id))
+            ?? ""
+        self.items = (try? container.decode([CartItemDto].self, forKey: .items)) ?? []
+        self.subtotal = (try? container.decode(Double.self, forKey: .subtotal))
+            ?? (try? container.decode(Double.self, forKey: .itemsSubtotal))
+            ?? (try? container.decode(Double.self, forKey: .items_subtotal))
+            ?? 0.0
+        self.deliveryFee = (try? container.decode(Double.self, forKey: .deliveryFee))
+            ?? (try? container.decode(Double.self, forKey: .expressDeliveryFee))
+            ?? (try? container.decode(Double.self, forKey: .delivery_fee))
+            ?? 0.0
+        self.surgeFee = (try? container.decode(Double.self, forKey: .surgeFee))
+            ?? (try? container.decode(Double.self, forKey: .packagingFee))
+            ?? (try? container.decode(Double.self, forKey: .handlingFee))
+            ?? (try? container.decode(Double.self, forKey: .coldChainPackagingFee))
+            ?? 0.0
+        self.total = (try? container.decode(Double.self, forKey: .total))
+            ?? (try? container.decode(Double.self, forKey: .grandTotal))
+            ?? (try? container.decode(Double.self, forKey: .totalAmount))
+            ?? (try? container.decode(Double.self, forKey: .grand_total))
+            ?? self.subtotal
+        self.requiresPrescription = (try? container.decode(Bool.self, forKey: .requiresPrescription))
+            ?? (try? container.decode(Bool.self, forKey: .prescriptionRequired))
+            ?? self.items.contains { $0.requiresPrescription }
+        self.freeDeliveryThreshold = try? container.decode(Double.self, forKey: .freeDeliveryThreshold)
+        self.freeDeliveryEligible = try? container.decode(Bool.self, forKey: .freeDeliveryEligible)
+        self.remainingForFreeDelivery = try? container.decode(Double.self, forKey: .remainingForFreeDelivery)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(customerId, forKey: .customerId)
+        try container.encode(items, forKey: .items)
+        try container.encode(subtotal, forKey: .subtotal)
+        try container.encode(deliveryFee, forKey: .deliveryFee)
+        try container.encode(surgeFee, forKey: .surgeFee)
+        try container.encode(total, forKey: .total)
+        try container.encode(requiresPrescription, forKey: .requiresPrescription)
+        try container.encodeIfPresent(freeDeliveryThreshold, forKey: .freeDeliveryThreshold)
+        try container.encodeIfPresent(freeDeliveryEligible, forKey: .freeDeliveryEligible)
+        try container.encodeIfPresent(remainingForFreeDelivery, forKey: .remainingForFreeDelivery)
+    }
 }
 
 public struct CartItemDto: Codable, Identifiable {
@@ -291,6 +377,61 @@ public struct CartItemDto: Codable, Identifiable {
     public let price: Double
     public var quantity: Int
     public let requiresPrescription: Bool
+    public let image: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sku, productId, product_id, name, price, unitPrice, discountedPrice, quantity
+        case requiresPrescription, prescriptionRequired, image
+    }
+
+    public init(
+        sku: String,
+        productId: String = "",
+        name: String = "",
+        price: Double = 0.0,
+        quantity: Int = 1,
+        requiresPrescription: Bool = false,
+        image: String? = nil
+    ) {
+        self.sku = sku
+        self.productId = productId.isEmpty ? sku : productId
+        self.name = name.isEmpty ? sku : name
+        self.price = price
+        self.quantity = quantity
+        self.requiresPrescription = requiresPrescription
+        self.image = image
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedSku = (try? container.decode(String.self, forKey: .sku)) ?? ""
+        self.sku = decodedSku
+        self.productId = (try? container.decode(String.self, forKey: .productId))
+            ?? (try? container.decode(String.self, forKey: .product_id))
+            ?? (try? container.decode(String.self, forKey: .id))
+            ?? decodedSku
+        self.name = (try? container.decode(String.self, forKey: .name)) ?? decodedSku
+        self.price = (try? container.decode(Double.self, forKey: .price))
+            ?? (try? container.decode(Double.self, forKey: .unitPrice))
+            ?? (try? container.decode(Double.self, forKey: .discountedPrice))
+            ?? 0.0
+        self.quantity = (try? container.decode(Int.self, forKey: .quantity)) ?? 1
+        self.requiresPrescription = (try? container.decode(Bool.self, forKey: .requiresPrescription))
+            ?? (try? container.decode(Bool.self, forKey: .prescriptionRequired))
+            ?? false
+        self.image = try? container.decode(String.self, forKey: .image)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sku, forKey: .sku)
+        try container.encode(productId, forKey: .productId)
+        try container.encode(name, forKey: .name)
+        try container.encode(price, forKey: .price)
+        try container.encode(quantity, forKey: .quantity)
+        try container.encode(requiresPrescription, forKey: .requiresPrescription)
+        try container.encodeIfPresent(image, forKey: .image)
+    }
 }
 
 public struct AddCartItemRequest: Codable {
@@ -402,11 +543,16 @@ public struct ServiceabilityRequest: Codable {
     public let longitude: Double
 }
 
-public struct ServiceabilityResponse: Codable {
+public struct ServiceabilityResponse: Codable, Equatable {
     public let serviceable: Bool
     public let storeId: String?
     public let estimatedDeliveryMinutes: Int?
+    public let distanceKm: Double?
     public let darkStoreDistanceKm: Double?
+
+    public var effectiveDistanceKm: Double? {
+        return distanceKm ?? darkStoreDistanceKm
+    }
 }
 
 public struct OrderQuoteRequest: Codable {

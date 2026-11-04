@@ -11,6 +11,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -44,13 +46,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
@@ -125,15 +131,46 @@ fun SearchScreen(
     }
 
     val searchUiState = viewModel?.uiState ?: SearchUiState.Idle
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    val cyclingHints = remember {
+        listOf(
+            "Search medicines, salts & symptoms...",
+            "Search 'Dolo 650' or 'Paracetamol'...",
+            "Search 'Pan D' for acidity...",
+            "Search 'Shelcal 500' for calcium...",
+            "Search 'Augmentin 625 Duo'...",
+            "Search 'Electral ORS'..."
+        )
+    }
+    var hintIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2600)
+            hintIndex = (hintIndex + 1) % cyclingHints.size
+        }
+    }
 
     fun commitSearch(raw: String) {
         val query = raw.trim()
         if (query.isBlank()) return
+        keyboardController?.hide()
         queryText = query
         isSearchSubmitted = true
         val updated = (listOf(query) + recentSearches.filter { !it.equals(query, ignoreCase = true) }).take(10)
         saveRecentSearches(updated)
         viewModel?.executeSearch(query)
+    }
+
+    LaunchedEffect(initialQuery.text) {
+        if (initialQuery.text.isNotBlank()) {
+            queryText = initialQuery.text
+            commitSearch(initialQuery.text)
+        } else {
+            queryText = ""
+            isSearchSubmitted = false
+            viewModel?.reset()
+        }
     }
 
     val speechRecognizerLauncher = rememberLauncherForActivityResult(
@@ -150,17 +187,6 @@ fun SearchScreen(
     }
 
     var showCameraDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(initialQuery.text) {
-        if (initialQuery.text.isNotBlank()) {
-            queryText = initialQuery.text
-            commitSearch(initialQuery.text)
-        } else {
-            queryText = ""
-            isSearchSubmitted = false
-            viewModel?.reset()
-        }
-    }
 
     if (showCameraDialog) {
         CameraSearchDialog(
@@ -215,14 +241,14 @@ fun SearchScreen(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    // Sleek Pill Search Bar (PharmEasy & Tata 1mg standard)
+                    // Sleek Pill Search Bar (Tata 1mg & Blinkit gold standard)
                     Surface(
-                        color = Color(0xFFF1F5F9),
-                        shape = RoundedCornerShape(22.dp),
+                        color = Color(0xFFF8FAFC),
+                        shape = RoundedCornerShape(24.dp),
                         border = BorderStroke(1.2.dp, if (queryText.isNotBlank()) Color(0xFF0C831F) else Color(0xFFE2E8F0)),
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp)
+                            .height(48.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -241,14 +267,23 @@ fun SearchScreen(
 
                             Box(modifier = Modifier.weight(1f)) {
                                 if (queryText.isEmpty()) {
-                                    Text(
-                                        text = "Search medicines, symptoms, salts...",
-                                        fontSize = 14.sp,
-                                        fontFamily = PlusJakartaSans,
-                                        color = Color(0xFF94A3B8),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    AnimatedContent(
+                                        targetState = hintIndex,
+                                        transitionSpec = {
+                                            (slideInVertically { height -> height } + fadeIn(tween(250)))
+                                                .togetherWith(slideOutVertically { height -> -height } + fadeOut(tween(250)))
+                                        },
+                                        label = "SearchHint"
+                                    ) { idx ->
+                                        Text(
+                                            text = cyclingHints[idx],
+                                            fontSize = 13.5.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            color = Color(0xFF94A3B8),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                                 BasicTextField(
                                     value = queryText,
@@ -270,7 +305,10 @@ fun SearchScreen(
                                     ),
                                     cursorBrush = SolidColor(Color(0xFF0C831F)),
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                    keyboardActions = KeyboardActions(onSearch = { commitSearch(queryText) }),
+                                    keyboardActions = KeyboardActions(onSearch = {
+                                        keyboardController?.hide()
+                                        commitSearch(queryText)
+                                    }),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -283,7 +321,7 @@ fun SearchScreen(
                                         viewModel?.updateQuery("")
                                         viewModel?.reset()
                                     },
-                                    modifier = Modifier.size(26.dp)
+                                    modifier = Modifier.size(28.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Close,
@@ -342,44 +380,6 @@ fun SearchScreen(
                                     tint = Color(0xFF0C831F),
                                     modifier = Modifier.size(19.dp)
                                 )
-                            }
-                        }
-                    }
-
-                    // Floating Cart Action Button if cart has items (Truemeds / 1mg style)
-                    if (cartItemCount > 0) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            onClick = { onViewCart?.invoke() },
-                            shape = CircleShape,
-                            color = Color(0xFFE8F5E9),
-                            border = BorderStroke(1.2.dp, Color(0xFF0C831F)),
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.ShoppingCart,
-                                    contentDescription = "View Cart",
-                                    tint = Color(0xFF0C831F),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Surface(
-                                    color = Color(0xFF0C831F),
-                                    shape = CircleShape,
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(top = 2.dp, end = 2.dp)
-                                        .size(16.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "$cartItemCount",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -505,7 +505,11 @@ fun SearchScreen(
 
 /**
  * Rich Typeahead & Autocomplete Dropdown while the user is typing.
- * Matches Blinkit, Tata 1mg, and PharmEasy typeahead patterns.
+ * Benchmarked directly against Tata 1mg, Truemeds, and Blinkit:
+ * - Query prefix highlighting in bold text
+ * - Clinical active salt & indication subtitle
+ * - Category jump shortcut ("Search in Pain & Fever ->")
+ * - Instant product card preview with real 0ms cart stepper
  */
 @Composable
 private fun SearchTypeaheadView(
@@ -521,34 +525,45 @@ private fun SearchTypeaheadView(
             "$queryText Tablet",
             "$queryText 650mg",
             "$queryText Syrup",
-            "$queryText Generic"
+            "$queryText Generic",
+            "$queryText Drops"
         )
     }
 
-    val dynamicSuggestions: List<String> = remember(queryText, suggestions) {
-        if (suggestions.isNotEmpty()) {
-            suggestions.map { it.title }
-        } else {
-            val q = queryText.lowercase()
-            val matched = TOP_MEDICINE_CATALOG
-                .filter { it.name.lowercase().contains(q) || it.saltComposition.lowercase().contains(q) }
-                .map { it.name }
-                .take(6)
-            if (matched.isNotEmpty()) {
-                matched
-            } else {
-                listOf(
-                    "$queryText 650mg Tablet",
-                    "$queryText Drop 15ml",
-                    "$queryText Suspension 60ml",
-                    "$queryText Cold Relief"
-                )
+    val richSuggestions = remember(queryText, suggestions) {
+        val q = queryText.lowercase().trim()
+        val mappedList = mutableListOf<HealthcareSuggestionItem>()
+
+        for ((key, list) in HEALTHCARE_SUGGESTION_MAP) {
+            if (q.contains(key) || key.contains(q)) {
+                mappedList.addAll(list)
             }
+        }
+
+        if (mappedList.isEmpty()) {
+            // Check top catalog matches
+            val catMatches = TOP_MEDICINE_CATALOG.filter {
+                it.name.lowercase().contains(q) || it.saltComposition.lowercase().contains(q)
+            }.map {
+                HealthcareSuggestionItem(it.name, it.saltComposition, "Medicines")
+            }
+            mappedList.addAll(catMatches)
+        }
+
+        if (mappedList.isEmpty()) {
+            listOf(
+                HealthcareSuggestionItem("$queryText 650mg Tablet", "Pharmaceutical Formulation • Licensed Stock", "Medicines"),
+                HealthcareSuggestionItem("$queryText Suspension 60ml", "Paediatric Oral Liquid Formulation", "Syrups"),
+                HealthcareSuggestionItem("$queryText Generic Alternative", "Save up to 40% with Certified Generic", "Generics"),
+                HealthcareSuggestionItem("$queryText Drops 15ml", "Infant Paediatric Drops", "Drops")
+            )
+        } else {
+            mappedList.distinctBy { it.title }.take(6)
         }
     }
 
     val matchingProducts = remember(queryText) {
-        val q = queryText.lowercase()
+        val q = queryText.lowercase().trim()
         TOP_MEDICINE_CATALOG
             .filter { it.name.lowercase().contains(q) || it.saltComposition.lowercase().contains(q) }
             .take(2)
@@ -559,7 +574,7 @@ private fun SearchTypeaheadView(
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Quick Query Extension Chips
+        // 1. Quick Query Extension Chips
         item {
             Row(
                 modifier = Modifier
@@ -593,17 +608,30 @@ private fun SearchTypeaheadView(
             }
         }
 
-        // Fast-match Instant Product Previews (Tata 1mg signature feature)
+        // 2. Fast-match Instant Product Previews (Tata 1mg signature feature)
         if (matchingProducts.isNotEmpty()) {
             item {
-                Text(
-                    text = "MATCHING MEDICINES",
-                    fontSize = 11.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF64748B),
-                    letterSpacing = 0.5.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "MATCHING MEDICINES",
+                        fontSize = 11.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF64748B),
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = "⚡ Instant Add",
+                        fontSize = 10.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0C831F)
+                    )
+                }
             }
 
             items(matchingProducts) { med ->
@@ -631,7 +659,7 @@ private fun SearchTypeaheadView(
             }
         }
 
-        // Suggestions Dropdown List
+        // 3. Suggestions Dropdown List with Bold Query Highlighting & Active Salt Tag
         item {
             Text(
                 text = "SUGGESTED SEARCHES",
@@ -643,38 +671,138 @@ private fun SearchTypeaheadView(
             )
         }
 
-        items(dynamicSuggestions) { item ->
+        items(richSuggestions) { item ->
+            val annotatedTitle = remember(item.title, queryText) {
+                buildAnnotatedString {
+                    val lowerTitle = item.title.lowercase()
+                    val lowerQ = queryText.lowercase().trim()
+                    val idx = if (lowerQ.isNotBlank()) lowerTitle.indexOf(lowerQ) else -1
+                    if (idx >= 0) {
+                        append(item.title.substring(0, idx))
+                        withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))) {
+                            append(item.title.substring(idx, idx + lowerQ.length))
+                        }
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))) {
+                            append(item.title.substring(idx + lowerQ.length))
+                        }
+                    } else {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))) {
+                            append(item.title)
+                        }
+                    }
+                }
+            }
+
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onSelectSuggestion(item) }
+                    .clickable { onSelectSuggestion(item.title) }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = Color(0xFFF0FDF4),
+                        shape = CircleShape,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_thin_search),
+                                contentDescription = null,
+                                tint = Color(0xFF0C831F),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = annotatedTitle,
+                            fontSize = 13.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = item.saltSubtitle,
+                            fontSize = 11.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF065F46),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Surface(
+                        color = Color(0xFFF8FAFC),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(0.5.dp, Color(0xFFE2E8F0))
+                    ) {
+                        Text(
+                            text = item.category,
+                            fontSize = 10.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF64748B),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+
+        // 4. Category Jump Banner
+        item {
+            Surface(
+                color = Color(0xFFF0FDF4),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelectSuggestion(queryText) }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ic_thin_search),
+                        Icons.Default.Explore,
                         contentDescription = null,
                         tint = Color(0xFF0C831F),
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = item,
-                        fontSize = 14.sp,
+                        text = "Search \"$queryText\" across all Healthcare departments",
+                        fontSize = 12.5.sp,
                         fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF1E293B),
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF065F46),
                         modifier = Modifier.weight(1f)
                     )
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = null,
-                        tint = Color(0xFF94A3B8),
+                        tint = Color(0xFF0C831F),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -821,8 +949,8 @@ private fun SearchResultsView(
 }
 
 /**
- * PharmEasy-Signature Smart Generic Substitute Comparison Card.
- * Compares prescribed medicine vs certified equivalent generic and highlights % savings.
+ * Truemeds & Tata 1mg Benchmark: Smart Generic Substitute Clinical Comparison Card.
+ * Compares prescribed medicine vs certified equivalent generic and highlights savings & salt equivalence.
  */
 @Composable
 private fun GenericSubstituteBanner(
@@ -831,32 +959,38 @@ private fun GenericSubstituteBanner(
     substitute: GenericSubstituteInfo,
     onAddSubstitute: () -> Unit
 ) {
+    val savingsAmount = (originalPrice - substitute.price).coerceAtLeast(1.0)
+
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.2.dp, Color(0xFFA7F3D0)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Header Row: Savings Pill + Clinical Note
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Surface(
                     color = Color(0xFF0C831F),
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.padding(end = 8.dp)
+                    shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
-                        "SAVE UP TO ${substitute.savingsPercent}%",
-                        fontSize = 9.sp,
+                        "SAVE ${substitute.savingsPercent}%",
+                        fontSize = 10.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
                 Text(
-                    "Certified Generic Equivalent Available",
-                    fontSize = 12.sp,
+                    "Same Composition • Lower Price",
+                    fontSize = 11.sp,
                     fontFamily = PlusJakartaSans,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF065F46)
@@ -865,101 +999,174 @@ private fun GenericSubstituteBanner(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White, RoundedCornerShape(10.dp))
-                    .border(0.5.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Dual Side-by-Side Comparison Container
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                SubcomposeAsyncImage(
-                    model = substitute.imageUrl,
-                    contentDescription = substitute.brandName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = substitute.brandName,
-                        fontSize = 13.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF111827),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "${substitute.packSize} • ${substitute.manufacturer}",
-                        fontSize = 10.sp,
-                        color = Color(0xFF64748B),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                Column(modifier = Modifier.padding(10.dp)) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 2.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = MoneyFormatter.format(substitute.price),
-                            fontSize = 13.sp,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0C831F)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = MoneyFormatter.format(substitute.mrp),
-                            fontSize = 10.sp,
-                            color = Color(0xFF94A3B8),
-                            textDecoration = TextDecoration.LineThrough
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            color = Color(0xFFF1F5F9),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
+                        // Left: Searched Brand
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = substitute.perUnitPrice,
-                                fontSize = 9.sp,
+                                text = "Searched Brand",
+                                fontSize = 9.5.sp,
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF475569),
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                color = Color(0xFF94A3B8)
+                            )
+                            Text(
+                                text = com.commerceos.android.ui.components.formatHealthcareTitle(originalName),
+                                fontSize = 12.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF334155),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = MoneyFormatter.format(originalPrice),
+                                fontSize = 12.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF64748B),
+                                textDecoration = TextDecoration.LineThrough
                             )
                         }
+
+                        // Center: Arrow with Savings Pill
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        ) {
+                            Surface(
+                                color = Color(0xFFDCFCE7),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "SAVE ₹${savingsAmount.toInt()}",
+                                    fontSize = 9.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF15803D),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = Color(0xFF0C831F),
+                                modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                            )
+                        }
+
+                        // Right: Certified Generic Substitute
+                        Column(
+                            modifier = Modifier.weight(1.2f),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Text(
+                                text = "Certified Generic",
+                                fontSize = 9.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF059669)
+                            )
+                            Text(
+                                text = substitute.brandName,
+                                fontSize = 12.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF111827),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = MoneyFormatter.format(substitute.price),
+                                    fontSize = 13.5.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF0C831F)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "(${substitute.perUnitPrice})",
+                                    fontSize = 9.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Salt Equivalence Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF0C831F),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "100% Identical Active Salt: ${substitute.saltComposition}",
+                            fontSize = 10.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF065F46),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-                Button(
-                    onClick = onAddSubstitute,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Text(
-                        "SWITCH",
-                        fontSize = 11.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                }
+            // Action Button: Full-width Switch CTA
+            Button(
+                onClick = onAddSubstitute,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F)),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+            ) {
+                Icon(
+                    Icons.Default.SwapHoriz,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "SWITCH TO GENERIC • SAVE ₹${savingsAmount.toInt()}",
+                    fontSize = 12.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
+                )
             }
         }
     }
 }
 
 /**
- * Rich, engaging Idle Search Discovery View matching Tata 1mg, Truemeds, and PharmEasy.
+ * Rich, engaging Idle Search Discovery View matching Tata 1mg, Truemeds, and Blinkit.
  */
 @Composable
 private fun SearchIdleRichView(
@@ -978,46 +1185,68 @@ private fun SearchIdleRichView(
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. TRUEMEDS-STYLE PROMOTIONAL DISCOUNT TICKET
+        // 1. TRUEMEDS-STYLE PROMOTIONAL DISCOUNT VOUCHER TICKET
         item {
             Surface(
-                color = Color(0xFFE8F5E9),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                color = Color(0xFFF0FDF4),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.2.dp, Color(0xFFA7F3D0)),
+                shadowElevation = 0.5.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.LocalOffer, contentDescription = null, tint = Color(0xFF0C831F), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        color = Color(0xFF0C831F),
+                        shape = CircleShape,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.LocalOffer, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
                     Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "FLAT 27% OFF",
+                                fontSize = 12.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF065F46)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "⚡ 10-Min Delivery",
+                                fontSize = 10.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0C831F)
+                            )
+                        }
                         Text(
-                            text = "FLAT 27% OFF on first medicine order",
-                            fontSize = 12.sp,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF065F46)
-                        )
-                        Text(
-                            text = "10-Minute guaranteed delivery by licensed pharmacist",
-                            fontSize = 10.sp,
+                            text = "Licensed pharmacist verified genuine batches",
+                            fontSize = 10.5.sp,
                             color = Color(0xFF047857)
                         )
                     }
+
                     Surface(
                         color = Color.White,
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(1.dp, Color(0xFF6EE7B7))
                     ) {
                         Text(
                             text = "FIRST27",
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color(0xFF0C831F),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -1035,7 +1264,7 @@ private fun SearchIdleRichView(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Default.Refresh,
+                                Icons.Default.History,
                                 contentDescription = null,
                                 tint = Color(0xFF0C831F),
                                 modifier = Modifier.size(16.dp)
@@ -1043,7 +1272,7 @@ private fun SearchIdleRichView(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 "Recent Searches",
-                                fontSize = 14.sp,
+                                fontSize = 13.5.sp,
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A)
@@ -1082,7 +1311,7 @@ private fun SearchIdleRichView(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        Icons.Default.Refresh,
+                                        Icons.Default.History,
                                         contentDescription = null,
                                         tint = Color(0xFF94A3B8),
                                         modifier = Modifier.size(13.dp)
@@ -1090,7 +1319,7 @@ private fun SearchIdleRichView(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = query,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.5.sp,
                                         fontFamily = PlusJakartaSans,
                                         fontWeight = FontWeight.Medium,
                                         color = Color(0xFF1E293B)
@@ -1115,208 +1344,104 @@ private fun SearchIdleRichView(
             }
         }
 
-        // 3. POPULAR CATEGORIES CAROUSEL (PharmEasy Benchmark)
-        item {
-            Column {
-                Text(
-                    text = "POPULAR CATEGORIES",
-                    fontSize = 12.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF64748B),
-                    letterSpacing = 0.5.sp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(POPULAR_MED_CATEGORIES) { cat ->
-                        Surface(
-                            onClick = { onCommitSearch(cat.query) },
-                            color = Color.White,
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            shadowElevation = 0.5.dp,
-                            modifier = Modifier.width(86.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Surface(
-                                    color = Color(0xFFF8FAFC),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.size(54.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        SubcomposeAsyncImage(
-                                            model = cat.imageUrl,
-                                            contentDescription = cat.name,
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier.size(42.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = cat.name,
-                                    fontSize = 11.sp,
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF111827),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    lineHeight = 14.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. TOP MEDICINE SEARCHES WITH BLISTER PACKAGING (PharmEasy's #1 Layout!)
+        // 3. TRENDING HEALTH SEARCHES (Tata 1mg & Blinkit Benchmark with Numbered Badges)
         item {
             Column {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Icon(
+                        Icons.Default.TrendingUp,
+                        contentDescription = null,
+                        tint = Color(0xFF0C831F),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "TOP MEDICINE SEARCHES",
-                        fontSize = 12.sp,
+                        text = "TRENDING HEALTH SEARCHES",
+                        fontSize = 11.5.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF64748B),
                         letterSpacing = 0.5.sp
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = Color(0xFFE2E8F0),
-                        thickness = 0.5.dp
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TOP_MEDICINE_CATALOG.forEach { med ->
-                        val qty = cartQuantityMap[med.sku] ?: 0
-                        TopMedicineRowItem(
-                            medicine = med,
-                            onClick = { onCommitSearch(med.name) },
-                            onAddToCart = {
-                                onAddToCart?.invoke(
-                                    SearchResult(
-                                        entityId = med.id,
-                                        sku = med.sku,
-                                        entityType = SearchEntityType.PRODUCT,
-                                        title = med.name,
-                                        subtitle = "${med.packSize} • ${med.manufacturer}",
-                                        vertical = "pharmacy",
-                                        price = med.price,
-                                        isExpressEligible = true,
-                                        image = med.imageUrl
-                                    )
-                                )
-                            },
-                            cartQuantity = qty,
-                            onUpdateQuantity = onUpdateQuantity
-                        )
-                    }
-                }
-            }
-        }
-
-        // 5. DOCTOR'S PRESCRIPTION QUICK UPLOAD CARD (Tata 1mg / PharmEasy)
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFECFDF5)),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onUploadPrescription?.invoke() }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = Color.White,
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, Color(0xFF6EE7B7)),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Description, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(24.dp))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Can't find your medicine?",
-                            fontSize = 14.sp,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF065F46)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Upload doctor's prescription slip & licensed pharmacist will add it in 10 mins.",
-                            fontSize = 11.sp,
-                            color = Color(0xFF047857),
-                            lineHeight = 15.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Button(
-                        onClick = { onUploadPrescription?.invoke() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("Upload", fontSize = 12.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-            }
-        }
-
-        // 6. BROWSE BY HEALTH CONCERNS (Curated 2-Column Cards)
-        item {
-            Column {
-                Text(
-                    text = "EXPLORE HEALTH CONCERNS",
-                    fontSize = 12.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF64748B),
-                    letterSpacing = 0.5.sp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HEALTH_CONCERNS.chunked(2).forEach { rowPair ->
+                    TRENDING_SEARCH_ITEMS.chunked(2).forEach { rowPair ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            rowPair.forEach { concern ->
-                                HealthConcernCard(
-                                    concern = concern,
-                                    onClick = { onCommitSearch(concern.query) },
-                                    modifier = Modifier.weight(1f)
-                                )
+                            rowPair.forEach { item ->
+                                val rankBg = when (item.rank) {
+                                    1 -> Color(0xFFFEF3C7)
+                                    2 -> Color(0xFFE0E7FF)
+                                    3 -> Color(0xFFE8F5E9)
+                                    else -> Color(0xFFF1F5F9)
+                                }
+                                val rankColor = when (item.rank) {
+                                    1 -> Color(0xFFB45309)
+                                    2 -> Color(0xFF4338CA)
+                                    3 -> Color(0xFF047857)
+                                    else -> Color(0xFF475569)
+                                }
+
+                                Surface(
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    shadowElevation = 0.5.dp,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onCommitSearch(item.query) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            color = rankBg,
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = "#${item.rank}",
+                                                    fontSize = 10.sp,
+                                                    fontFamily = PlusJakartaSans,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = rankColor
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = item.query,
+                                                fontSize = 12.sp,
+                                                fontFamily = PlusJakartaSans,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = item.salt,
+                                                fontSize = 10.sp,
+                                                fontFamily = PlusJakartaSans,
+                                                color = Color(0xFF64748B),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             if (rowPair.size == 1) {
                                 Spacer(modifier = Modifier.weight(1f))
@@ -1327,7 +1452,7 @@ private fun SearchIdleRichView(
             }
         }
 
-        // 7. TOP PICKS FOR YOU (Everyday Essentials Carousel)
+        // 4. TRUEMEDS & ZEPTO BENCHMARK: RECENTLY VIEWED & QUICK REORDER SHELF
         item {
             Column {
                 Row(
@@ -1337,7 +1462,7 @@ private fun SearchIdleRichView(
                 ) {
                     Text(
                         text = "Everyday Healthcare Essentials",
-                        fontSize = 14.sp,
+                        fontSize = 13.5.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
@@ -1383,11 +1508,235 @@ private fun SearchIdleRichView(
                 }
             }
         }
+
+        // 5. POPULAR CATEGORIES (4-Column Balanced Grid without clipping)
+        item {
+            Column {
+                Text(
+                    text = "POPULAR CATEGORIES",
+                    fontSize = 11.5.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF64748B),
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    POPULAR_MED_CATEGORIES.chunked(4).forEach { rowList ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowList.forEach { cat ->
+                                Surface(
+                                    onClick = { onCommitSearch(cat.query) },
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    shadowElevation = 0.5.dp,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Surface(
+                                            color = Color(0xFFF8FAFC),
+                                            shape = CircleShape,
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                SubcomposeAsyncImage(
+                                                    model = cat.imageUrl,
+                                                    contentDescription = cat.name,
+                                                    contentScale = ContentScale.Fit,
+                                                    modifier = Modifier.size(32.dp),
+                                                    error = {
+                                                        Icon(
+                                                            Icons.Default.MedicalServices,
+                                                            contentDescription = null,
+                                                            tint = Color(0xFF0C831F),
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = cat.name,
+                                            fontSize = 10.sp,
+                                            fontFamily = PlusJakartaSans,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF111827),
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 2,
+                                            lineHeight = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. TOP MEDICINE SEARCHES WITH BLISTER PACKAGING (PharmEasy's #1 Layout!)
+        item {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TOP MEDICINE SEARCHES",
+                        fontSize = 11.5.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF64748B),
+                        letterSpacing = 0.5.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = Color(0xFFE2E8F0),
+                        thickness = 0.5.dp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TOP_MEDICINE_CATALOG.forEach { med ->
+                        val qty = cartQuantityMap[med.sku] ?: 0
+                        TopMedicineRowItem(
+                            medicine = med,
+                            onClick = { onCommitSearch(med.name) },
+                            onAddToCart = {
+                                onAddToCart?.invoke(
+                                    SearchResult(
+                                        entityId = med.id,
+                                        sku = med.sku,
+                                        entityType = SearchEntityType.PRODUCT,
+                                        title = med.name,
+                                        subtitle = "${med.packSize} • ${med.manufacturer}",
+                                        vertical = "pharmacy",
+                                        price = med.price,
+                                        isExpressEligible = true,
+                                        image = med.imageUrl
+                                    )
+                                )
+                            },
+                            cartQuantity = qty,
+                            onUpdateQuantity = onUpdateQuantity
+                        )
+                    }
+                }
+            }
+        }
+
+        // 7. DOCTOR'S PRESCRIPTION QUICK UPLOAD CARD (Tata 1mg / PharmEasy)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFECFDF5)),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onUploadPrescription?.invoke() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = Color.White,
+                        shape = CircleShape,
+                        border = BorderStroke(1.dp, Color(0xFF6EE7B7)),
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Description, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(24.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Can't find your medicine?",
+                            fontSize = 13.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF065F46)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Upload doctor's prescription slip & licensed pharmacist will add it in 10 mins.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF047857),
+                            lineHeight = 15.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Button(
+                        onClick = { onUploadPrescription?.invoke() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C831F)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("Upload", fontSize = 12.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+
+        // 8. BROWSE BY HEALTH CONCERNS (Curated 2-Column Cards)
+        item {
+            Column {
+                Text(
+                    text = "EXPLORE HEALTH CONCERNS",
+                    fontSize = 11.5.sp,
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF64748B),
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HEALTH_CONCERNS.chunked(2).forEach { rowPair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowPair.forEach { concern ->
+                                HealthConcernCard(
+                                    concern = concern,
+                                    onClick = { onCommitSearch(concern.query) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (rowPair.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 /**
- * PharmEasy-Style Top Medicine Row Item with authentic blister thumbnail, salt microcopy & chevron/add.
+ * Top Medicine Row Item with authentic blister thumbnail, salt microcopy & chevron/add.
  */
 @Composable
 private fun TopMedicineRowItem(
@@ -1397,6 +1746,10 @@ private fun TopMedicineRowItem(
     cartQuantity: Int = 0,
     onUpdateQuantity: ((String, Int) -> Unit)? = null
 ) {
+    val resolvedThumbnail = remember(medicine) {
+        MedicineImageResolver.resolve(medicine.sku, medicine.name, medicine.imageUrl)
+    }
+
     Surface(
         color = Color.White,
         shape = RoundedCornerShape(12.dp),
@@ -1410,19 +1763,27 @@ private fun TopMedicineRowItem(
             modifier = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Blister pack thumbnail
+            // Blister pack thumbnail with fallback
             Surface(
                 color = Color(0xFFF8FAFC),
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.size(46.dp)
+                modifier = Modifier.size(48.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     SubcomposeAsyncImage(
-                        model = medicine.imageUrl,
+                        model = resolvedThumbnail,
                         contentDescription = medicine.name,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize().padding(4.dp)
+                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                        error = {
+                            Icon(
+                                Icons.Default.Medication,
+                                contentDescription = null,
+                                tint = Color(0xFF0C831F),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     )
                 }
             }
@@ -1439,22 +1800,29 @@ private fun TopMedicineRowItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = medicine.saltComposition,
-                    fontSize = 10.sp,
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF0C831F),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Surface(
+                    color = Color(0xFFF0FDF4),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    Text(
+                        text = medicine.saltComposition,
+                        fontSize = 10.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF065F46),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 2.dp)
                 ) {
                     Text(
                         text = "₹${medicine.price.toInt()}",
-                        fontSize = 12.sp,
+                        fontSize = 12.5.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF111827)
@@ -1475,44 +1843,75 @@ private fun TopMedicineRowItem(
                 Surface(
                     color = Color(0xFF0C831F),
                     shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.height(28.dp)
+                    modifier = Modifier
+                        .height(30.dp)
+                        .width(76.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        IconButton(
-                            onClick = { onUpdateQuantity?.invoke(medicine.sku, cartQuantity - 1) },
-                            modifier = Modifier.size(22.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clickable { onUpdateQuantity?.invoke(medicine.sku, cartQuantity - 1) },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text("-", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Icon(
+                                imageVector = Icons.Default.Remove,
+                                contentDescription = "Decrease",
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
                         }
                         Text(
                             text = "$cartQuantity",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 4.dp)
+                            color = Color.White
                         )
-                        IconButton(
-                            onClick = { onUpdateQuantity?.invoke(medicine.sku, cartQuantity + 1) },
-                            modifier = Modifier.size(22.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clickable { onUpdateQuantity?.invoke(medicine.sku, cartQuantity + 1) },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Increase",
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
                         }
                     }
                 }
             } else {
-                OutlinedButton(
-                    onClick = onAddToCart,
+                Surface(
+                    color = Color.White,
                     shape = RoundedCornerShape(6.dp),
                     border = BorderStroke(1.2.dp, Color(0xFF0C831F)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0C831F)),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    modifier = Modifier.height(28.dp)
+                    modifier = Modifier
+                        .height(28.dp)
+                        .width(68.dp)
+                        .clickable { onAddToCart() }
                 ) {
-                    Text("ADD", fontSize = 10.sp, fontFamily = PlusJakartaSans, fontWeight = FontWeight.ExtraBold)
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            "ADD",
+                            fontSize = 11.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0C831F),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                 }
             }
         }
@@ -1567,7 +1966,17 @@ private fun ModernSearchResultCard(
                     model = resolvedImage,
                     contentDescription = result.title,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(6.dp)
+                    modifier = Modifier.fillMaxSize().padding(6.dp),
+                    error = {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                Icons.Default.Medication,
+                                contentDescription = null,
+                                tint = Color(0xFF0C831F),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
                 )
                 Surface(
                     color = Color(0xFFE8F5E9),
@@ -1582,6 +1991,23 @@ private fun ModernSearchResultCard(
                         color = Color(0xFF0C831F),
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
+                }
+
+                if (discountPercent > 0) {
+                    Surface(
+                        color = Color(0xFF0C831F),
+                        shape = RoundedCornerShape(topEnd = 6.dp, bottomStart = 10.dp),
+                        modifier = Modifier.align(Alignment.BottomStart)
+                    ) {
+                        Text(
+                            text = "$discountPercent% OFF",
+                            fontSize = 8.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -1606,8 +2032,9 @@ private fun ModernSearchResultCard(
 
                 // Active Salt Composition Badge
                 Surface(
-                    color = Color(0xFFF1F5F9),
+                    color = Color(0xFFF0FDF4),
                     shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(0.5.dp, Color(0xFFA7F3D0)),
                     modifier = Modifier.padding(vertical = 3.dp)
                 ) {
                     Text(
@@ -1638,8 +2065,8 @@ private fun ModernSearchResultCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.Bottom) {
                             Text(
                                 text = MoneyFormatter.format(price),
                                 fontSize = 15.sp,
@@ -1650,101 +2077,107 @@ private fun ModernSearchResultCard(
                             if (hasDiscount) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = MoneyFormatter.format(mrp),
+                                    text = "MRP ${MoneyFormatter.format(mrp)}",
                                     fontSize = 11.sp,
                                     color = Color(0xFF9CA3AF),
                                     textDecoration = TextDecoration.LineThrough
                                 )
                             }
-                            if (discountPercent > 0) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "$discountPercent% OFF",
-                                    fontSize = 10.sp,
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0C831F)
-                                )
-                            }
                         }
 
-                        // Per-Unit Price Pill
                         Text(
                             text = meta.perUnitPrice,
-                            fontSize = 10.sp,
+                            fontSize = 10.5.sp,
                             fontFamily = PlusJakartaSans,
                             color = Color(0xFF64748B),
-                            modifier = Modifier.padding(top = 1.dp)
+                            maxLines = 1,
+                            modifier = Modifier.padding(top = 2.dp)
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     // Cart Action: [ ADD + ] or [ - qty + ]
                     if (currentQuantity > 0) {
                         Surface(
-                            color = Color(0xFF0E675E),
+                            color = Color(0xFF0C831F),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .height(32.dp)
-                                .widthIn(min = 84.dp)
+                                .width(82.dp)
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .padding(horizontal = 6.dp)
-                                    .fillMaxWidth(),
+                                modifier = Modifier.fillMaxSize(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                IconButton(
-                                    onClick = { onUpdateQuantity?.invoke(result.sku ?: result.entityId, currentQuantity - 1) },
-                                    modifier = Modifier.size(24.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clickable { onUpdateQuantity?.invoke(result.sku ?: result.entityId, currentQuantity - 1) },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Text("-", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Icon(
+                                        imageVector = Icons.Default.Remove,
+                                        contentDescription = "Decrease quantity",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
                                 }
                                 Text(
                                     text = "$currentQuantity",
-                                    fontSize = 12.sp,
+                                    fontSize = 12.5.sp,
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                    color = Color.White
                                 )
-                                IconButton(
-                                    onClick = { onUpdateQuantity?.invoke(result.sku ?: result.entityId, currentQuantity + 1) },
-                                    modifier = Modifier.size(24.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clickable { onUpdateQuantity?.invoke(result.sku ?: result.entityId, currentQuantity + 1) },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Increase quantity",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
                                 }
                             }
                         }
                     } else if (onAddToCart != null) {
-                        Surface(
-                            color = Color.White,
+                        OutlinedButton(
+                            onClick = { onAddToCart(result) },
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.5.dp, Color(0xFF0E675E)),
+                            border = BorderStroke(1.4.dp, Color(0xFF0C831F)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.White,
+                                contentColor = Color(0xFF0C831F)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                             modifier = Modifier
                                 .height(32.dp)
-                                .widthIn(min = 84.dp)
-                                .clickable { onAddToCart(result) }
+                                .width(78.dp)
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .padding(horizontal = 10.dp)
-                                    .fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
                                 Text(
                                     "ADD",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.5.sp,
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF0E675E)
+                                    color = Color(0xFF0C831F),
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
                                 Icon(
                                     Icons.Default.Add,
                                     contentDescription = null,
-                                    tint = Color(0xFF0E675E),
+                                    tint = Color(0xFF0C831F),
                                     modifier = Modifier.size(13.dp)
                                 )
                             }
@@ -1906,31 +2339,45 @@ private fun TopPickProductCard(
                     Surface(
                         color = Color(0xFF0C831F),
                         shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.height(28.dp)
+                        modifier = Modifier.height(30.dp)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 4.dp),
+                            modifier = Modifier.padding(horizontal = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = { onUpdateQuantity?.invoke(pick.id, currentQuantity - 1) },
-                                modifier = Modifier.size(20.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clickable { onUpdateQuantity?.invoke(pick.id, currentQuantity - 1) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text("-", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Icon(
+                                    imageVector = Icons.Default.Remove,
+                                    contentDescription = "Decrease",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp)
+                                )
                             }
                             Text(
                                 text = "$currentQuantity",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White,
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
-                            IconButton(
-                                onClick = { onUpdateQuantity?.invoke(pick.id, currentQuantity + 1) },
-                                modifier = Modifier.size(20.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clickable { onUpdateQuantity?.invoke(pick.id, currentQuantity + 1) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Increase",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp)
+                                )
                             }
                         }
                     }
@@ -2336,7 +2783,8 @@ data class GenericSubstituteInfo(
     val mrp: Double,
     val perUnitPrice: String,
     val savingsPercent: Int,
-    val imageUrl: String
+    val imageUrl: String,
+    val saltComposition: String = "Paracetamol (650mg)"
 )
 
 object MedicineDetailEnricher {
@@ -2350,16 +2798,17 @@ object MedicineDetailEnricher {
                 saltComposition = "Paracetamol (650mg)",
                 manufacturer = "Micro Labs Ltd",
                 packDescription = "Strip of 15 tablets • Micro Labs Ltd",
-                perUnitPrice = "₹${String.format("%.2f", price / 15)} / tablet",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 15)}/tab",
                 genericSubstitute = GenericSubstituteInfo(
                     brandName = "Paracip 650mg Tablet",
                     manufacturer = "Cipla Limited",
                     packSize = "Strip of 10 tablets",
                     price = 18.0,
                     mrp = 22.0,
-                    perUnitPrice = "₹1.80 / tablet",
+                    perUnitPrice = "₹1.80/tab",
                     savingsPercent = 40,
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/266954/paracip-500mg-strip-of-10-tablets-box-front-1-1756826302-non-watermarked.jpg"
+                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/266954/paracip-500mg-strip-of-10-tablets-box-front-1-1756826302-non-watermarked.jpg",
+                    saltComposition = "Paracetamol (650mg)"
                 )
             )
 
@@ -2367,16 +2816,17 @@ object MedicineDetailEnricher {
                 saltComposition = "Paracetamol (650mg) Fast Release",
                 manufacturer = "GSK Consumer Healthcare",
                 packDescription = "Strip of 15 tablets • GSK Pharma",
-                perUnitPrice = "₹${String.format("%.2f", price / 15)} / tablet",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 15)}/tab",
                 genericSubstitute = GenericSubstituteInfo(
                     brandName = "Dolo 650mg Tablet",
                     manufacturer = "Micro Labs Ltd",
                     packSize = "Strip of 15 tablets",
                     price = 30.0,
                     mrp = 34.50,
-                    perUnitPrice = "₹2.00 / tablet",
+                    perUnitPrice = "₹2.00/tab",
                     savingsPercent = 15,
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
+                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg",
+                    saltComposition = "Paracetamol (650mg)"
                 )
             )
 
@@ -2384,16 +2834,17 @@ object MedicineDetailEnricher {
                 saltComposition = "Amoxycillin (500mg) + Clavulanic Acid (125mg)",
                 manufacturer = "GlaxoSmithKline",
                 packDescription = "Strip of 10 tablets • GSK Pharma",
-                perUnitPrice = "₹${String.format("%.2f", price / 10)} / tablet",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 10)}/tab",
                 genericSubstitute = GenericSubstituteInfo(
                     brandName = "Moxikind-CV 625 Tablet",
                     manufacturer = "Mankind Pharma",
                     packSize = "Strip of 10 tablets",
                     price = 115.0,
                     mrp = 145.0,
-                    perUnitPrice = "₹11.50 / tablet",
+                    perUnitPrice = "₹11.50/tab",
                     savingsPercent = 38,
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg"
+                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg",
+                    saltComposition = "Amoxycillin (500mg) + Clavulanic Acid (125mg)"
                 )
             )
 
@@ -2401,24 +2852,51 @@ object MedicineDetailEnricher {
                 saltComposition = "Pantoprazole (40mg) + Domperidone (30mg)",
                 manufacturer = "Alkem Laboratories",
                 packDescription = "Strip of 15 capsules • Alkem Labs",
-                perUnitPrice = "₹${String.format("%.2f", price / 15)} / capsule",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 15)}/cap",
                 genericSubstitute = GenericSubstituteInfo(
                     brandName = "Pantocid-DSR Capsule",
                     manufacturer = "Sun Pharmaceutical",
                     packSize = "Strip of 15 capsules",
                     price = 115.0,
                     mrp = 140.0,
-                    perUnitPrice = "₹7.66 / capsule",
+                    perUnitPrice = "₹7.66/cap",
                     savingsPercent = 26,
-                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/130198/pan-d-capsule-strip-of-15-capsules-front-2-1756897184-non-watermarked.jpg"
+                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/130198/pan-d-capsule-strip-of-15-capsules-front-2-1756897184-non-watermarked.jpg",
+                    saltComposition = "Pantoprazole (40mg) + Domperidone (30mg)"
                 )
+            )
+
+            n.contains("pan 40") || n.contains("pantoprazole") || (n.contains("pan") && !n.contains("pan d")) -> MedicineMetadata(
+                saltComposition = "Pantoprazole Gastro-Resistant (40mg)",
+                manufacturer = "Alkem Laboratories",
+                packDescription = "Strip of 15 tablets • Alkem Labs",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 15)}/tab",
+                genericSubstitute = GenericSubstituteInfo(
+                    brandName = "Pantop 40mg Tablet",
+                    manufacturer = "Aristo Pharmaceuticals",
+                    packSize = "Strip of 15 tablets",
+                    price = 78.0,
+                    mrp = 142.0,
+                    perUnitPrice = "₹5.20/tab",
+                    savingsPercent = 45,
+                    imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/I00306/pan-40mg-strip-of-15-tablets-front-2-1756099995-non-watermarked.jpg",
+                    saltComposition = "Pantoprazole Gastro-Resistant (40mg)"
+                )
+            )
+
+            n.contains("zincovit") || n.contains("zinc") -> MedicineMetadata(
+                saltComposition = "Multivitamin + Multimineral with Zinc & Selenium",
+                manufacturer = "Apex Laboratories",
+                packDescription = "Strip of 15 tablets • Apex Labs",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 15)}/tab",
+                genericSubstitute = null
             )
 
             n.contains("becosules") -> MedicineMetadata(
                 saltComposition = "Vitamin B-Complex + Vitamin C + Zinc",
                 manufacturer = "Pfizer Ltd",
                 packDescription = "Strip of 20 capsules • Pfizer",
-                perUnitPrice = "₹${String.format("%.2f", price / 20)} / capsule",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 20)}/cap",
                 genericSubstitute = null
             )
 
@@ -2426,7 +2904,7 @@ object MedicineDetailEnricher {
                 saltComposition = "Magnesium Hydroxide + Aluminium Hydroxide + Simethicone",
                 manufacturer = "Abbott Healthcare",
                 packDescription = "Bottle of 200 ml • Abbott",
-                perUnitPrice = "₹0.73 / ml",
+                perUnitPrice = "₹0.73/ml",
                 genericSubstitute = null
             )
 
@@ -2434,7 +2912,7 @@ object MedicineDetailEnricher {
                 saltComposition = "Diclofenac Diethylamine + Linseed Oil + Menthol",
                 manufacturer = "Sun Pharmaceutical",
                 packDescription = "Tube of 75 g • Sun Pharma",
-                perUnitPrice = "₹2.60 / g",
+                perUnitPrice = "₹2.60/g",
                 genericSubstitute = null
             )
 
@@ -2442,7 +2920,7 @@ object MedicineDetailEnricher {
                 saltComposition = "WHO Recommended Oral Rehydration Salts",
                 manufacturer = "FDC Limited",
                 packDescription = "Sachet of 21.8 g • FDC Ltd",
-                perUnitPrice = "₹22.00 / sachet",
+                perUnitPrice = "₹22.00/sachet",
                 genericSubstitute = null
             )
 
@@ -2450,7 +2928,7 @@ object MedicineDetailEnricher {
                 saltComposition = "Telmisartan (40mg)",
                 manufacturer = "Glenmark Pharmaceuticals",
                 packDescription = "Strip of 30 tablets • Glenmark",
-                perUnitPrice = "₹${String.format("%.2f", price / 30)} / tablet",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", price / 30)}/tab",
                 genericSubstitute = null
             )
 
@@ -2458,7 +2936,7 @@ object MedicineDetailEnricher {
                 saltComposition = "Aspirin (75mg)",
                 manufacturer = "USV Private Limited",
                 packDescription = "Strip of 14 tablets • USV Ltd",
-                perUnitPrice = "₹0.43 / tablet",
+                perUnitPrice = "₹0.43/tab",
                 genericSubstitute = null
             )
 
@@ -2466,7 +2944,7 @@ object MedicineDetailEnricher {
                 saltComposition = "Calcium (500mg) + Vitamin D3 (250IU)",
                 manufacturer = "Torrent Pharmaceuticals",
                 packDescription = "Bottle of 30 tablets • Torrent",
-                perUnitPrice = "₹3.93 / tablet",
+                perUnitPrice = "₹3.93/tab",
                 genericSubstitute = null
             )
 
@@ -2474,7 +2952,7 @@ object MedicineDetailEnricher {
                 saltComposition = "Certified Pharmaceutical Formulation",
                 manufacturer = if (sub.contains("•")) sub.substringAfter("•").trim() else "WHO-GMP Certified",
                 packDescription = if (sub.isNotBlank()) sub else "Strip of 10 units",
-                perUnitPrice = "₹${String.format("%.2f", (price / 10).coerceAtLeast(1.0))} / unit",
+                perUnitPrice = "₹${String.format(java.util.Locale.US, "%.2f", (price / 10).coerceAtLeast(1.0))}/unit",
                 genericSubstitute = null
             )
         }
@@ -2526,27 +3004,27 @@ private val POPULAR_MED_CATEGORIES = listOf(
 
 private val TOP_MEDICINE_CATALOG = listOf(
     TopMedicineItem(
-        id = "MED-DOLO-650",
-        sku = "SKU-DOLO-650",
-        name = "Dolo 650mg Tablet",
+        id = "MED_DOLO_650",
+        sku = "MED_DOLO_650",
+        name = "Dolo 650mg Paracetamol Tablets",
         saltComposition = "Paracetamol (650mg)",
         manufacturer = "Micro Labs Ltd",
         packSize = "Strip of 15 tablets",
-        price = 30.0,
+        price = 28.0,
         mrp = 34.50,
-        perUnitLabel = "₹2.00/tab",
+        perUnitLabel = "₹1.87/tab",
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
     ),
     TopMedicineItem(
-        id = "MED-AUG-625",
-        sku = "SKU-AUG-625",
+        id = "MED_AUGMENTIN_625",
+        sku = "MED_AUGMENTIN_625",
         name = "Augmentin 625 Duo Tablet",
         saltComposition = "Amoxycillin (500mg) + Clavulanic Acid (125mg)",
         manufacturer = "GlaxoSmithKline",
         packSize = "Strip of 10 tablets",
-        price = 185.0,
-        mrp = 220.0,
-        perUnitLabel = "₹18.50/tab",
+        price = 169.0,
+        mrp = 204.0,
+        perUnitLabel = "₹16.90/tab",
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/255148/augmentin-duo-625mg-strip-of-10-tablets-box-front-1-1756827387-non-watermarked.jpg"
     ),
     TopMedicineItem(
@@ -2562,44 +3040,44 @@ private val TOP_MEDICINE_CATALOG = listOf(
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/130198/pan-d-capsule-strip-of-15-capsules-front-2-1756897184-non-watermarked.jpg"
     ),
     TopMedicineItem(
-        id = "MED-BECO-Z",
-        sku = "SKU-BECO-Z",
+        id = "MED_BECOSULES_Z",
+        sku = "MED_BECOSULES_Z",
         name = "Becosules Z Capsule",
         saltComposition = "Vitamin B-Complex + Vitamin C + Zinc",
         manufacturer = "Pfizer Ltd",
         packSize = "Strip of 20 capsules",
-        price = 48.0,
-        mrp = 55.0,
-        perUnitLabel = "₹2.40/cap",
+        price = 39.0,
+        mrp = 52.0,
+        perUnitLabel = "₹1.95/cap",
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg"
     ),
     TopMedicineItem(
-        id = "MED-DIG-200",
-        sku = "SKU-DIG-200",
+        id = "MED_DIGENE_MINT",
+        sku = "MED_DIGENE_MINT",
         name = "Digene Mint Antacid Gel",
         saltComposition = "Magnesium Hydroxide + Aluminium Hydroxide + Simethicone",
         manufacturer = "Abbott Healthcare",
         packSize = "Bottle of 200 ml",
-        price = 145.0,
-        mrp = 168.0,
-        perUnitLabel = "₹0.73/ml",
+        price = 122.0,
+        mrp = 152.0,
+        perUnitLabel = "₹0.61/ml",
         imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
     ),
     TopMedicineItem(
-        id = "MED-VOL-75",
-        sku = "SKU-VOL-75",
-        name = "Volini Pain Relief Gel",
-        saltComposition = "Diclofenac Diethylamine + Linseed Oil + Menthol",
-        manufacturer = "Sun Pharmaceutical",
-        packSize = "Tube of 75 g",
-        price = 195.0,
-        mrp = 230.0,
-        perUnitLabel = "₹2.60/g",
-        imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/I00392/volini-pain-relief-gel-tube-of-100-g-6.1-1712725504.jpg"
+        id = "MED_COMBIFLAM",
+        sku = "MED_COMBIFLAM",
+        name = "Combiflam Pain Relief Tablets",
+        saltComposition = "Ibuprofen (400mg) + Paracetamol (325mg)",
+        manufacturer = "Sanofi India",
+        packSize = "Strip of 20 tablets",
+        price = 38.0,
+        mrp = 48.0,
+        perUnitLabel = "₹1.90/tab",
+        imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/045353/combiflam-strip-of-20-tablets-front-2-1753347026-non-watermark.jpg"
     ),
     TopMedicineItem(
-        id = "MED-ELEC-21",
-        sku = "SKU-ELEC-21",
+        id = "MED_ELECTRAL_ORS",
+        sku = "MED_ELECTRAL_ORS",
         name = "Electral ORS Powder",
         saltComposition = "WHO Recommended Oral Rehydration Salts",
         manufacturer = "FDC Limited",
@@ -2634,8 +3112,8 @@ private val TOP_MEDICINE_CATALOG = listOf(
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/163836/telma-40mg-strip-of-30-tablets-front-2-1756884638-non-watermarked.jpg"
     ),
     TopMedicineItem(
-        id = "MED-ECO-75",
-        sku = "SKU-ECO-75",
+        id = "MED_ECOSPRIN_75",
+        sku = "MED_ECOSPRIN_75",
         name = "Ecosprin 75mg Tablet",
         saltComposition = "Aspirin (75mg)",
         manufacturer = "USV Private Limited",
@@ -2672,44 +3150,141 @@ private val HEALTH_CONCERNS = listOf(
 
 private val TOP_HEALTHCARE_PICKS = listOf(
     EssentialPick(
-        id = "MED-001",
+        id = "MED_DOLO_650",
         name = "Dolo 650mg Tablet",
         packSize = "Strip of 15 tablets",
-        price = 30.0,
+        price = 28.0,
         mrp = 34.50,
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/059346/dolo-650mg-strip-of-15-tablets-front-2-1753347026-non-watermark.jpg"
     ),
     EssentialPick(
-        id = "MED-002",
+        id = "MED_DIGENE_MINT",
         name = "Digene Mint Antacid",
         packSize = "Bottle of 200 ml",
-        price = 145.0,
-        mrp = 168.0,
+        price = 122.0,
+        mrp = 152.0,
         imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/255390/digene-gel-acidity-gas-relief-200ml-mint-flavour-sugar-free-2-1710939921.jpg"
     ),
     EssentialPick(
-        id = "MED-003",
-        name = "Volini Pain Relief Gel",
-        packSize = "Tube of 75 g",
-        price = 195.0,
-        mrp = 230.0,
-        imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/I00392/volini-pain-relief-gel-tube-of-100-g-6.1-1712725504.jpg"
+        id = "MED_COMBIFLAM",
+        name = "Combiflam Pain Relief",
+        packSize = "Strip of 20 tablets",
+        price = 38.0,
+        mrp = 48.0,
+        imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/045353/combiflam-strip-of-20-tablets-front-2-1753347026-non-watermark.jpg"
     ),
     EssentialPick(
-        id = "MED-004",
+        id = "MED_BECOSULES_Z",
         name = "Becosules Z Capsule",
         packSize = "Strip of 20 capsules",
-        price = 48.0,
-        mrp = 55.0,
+        price = 39.0,
+        mrp = 52.0,
         imageUrl = "https://cdn01.pharmeasy.in/dam/productsnowatermark/022236/becosules-strip-of-20-capsules-front-2-1756894147-non-watermarked.jpg"
     ),
     EssentialPick(
-        id = "MED-005",
+        id = "MED_ELECTRAL_ORS",
         name = "Electral ORS Powder",
         packSize = "Sachet of 21.8 g",
         price = 22.0,
         mrp = 24.5,
         imageUrl = "https://cdn01.pharmeasy.in/dam/products_otc/065110/electral-powder-218g-2-1671741180.jpg"
+    )
+)
+
+data class HealthcareSuggestionItem(
+    val title: String,
+    val saltSubtitle: String,
+    val category: String = "Medicines"
+)
+
+data class TrendingSearchItem(
+    val rank: Int,
+    val query: String,
+    val badge: String? = null,
+    val salt: String = ""
+)
+
+private val TRENDING_SEARCH_ITEMS = listOf(
+    TrendingSearchItem(1, "Dolo 650mg Tablet", "🔥 Trending", "Paracetamol (650mg)"),
+    TrendingSearchItem(2, "Pan-D Capsule", "⚡ Acidity", "Pantoprazole + Domperidone"),
+    TrendingSearchItem(3, "Shelcal 500 Tablet", "🦴 Calcium", "Calcium 500mg + D3"),
+    TrendingSearchItem(4, "Augmentin 625 Duo", "💊 Antibiotic", "Amoxiclav 625mg"),
+    TrendingSearchItem(5, "Electral ORS Powder", "💧 Hydration", "Oral Rehydration Salts"),
+    TrendingSearchItem(6, "Becosules Z Capsule", "🛡️ Immunity", "B-Complex + Zinc")
+)
+
+private val HEALTHCARE_SUGGESTION_MAP = mapOf(
+    "dolo" to listOf(
+        HealthcareSuggestionItem("Dolo 650mg Tablet", "Paracetamol (650mg) • Micro Labs Ltd", "Pain & Fever"),
+        HealthcareSuggestionItem("Dolo Cold Tablet", "Paracetamol + Phenylephrine + CPM", "Cough & Cold"),
+        HealthcareSuggestionItem("Dolo 120 Suspension 60ml", "Paracetamol Paediatric Suspension", "Fever"),
+        HealthcareSuggestionItem("Dolo 250 Drops 15ml", "Paracetamol Drops for Infants", "Fever"),
+        HealthcareSuggestionItem("Dolopar Tablet", "Paracetamol (500mg) + Caffeine", "Pain Relief"),
+        HealthcareSuggestionItem("Dolokind Plus Tablet", "Aceclofenac + Paracetamol", "Pain Relief")
+    ),
+    "para" to listOf(
+        HealthcareSuggestionItem("Paracetamol 650mg Tablet", "Paracetamol (650mg) • Certified Generic", "Pain & Fever"),
+        HealthcareSuggestionItem("Paracip 650mg Tablet", "Paracetamol (650mg) • Cipla Ltd", "Pain & Fever"),
+        HealthcareSuggestionItem("Crocin 650 Advance Tablet", "Fast Release Paracetamol • GSK", "Pain & Fever"),
+        HealthcareSuggestionItem("Calpol 650mg Tablet", "Paracetamol (650mg) • GSK", "Pain & Fever"),
+        HealthcareSuggestionItem("Paracetamol 500mg Suspension", "Oral Syrup for Kids • Cipla", "Fever")
+    ),
+    "pan" to listOf(
+        HealthcareSuggestionItem("Pan-D Capsule", "Pantoprazole (40mg) + Domperidone (30mg)", "Acidity & Gas"),
+        HealthcareSuggestionItem("Pan 40mg Tablet", "Pantoprazole Gastro-Resistant (40mg)", "Acidity & GERD"),
+        HealthcareSuggestionItem("Pantop-DSR Capsule", "Pantoprazole + Domperidone SR", "Acidity"),
+        HealthcareSuggestionItem("Pantocid 40mg Tablet", "Pantoprazole (40mg) • Sun Pharma", "Acidity")
+    ),
+    "aug" to listOf(
+        HealthcareSuggestionItem("Augmentin 625 Duo Tablet", "Amoxycillin (500mg) + Clavulanic Acid (125mg)", "Antibiotics"),
+        HealthcareSuggestionItem("Moxikind-CV 625 Tablet", "Amoxycillin + Potassium Clavulanate", "Antibiotics"),
+        HealthcareSuggestionItem("Amoxyclav 625 Tablet", "Amoxicillin + Clavulanic Acid • Abbott", "Antibiotics"),
+        HealthcareSuggestionItem("Augmentin 375 Duo Tablet", "Amoxicillin + Clavulanate (375mg)", "Antibiotics")
+    ),
+    "shel" to listOf(
+        HealthcareSuggestionItem("Shelcal 500 Tablet", "Elemental Calcium (500mg) + Vitamin D3", "Vitamins & Calcium"),
+        HealthcareSuggestionItem("Shelcal XT Tablet", "Calcium + Vitamin D3 + B12", "Vitamins & Calcium"),
+        HealthcareSuggestionItem("Shelcal HD Tablet", "High Dose Calcium + D3", "Calcium Deficiency"),
+        HealthcareSuggestionItem("Calcirol 60000 IU Sachet", "Cholecalciferol Granules", "Vitamin D3")
+    ),
+    "beco" to listOf(
+        HealthcareSuggestionItem("Becosules Z Capsule", "Vitamin B-Complex + Vitamin C + Zinc", "Vitamins & Immunity"),
+        HealthcareSuggestionItem("Supradyn Daily Multivitamin", "Multivitamins + Essential Minerals + Zinc", "Energy & Immunity"),
+        HealthcareSuggestionItem("Limcee Vitamin C 500mg", "Ascorbic Acid Chewable Tablet", "Immunity"),
+        HealthcareSuggestionItem("Zincovit Multivitamin Tablet", "Multivitamin + Multimineral + Grape Seed", "Daily Health")
+    ),
+    "dig" to listOf(
+        HealthcareSuggestionItem("Digene Mint Antacid Gel", "Magnesium + Aluminium Hydroxide + Simethicone", "Acidity & Gas"),
+        HealthcareSuggestionItem("Digene Orange Chewable Tablet", "Instant Acidity Relief • Abbott", "Acidity"),
+        HealthcareSuggestionItem("Gelusil MPS Liquid 200ml", "Aluminium Hydroxide + Dimethicone", "Gas Relief"),
+        HealthcareSuggestionItem("Eno Lemon Sachet 5g", "Fruit Salt Instant Relief in 6 Seconds", "Acidity")
+    ),
+    "elec" to listOf(
+        HealthcareSuggestionItem("Electral ORS Powder 21.8g", "WHO Recommended Oral Rehydration Salts", "Hydration"),
+        HealthcareSuggestionItem("Electral Ready to Drink 200ml", "Apple Flavour ORS Tetra Pack", "Energy & Hydration"),
+        HealthcareSuggestionItem("Enerzal ORS Energy Drink", "Balanced Electrolytes Powder 100g", "Sports Hydration")
+    ),
+    "vol" to listOf(
+        HealthcareSuggestionItem("Volini Pain Relief Gel 75g", "Diclofenac Diethylamine + Linseed Oil", "Pain Relief"),
+        HealthcareSuggestionItem("Volini Pain Relief Spray 100g", "Quick Action Diclofenac Spray", "Joint Pain"),
+        HealthcareSuggestionItem("Moov Pain Relief Cream 50g", "Ayurvedic Pain Relief Formula", "Muscle Pain")
+    ),
+    "cet" to listOf(
+        HealthcareSuggestionItem("Cetzine 10mg Tablet", "Cetirizine Hydrochloride (10mg)", "Allergy & Cold"),
+        HealthcareSuggestionItem("Cetirizine 10mg Tablet", "Anti-Allergic Generic Formulation", "Allergy"),
+        HealthcareSuggestionItem("Allegra 120mg Tablet", "Fexofenadine Hydrochloride (120mg)", "Allergy Relief"),
+        HealthcareSuggestionItem("Montair LC Tablet", "Montelukast (10mg) + Levocetirizine (5mg)", "Asthma & Allergy")
+    ),
+    "tel" to listOf(
+        HealthcareSuggestionItem("Telma 40mg Tablet", "Telmisartan (40mg) • Glenmark", "Cardiac / BP"),
+        HealthcareSuggestionItem("Telma H Tablet", "Telmisartan (40mg) + Hydrochlorothiazide", "Cardiac / BP"),
+        HealthcareSuggestionItem("Telmikind 40mg Tablet", "Telmisartan (40mg) • Mankind", "Cardiac / BP"),
+        HealthcareSuggestionItem("Amlong 5mg Tablet", "Amlodipine Besylate (5mg)", "Blood Pressure")
+    ),
+    "eco" to listOf(
+        HealthcareSuggestionItem("Ecosprin 75mg Tablet", "Aspirin Gastro-Resistant (75mg)", "Heart Care"),
+        HealthcareSuggestionItem("Ecosprin 150mg Tablet", "Aspirin (150mg) • USV Ltd", "Cardiology"),
+        HealthcareSuggestionItem("Ecosprin AV 75 Capsule", "Aspirin (75mg) + Atorvastatin (10mg)", "Cholesterol & Heart")
     )
 )
 
@@ -2724,7 +3299,7 @@ private fun SearchMicroLoadingView(
 ) {
     val trustMessages = remember {
         listOf(
-            "Checking 10-minute dark store stock in Rewari...",
+            "Checking 10-minute store stock in Rewari...",
             "Searching 50,000+ certified medicines & wellness...",
             "Matching 100% genuine batches & licensed pharmacies...",
             "Checking generic alternatives (save up to 40%)..."
@@ -2897,7 +3472,7 @@ private fun SearchMicroLoadingView(
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = "Rewari Dark Store • 10-Min Delivery",
+                        text = "Rewari Store • 10-Min Delivery",
                         fontSize = 11.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,

@@ -329,8 +329,8 @@ public struct ActiveDeliveryScreen: View {
     
     private var stageTitle: String {
         switch sessionManager.activeSession?.status {
-        case "ASSIGNED": return "STEP 1/4: Heading to Dark Store"
-        case "ARRIVED_MERCHANT": return "STEP 2/4: At Dark Store (Collect Package)"
+        case "ASSIGNED": return "STEP 1/4: Heading to Store"
+        case "ARRIVED_MERCHANT": return "STEP 2/4: At Store (Collect Package)"
         case "PICKED_UP": return "STEP 3/4: Out for Delivery to Customer"
         case "ARRIVED_CUSTOMER": return "STEP 4/4: At Customer Door (Enter OTP)"
         default: return "Delivery Active"
@@ -339,7 +339,7 @@ public struct ActiveDeliveryScreen: View {
     
     private var actionButtonTitle: String {
         switch sessionManager.activeSession?.status {
-        case "ASSIGNED": return "ARRIVED AT DARK STORE"
+        case "ASSIGNED": return "ARRIVED AT STORE"
         case "ARRIVED_MERCHANT": return "CONFIRM PACKAGE PICKUP"
         case "PICKED_UP": return "ARRIVED AT CUSTOMER DOOR"
         case "ARRIVED_CUSTOMER": return "COMPLETE DELIVERY (ENTER OTP)"

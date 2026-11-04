@@ -33,13 +33,32 @@ const DB_WAL_FILE = path.join(__dirname, 'db.wal.log');
 
 let appRepositories = null;
 let productionPgPool = null;
+
+process.on('uncaughtException', (err) => {
+  if (err && (err.code === 'ETIMEDOUT' || err.code === 'ECONNRESET' || String(err.message || '').includes('ETIMEDOUT'))) {
+    console.warn('[MockServer] Caught transient network socket error:', err.message);
+    return;
+  }
+  console.error('[MockServer] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.warn('[MockServer] Unhandled Rejection:', reason);
+});
+
 if (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
   try {
     const isLocalDb = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
     productionPgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
       max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
       ssl: isLocalDb ? false : { rejectUnauthorized: false }
+    });
+    productionPgPool.on('error', (err) => {
+      console.warn('[MockServer PostgreSQL Pool] Idle client error caught gracefully:', err.message);
     });
     productionPgPool.query("ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;").catch(() => {});
     console.log('✅ Connected to Supabase PostgreSQL in mock-server');
@@ -64,6 +83,7 @@ const otpStore = {}; // challengeId -> { phone, otp, expiresAt, attemptsLeft, cr
 const GATEWAY_ROUTES = [
   { prefix: '/api/v1/auth', port: 8082 },
   { prefix: '/api/v1/catalog', port: 8081 },
+  { prefix: '/api/v1/search', port: 8081 },
   { prefix: '/api/v1/cart', port: 8085 },
   { prefix: '/api/v1/orders', port: 8083 },
   { prefix: '/api/v1/customers', port: 8084 },
@@ -74,6 +94,9 @@ const GATEWAY_ROUTES = [
   { prefix: '/api/v1/delivery', port: 8083 },
   { prefix: '/api/v1/seller', port: 8083 },
   { prefix: '/api/v1/prescriptions', port: 8089 },
+  { prefix: '/api/v1/promotions', port: 8083 },
+  { prefix: '/api/v1/campaigns', port: 8083 },
+  { prefix: '/api/v1/config', port: 8083 },
 ];
 
 // ---------------- CANONICAL DELIVERY STATE MACHINE ----------------
@@ -1049,13 +1072,13 @@ function otpLockedOut(order) {
 }
 
 function json(res, status, data) {
-  const origin = res.getHeader('Access-Control-Allow-Origin') || '*';
+  const origin = res.getHeader('Access-Control-Allow-Origin');
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Origin': origin || '*',
+    ...(origin && origin !== '*' ? { 'Access-Control-Allow-Credentials': 'true' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Client-Platform, X-Client-Version'
   });
   res.end(JSON.stringify(data));
 }
@@ -1362,19 +1385,25 @@ function serverHomeFeed(customerId, rawProducts, orders, addressId) {
     if (p) buyAgain.push(p);
   }));
 
-  // Real Top Deals: honest discount math (>= 15% off MRP).
-  const topDeals = products.filter((p) =>
-    p.price > p.discountedPrice && (((p.price - p.discountedPrice) / p.price) * 100) >= 15
-  );
+  // Real Top Deals: honest discount math (>= 20% off MRP), sorted by highest discount percentage.
+  const highDeals = products
+    .filter((p) => p.price > p.discountedPrice && (((p.price - p.discountedPrice) / p.price) * 100) >= 20)
+    .sort((a, b) => b.discountPercentage - a.discountPercentage);
+  const fallbackDeals = products
+    .filter((p) => p.price > p.discountedPrice && (((p.price - p.discountedPrice) / p.price) * 100) >= 15)
+    .sort((a, b) => b.discountPercentage - a.discountPercentage);
+  const topDeals = highDeals.length > 0 ? highDeals : fallbackDeals;
 
-  // Honest Popular: ranked by REAL purchase frequency across all orders, then
-  // in-stock catalog items as a fallback. Humanizing stays honest.
+  // Honest Popular: ranked by REAL purchase frequency across all orders,
+  // then essential household categories (Pain & Fever, Cough & Cold, Acidity & Digestion, Antibiotics).
   const byFrequency = [...freq.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([sku]) => products.find((p) => p.sku === sku))
     .filter(Boolean);
-  const remaining = products.filter((p) => !freq.has(p.sku) && p.stockCount > 0);
-  const popular = byFrequency.concat(remaining).slice(0, 8);
+  const essentialCats = ['Pain & Fever', 'Cough & Cold', 'Acidity & Digestion', 'Antibiotics'];
+  const essentialPicks = products.filter(p => !freq.has(p.sku) && essentialCats.includes(p.category) && p.stockCount > 0);
+  const remaining = products.filter((p) => !freq.has(p.sku) && !essentialCats.includes(p.category) && p.stockCount > 0);
+  const popular = byFrequency.concat(essentialPicks).concat(remaining).slice(0, 8);
 
   // LOCATION-AWARE, STABLE ordering: when a delivery address is supplied the
   // ranking rotates deterministically per address (from the address id), so a
@@ -2886,6 +2915,11 @@ async function handleRequest(port, req, res) {
           name: body.name || 'Untitled Commerce Item',
           brandName: body.brandName || body.brand || 'Seller Brand',
           manufacturer: body.manufacturer || 'Seller',
+          saltComposition: body.saltComposition || body.salt_composition || body.activeSalt || null,
+          activeSalt: body.saltComposition || body.salt_composition || body.activeSalt || null,
+          safetyAdvice: body.safetyAdvice || body.safety_advice || [],
+          storageCondition: body.storageCondition || body.storage_condition || body.storageInstructions || null,
+          therapeuticClass: body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory || null,
           packSize: body.packSize || '1 unit',
           rxRequirement: body.rxRequirement || 'OTC',
           price: Number(body.price || body.discountedPrice || 0),
@@ -3037,8 +3071,20 @@ async function handleRequest(port, req, res) {
           stockCount: body.stockCount !== undefined ? Math.max(0, Number(body.stockCount)) : product.stockCount,
           inStock: body.stockCount !== undefined ? Number(body.stockCount) > 0 : product.inStock,
           therapeuticCategory: body.category ?? body.therapeuticCategory ?? product.therapeuticCategory,
+          category: body.category ?? body.therapeuticCategory ?? product.category,
           templateType: body.templateType ?? product.templateType,
-          image: body.image ?? product.image,
+          image: body.image ?? body.imageUrl ?? product.image,
+          imageUrl: body.imageUrl ?? body.image ?? product.imageUrl,
+          description: body.description ?? product.description,
+          expiryDate: body.expiryDate ?? body.expiry_date ?? product.expiryDate ?? product.expiry_date ?? '2026-11-30',
+          expiry_date: body.expiryDate ?? body.expiry_date ?? product.expiry_date ?? product.expiryDate ?? '2026-11-30',
+          manufacturingDate: body.manufacturingDate ?? body.manufacturing_date ?? product.manufacturingDate ?? product.manufacturing_date ?? '2024-05-15',
+          manufacturing_date: body.manufacturingDate ?? body.manufacturing_date ?? product.manufacturing_date ?? product.manufacturingDate ?? '2024-05-15',
+          batchNumber: body.batchNumber ?? body.batch_number ?? product.batchNumber ?? product.batch_number,
+          batch_number: body.batchNumber ?? body.batch_number ?? product.batch_number ?? product.batchNumber,
+          storageCondition: body.storageCondition ?? product.storageCondition,
+          coldChainRequired: body.coldChainRequired !== undefined ? Boolean(body.coldChainRequired) : product.coldChainRequired,
+          cold_chain_required: body.coldChainRequired !== undefined ? Boolean(body.coldChainRequired) : product.cold_chain_required,
         });
         if (previousStock !== Number(product.stockCount || 0)) {
           recordInventoryHistory(product, previousStock, Number(product.stockCount || 0), body.actor || 'seller', body.reason || 'Product edit stock change');
@@ -3156,6 +3202,8 @@ async function handleRequest(port, req, res) {
         const mrpVal = Number(p.mrp ?? p.price ?? (sellPrice * 1.25));
         const fullPrice = Math.max(mrpVal, sellPrice);
         const img = p.imageUrl || p.image_url || p.image || '';
+        const stock = Number(p.stock_count ?? p.stockCount ?? p.available_count ?? p.availableCount ?? 50);
+        const avail = Number(p.available_count ?? p.availableCount ?? stock);
         return {
           ...p,
           brandName: p.brandName || p.brand_name || p.brand || '',
@@ -3171,12 +3219,91 @@ async function handleRequest(port, req, res) {
           discountedPrice: sellPrice,
           sellingPrice: sellPrice,
           discountPercentage: fullPrice > sellPrice ? Math.round(((fullPrice - sellPrice) / fullPrice) * 100) : 0,
-          stockCount: Number(p.stock_count ?? p.stockCount ?? 0),
-          stock_count: Number(p.stock_count ?? p.stockCount ?? 0),
-          availableCount: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)),
-          available_count: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)),
-          inStock: Number(p.available_count ?? p.availableCount ?? (p.stock_count ?? p.stockCount ?? 0)) > 0
+          stockCount: stock,
+          stock_count: stock,
+          availableCount: avail,
+          available_count: avail,
+          inStock: avail > 0,
+          description: p.description || '',
+          expiryDate: p.expiryDate || p.expiry_date || '2026-11-30',
+          expiry_date: p.expiry_date || p.expiryDate || '2026-11-30',
+          manufacturingDate: p.manufacturingDate || p.manufacturing_date || '2024-05-15',
+          batchNumber: p.batchNumber || p.batch_number || ('BAT-' + (p.sku || p.id || '0000').slice(-4).toUpperCase()),
+          coldChainRequired: Boolean(p.coldChainRequired ?? p.cold_chain_required),
+          manufacturer: p.manufacturer || p.brandName || 'CommerceOS Health',
+          saltComposition: p.salt_composition || p.saltComposition || p.activeSalt || null,
+          activeSalt: p.salt_composition || p.saltComposition || p.activeSalt || null,
+          safetyAdvice: Array.isArray(p.safety_advice) ? p.safety_advice : (Array.isArray(p.safetyAdvice) ? p.safetyAdvice : (typeof (p.safety_advice || p.safetyAdvice) === 'string' && (p.safety_advice || p.safetyAdvice).startsWith('[') ? JSON.parse(p.safety_advice || p.safetyAdvice) : [])),
+          storageCondition: p.storage_condition || p.storageCondition || (p.coldChainRequired ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C'),
+          storageInstructions: p.storage_condition || p.storageCondition || (p.coldChainRequired ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C'),
+          therapeuticClass: p.therapeutic_class || p.therapeuticClass || p.therapeuticCategory || null,
+          therapeuticCategory: p.therapeutic_class || p.therapeuticClass || p.therapeuticCategory || p.category || ''
         };
+      }
+
+      if (path === '/api/v1/search') {
+        const q = (query.get('query') || query.get('q') || '').toLowerCase().trim();
+        let allProducts = [];
+        if (appRepositories && appRepositories.catalogRepo) {
+          allProducts = await appRepositories.catalogRepo.getActiveProducts();
+        } else {
+          allProducts = db.products || [];
+        }
+        const matched = (q
+          ? allProducts.filter((m) =>
+              (String(m.name || '') + ' ' + String(m.brandName || m.brand_name || '') + ' ' + String(m.therapeuticCategory || m.category || '') + ' ' + String(m.sku || '')).toLowerCase().includes(q)
+            )
+          : allProducts)
+          .map(formatProductForCatalog);
+        const searchResults = matched.map((p, idx) => ({
+          entityType: 'PRODUCT',
+          entityId: p.id,
+          sku: p.sku,
+          title: p.name,
+          subtitle: p.brandName || p.category || '',
+          image: p.image || p.imageUrl || '',
+          price: Number(p.discountedPrice || p.price || 0),
+          vertical: 'pharmacy',
+          globalRank: idx + 1,
+          isExpressEligible: true,
+          rating: p.rating || 4.8
+        }));
+        return json(res, 200, {
+          query: q,
+          totalCount: searchResults.length,
+          orderedResults: searchResults,
+          products: searchResults,
+          stores: [],
+          restaurants: [],
+          services: [],
+          brands: [],
+          categories: [],
+          collections: [],
+          campaigns: [],
+          offers: []
+        });
+      }
+
+      if (path === '/api/v1/search/autocomplete') {
+        const q = (query.get('query') || query.get('q') || '').toLowerCase().trim();
+        let allProducts = [];
+        if (appRepositories && appRepositories.catalogRepo) {
+          allProducts = await appRepositories.catalogRepo.getActiveProducts();
+        } else {
+          allProducts = db.products || [];
+        }
+        const matched = allProducts
+          .filter(m => (String(m.name || '') + ' ' + String(m.brandName || '')).toLowerCase().includes(q))
+          .slice(0, 8)
+          .map(p => ({
+            id: p.id,
+            type: 'PRODUCT',
+            title: p.name,
+            subtitle: p.brandName || p.category || '',
+            vertical: 'pharmacy',
+            image: p.imageUrl || p.image || ''
+          }));
+        return json(res, 200, matched);
       }
 
       if (path.includes('/search')) {
@@ -3904,6 +4031,203 @@ async function handleRequest(port, req, res) {
         });
       }
 
+      // ---------------- PROMOTIONS & MARKETING CAMPAIGNS ----------------
+      if ((path === '/api/v1/promotions' || path === '/api/v1/campaigns') && req.method === 'GET') {
+        let activePromotions = [];
+        if (productionPgPool) {
+          try {
+            const dbRes = await productionPgPool.query(`
+              SELECT id, code, title, type, discount_text AS "discountText", description,
+                     min_order_value::numeric AS "minOrderValue",
+                     discount_percent::numeric AS "discountPercent",
+                     flat_discount::numeric AS "flatDiscount",
+                     max_discount::numeric AS "maxDiscount",
+                     badge, status, valid_until AS "validUntil"
+              FROM promotions
+              WHERE status = 'ACTIVE'
+              ORDER BY min_order_value ASC
+            `);
+            activePromotions = dbRes.rows.map(r => ({
+              ...r,
+              minOrderValue: Number(r.minOrderValue || 0),
+              discountPercent: Number(r.discountPercent || 0),
+              flatDiscount: Number(r.flatDiscount || 0),
+              maxDiscount: r.maxDiscount != null ? Number(r.maxDiscount) : null
+            }));
+          } catch (err) {
+            console.warn('[mock-server] promotions DB query failed:', err.message);
+          }
+        }
+        if (activePromotions.length === 0) {
+          activePromotions = [
+            {
+              id: 'promo2',
+              code: 'HEALTH30',
+              title: 'FLAT ₹150 OFF',
+              type: 'FLAT_DISCOUNT',
+              discountText: '₹150 Flat Off Medicines',
+              description: 'Flat ₹150 OFF on orders above ₹799',
+              minOrderValue: 799,
+              flatDiscount: 150,
+              maxDiscount: 150,
+              badge: 'BIG SAVINGS / ₹150 OFF',
+              status: 'ACTIVE',
+              validUntil: '2026-11-30'
+            },
+            {
+              id: 'promo_save10',
+              code: 'SAVE10',
+              title: 'FLAT ₹100 OFF',
+              type: 'FLAT_DISCOUNT',
+              discountText: 'Flat ₹100 OFF',
+              description: 'Flat ₹100 OFF on orders above ₹199',
+              minOrderValue: 199,
+              flatDiscount: 100,
+              maxDiscount: 100,
+              badge: 'INSTANT SAVINGS',
+              status: 'ACTIVE',
+              validUntil: '2026-12-31'
+            }
+          ];
+        }
+        return json(res, 200, {
+          promotions: activePromotions,
+          total: activePromotions.length
+        });
+      }
+
+      // ---------------- COUPON VALIDATION ----------------
+      if (path === '/api/v1/promotions/validate' && req.method === 'GET') {
+        const code = String(query.get('code') || '').trim().toUpperCase();
+        const subtotal = Math.max(0, Number(query.get('subtotal') || 0));
+
+        if (!code) {
+          return json(res, 400, { valid: false, error: 'MISSING_CODE', message: 'Coupon code is required.' });
+        }
+        if (code === 'FREESHIP') {
+          return json(res, 400, { valid: false, error: 'NOT_A_COUPON', message: 'Free delivery is an automatic policy above threshold, not a coupon.' });
+        }
+
+        if (productionPgPool) {
+          try {
+            const dbRes = await productionPgPool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [code]);
+            if (dbRes.rows.length === 0) {
+              return json(res, 404, { valid: false, error: 'INVALID_COUPON', message: `Coupon code '${code}' is invalid.` });
+            }
+            const promo = dbRes.rows[0];
+            if (promo.status !== 'ACTIVE') {
+              return json(res, 400, { valid: false, error: 'COUPON_INACTIVE', message: `Coupon '${code}' is currently ${promo.status.toLowerCase()}.` });
+            }
+            const minOrder = Number(promo.min_order_value || 0);
+            if (subtotal < minOrder) {
+              const diff = Math.round((minOrder - subtotal) * 100) / 100;
+              return json(res, 400, { valid: false, error: 'COUPON_MIN_ORDER_NOT_MET', message: `Add ₹${diff.toFixed(2)} more to apply ${code}` });
+            }
+
+            let discount = 0;
+            if (promo.type === 'PERCENTAGE') {
+              const calculated = subtotal * (Number(promo.discount_percent || 0) / 100);
+              const maxDisc = promo.max_discount != null ? Number(promo.max_discount) : null;
+              discount = maxDisc ? Math.min(maxDisc, calculated) : calculated;
+            } else {
+              discount = Math.min(Number(promo.flat_discount || 0), subtotal);
+            }
+            discount = Math.round(discount * 100) / 100;
+
+            return json(res, 200, {
+              valid: true,
+              code: promo.code,
+              discountAmount: discount,
+              discountText: promo.discount_text,
+              message: `Coupon '${promo.code}' applied! You saved ₹${discount.toFixed(2)}`
+            });
+          } catch (err) {
+            console.warn('[mock-server] promo validation error:', err.message);
+          }
+        }
+
+        return json(res, 400, { valid: false, error: 'INVALID_COUPON', message: `Coupon code '${code}' is invalid.` });
+      }
+
+      // ---------------- STORE & DELIVERY CONFIGURATION ----------------
+      if (path === '/api/v1/config/delivery' && req.method === 'GET') {
+        let deliveryConfig = {
+          freeDeliveryThreshold: 199.00,
+          standardDeliveryFee: 2.00,
+          expressDeliveryFee: 2.00,
+          coldChainPackagingFee: 15.00,
+          cacheTtlDays: 30
+        };
+        if (productionPgPool) {
+          try {
+            const dbRes = await productionPgPool.query('SELECT * FROM delivery_config WHERE is_active = TRUE LIMIT 1');
+            if (dbRes.rows.length > 0) {
+              const row = dbRes.rows[0];
+              deliveryConfig.freeDeliveryThreshold = Number(row.free_delivery_threshold || 199.00);
+              deliveryConfig.standardDeliveryFee = Number(row.standard_delivery_fee || 2.00);
+              deliveryConfig.expressDeliveryFee = Number(row.express_delivery_fee || 2.00);
+              deliveryConfig.coldChainPackagingFee = Number(row.cold_chain_packaging_fee || 15.00);
+            }
+          } catch (err) {
+            console.warn('[mock-server] delivery_config query error:', err.message);
+          }
+        }
+        return json(res, 200, deliveryConfig);
+      }
+
+      // ---------------- SELLER PROMOTIONS API ----------------
+      if (path === '/api/v1/seller/promotions' && req.method === 'GET') {
+        let allPromotions = [];
+        if (productionPgPool) {
+          try {
+            const dbRes = await productionPgPool.query(`
+              SELECT id, code, title, type, discount_text AS "discountText", description,
+                     min_order_value::numeric AS "minOrderValue",
+                     discount_percent::numeric AS "discountPercent",
+                     flat_discount::numeric AS "flatDiscount",
+                     max_discount::numeric AS "maxDiscount",
+                     badge, status, valid_until AS "validUntil",
+                     usage_count AS "usageCount", max_usage AS "maxUsage"
+              FROM promotions
+              ORDER BY created_at DESC
+            `);
+            allPromotions = dbRes.rows.map(r => ({
+              ...r,
+              minOrderValue: Number(r.minOrderValue || 0),
+              discountPercent: Number(r.discountPercent || 0),
+              flatDiscount: Number(r.flatDiscount || 0),
+              maxDiscount: r.maxDiscount != null ? Number(r.maxDiscount) : null,
+              usageCount: Number(r.usageCount || 0),
+              maxUsage: Number(r.maxUsage || 5000)
+            }));
+          } catch (err) {
+            console.warn('[mock-server] seller promotions DB error:', err.message);
+          }
+        }
+        return json(res, 200, allPromotions);
+      }
+
+      if (path.match(/^\/api\/v1\/seller\/promotions\/([^/]+)\/toggle$/) && req.method === 'POST') {
+        const promoCode = path.split('/')[5];
+        if (productionPgPool) {
+          try {
+            const updateRes = await productionPgPool.query(`
+              UPDATE promotions
+              SET status = CASE WHEN status = 'ACTIVE' THEN 'PAUSED' ELSE 'ACTIVE' END,
+                  updated_at = NOW()
+              WHERE UPPER(code) = UPPER($1) OR id = $1
+              RETURNING *
+            `, [promoCode]);
+            if (updateRes.rows.length > 0) {
+              return json(res, 200, { success: true, promotion: updateRes.rows[0] });
+            }
+          } catch (err) {
+            return json(res, 500, { error: err.message });
+          }
+        }
+        return json(res, 404, { error: 'Promotion not found' });
+      }
+
       if (path === '/api/v1/orders/seller' && req.method === 'GET') {
         const authClaims = verifyAndDecodeJwt(req);
         const storeId = authClaims ? (authClaims.storeId || authClaims.sellerId) : null;
@@ -3983,6 +4307,12 @@ async function handleRequest(port, req, res) {
           name: name,
           brandName: body.brandName || body.brand || body.manufacturer || 'CommerceOS Partner',
           manufacturer: body.manufacturer || body.brandName || 'CommerceOS Partner',
+          saltComposition: body.saltComposition || body.salt_composition || body.activeSalt || null,
+          activeSalt: body.saltComposition || body.salt_composition || body.activeSalt || null,
+          safetyAdvice: body.safetyAdvice || body.safety_advice || [],
+          storageCondition: body.storageCondition || body.storage_condition || body.storageInstructions || null,
+          therapeuticClass: body.therapeuticClass || body.therapeuticCategory || null,
+          therapeuticCategory: body.therapeuticCategory || body.therapeuticClass || body.category || 'General Commerce',
           packSize: body.packSize || body.unit || '1 Unit',
           rxRequirement: (body.rxRequirement || body.rxRequired) ? 'RX' : 'OTC',
           price: mrp,
@@ -5442,8 +5772,13 @@ async function handleRequest(port, req, res) {
             'riders_broadcast'
           ).catch(err => console.error('[MockServer] Broadcast topic FCM error:', err.message));
 
-          // 2. Direct FCM fan out to all registered rider devices
+          // 2. Direct FCM fan out to active online rider devices only (Double-condition gate: must be online)
           for (const item of registeredTokens) {
+            const presence = (item.riderId && db.riderPresence) ? db.riderPresence[item.riderId] : null;
+            const isRiderOnline = presence ? (presence.isOnline === true || presence.status === 'ONLINE' || presence.status === 'ONLINE_AVAILABLE') : false;
+            if (!isRiderOnline) {
+              continue;
+            }
             sendGoogleFcmPushNotification(
               item.riderId,
               `⚡ New Delivery Order #${order.id.slice(-8).toUpperCase()}`,
@@ -5543,7 +5878,7 @@ async function handleRequest(port, req, res) {
           },
           {
             id: 'STORE_DELHI_01',
-            storeName: 'South Delhi Dark Store & Hub',
+            storeName: 'South Delhi Store & Hub',
             address: 'A-24 Hauz Khas Enclave, New Delhi, Delhi 110016',
             latitude: 28.5494,
             longitude: 77.2001,
@@ -5555,7 +5890,7 @@ async function handleRequest(port, req, res) {
           },
           {
             id: 'STORE_BANGALORE_01',
-            storeName: 'Koramangala Super Dark Store',
+            storeName: 'Koramangala Super Store',
             address: '12, 80 Feet Road, 4th Block, Koramangala, Bengaluru, Karnataka 560034',
             latitude: 12.9352,
             longitude: 77.6245,
@@ -5627,8 +5962,8 @@ async function handleRequest(port, req, res) {
         const DEFAULT_HUBS = [
           { id: 'STORE_REWARI_01', storeName: 'Commerce OS Rewari Central Store Hub', address: '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401', latitude: 28.202224, longitude: 76.615418, slaMinutes: 8, isActive: true, serviceRadiusKm: 10.0 },
           { id: 'STORE_GURGAON_01', storeName: 'Cyber City Quick Fulfillment Hub', address: 'DLF Cyber City, Phase 2, Sector 24, Gurugram, Haryana 122002', latitude: 28.4906, longitude: 77.0898, slaMinutes: 10, isActive: true, serviceRadiusKm: 12.0 },
-          { id: 'STORE_DELHI_01', storeName: 'South Delhi Dark Store & Hub', address: 'A-24 Hauz Khas Enclave, New Delhi, Delhi 110016', latitude: 28.5494, longitude: 77.2001, slaMinutes: 10, isActive: true, serviceRadiusKm: 12.0 },
-          { id: 'STORE_BANGALORE_01', storeName: 'Koramangala Super Dark Store', address: '12, 80 Feet Road, 4th Block, Koramangala, Bengaluru, Karnataka 560034', latitude: 12.9352, longitude: 77.6245, slaMinutes: 8, isActive: true, serviceRadiusKm: 8.0 }
+          { id: 'STORE_DELHI_01', storeName: 'South Delhi Store & Hub', address: 'A-24 Hauz Khas Enclave, New Delhi, Delhi 110016', latitude: 28.5494, longitude: 77.2001, slaMinutes: 10, isActive: true, serviceRadiusKm: 12.0 },
+          { id: 'STORE_BANGALORE_01', storeName: 'Koramangala Super Store', address: '12, 80 Feet Road, 4th Block, Koramangala, Bengaluru, Karnataka 560034', latitude: 12.9352, longitude: 77.6245, slaMinutes: 8, isActive: true, serviceRadiusKm: 8.0 }
         ];
         const storeMap = new Map();
         for (const dh of DEFAULT_HUBS) storeMap.set(dh.id, dh);
@@ -6219,6 +6554,30 @@ async function handleRequest(port, req, res) {
         return json(res, 200, { ok: true, rider: r || { id: targetRiderId, status: newStatus } });
       }
 
+      // DELETE /api/v1/seller/riders/:id
+      const sellerRiderDeleteMatch = path.match(/^\/api\/v1\/seller\/riders\/([^/]+)$/);
+      if (sellerRiderDeleteMatch && req.method === 'DELETE') {
+        const targetRiderId = decodeURIComponent(sellerRiderDeleteMatch[1]);
+        if (appRepositories && appRepositories.riderRepo) {
+          try {
+            if (typeof appRepositories.riderRepo.deleteRider === 'function') {
+              await appRepositories.riderRepo.deleteRider(targetRiderId);
+            }
+          } catch (e) {
+            console.error('[Rider Delete] Error in repo:', e.message);
+          }
+        }
+        if (productionPgPool) {
+          try {
+            await productionPgPool.query('DELETE FROM rider_device_tokens WHERE rider_id = $1', [targetRiderId]);
+            await productionPgPool.query('DELETE FROM riders WHERE id = $1 OR rider_id = $1', [targetRiderId]);
+          } catch (e) {}
+        }
+        db.riders = (db.riders || []).filter(r => r.id !== targetRiderId && r.rider_id !== targetRiderId);
+        saveDb();
+        return json(res, 200, { ok: true, message: `Rider ${targetRiderId} deleted successfully.`, riderId: targetRiderId });
+      }
+
       // POST /api/v1/orders/:id/pack
       const packMatch = path.match(/^\/api\/v1\/orders\/([^/]+)\/pack$/);
       if (packMatch && req.method === 'POST') {
@@ -6456,14 +6815,59 @@ async function handleRequest(port, req, res) {
       // POST /api/v1/delivery/rider/device-token/logout (Phase 1 Token Invalidation)
       if (path === '/api/v1/delivery/rider/device-token/logout' && req.method === 'POST') {
         const authClaims = verifyAndDecodeJwt(req);
-        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
-          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT authentication required.' });
+        const body = await parseBody(req).catch(() => ({}));
+        const riderId = (authClaims && (authClaims.sub || authClaims.subject)) || body.riderId || null;
+        const targetToken = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
+
+        if (riderId) {
+          if (db.riderPresence && db.riderPresence[riderId]) {
+            db.riderPresence[riderId].isOnline = false;
+            db.riderPresence[riderId].status = 'OFFLINE';
+            db.riderPresence[riderId].lastSeenTimestamp = Date.now();
+          }
+          if (db.riderDeviceTokens) {
+            delete db.riderDeviceTokens[riderId];
+          }
+          if (db.deviceTokens) {
+            delete db.deviceTokens[riderId];
+          }
+          if (appRepositories && appRepositories.deviceTokenRepo && appRepositories.deviceTokenRepo.invalidateToken) {
+            try { await appRepositories.deviceTokenRepo.invalidateToken(riderId); } catch (_) {}
+          }
+          if (appRepositories && appRepositories.presenceRepo && appRepositories.presenceRepo.setShiftStatus) {
+            try { await appRepositories.presenceRepo.setShiftStatus(riderId, false); } catch (_) {}
+          }
+          if (productionPgPool) {
+            try {
+              await productionPgPool.query('DELETE FROM rider_device_tokens WHERE rider_id = $1', [riderId]);
+            } catch (_) {}
+          }
         }
-        const riderId = authClaims.sub || authClaims.subject;
-        if (appRepositories && appRepositories.deviceTokenRepo && appRepositories.deviceTokenRepo.invalidateToken) {
-          await appRepositories.deviceTokenRepo.invalidateToken(riderId);
+
+        if (targetToken) {
+          if (db.riderDeviceTokens) {
+            for (const [rId, rec] of Object.entries(db.riderDeviceTokens)) {
+              if (rec?.token === targetToken || rec?.fcmToken === targetToken) {
+                delete db.riderDeviceTokens[rId];
+              }
+            }
+          }
+          if (db.deviceTokens) {
+            for (const [rId, rec] of Object.entries(db.deviceTokens)) {
+              if (rec?.token === targetToken || rec?.fcmToken === targetToken) {
+                delete db.deviceTokens[rId];
+              }
+            }
+          }
+          if (productionPgPool) {
+            try {
+              await productionPgPool.query('DELETE FROM rider_device_tokens WHERE token = $1', [targetToken]);
+            } catch (_) {}
+          }
         }
-        return json(res, 200, { ok: true, message: 'FCM Token invalidated successfully.' });
+
+        saveDb();
+        return json(res, 200, { ok: true, message: 'Device token and rider session invalidated successfully.' });
       }
 
       // GET /api/v1/delivery/rider/stream (Phase 3 Rider Realtime SSE Stream)
@@ -8794,10 +9198,14 @@ async function handleRequest(port, req, res) {
       if (path.endsWith('/items') && req.method === 'POST') {
         const item = await parseBody(req);
         if (appRepositories && appRepositories.cartRepo) {
-          const items = await appRepositories.cartRepo.addItem(customerId, item);
-          const normalized = items.map(normalizeCartItem);
-          const totals = grandTotal(normalized);
-          return json(res, 200, { customerId, items: normalized, ...totals });
+          try {
+            const items = await appRepositories.cartRepo.addItem(customerId, item);
+            const normalized = items.map(normalizeCartItem);
+            const totals = grandTotal(normalized);
+            return json(res, 200, { customerId, items: normalized, ...totals });
+          } catch (repoErr) {
+            console.warn(`[CartService] cartRepo.addItem fallback:`, repoErr.message);
+          }
         } else if (appRepositories && appRepositories.isProduction) {
           return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
         }
@@ -8828,10 +9236,14 @@ async function handleRequest(port, req, res) {
             return json(res, 400, { error: 'INVALID_QUANTITY', message: 'Quantity must be an integer between 1 and 99' });
           }
           if (appRepositories && appRepositories.cartRepo) {
-            const items = await appRepositories.cartRepo.updateItemQty(custId, sku, qty);
-            const normalized = items.map(normalizeCartItem);
-            const t = grandTotal(normalized);
-            return json(res, 200, { customerId: custId, items: normalized, ...t });
+            try {
+              const items = await appRepositories.cartRepo.updateItemQty(custId, sku, qty);
+              const normalized = items.map(normalizeCartItem);
+              const t = grandTotal(normalized);
+              return json(res, 200, { customerId: custId, items: normalized, ...t });
+            } catch (repoErr) {
+              console.warn(`[CartService] cartRepo.updateItemQty fallback:`, repoErr.message);
+            }
           } else if (appRepositories && appRepositories.isProduction) {
             return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
           }
@@ -8848,10 +9260,14 @@ async function handleRequest(port, req, res) {
 
         if (req.method === 'DELETE') {
           if (appRepositories && appRepositories.cartRepo) {
-            const items = await appRepositories.cartRepo.removeItem(custId, sku);
-            const normalized = items.map(normalizeCartItem);
-            const t = grandTotal(normalized);
-            return json(res, 200, { customerId: custId, items: normalized, ...t });
+            try {
+              const items = await appRepositories.cartRepo.removeItem(custId, sku);
+              const normalized = items.map(normalizeCartItem);
+              const t = grandTotal(normalized);
+              return json(res, 200, { customerId: custId, items: normalized, ...t });
+            } catch (repoErr) {
+              console.warn(`[CartService] cartRepo.removeItem fallback:`, repoErr.message);
+            }
           } else if (appRepositories && appRepositories.isProduction) {
             return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
           }
@@ -9249,7 +9665,12 @@ async function handleRequest(port, req, res) {
     }
 
     return json(res, 200, { status: 'OK', message: 'Commerce OS Mock Platform API Operational' });
-  })();
+  })().catch((err) => {
+    console.error(`[Server ${port}] Uncaught request error:`, err);
+    if (!res.headersSent) {
+      json(res, 500, { error: 'INTERNAL_SERVER_ERROR', message: err.message || 'Internal error' });
+    }
+  });
 }
 
 async function dispatchOutboxEvent(event) {

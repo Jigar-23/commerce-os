@@ -111,6 +111,6 @@ sequenceDiagram
 | **Client** | **Customer iOS** | iOS 17.0+ | Native Swift app using SwiftUI, MapKit, VisionKit OCR, and Passkeys pointing to Render. |
 | **Client** | **Rider Android** | Android 8.0+ | Native Kotlin courier app with turn-by-turn navigation and 50m arrival geofencing. |
 | **Client** | **Rider iOS** | iOS 17.0+ | Native Swift courier app with CoreLocation circular geofence auto-arrival and dead reckoning. |
-| **Client** | **Seller Portal** | Next.js 14 | Web application with dark store order dispatching, packing workflow, and SKU catalog management. |
+| **Client** | **Seller Portal** | Next.js 14 | Web application with store order dispatching, packing workflow, and SKU catalog management. |
 | **External** | **2Factor.in** | Cloud API | Dual SMS and Voice Call OTP carrier gateway. |
 | **External** | **OSRM Project** | Cloud API | OpenStreetMap routing engine for real-world road network driving distances and ETAs. |

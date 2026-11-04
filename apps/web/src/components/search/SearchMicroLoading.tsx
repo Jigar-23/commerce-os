@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const TRUST_MESSAGES = [
-  'Checking 10-minute dark store stock in Rewari...',
+  'Checking 10-minute store stock in Rewari...',
   'Searching 50,000+ certified medicines & wellness...',
   'Matching 100% genuine batches & licensed pharmacies...',
   'Checking generic alternatives (save up to 40%)...',

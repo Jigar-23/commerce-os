@@ -48,6 +48,14 @@ function runTest() {
   }, /Invalid data URI format/);
   console.log('  ✅ PASS: Malformed data URI rejected with explicit error');
 
+  // Test 4: Presigned URL Generation for Medical Records
+  const presigned = configured.generatePresignedGetUrl({ key: 'prescriptions/cust_123/rx_99.jpg', expiresInSeconds: 900 });
+  assert.ok(presigned, 'Presigned URL must be returned');
+  assert.ok(presigned.includes('X-Amz-Signature='), 'Presigned URL must contain SigV4 signature');
+  assert.ok(presigned.includes('X-Amz-Expires=900'), 'Presigned URL must contain expiry parameter');
+  assert.ok(presigned.includes('a1b2c3d4e5f6.r2.cloudflarestorage.com/commerce-os-prescriptions/prescriptions/cust_123/rx_99.jpg'), 'Presigned URL must target correct private object path');
+  console.log('  ✅ PASS: Presigned GET URL with SigV4 query authentication generated correctly');
+
   console.log('\n================================================================');
   console.log('🏆 CLOUDFLARE R2 TEST SUITE PASSED (100%)');
   console.log('================================================================\n');

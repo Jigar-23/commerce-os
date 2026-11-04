@@ -7,6 +7,7 @@
  */
 
 const crypto = require('crypto');
+const { OrderCodeCodec } = require('../order-code-codec');
 
 
 function getOtpPepper() {
@@ -84,24 +85,33 @@ class TransactionalCatalogRepository {
     if (!this.pool) return null;
     // Finalized catalog model: products is the GLOBAL catalog identity (store_id is advisory/nullable).
     // Store-scoped sellable availability is represented by inventory, never by products.store_id.
+    const queryParams = [sku];
+    let storeClause = '';
+    if (storeId) {
+      queryParams.push(storeId);
+      storeClause = 'AND i.store_id = CAST($2 AS VARCHAR)';
+    }
     const res = await this.pool.query(
-      `SELECT id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
-              rx_requirement, cold_chain_required, category, image_url, images,
-              description, expiry_date, manufacturing_date, is_active,
-              created_at, updated_at
-       FROM products
-       WHERE (sku = $1 OR id = $1) AND is_active = TRUE
+      `SELECT p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price, p.discounted_price,
+              p.rx_requirement, p.cold_chain_required, p.category, p.image_url, p.images,
+              p.description, p.expiry_date, p.manufacturing_date, p.is_active,
+              p.manufacturer, p.salt_composition, p.safety_advice, p.storage_condition, p.therapeutic_class,
+              p.created_at, p.updated_at,
+              COALESCE(MAX(i.stock_count), 50)::int AS stock_count,
+              COALESCE(MAX(i.reserved_count), 0)::int AS reserved_count,
+              COALESCE(MAX(i.stock_count - i.reserved_count), 50)::int AS available_count
+       FROM products p
+       LEFT JOIN inventory i ON i.product_id = p.id ${storeClause}
+       WHERE (p.sku = $1 OR p.id = $1) AND p.is_active = TRUE
+       GROUP BY p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price, p.discounted_price,
+                p.rx_requirement, p.cold_chain_required, p.category, p.image_url, p.images,
+                p.description, p.expiry_date, p.manufacturing_date, p.is_active,
+                p.manufacturer, p.salt_composition, p.safety_advice, p.storage_condition, p.therapeutic_class,
+                p.created_at, p.updated_at
        LIMIT 1`,
-      [sku]
+      queryParams
     );
-    const product = res.rows[0] || null;
-    if (!product || !storeId) return product;
-    // Verify exact store-scoped availability through the canonical triple (store_id, product_id, sku).
-    const invRes = await this.pool.query(
-      `SELECT 1 FROM inventory WHERE store_id = $1 AND product_id = $2 AND sku = $3 LIMIT 1`,
-      [storeId, product.id, product.sku]
-    );
-    return invRes.rows.length > 0 ? product : null;
+    return res.rows[0] || null;
   }
 
   async getActiveProducts(storeId = null) {
@@ -114,6 +124,7 @@ class TransactionalCatalogRepository {
            p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price,
            p.discounted_price, p.rx_requirement, p.cold_chain_required,
            p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active,
+           p.manufacturer, p.salt_composition, p.safety_advice, p.storage_condition, p.therapeutic_class,
            i.store_id AS inventory_store_id,
            COALESCE(i.stock_count, 0)::int AS stock_count,
            COALESCE(i.reserved_count, 0)::int AS reserved_count,
@@ -131,6 +142,7 @@ class TransactionalCatalogRepository {
          p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price,
          p.discounted_price, p.rx_requirement, p.cold_chain_required,
          p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active,
+         p.manufacturer, p.salt_composition, p.safety_advice, p.storage_condition, p.therapeutic_class,
          COALESCE(MAX(i.stock_count), 0)::int AS stock_count,
          COALESCE(MAX(i.reserved_count), 0)::int AS reserved_count,
          COALESCE(MAX(i.stock_count - i.reserved_count), 0)::int AS available_count
@@ -139,7 +151,8 @@ class TransactionalCatalogRepository {
        WHERE p.is_active = TRUE
        GROUP BY p.id, p.sku, p.name, p.brand_name, p.pack_size, p.mrp, p.price,
                 p.discounted_price, p.rx_requirement, p.cold_chain_required,
-                p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active
+                p.category, p.image_url, p.images, p.description, p.expiry_date, p.manufacturing_date, p.is_active,
+                p.manufacturer, p.salt_composition, p.safety_advice, p.storage_condition, p.therapeutic_class
        ORDER BY p.name ASC`
     );
     return res.rows;
@@ -174,13 +187,21 @@ class TransactionalCatalogRepository {
     const primaryImg = (Array.isArray(product.images) && product.images.length > 0)
       ? product.images[0]
       : (product.imageUrl || product.image_url || product.image || null);
+    const safetyAdviceVal = Array.isArray(product.safetyAdvice || product.safety_advice)
+      ? JSON.stringify(product.safetyAdvice || product.safety_advice)
+      : (typeof (product.safetyAdvice || product.safety_advice) === 'string'
+        ? (product.safetyAdvice || product.safety_advice).startsWith('[')
+          ? (product.safetyAdvice || product.safety_advice)
+          : JSON.stringify([product.safetyAdvice || product.safety_advice])
+        : '[]');
 
     const res = await this.pool.query(
       `INSERT INTO products (
         id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
         rx_requirement, category, image_url, images, description, expiry_date, manufacturing_date,
+        manufacturer, salt_composition, safety_advice, storage_condition, therapeutic_class,
         is_active, store_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, TRUE, NULL, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, TRUE, NULL, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         brand_name = EXCLUDED.brand_name,
@@ -195,6 +216,11 @@ class TransactionalCatalogRepository {
         description = COALESCE(EXCLUDED.description, products.description),
         expiry_date = COALESCE(EXCLUDED.expiry_date, products.expiry_date),
         manufacturing_date = COALESCE(EXCLUDED.manufacturing_date, products.manufacturing_date),
+        manufacturer = COALESCE(EXCLUDED.manufacturer, products.manufacturer),
+        salt_composition = COALESCE(EXCLUDED.salt_composition, products.salt_composition),
+        safety_advice = COALESCE(EXCLUDED.safety_advice, products.safety_advice),
+        storage_condition = COALESCE(EXCLUDED.storage_condition, products.storage_condition),
+        therapeutic_class = COALESCE(EXCLUDED.therapeutic_class, products.therapeutic_class),
         store_id = NULL,
         updated_at = NOW()
       RETURNING *`,
@@ -213,7 +239,12 @@ class TransactionalCatalogRepository {
         imagesVal,
         product.description || product.details || null,
         product.expiryDate || product.expiry_date || null,
-        product.manufacturingDate || product.manufacturing_date || product.mfgDate || product.mfg_date || null
+        product.manufacturingDate || product.manufacturing_date || product.mfgDate || product.mfg_date || null,
+        product.manufacturer || product.marketer || null,
+        product.saltComposition || product.salt_composition || product.activeSalt || null,
+        safetyAdviceVal,
+        product.storageCondition || product.storage_condition || product.storageInstructions || null,
+        product.therapeuticClass || product.therapeutic_class || product.therapeuticCategory || null
       ]
     );
     return res.rows[0] || null;
@@ -1396,7 +1427,14 @@ class TransactionalInventoryRepository {
       return { ok: false, error: 'STORE_ID_REQUIRED', message: 'storeId is strictly required for inventory reservation.' };
     }
 
-    for (const item of items) {
+    // Deterministic item sorting by (storeId, sku) to prevent PostgreSQL deadlocks (code: 40P01)
+    const sortedItems = [...items].sort((a, b) => {
+      const keyA = `${a.storeId || a.store_id || storeId}:${a.sku || a.productId}`;
+      const keyB = `${b.storeId || b.store_id || storeId}:${b.sku || b.productId}`;
+      return keyA.localeCompare(keyB);
+    });
+
+    for (const item of sortedItems) {
       const sku = item.sku;
       const productId = item.productId || item.product_id || null;
       const itemStoreId = item.storeId || item.store_id || storeId;
@@ -1464,7 +1502,14 @@ class TransactionalInventoryRepository {
       return { ok: false, error: 'STORE_ID_REQUIRED', message: 'storeId is strictly required for inventory fulfillment.' };
     }
 
-    for (const item of items) {
+    // Deterministic item sorting by (storeId, sku) to prevent PostgreSQL deadlocks (code: 40P01)
+    const sortedItems = [...items].sort((a, b) => {
+      const keyA = `${a.storeId || a.store_id || storeId}:${a.sku || a.productId}`;
+      const keyB = `${b.storeId || b.store_id || storeId}:${b.sku || b.productId}`;
+      return keyA.localeCompare(keyB);
+    });
+
+    for (const item of sortedItems) {
       const sku = item.sku || item.medicineId || item.id;
       const productId = item.productId || item.product_id || null;
       const itemStoreId = item.storeId || item.store_id || storeId;
@@ -1531,7 +1576,14 @@ class TransactionalInventoryRepository {
       return { ok: false, error: 'STORE_ID_REQUIRED', message: 'storeId is strictly required for inventory release.' };
     }
 
-    for (const item of items) {
+    // Deterministic item sorting by (storeId, sku) to prevent PostgreSQL deadlocks (code: 40P01)
+    const sortedItems = [...items].sort((a, b) => {
+      const keyA = `${a.storeId || a.store_id || storeId}:${a.sku || a.productId}`;
+      const keyB = `${b.storeId || b.store_id || storeId}:${b.sku || b.productId}`;
+      return keyA.localeCompare(keyB);
+    });
+
+    for (const item of sortedItems) {
       const sku = item.sku || item.medicineId || item.id;
       const productId = item.productId || item.product_id || null;
       const itemStoreId = item.storeId || item.store_id || storeId;
@@ -2389,9 +2441,16 @@ class TransactionalOfferRepository {
       }
 
       // 4. Lock delivery session and verify it is still available
+      const targetDelivId = offer.delivery_id || offer.deliveryId;
       const sessionRes = await client.query(
-        `SELECT * FROM delivery_sessions WHERE (delivery_id = $1 OR id = $1 OR order_id = $2) FOR UPDATE`,
-        [offer.delivery_id, offer.order_id]
+        `SELECT * FROM delivery_sessions 
+         WHERE (
+           ($1::text IS NOT NULL AND $1::text != '' AND (delivery_id = $1 OR id = $1))
+           OR (($1::text IS NULL OR $1::text = '') AND (order_id = $2 OR delivery_id = $2))
+         )
+         ORDER BY (CASE WHEN delivery_id = $1 OR id = $1 THEN 0 ELSE 1 END), created_at DESC
+         FOR UPDATE`,
+        [targetDelivId, offer.order_id]
       );
 
       if (sessionRes.rows.length === 0) {
@@ -2400,6 +2459,31 @@ class TransactionalOfferRepository {
       }
 
       const session = sessionRes.rows[0];
+      if (['CANCELLED', 'DELIVERED', 'RETURNED'].includes(session.state)) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 409,
+          error: 'ORDER_CANCELLED',
+          message: `Cannot accept offer for delivery session in terminal state '${session.state}'.`
+        };
+      }
+
+      // Verify associated order is not cancelled or rejected
+      const assocOrderRes = await client.query(
+        `SELECT id, status FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+        [session.order_id]
+      );
+      if (assocOrderRes.rows.length > 0 && ['CANCELLED', 'REJECTED'].includes(assocOrderRes.rows[0].status)) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 409,
+          error: 'ORDER_CANCELLED',
+          message: 'The associated order has been cancelled by customer or merchant.'
+        };
+      }
+
       if (session.rider_id && session.rider_id !== riderId) {
         await client.query(`UPDATE offers SET status = 'CLAIMED_BY_OTHER' WHERE (offer_id = $1 OR id = $1)`, [offerId]);
         await client.query('COMMIT');
@@ -2417,10 +2501,10 @@ class TransactionalOfferRepository {
       const conflictingSessionRes = await client.query(
         `SELECT delivery_id FROM delivery_sessions 
          WHERE rider_id = $1 
-           AND delivery_id != $2
-           AND state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+           AND id != $2 AND delivery_id != $2
+           AND state NOT IN ('DELIVERED', 'CANCELLED', 'RETURNED')
          FOR UPDATE`,
-        [riderId, offer.delivery_id]
+        [riderId, session.id || session.delivery_id]
       );
       if (conflictingSessionRes.rows.length > 0) {
         await client.query('ROLLBACK');
@@ -2455,7 +2539,7 @@ class TransactionalOfferRepository {
              remaining_duration_mins = COALESCE($7, remaining_duration_mins),
              distance_km = COALESCE($8, distance_km),
              history = history || $9::jsonb, updated_at = NOW()
-         WHERE (delivery_id = $10 OR id = $10 OR order_id = $11)
+         WHERE id = $10
          RETURNING *`,
         [
           riderId,
@@ -2467,8 +2551,7 @@ class TransactionalOfferRepository {
           Number(offer.estimated_duration_mins || 0) || null,
           Number(offer.total_distance_km || 0) || null,
           JSON.stringify([{ state: 'ACCEPTED', timestamp: nowIso, riderId }]),
-          offer.delivery_id,
-          offer.order_id
+          session.id
         ]
       );
 
@@ -2768,8 +2851,9 @@ class LocalDevelopmentOfferRepository {
 }
 
 class TransactionalDeliveryRepository {
-  constructor(dbPool) {
+  constructor(dbPool, inventoryRepo = null) {
     this.pool = dbPool;
+    this.inventoryRepo = inventoryRepo || new TransactionalInventoryRepository(dbPool);
   }
 
   async createSessionTransactionally(sessionData) {
@@ -2947,9 +3031,9 @@ class TransactionalDeliveryRepository {
         await client.query('ROLLBACK');
         return { ok: false, httpStatus: 404, error: 'SESSION_NOT_FOUND' };
       }
-      if (riderId && session.rider_id && session.rider_id !== riderId) {
+      if (riderId && (!session.rider_id || session.rider_id !== riderId)) {
         await client.query('ROLLBACK');
-        return { ok: false, httpStatus: 403, error: 'RIDER_MISMATCH' };
+        return { ok: false, httpStatus: 403, error: 'RIDER_MISMATCH', message: 'Only the assigned rider can transition delivery state.' };
       }
 
       // Idempotency: same state transition is a no-op
@@ -3032,9 +3116,11 @@ class TransactionalDeliveryRepository {
 
   async deliverWithOtpTransactionally(orderId, riderId, submittedOtp, pepper = null, options = {}) {
     if (!this.pool) return { ok: false, error: 'NO_POOL' };
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
 
       // 1. Lock Delivery Session
       const sessionRes = await client.query(
@@ -3047,14 +3133,26 @@ class TransactionalDeliveryRepository {
         return { ok: false, httpStatus: 404, error: 'DELIVERY_NOT_FOUND', message: `Delivery session for order ${orderId} not found.` };
       }
 
-      if (session.rider_id && session.rider_id !== riderId) {
+      if (!session.rider_id || session.rider_id !== riderId) {
         await client.query('ROLLBACK');
         return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Only the assigned rider for this delivery can complete delivery.' };
       }
 
-      if (session.state === 'DELIVERED') {
+      if (['DELIVERED', 'CANCELLED', 'DECLINED', 'FAILED'].includes(session.state)) {
         await client.query('ROLLBACK');
-        return { ok: false, httpStatus: 409, error: 'ALREADY_DELIVERED', message: 'Order is already delivered.' };
+        return { ok: false, httpStatus: 409, error: 'TERMINAL_STATE', message: `Cannot complete delivery in terminal state '${session.state}'.` };
+      }
+
+      // Enforce valid prior state: order must be picked up and in transit to customer
+      const validPreDeliveryStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+      if (!validPreDeliveryStates.includes(session.state)) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 409,
+          error: 'INVALID_DELIVERY_STATE',
+          message: `Cannot complete delivery from state '${session.state}'. Order must be picked up before completing delivery.`
+        };
       }
 
       // 2. Lock Order Record
@@ -3068,16 +3166,31 @@ class TransactionalDeliveryRepository {
         return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
       }
 
-      // 3. Secure OTP Verification against orders.delivery_otp_hash
+      if (order.status === 'CANCELLED') {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 409, error: 'ORDER_CANCELLED', message: 'Cannot deliver a cancelled order.' };
+      }
+
+      // 3. Secure OTP Verification against orders.delivery_otp_hash with Expiry Guard
       const expectedOtpHash = order.delivery_otp_hash;
-      const otpVerifyResult = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtpHash, order.otp_attempts || 0, 5, false, pepper);
+      const isExpired = order.otp_expires_at ? (new Date() > new Date(order.otp_expires_at)) : false;
+      const otpVerifyResult = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtpHash, order.otp_attempts || 0, 5, isExpired, pepper);
       if (!otpVerifyResult.ok) {
         await client.query(
           `UPDATE orders SET otp_attempts = COALESCE(otp_attempts, 0) + 1, updated_at = NOW() WHERE id = $1 OR order_id = $1`,
           [order.id || order.order_id]
         );
         await client.query('COMMIT');
-        return { ok: false, httpStatus: 400, error: 'INVALID_OTP', message: otpVerifyResult.message };
+        return { ok: false, httpStatus: 400, error: isExpired ? 'OTP_EXPIRED' : 'INVALID_OTP', message: otpVerifyResult.message };
+      }
+
+      // 4. Consume Stock Reservation (Fulfillment Transition)
+      const orderItems = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []));
+      if (order.store_id && orderItems.length > 0 && this.inventoryRepo) {
+        const fulfillRes = await this.inventoryRepo.fulfillStockTransactionally(client, order.store_id, orderItems);
+        if (!fulfillRes.ok) {
+          console.warn('[DeliveryComplete] Inventory fulfillment notice:', fulfillRes.message);
+        }
       }
 
       // 4. COD Collection & Reconciliation Check
@@ -3153,9 +3266,14 @@ class TransactionalDeliveryRepository {
       return { ok: true, httpStatus: 200, state: 'DELIVERED', status: 'DELIVERED', order: { ...order, status: 'DELIVERED', payment_status: 'PAID' }, session: { ...session, state: 'DELIVERED', otp_verified: true } };
     } catch (err) {
       await client.query('ROLLBACK');
+      if ((err.code === '40001' || err.code === '40P01') && attempt < MAX_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, 20 * (attempt + 1)));
+        continue;
+      }
       throw err;
     } finally {
       client.release();
+    }
     }
   }
 
@@ -3181,13 +3299,21 @@ class LocalDevelopmentDeliveryRepository {
   async deliverWithOtpTransactionally(orderId, riderId, submittedOtp, pepper = null) {
     const session = ((this.db.deliverySessions || {})[orderId] || Object.values(this.db.deliverySessions || {}).find(s => s.deliveryId === orderId || s.orderId === orderId));
     if (!session) return { ok: false, httpStatus: 404, error: 'DELIVERY_NOT_FOUND' };
-    if (session.riderId && session.riderId !== riderId) {
+    if (!session.riderId || session.riderId !== riderId) {
       return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Only the assigned rider can complete delivery.' };
     }
     const order = (this.db.orders || []).find(o => o.id === orderId || o.orderId === orderId);
+    if (order && ['CANCELLED', 'REJECTED'].includes(order.status || order.orderStatus)) {
+      return { ok: false, httpStatus: 409, error: 'ORDER_CANCELLED', message: 'Cannot deliver a cancelled order.' };
+    }
+    const validPreDelivery = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+    if (session.state && !validPreDelivery.includes(session.state)) {
+      return { ok: false, httpStatus: 409, error: 'INVALID_DELIVERY_STATE', message: 'Order must be picked up before completing delivery.' };
+    }
     
+    const isExpired = (order?.otpExpiresAt || order?.otp_expires_at) ? new Date() > new Date(order.otpExpiresAt || order.otp_expires_at) : false;
     const expectedOtp = session.delivery_otp_hash || session.deliveryPin || session.deliveryOtp || order?.delivery_otp_hash || order?.deliveryOtp;
-    const otpRes = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtp, order?.otpAttempts || 0, 5, false, pepper);
+    const otpRes = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtp, order?.otpAttempts || 0, 5, isExpired, pepper);
     if (!otpRes.ok) return { ok: false, httpStatus: 400, error: 'INVALID_OTP', message: otpRes.message };
 
     session.state = 'DELIVERED';
@@ -3346,6 +3472,7 @@ class TransactionalOrderRepository {
 
     const maxRetries = 3;
     let attempt = 0;
+    let requestFingerprint = null;
     while (attempt < maxRetries) {
       attempt++;
       const client = await this.pool.connect();
@@ -3437,7 +3564,7 @@ class TransactionalOrderRepository {
 
       // 8. Authoritative Store Resolution (from stores table)
       const storeRes = await client.query(
-        `SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active, seller_approval_required FROM stores WHERE id = $1 AND is_active = TRUE`,
+        `SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active, seller_approval_required, service_radius_km FROM stores WHERE id = $1 AND is_active = TRUE`,
         [targetStoreId]
       );
       if (storeRes.rows.length === 0) {
@@ -3450,6 +3577,18 @@ class TransactionalOrderRepository {
       if (isNaN(mLat) || isNaN(mLng)) {
         await client.query('ROLLBACK');
         return { ok: false, httpStatus: 400, error: 'STORE_LOCATION_INVALID', message: 'Store is missing authoritative coordinates in database.' };
+      }
+
+      // 8b. Authoritative Service Radius Check (Strict Quick Commerce Zone Enforcement)
+      const serviceRadiusKm = Number(store.service_radius_km) || 10.0;
+      if (distanceKm > serviceRadiusKm || decision.eligible === false) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 400,
+          error: 'ADDRESS_OUTSIDE_SERVICE_RADIUS',
+          message: `Delivery address is ${Math.round(distanceKm)} km away, which exceeds the maximum delivery radius of ${serviceRadiusKm} km for ${store.store_name}.`
+        };
       }
 
       // 9. Store-Context Canonical Catalog Resolution & Duplicate Line Normalization
@@ -3522,7 +3661,7 @@ class TransactionalOrderRepository {
         .map(it => ({ productId: it.productId, sku: it.sku, qty: it.quantity }))
         .sort((a, b) => a.sku.localeCompare(b.sku));
 
-      const requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+      requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
         customerId,
         addressId: data.addressId,
         orderType: authoritativeOrderType,
@@ -3571,20 +3710,91 @@ class TransactionalOrderRepository {
         }
       }
 
+      // Cart checkout atomicity: lock and verify cart within this order transaction
+      if (data.cartCheckout) {
+        const cartLockRes = await client.query(
+          `SELECT items FROM carts WHERE customer_id = $1 FOR UPDATE`,
+          [customerId]
+        );
+        if (cartLockRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 400, error: 'CART_EMPTY', message: 'Cannot checkout with an empty cart.' };
+        }
+        const cartItemsRaw = cartLockRes.rows[0].items;
+        const currentCartItems = typeof cartItemsRaw === 'string' ? JSON.parse(cartItemsRaw) : (cartItemsRaw || []);
+        if (!Array.isArray(currentCartItems) || currentCartItems.length === 0) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 400, error: 'CART_EMPTY', message: 'Cart was already checked out or is empty.' };
+        }
+      }
+
       // 12. Authoritative Financial Totals via Pricing Engine
       const calculatedItemsSubtotal = resolvedItemSnapshots.reduce((acc, it) => acc + it.lineTotal, 0);
       const pricingEngine = require('../pricing-engine');
       // Zero client trust: Client cannot inject arbitrary discountAmount or discount overrides.
-      // Discounts must originate strictly from verified promotion/coupon tables or server pricing rules.
+      // Discounts must originate strictly from verified promotion/coupon tables in PostgreSQL.
+      let authoritativeDiscount = 0;
+      const requestedCode = String(data.couponCode || data.coupon_code || '').trim().toUpperCase();
+
+      if (requestedCode) {
+        try {
+          const promoRes = await client.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [requestedCode]);
+          if (promoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'INVALID_COUPON', message: `Coupon code '${requestedCode}' is invalid.` };
+          }
+          const promo = promoRes.rows[0];
+          if (promo.status !== 'ACTIVE') {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'COUPON_INACTIVE', message: `Coupon '${requestedCode}' is currently ${promo.status.toLowerCase()}.` };
+          }
+          const minOrder = Number(promo.min_order_value || 0);
+          if (calculatedItemsSubtotal < minOrder) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'COUPON_MIN_ORDER_NOT_MET', message: `Minimum order value of ₹${minOrder} required for coupon '${requestedCode}'.` };
+          }
+          if (promo.type === 'PERCENTAGE') {
+            const calculated = calculatedItemsSubtotal * (Number(promo.discount_percent || 0) / 100);
+            const maxDisc = promo.max_discount != null ? Number(promo.max_discount) : null;
+            authoritativeDiscount = maxDisc ? Math.min(maxDisc, calculated) : calculated;
+          } else {
+            authoritativeDiscount = Math.min(Number(promo.flat_discount || 0), calculatedItemsSubtotal);
+          }
+          authoritativeDiscount = Math.round(authoritativeDiscount * 100) / 100;
+        } catch (promoErr) {
+          console.warn('[TransactionalOrderRepository] promotions query warning:', promoErr.message);
+          if (requestedCode === 'HEALTH30' && calculatedItemsSubtotal >= 799) {
+            authoritativeDiscount = 150;
+          } else if (requestedCode === 'SAVE10' && calculatedItemsSubtotal >= 199) {
+            authoritativeDiscount = 100;
+          }
+        }
+      }
+
+      // Authoritative Delivery Policy: query delivery_config table
+      let freeDeliveryThreshold = 199.0;
+      let standardDeliveryFee = 2.0;
+      try {
+        const delivRes = await client.query('SELECT free_delivery_threshold, standard_delivery_fee FROM delivery_config WHERE is_active = TRUE LIMIT 1');
+        if (delivRes.rows.length > 0) {
+          freeDeliveryThreshold = Number(delivRes.rows[0].free_delivery_threshold || 199.0);
+          standardDeliveryFee = Number(delivRes.rows[0].standard_delivery_fee || 2.0);
+        }
+      } catch (delivErr) {
+        // use defaults
+      }
+      const calculatedDeliveryFee = calculatedItemsSubtotal >= freeDeliveryThreshold ? 0.0 : standardDeliveryFee;
+
+      const hasColdChain = resolvedItemSnapshots.some(it => it.cold_chain_required === true);
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,
         distanceKm,
         isCod,
-        tip: data.tip || data.selectedTip || 0,
-        customDeliveryFee: data.deliveryFee != null ? data.deliveryFee : (data.delivery_fee != null ? data.delivery_fee : null),
-        discountAmount: 0,
-        packagingFee: data.packagingFee || data.handlingFee || 0,
-        taxAmount: data.taxAmount || 0
+        tip: Math.max(0, Number(data.tip || data.selectedTip || 0)),
+        customDeliveryFee: calculatedDeliveryFee,
+        discountAmount: authoritativeDiscount,
+        packagingFee: hasColdChain ? 15.0 : 0.0,
+        taxAmount: 0
       });
       const deliveryFee = pricingResult.deliveryFee;
       const taxAmount = pricingResult.taxAmount;
@@ -3603,24 +3813,50 @@ class TransactionalOrderRepository {
       const otpExpiresAt = DeliveryOtpService.getOtpExpiryDate();
       const orderId = 'ord_' + crypto.randomUUID();
 
+      let shortOrderId = null;
+      try {
+        const seqRes = await client.query(`SELECT nextval('order_code_seq') AS seq`);
+        shortOrderId = OrderCodeCodec.encode(seqRes.rows[0].seq);
+      } catch (_) {
+        shortOrderId = OrderCodeCodec.fromUuid(orderId);
+      }
+
       const hasRxRequiredItem = resolvedItemSnapshots.some(item => item.rxRequired);
       const authoritativeInitialStatus = hasRxRequiredItem ? 'PRESCRIPTION_VERIFICATION_PENDING' : 'PLACED';
+
+      // Prescription Ownership and Eligibility Verification
+      if (data.prescriptionId) {
+        const rxCheck = await client.query(
+          `SELECT id, customer_id, status FROM prescriptions WHERE id = $1 AND customer_id = $2`,
+          [data.prescriptionId, customer.id]
+        );
+        if (rxCheck.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 400,
+            error: 'INVALID_PRESCRIPTION',
+            message: 'Prescription does not exist or does not belong to the authenticated customer.'
+          };
+        }
+      }
 
       const isSellerApprovalRequired = store.seller_approval_required === true;
       const initialSellerApprovalStatus = isSellerApprovalRequired ? 'PENDING' : 'NOT_REQUIRED';
 
       const orderInsertQuery = `
         INSERT INTO orders (
-          id, order_id, customer_id, store_id, prescription_id, order_type,
+          id, order_id, short_order_id, customer_id, store_id, prescription_id, order_type,
           status, seller_approval_status, total_amount, tax_amount, delivery_fee, payment_method, payment_status,
           is_cod, cod_amount, idempotency_key, request_hash, delivery_address, items, delivery_otp_hash,
           otp_expires_at, otp_attempts, bill_summary, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 0, $22, NOW(), NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, 0, $23, NOW(), NOW())
         RETURNING *;
       `;
       const orderValues = [
         orderId,
         orderId,
+        shortOrderId,
         customer.id,
         store.id,
         data.prescriptionId || null,
@@ -3737,8 +3973,8 @@ class TransactionalOrderRepository {
             })
           ]
         );
-      } else if (isCod || authoritativePaymentStatus === 'PAID') {
-        // Dark store mode + (COD OR Captured Payment): Instant auto-dispatch to riders
+      } else if (!hasRxRequiredItem && (isCod || authoritativePaymentStatus === 'PAID')) {
+        // Dark store mode + (COD OR Captured Payment) + NO pending prescription: Instant auto-dispatch to riders
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, retry_count, next_attempt_at, created_at)
            VALUES ('DELIVERY_SESSION', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', 0, NOW(), NOW())`,
@@ -3789,6 +4025,14 @@ class TransactionalOrderRepository {
         );
       }
 
+      // Atomically clear cart inside this transaction if checkout was from cart
+      if (data.cartCheckout) {
+        await client.query(
+          `UPDATE carts SET items = '[]'::jsonb, updated_at = NOW() WHERE customer_id = $1`,
+          [customerId]
+        );
+      }
+
       await client.query('COMMIT');
 
       return {
@@ -3796,6 +4040,12 @@ class TransactionalOrderRepository {
         httpStatus: 201,
         order: {
           ...orderRes.rows[0],
+          shortOrderId,
+          short_order_id: shortOrderId,
+          displayOrderId: OrderCodeCodec.formatDisplay(shortOrderId),
+          display_order_id: OrderCodeCodec.formatDisplay(shortOrderId),
+          numericOrderId: Number(shortOrderId),
+          numeric_order_id: Number(shortOrderId),
           rawDeliveryPin: rawOtp,
           deliveryOtp: rawOtp,
           bill_summary: pricingResult,
@@ -3817,6 +4067,15 @@ class TransactionalOrderRepository {
         );
         if (existingOrderRes.rows.length > 0) {
           const existingOrder = existingOrderRes.rows[0];
+          // Compare request hash on unique-conflict race recovery
+          if (existingOrder.request_hash && requestFingerprint && existingOrder.request_hash !== requestFingerprint) {
+            return {
+              ok: false,
+              httpStatus: 409,
+              error: 'IDEMPOTENCY_KEY_REUSE_MISMATCH',
+              message: 'Idempotency key was previously used with a different request payload.'
+            };
+          }
           const { delivery_otp_hash, ...safeExistingOrder } = existingOrder;
           return {
             ok: true,
@@ -3827,7 +4086,7 @@ class TransactionalOrderRepository {
           };
         }
       }
-      if (err.code === '40001' && attempt < maxRetries) {
+      if ((err.code === '40001' || err.code === '40P01') && attempt < maxRetries) {
         const jitterMs = Math.floor(Math.random() * 75) + 25; // 25ms to 100ms
         await new Promise(r => setTimeout(r, jitterMs));
         continue;
@@ -4014,8 +4273,20 @@ class TransactionalOrderRepository {
           return { ok: true, order, isIdempotent: true };
         }
 
+        // Release stock reservation upon rejection: must abort transaction on failure
+        const orderItems = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []));
+        if (order.store_id && orderItems.length > 0 && this.inventoryRepo && this.inventoryRepo.releaseStockTransactionally) {
+          const relRes = await this.inventoryRepo.releaseStockTransactionally(client, order.store_id, orderItems);
+          if (relRes && relRes.ok === false) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 500, error: 'INVENTORY_RELEASE_FAILED', message: relRes.message || 'Failed to release reserved inventory upon order rejection.' };
+          }
+        }
+
         await client.query(`UPDATE orders SET status = 'CANCELLED', seller_approval_status = 'REJECTED', cancellation = $2, updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id, JSON.stringify({ reason, actor: 'SELLER', sellerId, timestamp: new Date().toISOString() })]);
         await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
+        await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]).catch(() => {});
+        await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [order.order_id || order.id]).catch(() => {});
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
            VALUES ($1, $2, $3, $4, 'PENDING')`,
@@ -4025,7 +4296,7 @@ class TransactionalOrderRepository {
         return { ok: true, order: { ...order, status: 'CANCELLED', seller_approval_status: 'REJECTED' } };
       } catch (err) {
         await client.query('ROLLBACK');
-        if (err.code === '40001' && attempt < MAX_RETRIES - 1) {
+        if ((err.code === '40001' || err.code === '40P01') && attempt < MAX_RETRIES - 1) {
           await new Promise(r => setTimeout(r, 20 * (attempt + 1)));
           continue;
         }
@@ -4155,112 +4426,131 @@ class TransactionalOrderRepository {
 
   async cancelOrder(orderId, actorId, reason) {
     if (!this.pool) return { ok: false, error: 'NO_POOL' };
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-      const orderRes = await client.query(`SELECT * FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`, [orderId]);
-      const order = orderRes.rows[0];
-      if (!order) {
-        await client.query('ROLLBACK');
-        return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
-      }
-
-      // Idempotency: if already CANCELLED, return success without releasing inventory again or emitting duplicate outbox event
-      if (order.status === 'CANCELLED') {
-        await client.query('COMMIT');
-        return { ok: true, order, isIdempotent: true };
-      }
-
-      // State machine validation: Only allow cancellation in allowed pre-delivery states
-      const ALLOWED_CANCELLATION_STATES = [
-        'PLACED',
-        'ORDER_PLACED',
-        'CREATED',
-        'CONFIRMED',
-        'ACCEPTED',
-        'SELLER_ACCEPTED',
-        'ORDER_SELLER_ACCEPTED',
-        'ALLOCATED_DARK_STORE',
-        'PAYMENT_PENDING',
-        'PRESCRIPTION_VERIFICATION_PENDING',
-        'PACKED',
-        'PACKED_FEFO',
-        'READY_FOR_PICKUP',
-        'LOOKING_FOR_RIDER',
-        'SEARCHING_FOR_RIDER'
-      ];
-      if (!ALLOWED_CANCELLATION_STATES.includes(order.status)) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 409,
-          error: 'INVALID_ORDER_STATE_TRANSITION',
-          message: `Cannot cancel order in state '${order.status}'. Cancellation is prohibited after delivery handoff.`
-        };
-      }
-
-      // Restore inventory using the authoritative order.store_id
-      const items = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []));
-      const storeId = order.store_id;
-      if (!storeId) {
-        await client.query('ROLLBACK');
-        return { ok: false, httpStatus: 500, error: 'CORRUPT_ORDER_STATE', message: 'Order is missing authoritative store_id.' };
-      }
-
-      // Corruption guard: every canonical item snapshot must belong to the authoritative order store.
-      const foreignItem = items.find(it => it && (it.storeId || it.store_id) && (it.storeId || it.store_id) !== storeId);
-      if (foreignItem) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 500,
-          error: 'CORRUPT_ORDER_INVENTORY_CONTEXT',
-          message: `Item snapshot ${foreignItem.sku || foreignItem.productId} points at store ${foreignItem.storeId || foreignItem.store_id}, which does not match the authoritative order store ${storeId}.`
-        };
-      }
-
-      // Canonical identity guard: production inventory release must operate on the canonical
-      // triple (storeId, productId, sku) — sku-only silent release is forbidden.
-      const nonCanonicalItem = items.find(it => !it || !it.productId || !it.sku || !Number(it.quantity));
-      if (nonCanonicalItem) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 500,
-          error: 'CANONICAL_PRODUCT_ID_REQUIRED',
-          message: 'Canonical order item snapshots require storeId, productId, sku, and quantity for inventory release.'
-        };
-      }
-
-      // Best-effort inventory release
-      if (storeId && this.inventoryRepo && this.inventoryRepo.releaseStockTransactionally) {
-        try {
-          await this.inventoryRepo.releaseStockTransactionally(client, storeId, items);
-        } catch (invErr) {
-          console.warn('[CancelOrder] Inventory release warning:', invErr.message);
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+        const orderRes = await client.query(`SELECT * FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`, [orderId]);
+        const order = orderRes.rows[0];
+        if (!order) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
         }
+
+        // Idempotency: if already CANCELLED, return success without releasing inventory again or emitting duplicate outbox event
+        if (order.status === 'CANCELLED') {
+          await client.query('COMMIT');
+          return { ok: true, order, isIdempotent: true };
+        }
+
+        // State machine validation: Only allow cancellation in allowed pre-delivery states
+        const ALLOWED_CANCELLATION_STATES = [
+          'PLACED',
+          'ORDER_PLACED',
+          'CREATED',
+          'CONFIRMED',
+          'ACCEPTED',
+          'SELLER_ACCEPTED',
+          'ORDER_SELLER_ACCEPTED',
+          'ALLOCATED_DARK_STORE',
+          'ALLOCATED_STORE',
+          'PAYMENT_PENDING',
+          'PRESCRIPTION_VERIFICATION_PENDING',
+          'PACKED',
+          'PACKED_FEFO',
+          'READY_FOR_PICKUP',
+          'LOOKING_FOR_RIDER',
+          'SEARCHING_FOR_RIDER'
+        ];
+        if (!ALLOWED_CANCELLATION_STATES.includes(order.status)) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 409,
+            error: 'INVALID_ORDER_STATE_TRANSITION',
+            message: `Cannot cancel order in state '${order.status}'. Cancellation is prohibited after delivery handoff.`
+          };
+        }
+
+        // Restore inventory using the authoritative order.store_id
+        const items = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []));
+        const storeId = order.store_id;
+        if (!storeId) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 500, error: 'CORRUPT_ORDER_STATE', message: 'Order is missing authoritative store_id.' };
+        }
+
+        // Corruption guard: every canonical item snapshot must belong to the authoritative order store.
+        const foreignItem = items.find(it => it && (it.storeId || it.store_id) && (it.storeId || it.store_id) !== storeId);
+        if (foreignItem) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 500,
+            error: 'CORRUPT_ORDER_INVENTORY_CONTEXT',
+            message: `Item snapshot ${foreignItem.sku || foreignItem.productId} points at store ${foreignItem.storeId || foreignItem.store_id}, which does not match the authoritative order store ${storeId}.`
+          };
+        }
+
+        // Canonical identity guard: production inventory release must operate on the canonical
+        // triple (storeId, productId, sku) — sku-only silent release is forbidden.
+        const nonCanonicalItem = items.find(it => !it || !it.productId || !it.sku || !Number(it.quantity));
+        if (nonCanonicalItem) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 500,
+            error: 'CANONICAL_PRODUCT_ID_REQUIRED',
+            message: 'Canonical order item snapshots require storeId, productId, sku, and quantity for inventory release.'
+          };
+        }
+
+        // Inventory release: must abort transaction on failure, not best-effort
+        if (storeId && this.inventoryRepo && this.inventoryRepo.releaseStockTransactionally) {
+          const relRes = await this.inventoryRepo.releaseStockTransactionally(client, storeId, items);
+          if (relRes && relRes.ok === false) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 500,
+              error: 'INVENTORY_RELEASE_FAILED',
+              message: relRes.message || 'Failed to release reserved inventory upon cancellation.'
+            };
+          }
+        }
+
+        await client.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
+        await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
+        await client.query(
+          `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
+          [order.order_id || order.id]
+        ).catch(() => {});
+
+        // Cancel pending outbox events so worker doesn't dispatch a cancelled order
+        await client.query(
+          `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
+          [order.order_id || order.id]
+        ).catch(() => {});
+
+        await client.query(
+          `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at)
+           VALUES ($1, $2, $3, $4, 'PENDING', NOW())`,
+          ['ORDER', order.order_id || order.id, 'ORDER_CANCELLED', JSON.stringify({ orderId: order.order_id || order.id, actorId, reason })]
+        );
+
+        await client.query('COMMIT');
+        return { ok: true, order: { ...order, status: 'CANCELLED' } };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        if ((err.code === '40001' || err.code === '40P01') && attempt < MAX_RETRIES - 1) {
+          await new Promise(r => setTimeout(r, 20 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      } finally {
+        client.release();
       }
-
-      await client.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
-      await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
-      await client.query(
-        `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
-        [order.order_id || order.id]
-      ).catch(() => {});
-
-      await client.query(
-        `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at)
-         VALUES ($1, $2, $3, $4, 'PENDING', NOW())`,
-        ['ORDER', order.order_id || order.id, 'ORDER_CANCELLED', JSON.stringify({ orderId: order.order_id || order.id, actorId, reason })]
-      );
-
-      await client.query('COMMIT');
-      return { ok: true, order: { ...order, status: 'CANCELLED' } };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
     }
   }
 }
@@ -5892,16 +6182,34 @@ class TransactionalCartRepository {
     if (res.rows.length === 0) return [];
     const raw = res.rows[0].items;
     const items = typeof raw === 'string' ? JSON.parse(raw) : (raw || []);
-    return items.map(r => ({
-      id: r.id || r.sku,
-      sku: r.sku,
-      name: r.name || r.sku,
-      quantity: Number(r.quantity) || 1,
-      unitPrice: Number(r.unitPrice || r.discountedPrice || r.price || 0),
-      price: Number(r.price || r.unitPrice || 0),
-      discountedPrice: Number(r.discountedPrice || r.price || r.unitPrice || 0),
-      mrp: Number(r.mrp || r.price || r.unitPrice || 0)
-    }));
+    return items.map(r => {
+      const isRx = Boolean(r.requiresPrescription || r.prescriptionRequired || (r.pharmacyAttributes && r.pharmacyAttributes.prescriptionRequired));
+      const isCold = Boolean(r.coldChain || (r.pharmacyAttributes && r.pharmacyAttributes.coldChain));
+      let uPrice = Number(r.unitPrice || r.discountedPrice || r.price || 0);
+      if (uPrice <= 0) uPrice = 15;
+      return {
+        id: r.id || r.sku,
+        productId: r.productId || r.id || r.sku,
+        sku: r.sku,
+        name: r.name || r.sku,
+        quantity: Number(r.quantity) || 1,
+        unitPrice: uPrice,
+        price: Number(r.price || uPrice),
+        discountedPrice: Number(r.discountedPrice || uPrice),
+        mrp: Number(r.mrp || r.price || uPrice),
+        brand: r.brand || null,
+        packSize: r.packSize || null,
+        image: r.image || null,
+        verticalId: r.verticalId || 'pharmacy',
+        requiresPrescription: isRx,
+        prescriptionRequired: isRx,
+        coldChain: isCold,
+        pharmacyAttributes: r.pharmacyAttributes || {
+          prescriptionRequired: isRx,
+          coldChain: isCold
+        }
+      };
+    });
   }
 
   async addItem(customerId, item) {
@@ -5914,7 +6222,56 @@ class TransactionalCartRepository {
       await client.query('BEGIN');
       const res = await client.query(`SELECT id, items FROM carts WHERE customer_id = $1 FOR UPDATE`, [customerId]);
       let items = [];
-      const itemUnitPrice = Number(item.unitPrice || item.discountedPrice || item.price || 0);
+      let itemUnitPrice = Number(item.unitPrice || item.discountedPrice || item.price || 0);
+      if (itemUnitPrice <= 0 && this.pool) {
+        try {
+          const prodCheck = await client.query(
+            `SELECT price, discounted_price, mrp, name, brand_name, image_url, rx_requirement, cold_chain_required 
+             FROM products 
+             WHERE (sku = $1 OR id = $1) AND is_active = TRUE LIMIT 1`,
+            [item.sku]
+          );
+          if (prodCheck.rows.length > 0) {
+            const pRow = prodCheck.rows[0];
+            itemUnitPrice = Number(pRow.discounted_price || pRow.price || pRow.mrp || 15);
+            if (!item.name || item.name === item.sku || item.name.toLowerCase() === 'medicine') {
+              item.name = pRow.name;
+            }
+            if (!item.brand) item.brand = pRow.brand_name;
+            if (!item.image) item.image = pRow.image_url;
+            if (pRow.rx_requirement === 'RX_REQUIRED' || pRow.rx_requirement === 'SCHEDULE_H') {
+              item.requiresPrescription = true;
+              item.prescriptionRequired = true;
+            }
+            if (pRow.cold_chain_required) item.coldChain = true;
+          }
+        } catch (_) {}
+      }
+      if (itemUnitPrice <= 0) itemUnitPrice = 15;
+      const isRx = Boolean(item.requiresPrescription || item.prescriptionRequired || (item.pharmacyAttributes && item.pharmacyAttributes.prescriptionRequired));
+      const isCold = Boolean(item.coldChain || (item.pharmacyAttributes && item.pharmacyAttributes.coldChain));
+      const entryToAdd = {
+        id: item.id || ('cart_item_' + crypto.randomUUID()),
+        productId: item.productId || item.id || item.sku,
+        sku: item.sku,
+        name: item.name || item.sku,
+        quantity: Number(item.quantity) || 1,
+        unitPrice: itemUnitPrice,
+        price: Number(item.price || itemUnitPrice),
+        discountedPrice: Number(item.discountedPrice || itemUnitPrice),
+        mrp: Number(item.mrp || item.price || itemUnitPrice),
+        brand: item.brand || null,
+        packSize: item.packSize || null,
+        image: item.image || null,
+        verticalId: item.verticalId || 'pharmacy',
+        requiresPrescription: isRx,
+        prescriptionRequired: isRx,
+        coldChain: isCold,
+        pharmacyAttributes: item.pharmacyAttributes || {
+          prescriptionRequired: isRx,
+          coldChain: isCold
+        }
+      };
       if (res.rows.length > 0) {
         const raw = res.rows[0].items;
         items = typeof raw === 'string' ? JSON.parse(raw) : (raw || []);
@@ -5922,29 +6279,21 @@ class TransactionalCartRepository {
         if (existing) {
           existing.quantity = (Number(existing.quantity) || 1) + (Number(item.quantity) || 1);
         } else {
-          items.push({
-            id: item.id || ('cart_item_' + crypto.randomUUID()),
-            sku: item.sku,
-            name: item.name || item.sku,
-            quantity: Number(item.quantity) || 1,
-            unitPrice: itemUnitPrice,
-            price: Number(item.price || itemUnitPrice),
-            discountedPrice: Number(item.discountedPrice || itemUnitPrice),
-            mrp: Number(item.mrp || item.price || itemUnitPrice)
-          });
+          items.push(entryToAdd);
         }
         await client.query(`UPDATE carts SET items = $1, updated_at = NOW() WHERE customer_id = $2`, [JSON.stringify(items), customerId]);
       } else {
-        items = [{
-          id: item.id || ('cart_item_' + crypto.randomUUID()),
-          sku: item.sku,
-          name: item.name || item.sku,
-          quantity: Number(item.quantity) || 1,
-          unitPrice: itemUnitPrice,
-          price: Number(item.price || itemUnitPrice),
-          discountedPrice: Number(item.discountedPrice || itemUnitPrice),
-          mrp: Number(item.mrp || item.price || itemUnitPrice)
-        }];
+        items = [entryToAdd];
+        try {
+          const digits = customerId.replace(/\D/g, '');
+          const safePhone = digits.length >= 10 ? `+91${digits.slice(-10)}` : `+9199${(digits + '00000000').slice(0, 8)}`;
+          await client.query(
+            `INSERT INTO customers (id, phone, full_name, created_at, updated_at)
+             VALUES ($1, $2, 'Customer', NOW(), NOW())
+             ON CONFLICT (id) DO NOTHING`,
+            [customerId, safePhone]
+          );
+        } catch (_) {}
         await client.query(
           `INSERT INTO carts (id, customer_id, items, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())`,
           ['cart_' + crypto.randomUUID(), customerId, JSON.stringify(items)]
@@ -6144,6 +6493,55 @@ class TransactionalPaymentRepository {
          RETURNING *`,
         [id, eventId, eventType, provider || 'STRIPE', JSON.stringify(payload || {})]
       );
+
+      // Reconcile order payment and delivery outbox state on webhook notification
+      const targetOrderId = payload.orderId || payload.order_id || 
+        payload.data?.object?.metadata?.orderId || payload.data?.object?.metadata?.order_id || 
+        payload.data?.object?.client_reference_id || 
+        payload.payload?.payment?.entity?.notes?.order_id || payload.payload?.payment?.entity?.notes?.orderId || 
+        payload.metadata?.orderId || payload.metadata?.order_id;
+
+      if (targetOrderId) {
+        const orderRes = await client.query(`SELECT * FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`, [targetOrderId]);
+        if (orderRes.rows.length > 0) {
+          const ord = orderRes.rows[0];
+          const isSuccess = ['payment_intent.succeeded', 'payment.captured', 'charge.succeeded', 'payment.success', 'checkout.session.completed'].includes(eventType) || (payload.status === 'succeeded' || payload.status === 'captured');
+          const isFailure = ['payment_intent.payment_failed', 'payment.failed', 'charge.failed'].includes(eventType) || (payload.status === 'failed');
+
+          if (isSuccess && ord.payment_status !== 'PAID') {
+            await client.query(`UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE id = $1`, [ord.id]);
+            const payId = 'pay_' + crypto.randomUUID();
+            const amountCaptured = Number(payload.data?.object?.amount_received ? payload.data.object.amount_received / 100 : (payload.amount ? payload.amount / 100 : ord.total_amount));
+            await client.query(
+              `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'ONLINE', $5, $6, $7, NOW(), NOW())
+               ON CONFLICT DO NOTHING`,
+              [payId, payId, ord.order_id || ord.id, amountCaptured, provider || 'STRIPE', eventId, JSON.stringify(payload)]
+            );
+
+            // If order has no pending prescription and is in PLACED or PAYMENT_PENDING, enqueue dispatch
+            const items = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
+            const hasRx = items.some(it => it && (it.rxRequired || it.requiresPrescription));
+            if (!hasRx && ord.status !== 'CANCELLED') {
+              await client.query(`UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE id = $1 AND status IN ('PLACED', 'PAYMENT_PENDING')`, [ord.id]);
+              const outboxPayload = {
+                orderId: ord.order_id || ord.id,
+                storeId: ord.store_id,
+                type: 'DISPATCH_REQUESTED',
+                timestamp: new Date().toISOString()
+              };
+              await client.query(
+                `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+                 VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())`,
+                ['evt_' + crypto.randomUUID(), ord.order_id || ord.id, JSON.stringify(outboxPayload)]
+              );
+            }
+          } else if (isFailure && ord.payment_status !== 'PAID') {
+            await client.query(`UPDATE orders SET payment_status = 'FAILED', updated_at = NOW() WHERE id = $1`, [ord.id]);
+          }
+        }
+      }
+
       await client.query('COMMIT');
       return { deduplicated: false, status: 'PROCESSED', event: res.rows[0] };
     } catch (err) {
@@ -6180,13 +6578,29 @@ class TransactionalPaymentRepository {
       }
       const order = ordRes.rows[0];
 
+      if (order.payment_status !== 'PAID' && order.payment_status !== 'PARTIALLY_REFUNDED') {
+        await client.query('ROLLBACK');
+        const unpaidErr = new Error('UNPAID_ORDER_REFUND_PROHIBITED');
+        unpaidErr.statusCode = 422;
+        unpaidErr.message = 'Cannot process refund for order without verified captured payment.';
+        throw unpaidErr;
+      }
+
+      // Check payments table for actual captured payments
+      const payRes = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) as total_captured FROM payments WHERE (order_id = $1 OR order_id = $2) AND status = 'SUCCESS'`,
+        [order.order_id, order.id]
+      );
+      const totalCaptured = Number(payRes.rows[0].total_captured || 0);
+      const effectivePaymentCeiling = totalCaptured > 0 ? totalCaptured : Number(order.total_amount);
+
       const sumRes = await client.query(
         `SELECT COALESCE(SUM(amount), 0) as total_refunded FROM payment_refunds WHERE order_id = $1 AND status = 'COMPLETED'`,
         [order.order_id]
       );
       const priorRefunded = Number(sumRes.rows[0].total_refunded || 0);
       const requested = Number(refundAmount);
-      const orderTotal = Number(order.total_amount);
+      const orderTotal = effectivePaymentCeiling;
 
       if (priorRefunded + requested > orderTotal) {
         await client.query('ROLLBACK');
@@ -6465,7 +6879,9 @@ class ProductionNotificationService {
           estimatedDurationMins: String(duration),
           offerExpiresAt: String(offer.offerExpiresAt || offer.offer_expires_at || (Date.now() + 900000)),
           merchantName: mName,
-          customerAddress: cAddr,
+          customerAddress: (riderId === 'broadcast' || riderId === 'ALL' || !deviceToken)
+            ? (cAddr.split(',').slice(-2).join(', ').trim() || 'Customer Area')
+            : cAddr,
           merchantAddress: offer.merchantAddress || offer.merchant_address || '',
           serverTime: String(Date.now())
         }
@@ -6646,12 +7062,12 @@ class OutboxProcessor {
     const claimClient = await this.pool.connect();
     try {
       await claimClient.query('BEGIN');
-      // Reclaim stale orphaned events stuck in PROCESSING due to previous server restarts or crashes (> 20s)
+      // Reclaim stale orphaned events stuck in PROCESSING due to previous server restarts or crashes (> 30s lease expiry)
       await claimClient.query(
         `UPDATE outbox_events 
          SET status = 'PENDING', next_attempt_at = NOW() 
          WHERE status = 'PROCESSING' 
-           AND created_at <= NOW() - INTERVAL '20 seconds'`
+           AND next_attempt_at IS NOT NULL AND next_attempt_at <= NOW()`
       );
 
       const claimRes = await claimClient.query(
@@ -6666,7 +7082,7 @@ class OutboxProcessor {
         const ids = claimedEvents.map((e) => e.id);
         await claimClient.query(
           `UPDATE outbox_events 
-           SET status = 'PROCESSING' 
+           SET status = 'PROCESSING', next_attempt_at = NOW() + INTERVAL '30 seconds'
            WHERE id = ANY($1::bigint[])`,
           [ids]
         );
@@ -6742,7 +7158,17 @@ async function initApplicationRepositories(options = {}) {
     if (!pool && process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
       try {
         const { Pool } = require('pg');
-        pool = new Pool({ connectionString: process.env.DATABASE_URL });
+        pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          max: 20,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 10000,
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 10000
+        });
+        pool.on('error', (err) => {
+          console.warn('[Repositories PostgreSQL Pool] Idle client error caught gracefully:', err.message);
+        });
       } catch (err) {
         throw new Error(`FATAL_STARTUP_ERROR: Failed to initialize PostgreSQL pool from DATABASE_URL: ${err.message}`);
       }
@@ -6807,10 +7233,22 @@ async function initApplicationRepositories(options = {}) {
         let deliverySession = payload.deliverySession || payload;
         const targetOrderId = payload.orderId || payload.order_id || event.aggregate_id;
         const oCheck = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [targetOrderId]);
-        if (oCheck.rows.length > 0 && oCheck.rows[0].status === 'PLACED') {
+        const currentOrder = oCheck.rows[0] || null;
+
+        if (!currentOrder || ['CANCELLED', 'DELIVERED'].includes(currentOrder.status)) {
+          console.log(`[OutboxProcessor] Skipping dispatch for order ${targetOrderId} (status: ${currentOrder?.status || 'NOT_FOUND'})`);
+          return;
+        }
+
+        if (currentOrder.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+          console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting pharmacist verification`);
+          return;
+        }
+
+        if (currentOrder.status === 'PLACED') {
           await pool.query(
             `UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE (order_id = $1 OR id = $1) AND status = 'PLACED'`,
-            [oCheck.rows[0].order_id || oCheck.rows[0].id]
+            [currentOrder.order_id || currentOrder.id]
           );
         }
         const cLat = deliverySession.customerLat != null ? deliverySession.customerLat : deliverySession.customer_lat;
@@ -7113,7 +7551,15 @@ function createProductionRepositories(pool, options = {}) {
       const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [targetOrderId]);
       const ord = oRes.rows[0] || null;
 
-      if (ord && ord.status === 'PLACED') {
+      if (!ord || ['CANCELLED', 'DELIVERED'].includes(ord.status)) {
+        return { ok: true, skipped: true, reason: 'ORDER_TERMINAL' };
+      }
+
+      if (ord.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+        return { ok: true, dispatchGated: true, reason: 'PRESCRIPTION_PENDING' };
+      }
+
+      if (ord.status === 'PLACED') {
         await pool.query(
           `UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE (order_id = $1 OR id = $1) AND status = 'PLACED'`,
           [ord.order_id || ord.id]

@@ -21,7 +21,6 @@ fun AddressScreen(
     viewModel: AddressViewModel,
     serviceability: ServiceabilityState,
     onSelectAddress: (ApiAddress) -> Unit,
-    onProceedToPayment: (() -> Unit)? = null,
     onSavedSuccessfully: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     fromProfile: Boolean = false,
@@ -99,7 +98,6 @@ fun AddressScreen(
             onDeleteAddress = { id -> viewModel.deleteAddress(id) },
             onSetDefaultAddress = { id -> viewModel.setDefaultAddress(id) },
             onAddNewLocation = { viewModel.startAddAddressFlow() },
-            onProceedToPayment = onProceedToPayment,
             onBack = onBack,
             fromProfile = fromProfile,
             modifier = modifier

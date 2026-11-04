@@ -10,15 +10,14 @@ import com.commerceos.android.data.local.LocalPrescriptionManager
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.repository.AppRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class PrescriptionViewModel(
     private val repository: AppRepository,
-    private val appContext: Context
+    private val appContext: Context? = null
 ) : ViewModel() {
 
     var prescriptions by mutableStateOf<List<Prescription>>(emptyList())
@@ -30,29 +29,59 @@ class PrescriptionViewModel(
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
-    fun load(customerId: String) {
-        viewModelScope.launch {
-            isLoading = true
-            // 1. Instantly surface all prescriptions stored in device personal storage
-            val localPrescriptions = LocalPrescriptionManager.getPrescriptions(appContext, customerId)
-            prescriptions = localPrescriptions
-            errorMessage = null
+    private var loadJob: Job? = null
+    private var loadGeneration = 0L
+    private var uploadJob: Job? = null
 
-            // 2. Fetch server records if available and merge seamlessly
+    fun load(customerId: String) {
+        val id = customerId.trim()
+        loadGeneration++
+        val generation = loadGeneration
+        loadJob?.cancel()
+
+        if (id.isBlank()) {
+            prescriptions = emptyList()
+            isLoading = false
+            errorMessage = "Sign in to view prescriptions."
+            return
+        }
+
+        loadJob = viewModelScope.launch {
+            isLoading = true
             try {
-                when (val result = repository.getCustomerPrescriptions(customerId)) {
+                val local = if (appContext != null) {
+                    LocalPrescriptionManager.getPrescriptions(appContext, id)
+                        .filter { it.customerId == id }
+                } else {
+                    emptyList()
+                }
+
+                if (generation != loadGeneration) return@launch
+                prescriptions = local
+                errorMessage = null
+
+                when (val result = repository.getCustomerPrescriptions(id)) {
                     is ApiResult.Success -> {
-                        val serverItems = result.data
-                        val localIds = localPrescriptions.map { it.id }.toSet()
-                        val newServerItems = serverItems.filterNot { it.id in localIds }
-                        prescriptions = localPrescriptions + newServerItems
+                        if (generation == loadGeneration) {
+                            val server = result.data.filter { it.customerId == id }
+                            prescriptions = (local + server).distinctBy { it.id }
+                        }
                     }
                     is ApiResult.Failure -> {
-                        // Network error is silent since local prescriptions are active and valid
+                        if (generation == loadGeneration) {
+                            errorMessage = "Showing prescriptions saved on this device."
+                        }
                     }
                 }
-            } catch (_: Exception) {}
-            isLoading = false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (generation == loadGeneration) {
+                    errorMessage = "Could not load prescriptions."
+                }
+            } finally {
+                if (generation == loadGeneration) isLoading = false
+            }
         }
     }
 
@@ -62,62 +91,82 @@ class PrescriptionViewModel(
         attachments: List<String>,
         onUploaded: ((Prescription) -> Unit)? = null
     ) {
+        val safeCustomerId = customerId.trim()
+        if (safeCustomerId.isBlank()) {
+            errorMessage = "Sign in to upload prescriptions"
+            return
+        }
         if (attachments.isEmpty()) {
             errorMessage = "Attach at least one prescription image"
             return
         }
-        viewModelScope.launch {
+        uploadJob?.cancel()
+        uploadJob = viewModelScope.launch {
             isLoading = true
-            val rxId = "rx_local_${System.currentTimeMillis()}_${(1000..9999).random()}"
-            val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-
-            val localRx = Prescription(
-                id = rxId,
-                customerId = customerId,
-                patientName = patientName.ifBlank { "Patient" },
-                attachments = attachments,
-                doctorName = "Prescribing Physician",
-                status = "APPROVED",
-                createdAt = timestamp,
-                note = "Stored in device app personal storage"
-            )
-
-            // Persist to device app storage
-            LocalPrescriptionManager.savePrescription(appContext, localRx)
-            prescriptions = listOf(localRx) + prescriptions.filterNot { it.id == rxId }
             errorMessage = null
-            com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
-                appContext,
-                com.commerceos.android.notifications.InAppNotificationItem(
-                    title = "Prescription Uploaded",
-                    message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Ready to share with pharmacy vendor.",
-                    category = "Prescriptions",
-                    deepLinkAction = "PRESCRIPTIONS"
-                )
-            )
-            onUploaded?.invoke(localRx)
-
-            // Lightweight server audit record — avoids multi-megabyte base64 storage/bandwidth overhead
             try {
                 val lightweightAttachments = attachments.map { path ->
-                    if (path.startsWith("data:")) "local_device_storage" else File(path).name
+                    if (path.startsWith("data:")) {
+                        path
+                    } else {
+                        val file = File(path.removePrefix("file://"))
+                        if (file.exists() && file.length() in 1..(5 * 1024 * 1024)) {
+                            try {
+                                val bytes = file.readBytes()
+                                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                "data:image/jpeg;base64,$base64"
+                            } catch (_: Exception) {
+                                file.name
+                            }
+                        } else {
+                            file.name
+                        }
+                    }
                 }
-                repository.uploadPrescription(
+                when (val result = repository.uploadPrescription(
                     UploadPrescriptionRequest(
-                        customerId = customerId,
+                        customerId = safeCustomerId,
                         patientName = patientName.ifBlank { "Patient" },
                         attachments = lightweightAttachments,
-                        note = "device_personal_storage"
+                        note = "prescription_document_upload"
                     )
-                )
-            } catch (_: Exception) {
-                // Device personal storage already succeeded
+                )) {
+                    is ApiResult.Success -> {
+                        val serverRx = result.data.copy(attachments = attachments)
+                        if (appContext != null) {
+                            LocalPrescriptionManager.savePrescription(appContext, serverRx)
+                            com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
+                                appContext,
+                                com.commerceos.android.notifications.InAppNotificationItem(
+                                    title = "Prescription Uploaded",
+                                    message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Pending review by pharmacy vendor.",
+                                    category = "Prescriptions",
+                                    deepLinkAction = "PRESCRIPTIONS"
+                                )
+                            )
+                        }
+                        prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
+                        errorMessage = null
+                        onUploaded?.invoke(serverRx)
+                    }
+                    is ApiResult.Failure -> {
+                        errorMessage = result.error.message ?: "Failed to upload prescription. Please try again."
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errorMessage = "Could not upload prescription: ${e.message}"
+            } finally {
+                isLoading = false
+                uploadJob = null
             }
-            isLoading = false
         }
     }
 
     fun reset() {
+        loadJob?.cancel()
+        uploadJob?.cancel()
         prescriptions = emptyList()
         isLoading = false
         errorMessage = null

@@ -4,10 +4,12 @@ public struct ProductDetailSheet: View {
     @Environment(\.presentationMode) private var presentationMode
     @EnvironmentObject private var cartStore: CartLocalStore
     let product: ProductDto
+    public var onDismiss: (() -> Void)? = nil
     @State private var isWishlisted: Bool = false
     
-    public init(product: ProductDto) {
+    public init(product: ProductDto, onDismiss: (() -> Void)? = nil) {
         self.product = product
+        self.onDismiss = onDismiss
     }
     
     private var quantity: Int {
@@ -187,7 +189,7 @@ public struct ProductDetailSheet: View {
                                 Text("Express Delivery in 10-15 Mins")
                                     .font(.system(size: 13, weight: .bold))
                                     .foregroundColor(CommerceOSTheme.Colors.sushiInk)
-                                Text("Dispatched instantly from Koramangala Dark Store Hub")
+                                Text("Dispatched instantly from local licensed partner store")
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary)
                             }
@@ -404,8 +406,11 @@ public struct ProductDetailSheet: View {
             .navigationBarTitle("Product Details", displayMode: .inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { presentationMode.wrappedValue.dismiss() }
-                        .font(.system(size: 15, weight: .bold))
+                    Button("Done") {
+                        onDismiss?()
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .font(.system(size: 15, weight: .bold))
                 }
             }
         }

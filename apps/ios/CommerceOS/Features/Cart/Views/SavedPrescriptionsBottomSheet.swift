@@ -221,9 +221,9 @@ public struct SavedPrescriptionsBottomSheet: View {
 public struct PrescriptionQuickPreviewModal: View {
     @Environment(\.presentationMode) private var presentationMode
     public let prescription: PrescriptionItem
-    public let onAttach: () -> Void
+    public let onAttach: (() -> Void)?
 
-    public init(prescription: PrescriptionItem, onAttach: @escaping () -> Void) {
+    public init(prescription: PrescriptionItem, onAttach: (() -> Void)? = nil) {
         self.prescription = prescription
         self.onAttach = onAttach
     }
@@ -335,27 +335,29 @@ public struct PrescriptionQuickPreviewModal: View {
 
             // Bottom Actions
             HStack(spacing: 12) {
-                Button("Close") {
+                Button(onAttach != nil ? "Close" : "Done") {
                     presentationMode.wrappedValue.dismiss()
                 }
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(Color(hex: "64748B"))
+                .foregroundColor(onAttach != nil ? Color(hex: "64748B") : .white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
-                .background(Color(hex: "F1F5F9"))
+                .background(onAttach != nil ? Color(hex: "F1F5F9") : CommerceOSTheme.Colors.brandPrimary)
                 .cornerRadius(12)
 
-                Button("Attach to Order") {
-                    HapticFeedbackEngine.shared.triggerNotification(.success)
-                    onAttach()
-                    presentationMode.wrappedValue.dismiss()
+                if let onAttach = onAttach {
+                    Button("Attach to Order") {
+                        HapticFeedbackEngine.shared.triggerNotification(.success)
+                        onAttach()
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(CommerceOSTheme.Colors.brandPrimary)
+                    .cornerRadius(12)
                 }
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(CommerceOSTheme.Colors.brandPrimary)
-                .cornerRadius(12)
             }
             .padding(16)
         }

@@ -259,7 +259,7 @@ public struct OrderHistoryCard: View {
         let s = order.status.uppercased()
         return s == "PLACED" || s == "ORDER_PLACED" || s == "CREATED" ||
                s == "CONFIRMED" || s == "ACCEPTED" || s == "SELLER_ACCEPTED" ||
-               s == "ORDER_SELLER_ACCEPTED" || s == "ALLOCATED_DARK_STORE" ||
+               s == "ORDER_SELLER_ACCEPTED" || s == "ALLOCATED_DARK_STORE" || s == "ALLOCATED_STORE" ||
                s == "PAYMENT_PENDING" || s == "PRESCRIPTION_VERIFICATION_PENDING" ||
                s == "PACKED" || s == "PACKED_FEFO" || s == "READY_FOR_PICKUP" ||
                s == "SEARCHING_FOR_RIDER" || s == "LOOKING_FOR_RIDER"
@@ -523,7 +523,7 @@ public struct OrderHistoryCard: View {
         let label: String = {
             switch s {
             case "PLACED", "ORDER_PLACED", "CREATED": return "Order Placed"
-            case "CONFIRMED", "ACCEPTED", "SELLER_ACCEPTED", "ORDER_SELLER_ACCEPTED", "ALLOCATED_DARK_STORE": return "Order Confirmed"
+            case "CONFIRMED", "ACCEPTED", "SELLER_ACCEPTED", "ORDER_SELLER_ACCEPTED", "ALLOCATED_DARK_STORE", "ALLOCATED_STORE": return "Order Confirmed"
             case "PAYMENT_PENDING": return "Payment Pending"
             case "PRESCRIPTION_VERIFICATION_PENDING": return "Prescription Review"
             case "PACKED", "PACKED_FEFO": return "Packed & Ready"
@@ -640,6 +640,8 @@ public struct CancelOrderSheet: View {
                         
                         TextField("e.g., Placed by mistake", text: $reasonNote)
                             .font(.system(size: 14))
+                            .foregroundColor(Color(hex: "0F172A"))
+                            .accentColor(Color(hex: "0E675E"))
                             .padding(12)
                             .background(Color.white)
                             .cornerRadius(10)

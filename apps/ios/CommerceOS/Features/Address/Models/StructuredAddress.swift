@@ -139,6 +139,13 @@ public struct StructuredAddress: Codable, Identifiable, Equatable, Hashable {
     public var geoLocation: GeoPoint?
     public var placeId: String?
 
+    public var formattedSummary: String {
+        let parts = [houseNumber, building, street, subLocality, locality, landmark, city, postalCode]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? "Current Selected Address" : parts.joined(separator: ", ")
+    }
+
     public init(
         id: String = "",
         tag: String = "Home",

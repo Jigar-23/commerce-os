@@ -17,7 +17,7 @@ public struct RiderHomeDashboardView: View {
     }
     
     private var assignedHub: String {
-        sessionManager.profile?.assignedHub ?? "Koramangala Dark Store Hub #04"
+        sessionManager.profile?.assignedHub ?? "Koramangala Store Hub #04"
     }
     
     public var body: some View {

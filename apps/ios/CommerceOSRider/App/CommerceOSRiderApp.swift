@@ -18,7 +18,9 @@ public class RiderAppDelegate: NSObject, UIApplicationDelegate {
     ) {
         Task { @MainActor in
             RiderPushNotificationManager.shared.handleDeviceTokenRegistration(deviceTokenData: deviceToken)
-            await RiderSessionManager.shared.ensureOnlineShift()
+            if RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline {
+                await RiderSessionManager.shared.registerDeviceTokenIfNeeded()
+            }
         }
     }
 
@@ -35,6 +37,11 @@ public class RiderAppDelegate: NSObject, UIApplicationDelegate {
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         Task { @MainActor in
+            guard RiderAPIClient.shared.isAuthenticated && RiderSessionManager.shared.isShiftOnline else {
+                print("[RiderAppDelegate] Dropped background remote notification: Rider is logged out or offline.")
+                completionHandler(.noData)
+                return
+            }
             RiderPushNotificationManager.shared.handleRemoteNotification(userInfo: userInfo)
             await RiderOfferEventPipeline.shared.pollActiveOffersOnce()
             completionHandler(.newData)

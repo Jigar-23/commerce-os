@@ -70,7 +70,7 @@ object OrderStatusPresentationMapper {
                 CustomerOrderStatus.PLACED, "Order Placed",
                 "We have received your order", isTerminal = false, isCancelled = false, isDelivered = false
             )
-            "SELLER_ACCEPTED", "CONFIRMED", "ALLOCATED_DARK_STORE" -> PresentedStatus(
+            "SELLER_ACCEPTED", "CONFIRMED", "ALLOCATED_DARK_STORE", "ALLOCATED_STORE" -> PresentedStatus(
                 CustomerOrderStatus.CONFIRMED, "Order Accepted & Being Packed",
                 "Store has accepted your order and is packing items", isTerminal = false, isCancelled = false, isDelivered = false
             )

@@ -25,7 +25,7 @@ interface CatalogApi {
     @GET("/api/v1/catalog/medicines/search")
     suspend fun searchMedicines(
         @Query("query") query: String,
-        @Query("limit") limit: Int = 20,
+        @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
         @Query("minPrice") minPrice: Double? = null,
         @Query("maxPrice") maxPrice: Double? = null
@@ -34,7 +34,7 @@ interface CatalogApi {
     @GET("/api/v1/catalog/medicines/category")
     suspend fun getMedicinesByCategory(
         @Query("category") category: String,
-        @Query("limit") limit: Int = 20,
+        @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
         @Query("minPrice") minPrice: Double? = null,
         @Query("maxPrice") maxPrice: Double? = null
@@ -42,7 +42,7 @@ interface CatalogApi {
 
     @GET("/api/v1/catalog/medicines")
     suspend fun getMedicines(
-        @Query("limit") limit: Int = 20,
+        @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
         @Query("minPrice") minPrice: Double? = null,
         @Query("maxPrice") maxPrice: Double? = null
@@ -73,7 +73,7 @@ interface CatalogApi {
         @Query("vertical") vertical: String? = null,
         @Query("minPrice") minPrice: Double? = null,
         @Query("maxPrice") maxPrice: Double? = null,
-        @Query("limit") limit: Int = 20,
+        @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0
     ): PageResponse<CommerceProduct>
 
@@ -102,7 +102,7 @@ interface SearchApi {
         @Query("vertical") vertical: String? = null,
         @Query("intent") intent: String? = null,
         @Query("addressId") addressId: String? = null,
-        @Query("limit") limit: Int = 20,
+        @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0
     ): SearchResponse
 
@@ -256,6 +256,84 @@ interface PrescriptionApi {
     @GET("/api/v1/prescriptions/customer/{customerId}")
     suspend fun getCustomerPrescriptions(@Path("customerId") customerId: String): List<Prescription>
 }
+
+interface PromotionsApi {
+    @GET("/api/v1/promotions")
+    suspend fun getPromotions(): PromotionsResponse
+
+    @GET("/api/v1/promotions/validate")
+    suspend fun validateCoupon(
+        @Query("code") code: String,
+        @Query("subtotal") subtotal: Double
+    ): CouponValidationResponse
+
+    @GET("/api/v1/config/delivery")
+    suspend fun getDeliveryConfig(): DeliveryConfigResponse
+}
+
+data class PromotionsResponse(
+    @SerializedName("promotions")
+    val promotions: List<RemotePromotionItem> = emptyList(),
+    @SerializedName("total")
+    val total: Int = 0
+)
+
+data class RemotePromotionItem(
+    @SerializedName("id")
+    val id: String = "",
+    @SerializedName("code")
+    val code: String = "",
+    @SerializedName("title")
+    val title: String = "",
+    @SerializedName("type")
+    val type: String = "PERCENTAGE",
+    @SerializedName("discountText")
+    val discountText: String? = null,
+    @SerializedName("description")
+    val description: String? = null,
+    @SerializedName("minOrderValue")
+    val minOrderValue: Double = 0.0,
+    @SerializedName("discountPercent")
+    val discountPercent: Double = 0.0,
+    @SerializedName("flatDiscount")
+    val flatDiscount: Double = 0.0,
+    @SerializedName("maxDiscount")
+    val maxDiscount: Double? = null,
+    @SerializedName("badge")
+    val badge: String? = null,
+    @SerializedName("status")
+    val status: String = "ACTIVE",
+    @SerializedName("validUntil")
+    val validUntil: String? = null
+)
+
+data class CouponValidationResponse(
+    @SerializedName("valid")
+    val valid: Boolean = false,
+    @SerializedName("code")
+    val code: String? = null,
+    @SerializedName("discountAmount")
+    val discountAmount: Double = 0.0,
+    @SerializedName("discountText")
+    val discountText: String? = null,
+    @SerializedName("message")
+    val message: String? = null,
+    @SerializedName("error")
+    val error: String? = null
+)
+
+data class DeliveryConfigResponse(
+    @SerializedName("freeDeliveryThreshold")
+    val freeDeliveryThreshold: Double = 199.0,
+    @SerializedName("standardDeliveryFee")
+    val standardDeliveryFee: Double = 2.0,
+    @SerializedName("expressDeliveryFee")
+    val expressDeliveryFee: Double = 2.0,
+    @SerializedName("coldChainPackagingFee")
+    val coldChainPackagingFee: Double = 15.0,
+    @SerializedName("cacheTtlDays")
+    val cacheTtlDays: Int = 30
+)
 
 data class DeleteAddressResponse(
     @SerializedName(value = "deleted", alternate = ["ok", "success"])
@@ -432,6 +510,7 @@ object NetworkClient {
     val orderApi: OrderApi get() = service(OrderApi::class.java)
     val customerApi: CustomerApi get() = service(CustomerApi::class.java)
     val prescriptionApi: PrescriptionApi get() = service(PrescriptionApi::class.java)
+    val promotionsApi: PromotionsApi get() = service(PromotionsApi::class.java)
 
     /** Authoritative Server-Sent Events (SSE) Stream Call for Live Order Telemetry */
     fun openOrderSseCall(orderId: String): okhttp3.Call {

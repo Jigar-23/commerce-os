@@ -338,7 +338,7 @@ fun CustomerLiveMapTrackingView(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "Waiting for dark store dispatch coordinates",
+                            text = "Waiting for store dispatch coordinates",
                             fontSize = 11.sp,
                             color = Color(0xFF64748B)
                         )
@@ -447,7 +447,7 @@ fun CustomerLiveMapTrackingView(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "Waiting for dark store dispatch coordinates",
+                            text = "Waiting for store dispatch coordinates",
                             fontSize = 11.sp,
                             color = Color(0xFF64748B)
                         )
