@@ -60,6 +60,8 @@ fun CustomerLiveMapTrackingView(
     var lastRoutedOriginLat by remember(order.id) { mutableStateOf<Double?>(null) }
     var lastRoutedOriginLng by remember(order.id) { mutableStateOf<Double?>(null) }
     var lastRoutedStage by remember(order.id) { mutableStateOf<String?>(null) }
+    val routesProvider = remember { com.commerceos.android.location.GoogleRoutesProvider() }
+    var routeUnavailable by remember(order.id) { mutableStateOf(false) }
 
     if (realRiderLat != null && realRiderLng != null) {
         cachedRiderLat = realRiderLat
@@ -164,90 +166,16 @@ fun CustomerLiveMapTrackingView(
         }
 
         if (originLat != destLat || originLng != destLng) {
-            withContext(Dispatchers.IO) {
-                var routeFetched = false
-                // 1. Authoritative Backend Routing (Host Google Directions + OSRM)
-                try {
-                    val backendBase = com.commerceos.android.network.NetworkClient.baseUrl.trimEnd('/')
-                    val backendUrl = "$backendBase/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
-                    val url = URL(backendUrl)
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        requestMethod = "GET"
-                        connectTimeout = 3500
-                        readTimeout = 3500
-                        setRequestProperty("User-Agent", "CommerceOS-Customer/2.0")
-                    }
-                    if (conn.responseCode == 200) {
-                        val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                        val json = JSONObject(jsonStr)
-                        if (json.optBoolean("ok", false) && json.has("waypoints")) {
-                            val arr = json.getJSONArray("waypoints")
-                            val pts = mutableListOf<MapRoutePoint>()
-                            for (i in 0 until arr.length()) {
-                                val pt = arr.getJSONObject(i)
-                                pts.add(MapRoutePoint(lat = pt.getDouble("lat"), lng = pt.getDouble("lng")))
-                            }
-                            if (pts.size >= 2) {
-                                withContext(Dispatchers.Main) {
-                                    dynamicRoadPoints = pts
-                                    lastRoutedOriginLat = originLat
-                                    lastRoutedOriginLng = originLng
-                                    lastRoutedStage = activeStage
-                                }
-                                routeFetched = true
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                if (!routeFetched) {
-                    // 2. Direct OSRM Fallback
-                    try {
-                        val url = URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
-                        val conn = (url.openConnection() as HttpURLConnection).apply {
-                            requestMethod = "GET"
-                            connectTimeout = 4000
-                            readTimeout = 4000
-                            setRequestProperty("User-Agent", "CommerceOS-Customer/2.0")
-                        }
-                        if (conn.responseCode == 200) {
-                            val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                            val json = JSONObject(jsonStr)
-                            val routes = json.getJSONArray("routes")
-                            if (routes.length() > 0) {
-                                val geom = routes.getJSONObject(0).getJSONObject("geometry")
-                                val coords = geom.getJSONArray("coordinates")
-                                val pts = mutableListOf<MapRoutePoint>()
-                                for (i in 0 until coords.length()) {
-                                    val c = coords.getJSONArray(i)
-                                    pts.add(MapRoutePoint(lat = c.getDouble(1), lng = c.getDouble(0)))
-                                }
-                                if (pts.size >= 2) {
-                                    withContext(Dispatchers.Main) {
-                                        dynamicRoadPoints = pts
-                                        lastRoutedOriginLat = originLat
-                                        lastRoutedOriginLng = originLng
-                                        lastRoutedStage = activeStage
-                                    }
-                                    routeFetched = true
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                // 3. Unbreakable geometric fallback corridor
-                if (!routeFetched && dynamicRoadPoints.isEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        dynamicRoadPoints = listOf(
-                            MapRoutePoint(originLat, originLng),
-                            MapRoutePoint(destLat, destLng)
-                        )
-                        lastRoutedOriginLat = originLat
-                        lastRoutedOriginLng = originLng
-                        lastRoutedStage = activeStage
-                    }
-                }
+            val result = routesProvider.getDrivingRoute(originLat, originLng, destLat, destLng)
+            if (result is com.commerceos.android.network.ApiResult.Success && result.data.waypoints.size >= 2) {
+                dynamicRoadPoints = result.data.waypoints.map { MapRoutePoint(it.latitude, it.longitude) }
+                lastRoutedOriginLat = originLat
+                lastRoutedOriginLng = originLng
+                lastRoutedStage = activeStage
+                routeUnavailable = false
+            } else {
+                dynamicRoadPoints = emptyList()
+                routeUnavailable = true
             }
         }
     }
@@ -261,10 +189,6 @@ fun CustomerLiveMapTrackingView(
             liveTracking!!.waypoints.map { MapRoutePoint(it.lat, it.lng) }
         } else if (dynamicRoadPoints.size >= 2 && lastRoutedStage == activeStage) {
             dynamicRoadPoints
-        } else if (isHeadingToCustomer) {
-            listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(customerLat, customerLng))
-        } else if (isHeadingToStore) {
-            listOf(MapRoutePoint(effectiveRiderLat, effectiveRiderLng), MapRoutePoint(merchantLat, merchantLng))
         } else {
             emptyList()
         }
@@ -521,6 +445,7 @@ fun CustomerLiveMapTrackingView(
                                 currentStatus == "DELIVERED" -> "Order Delivered"
                                 currentStatus == "HANDOFF_STARTED" -> "Partner at your door"
                                 currentStatus == "ARRIVED_CUSTOMER" -> "Partner has arrived"
+                                routeUnavailable && routePoints.isEmpty() && (isHeadingToStore || isHeadingToCustomer) -> "Route unavailable • Live tracking"
                                 currentStatus == "OUT_FOR_DELIVERY" || currentStatus == "EN_ROUTE_CUSTOMER" -> "Partner on the way"
                                 currentStatus == "PICKED_UP" -> "Order packed & picked up"
                                 currentStatus in listOf("ARRIVED_PICKUP", "EN_ROUTE_PICKUP") -> "Partner picking up"

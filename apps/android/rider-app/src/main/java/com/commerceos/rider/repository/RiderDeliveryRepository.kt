@@ -12,15 +12,18 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+import kotlin.coroutines.resume
 
 class RiderDeliveryRepository(
     private val baseUrlProvider: () -> String,
-    private val authTokenProvider: () -> String
+    private val authTokenProvider: () -> String,
+    private val connectionFactory: (url: URL) -> HttpURLConnection = { url -> url.openConnection() as HttpURLConnection }
 ) {
 
     companion object {
@@ -213,7 +216,7 @@ class RiderDeliveryRepository(
     private fun openCandidateConnection(base: String, path: String, method: String): HttpURLConnection {
         val cleanBase = base.trimEnd('/')
         val url = URL("$cleanBase$path")
-        val conn = url.openConnection() as HttpURLConnection
+        val conn = connectionFactory(url)
         conn.requestMethod = method
         conn.setRequestProperty("Content-Type", "application/json")
         val token = authTokenProvider()
@@ -228,7 +231,7 @@ class RiderDeliveryRepository(
     private fun createConnection(path: String, method: String): HttpURLConnection {
         val baseUrl = baseUrlProvider().trimEnd('/')
         val url = URL("$baseUrl$path")
-        val conn = url.openConnection() as HttpURLConnection
+        val conn = connectionFactory(url)
         conn.requestMethod = method
         conn.setRequestProperty("Content-Type", "application/json")
         val token = authTokenProvider()
@@ -968,46 +971,59 @@ class RiderDeliveryRepository(
         destLat: Double,
         destLng: Double
     ): Result<DeliveryRouteResult> = withContext(Dispatchers.IO) {
-        val requestContext = currentCoroutineContext()
-
-        // 1. Try via Commerce OS Server
-        try {
-            val path = "/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
-            val conn = createConnection(path, "GET")
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-            if (conn.responseCode == 200) {
-                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(jsonStr)
-                val distKm = json.getDouble("distanceKm")
-                val durMins = json.getInt("durationMins")
-                val provider = json.optString("provider", "OSRM_OPENSTREETMAP")
-                val waypointsArray = json.getJSONArray("waypoints")
-                val waypoints = mutableListOf<RoutePoint>()
-                for (i in 0 until waypointsArray.length()) {
-                    val pt = waypointsArray.getJSONObject(i)
-                    waypoints.add(RoutePoint(lat = pt.getDouble("lat"), lng = pt.getDouble("lng")))
-                }
-                if (waypoints.size >= 2) {
-                    return@withContext Result.success(
-                        DeliveryRouteResult(
-                            distanceKm = distKm,
-                            durationMins = durMins,
-                            waypoints = waypoints,
-                            provider = provider
-                        )
-                    )
-                }
+        suspendCancellableCoroutine { continuation ->
+            var activeConn: HttpURLConnection? = null
+            continuation.invokeOnCancellation {
+                try {
+                    activeConn?.disconnect()
+                } catch (_: Throwable) {}
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            requestContext.ensureActive()
+
+            try {
+                val path = "/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
+                val conn = createConnection(path, "GET")
+                activeConn = conn
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                if (conn.responseCode == 200) {
+                    val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(jsonStr)
+                    val distKm = json.getDouble("distanceKm")
+                    val durMins = json.getInt("durationMins")
+                    val provider = json.optString("provider", "OSRM_OPENSTREETMAP")
+                    val waypointsArray = json.getJSONArray("waypoints")
+                    val waypoints = mutableListOf<RoutePoint>()
+                    for (i in 0 until waypointsArray.length()) {
+                        val pt = waypointsArray.getJSONObject(i)
+                        waypoints.add(RoutePoint(lat = pt.getDouble("lat"), lng = pt.getDouble("lng")))
+                    }
+                    if (waypoints.size >= 2) {
+                        continuation.resume(
+                            Result.success(
+                                DeliveryRouteResult(
+                                    distanceKm = distKm,
+                                    durationMins = durMins,
+                                    waypoints = waypoints,
+                                    provider = provider
+                                )
+                            )
+                        )
+                        return@suspendCancellableCoroutine
+                    }
+                }
+                continuation.resume(Result.failure(Exception("Road route geometry calculation unavailable")))
+            } catch (cancelled: CancellationException) {
+                try {
+                    activeConn?.disconnect()
+                } catch (_: Throwable) {}
+                continuation.cancel(cancelled)
+            } catch (e: Exception) {
+                if (continuation.isCancelled) {
+                    return@suspendCancellableCoroutine
+                }
+                continuation.resume(Result.failure(Exception("Road route geometry calculation unavailable: ${e.message}")))
+            }
         }
-
-        requestContext.ensureActive()
-
-        Result.failure(Exception("Road route geometry calculation unavailable"))
     }
 
     private fun parseSessionJson(json: JSONObject): ServerDeliverySession {

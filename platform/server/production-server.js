@@ -136,6 +136,60 @@ const DEFAULT_STORE_ID = process.env.DEFAULT_STORE_ID || 'store_rewari_hub_01';
 const inFlightRouteCalculations = new Set();
 const lastRerouteTimes = new Map();
 
+const REQUIRED_DATABASE_MIGRATIONS = [
+  `ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`,
+  `ALTER TABLE offers ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;`,
+  `ALTER TABLE offers ADD COLUMN IF NOT EXISTS is_broadcast BOOLEAN NOT NULL DEFAULT FALSE;`,
+  `ALTER TABLE riders ADD COLUMN IF NOT EXISTS aadhaar_number VARCHAR(32);`,
+  `ALTER TABLE riders ADD COLUMN IF NOT EXISTS store_id VARCHAR(64);`,
+  `ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS route_version INT NOT NULL DEFAULT 1;`,
+  `ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS eta_updated_at TIMESTAMPTZ;`,
+  `ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS rider_to_store_mins NUMERIC(6, 2) DEFAULT 0.0;`,
+  `ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS store_to_customer_mins NUMERIC(6, 2) DEFAULT 0.0;`,
+  `ALTER TABLE inventory_ledger ALTER COLUMN reason SET NOT NULL;`,
+  `ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS reversal_of_id VARCHAR(64);`,
+  `ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_ledger_reversal ON inventory_ledger(reversal_of_id) WHERE reversal_of_id IS NOT NULL;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_default ON customer_addresses(customer_id) WHERE is_default = TRUE;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_upi_utr ON payments(provider_ref) WHERE provider = 'UPI_INTENT' AND provider_ref IS NOT NULL;`,
+  `ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_vpa VARCHAR(128);`,
+  `ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_ref_id VARCHAR(128);`,
+  `ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`,
+  `ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);`,
+  `ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS state VARCHAR(100);`,
+  `ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS landmark TEXT;`,
+  `ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_name VARCHAR(128);`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_summary JSONB;`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS short_order_id VARCHAR(16);`,
+  `CREATE SEQUENCE IF NOT EXISTS order_code_seq START WITH 1000000001;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS unq_orders_short_order_id ON orders(short_order_id) WHERE short_order_id IS NOT NULL;`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_short_id ON orders(short_order_id);`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(255);`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS salt_composition TEXT;`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS safety_advice JSONB NOT NULL DEFAULT '[]'::jsonb;`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS storage_condition VARCHAR(255);`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS therapeutic_class VARCHAR(255);`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(16);`,
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(4, 2);`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT TRUE;`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_offline BOOLEAN NOT NULL DEFAULT FALSE;`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS surge_mode BOOLEAN NOT NULL DEFAULT FALSE;`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_time_utc VARCHAR(8) NOT NULL DEFAULT '00:00';`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS closing_time_utc VARCHAR(8) NOT NULL DEFAULT '23:59';`,
+  `ALTER TABLE stores ADD COLUMN IF NOT EXISTS max_active_orders INT NOT NULL DEFAULT 50;`
+];
+
+async function runDatabaseMigrations(pgPool) {
+  if (!pgPool) return;
+  for (const sql of REQUIRED_DATABASE_MIGRATIONS) {
+    await pgPool.query(sql);
+  }
+}
+
+let databaseMigrationsPromise = Promise.resolve();
+
 // 2. Production PostgreSQL Connection Pool (Authoritative Supabase Cluster)
 let pool = null;
 if (DATABASE_URL) {
@@ -153,48 +207,11 @@ if (DATABASE_URL) {
   pool.on('error', (err) => {
     console.error('⚠️ [PostgreSQL Pool Error - Idle Client]:', err.message);
   });
-  pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
-  pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;`).catch(() => {});
-  pool.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS is_broadcast BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-  pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS aadhaar_number VARCHAR(32);`).catch(() => {});
-  pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS store_id VARCHAR(64);`).catch(() => {});
-  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS route_version INT NOT NULL DEFAULT 1;`).catch(() => {});
-  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS eta_updated_at TIMESTAMPTZ;`).catch(() => {});
-  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS rider_to_store_mins NUMERIC(6, 2) DEFAULT 0.0;`).catch(() => {});
-  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS store_to_customer_mins NUMERIC(6, 2) DEFAULT 0.0;`).catch(() => {});
-  pool.query(`ALTER TABLE inventory_ledger ALTER COLUMN reason SET NOT NULL;`).catch(() => {});
-  pool.query(`ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS reversal_of_id VARCHAR(64);`).catch(() => {});
-  pool.query(`ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_ledger_reversal ON inventory_ledger(reversal_of_id) WHERE reversal_of_id IS NOT NULL;`).catch(() => {});
-  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_default ON customer_addresses(customer_id) WHERE is_default = TRUE;`).catch(() => {});
-  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_upi_utr ON payments(provider_ref) WHERE provider = 'UPI_INTENT' AND provider_ref IS NOT NULL;`).catch(() => {});
-  pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_vpa VARCHAR(128);`).catch(() => {});
-  pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_ref_id VARCHAR(128);`).catch(() => {});
-  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);`).catch(() => {});
-  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS state VARCHAR(100);`).catch(() => {});
-  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS landmark TEXT;`).catch(() => {});
-  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_name VARCHAR(128);`).catch(() => {});
-  pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_summary JSONB;`).catch(() => {});
-  pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS short_order_id VARCHAR(16);`).catch(() => {});
-  pool.query(`CREATE SEQUENCE IF NOT EXISTS order_code_seq START WITH 1000000001;`).catch(() => {});
-  pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS unq_orders_short_order_id ON orders(short_order_id) WHERE short_order_id IS NOT NULL;`).catch(() => {});
-  pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_short_id ON orders(short_order_id);`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(255);`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS salt_composition TEXT;`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS safety_advice JSONB NOT NULL DEFAULT '[]'::jsonb;`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS storage_condition VARCHAR(255);`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS therapeutic_class VARCHAR(255);`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(16);`).catch(() => {});
-  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(4, 2);`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT TRUE;`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_offline BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS surge_mode BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_time_utc VARCHAR(8) NOT NULL DEFAULT '00:00';`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS closing_time_utc VARCHAR(8) NOT NULL DEFAULT '23:59';`).catch(() => {});
-  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS max_active_orders INT NOT NULL DEFAULT 50;`).catch(() => {});
+
+  databaseMigrationsPromise = runDatabaseMigrations(pool).catch((err) => {
+    console.error('💥 [Database Migration Error]: Startup migration failed:', err.message);
+    throw err;
+  });
 
   // ---------------------------------------------------------------------------
   // 2b. Authoritative Database Keep-Alive Pulse (Prevents Cloud Hibernation)
@@ -11347,15 +11364,27 @@ const server = http.createServer(async (req, res) => {
 
 // 8. Server Boot & Process Lifecycle Management
 if (require.main === module) {
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`================================================================`);
-    console.log(`🚀 Commerce OS Production Server listening on port ${PORT}`);
-    console.log(`   Persistence Mode: PostgreSQL 16+ (${DATABASE_URL.replace(/:[^:@]+@/, ':***@')})`);
-    console.log(`   Routing Adapter : Real OSRM (${OSRM_BASE_URL})`);
-    console.log(`   Outbox Worker   : Active (polling interval 500ms)`);
-    console.log(`   FCM Adapter     : Data-Only Payload (${FCM_ENDPOINT_URL})`);
-    console.log(`================================================================`);
-  });
+  (async () => {
+    try {
+      if (pool) {
+        console.log('[ProductionServer] Running required database migrations before accepting requests...');
+        await databaseMigrationsPromise;
+        console.log('[ProductionServer] Required database migrations successfully verified.');
+      }
+      server.listen(PORT, '0.0.0.0', () => {
+        console.log(`================================================================`);
+        console.log(`🚀 Commerce OS Production Server listening on port ${PORT}`);
+        console.log(`   Persistence Mode: PostgreSQL 16+ (${DATABASE_URL.replace(/:[^:@]+@/, ':***@')})`);
+        console.log(`   Routing Adapter : Real OSRM (${OSRM_BASE_URL})`);
+        console.log(`   Outbox Worker   : Active (polling interval 500ms)`);
+        console.log(`   FCM Adapter     : Data-Only Payload (${FCM_ENDPOINT_URL})`);
+        console.log(`================================================================`);
+      });
+    } catch (bootErr) {
+      console.error('💥 [ProductionServer Fatal Startup Failure]: Database migration failed. Refusing to accept requests:', bootErr);
+      process.exit(1);
+    }
+  })();
 
   const shutdown = async () => {
     console.log('[ProductionServer] Graceful shutdown initiated...');
@@ -11371,4 +11400,4 @@ if (require.main === module) {
   process.on('SIGINT', shutdown);
 }
 
-module.exports = { server, appRepositories, getAppRepositories: () => appRepositories, pool, ProductionFcmSender, ProductionSseBroadcaster, sseBroadcasterInstance, verifyAndDecodeJwt, validateProductionConfiguration, ApnsDispatcher, ApnsPayloadBuilder, apnsDispatcherInstance, PrometheusMetrics, prometheusMetricsInstance };
+module.exports = { server, appRepositories, getAppRepositories: () => appRepositories, pool, runDatabaseMigrations, databaseMigrationsPromise, REQUIRED_DATABASE_MIGRATIONS, ProductionFcmSender, ProductionSseBroadcaster, sseBroadcasterInstance, verifyAndDecodeJwt, validateProductionConfiguration, ApnsDispatcher, ApnsPayloadBuilder, apnsDispatcherInstance, PrometheusMetrics, prometheusMetricsInstance };

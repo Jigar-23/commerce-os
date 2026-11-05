@@ -305,7 +305,7 @@ fun NativeGoogleOrderTrackingMap(
             !shouldShowRoute || routeOrigin == null || routeDest == null -> emptyList()
             googleRouteWaypoints.size >= 2 && activeStage == lastActiveStage -> googleRouteWaypoints
             waypoints.size >= 2 -> waypoints.map { LatLng(it.lat, it.lng) }
-            else -> listOf(routeOrigin, routeDest)
+            else -> emptyList()
         }
     }
 

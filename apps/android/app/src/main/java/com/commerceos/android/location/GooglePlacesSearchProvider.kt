@@ -24,12 +24,25 @@ import kotlin.coroutines.resume
  */
 class GooglePlacesSearchProvider(
     private val context: Context,
-    private val apiKey: String = "AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c"
+    private val apiKey: String = ""
 ) : PlaceSearchProvider {
 
     private val placesClient: PlacesClient by lazy {
         if (!Places.isInitialized()) {
-            Places.initialize(context.applicationContext, apiKey)
+            val key = if (apiKey.isNotBlank()) apiKey else {
+                try {
+                    val appInfo = context.packageManager.getApplicationInfo(
+                        context.packageName,
+                        android.content.pm.PackageManager.GET_META_DATA
+                    )
+                    appInfo.metaData?.getString("com.google.android.geo.API_KEY") ?: ""
+                } catch (_: Exception) {
+                    ""
+                }
+            }
+            if (key.isNotBlank()) {
+                Places.initialize(context.applicationContext, key)
+            }
         }
         Places.createClient(context.applicationContext)
     }

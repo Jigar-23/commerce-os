@@ -173,6 +173,32 @@ async function runTests() {
     }
   }
 
+  // 4. Server boot startup migration sequencing test (Finding 5)
+  const { runDatabaseMigrations, databaseMigrationsPromise, REQUIRED_DATABASE_MIGRATIONS } = require('./server/production-server');
+  assert.ok(Array.isArray(REQUIRED_DATABASE_MIGRATIONS), 'REQUIRED_DATABASE_MIGRATIONS must be an exported array');
+  assert.ok(
+    REQUIRED_DATABASE_MIGRATIONS.some(m => m.includes('eta_updated_at TIMESTAMPTZ')),
+    'REQUIRED_DATABASE_MIGRATIONS must include eta_updated_at migration'
+  );
+  assert.ok(typeof runDatabaseMigrations === 'function', 'runDatabaseMigrations must be an exported async function');
+  assert.ok(databaseMigrationsPromise instanceof Promise, 'databaseMigrationsPromise must be an active Promise');
+
+  // Verify that migration failure rejects and halts startup
+  const failingMockPool = {
+    query: async (sql) => {
+      if (sql.includes('eta_updated_at')) throw new Error('Simulated disk full migration failure');
+    }
+  };
+  let migrationErrorThrown = false;
+  try {
+    await runDatabaseMigrations(failingMockPool);
+  } catch (err) {
+    migrationErrorThrown = true;
+    assert.ok(err.message.includes('Simulated disk full migration failure'));
+  }
+  assert.ok(migrationErrorThrown, 'runDatabaseMigrations must throw and refuse startup if a migration fails');
+  console.log('✅ Test 4 Passed: Server database migrations are sequentially executed, verified, and fatal on failure');
+
   console.log('🎉 ALL KODEX BATCH 2 TESTS PASSED SUCCESSFULLY');
   process.exit(0);
 }
