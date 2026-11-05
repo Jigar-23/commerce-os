@@ -1984,7 +1984,7 @@ private fun ModernSearchResultCard(
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Text(
-                        "⚡ 10 MINS",
+                        "⚡ EXPRESS",
                         fontSize = 8.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.ExtraBold,
@@ -2280,7 +2280,7 @@ private fun TopPickProductCard(
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Text(
-                        "⚡ 10 MINS",
+                        "⚡ EXPRESS",
                         fontSize = 9.sp,
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,

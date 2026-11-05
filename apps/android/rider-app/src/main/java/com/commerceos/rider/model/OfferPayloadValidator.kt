@@ -21,10 +21,16 @@ object OfferPayloadValidator {
     private fun isValidPositiveNumber(n: Double?): Boolean =
         n != null && n.isFinite() && !n.isNaN() && n > 0.0
 
+    private val COD_PAYMENT_ALLOWLIST = setOf("COD", "CASH", "PAY_ON_DELIVERY", "CASH_ON_DELIVERY")
+
     fun extractCoarseLocality(rawAddress: String?, localityCandidate: String? = null): String {
         if (!localityCandidate.isNullOrBlank()) {
             val candidate = localityCandidate.trim()
-            if (!candidate.contains(",") && candidate.length in 3..40 && !candidate.matches(Regex(".*\\d{3,}.*"))) {
+            val isStreetOrHouse = candidate.matches(Regex("(?i).*\\b(street|road|st\\b|rd\\b|lane|ave|avenue|dr\\b|drive|gali|marg|sector|house|h\\.no|flat|apt|apartment|unit|tower|villa|plot|floor|block|room|bldg|b-?\\d+)\\b.*")) ||
+                candidate.matches(Regex("^#?\\d+.*")) ||
+                candidate.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE))
+
+            if (!candidate.contains(",") && candidate.length in 3..40 && !candidate.matches(Regex(".*\\d{3,}.*")) && !isStreetOrHouse) {
                 val isPersonName = candidate.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
                 if (!isPersonName) return candidate
             }
@@ -33,11 +39,17 @@ object OfferPayloadValidator {
                 part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
                 part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
                 part.matches(Regex("^#?\\d+.*")) ||
-                part.matches(Regex(".*\\b(street|road|st|rd|lane|ave|avenue|dr|drive|gali|marg)\\b.*", RegexOption.IGNORE_CASE)) ||
+                part.matches(Regex(".*\\b(street|road|st|rd|lane|ave|avenue|dr|drive|gali|marg|sector)\\b.*", RegexOption.IGNORE_CASE)) ||
                 part.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
             }
             if (filtered.isNotEmpty()) {
-                return filtered.last()
+                val chosen = filtered.last()
+                val isChosenStreetOrHouse = chosen.matches(Regex("(?i).*\\b(street|road|st\\b|rd\\b|lane|ave|avenue|dr\\b|drive|gali|marg|sector|house|h\\.no|flat|apt|apartment|unit|tower|villa|plot|floor|block|room|bldg|b-?\\d+)\\b.*")) ||
+                    chosen.matches(Regex("^#?\\d+.*")) ||
+                    chosen.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE))
+                if (!isChosenStreetOrHouse) {
+                    return chosen
+                }
             }
         }
         return "Customer Delivery Area"
@@ -73,7 +85,7 @@ object OfferPayloadValidator {
 
             val isPoolOffer = riderId.equals("ALL", ignoreCase = true) || riderId.equals("broadcast", ignoreCase = true) || riderId.equals("pool", ignoreCase = true)
             if (authenticatedRiderId != null && riderId != authenticatedRiderId && !isPoolOffer) {
-                return logReject("Offer targeted to rider '$riderId' does not match authenticated rider '$authenticatedRiderId'")
+                return logReject("Target rider does not match authenticated rider")
             }
 
             val merchantName = json.optString("merchantName").takeIf { it.isNotBlank() }
@@ -118,17 +130,19 @@ object OfferPayloadValidator {
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
             val isCodRaw = if (json.has("isCod")) json.optBoolean("isCod") else if (json.has("is_cod")) json.optBoolean("is_cod") else null
-            val isCod = isCodRaw ?: true
-            if (!isCod) {
-                Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces COD / Pay on Delivery.")
+            if (isCodRaw != true) {
+                Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces explicit true COD / Pay on Delivery.")
                 return null
             }
+            val isCod = true
 
             val paymentMethod = json.optString("paymentMethod")
                 .ifBlank { json.optString("payment_method") }
                 .ifBlank { json.optString("paymentMode") }
                 .ifBlank { json.optString("payment_mode") }
-            if (paymentMethod.isNotBlank() && !paymentMethod.contains("COD", ignoreCase = true) && !paymentMethod.contains("CASH", ignoreCase = true) && !paymentMethod.contains("DELIVERY", ignoreCase = true)) {
+                .trim()
+                .uppercase()
+            if (paymentMethod.isNotBlank() && paymentMethod !in COD_PAYMENT_ALLOWLIST) {
                 Log.w(TAG, "Rejecting offer $offerId: payment method $paymentMethod contradicts COD-only deployment.")
                 return null
             }
@@ -159,9 +173,9 @@ object OfferPayloadValidator {
                 ?: 0.0)
 
             val itemsList = mutableListOf<RiderOrderItem>()
-            val packageCount = (json.optInt("packageCount", 0).takeIf { it > 0 }
-                ?: json.optInt("itemCount", 0).takeIf { it > 0 }
-                ?: json.optJSONArray("items")?.length()?.takeIf { it > 0 }
+            val packageCount = (json.optInt("packageCount", 0).takeIf { it in 1..100 }
+                ?: json.optInt("itemCount", 0).takeIf { it in 1..100 }
+                ?: json.optJSONArray("items")?.length()?.takeIf { it in 1..100 }
                 ?: 1)
             if (isAccepted) {
                 val itemsArray = json.optJSONArray("items")
@@ -302,15 +316,15 @@ object OfferPayloadValidator {
             val customerLat = if (isAccepted) rawCustomerLat else 0.0
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
-            val isCodRaw = data["isCod"] ?: data["is_cod"]
-            val isCod = if (isCodRaw != null) isCodRaw.toBoolean() else true
-            if (!isCod) {
-                Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces COD / Pay on Delivery.")
+            val isCodRaw = (data["isCod"] ?: data["is_cod"])?.trim()
+            if (isCodRaw == null || !isCodRaw.equals("true", ignoreCase = true)) {
+                Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces explicit true COD / Pay on Delivery.")
                 return null
             }
+            val isCod = true
 
-            val paymentMethod = (data["paymentMethod"] ?: data["payment_method"] ?: data["paymentMode"] ?: data["payment_mode"] ?: "").trim()
-            if (paymentMethod.isNotBlank() && !paymentMethod.contains("COD", ignoreCase = true) && !paymentMethod.contains("CASH", ignoreCase = true) && !paymentMethod.contains("DELIVERY", ignoreCase = true)) {
+            val paymentMethod = (data["paymentMethod"] ?: data["payment_method"] ?: data["paymentMode"] ?: data["payment_mode"] ?: "").trim().uppercase()
+            if (paymentMethod.isNotBlank() && paymentMethod !in COD_PAYMENT_ALLOWLIST) {
                 Log.w(TAG, "Rejecting offer $offerId: payment method $paymentMethod contradicts COD-only deployment.")
                 return null
             }
@@ -355,9 +369,9 @@ object OfferPayloadValidator {
 
             val serverTime = data["serverTime"]?.toLongOrNull() ?: nowMs
 
-            val packageCount = data["packageCount"]?.toIntOrNull()
-                ?: data["itemCount"]?.toIntOrNull()
-                ?: 1
+            val packageCount = (data["packageCount"]?.toIntOrNull()?.takeIf { it in 1..100 }
+                ?: data["itemCount"]?.toIntOrNull()?.takeIf { it in 1..100 }
+                ?: 1)
 
             return ServerOffer(
                 offerId = offerId,
@@ -366,7 +380,7 @@ object OfferPayloadValidator {
                 deliveryId = deliveryId,
                 orderId = orderId,
                 riderId = riderId,
-                status = "CREATED",
+                status = offerStatus.trim().uppercase(),
                 earningsAmount = earningsAmount,
                 pickupDistanceKm = pickupDistanceKm,
                 deliveryDistanceKm = deliveryDistanceKm,

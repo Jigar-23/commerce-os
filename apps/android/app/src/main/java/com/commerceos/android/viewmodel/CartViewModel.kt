@@ -2,6 +2,8 @@ package com.commerceos.android.viewmodel
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +62,7 @@ class CartViewModel(
     private val reorderBatchSuccessfulSkus = ConcurrentHashMap<String, MutableSet<String>>()
     val uncertainMoveSkus = ConcurrentHashMap.newKeySet<String>()
     private val activeMutationJobs = ConcurrentHashMap.newKeySet<Job>()
+    private var cartRevision: Long = 0L
 
     private fun trackMutationJob(block: suspend CoroutineScope.() -> Unit): Job {
         val job = viewModelScope.launch(block = block)
@@ -335,7 +338,7 @@ class CartViewModel(
         refreshJob = viewModelScope.launch {
             try {
                 appContext?.let {
-                    com.commerceos.android.data.local.DeliveryConfigLocalStore.syncIfStale(it, dispatcher = ioDispatcher)
+                    com.commerceos.android.data.local.DeliveryConfigLocalStore.syncIfStale(it)
                 }
                 when (val result = repository.getPromotions()) {
                     is ApiResult.Success -> {
@@ -584,6 +587,7 @@ class CartViewModel(
     private fun loadFromLocalStorage(targetCustomerId: String) {
         val dao = cartDao ?: return
         val generation = customerGeneration
+        val capturedRevision = cartRevision
 
         viewModelScope.launch {
             try {
@@ -602,8 +606,10 @@ class CartViewModel(
                     (targetCustomerId == LOCAL_OFFLINE_CART_KEY && customerId.isBlank()) ||
                         targetCustomerId == customerId
 
-                if (generation == customerGeneration && targetIsCurrent) {
-                    cartItems = items
+                cartMutex.withLock {
+                    if (cartRevision == capturedRevision && generation == customerGeneration && targetIsCurrent) {
+                        cartItems = items
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -678,27 +684,43 @@ class CartViewModel(
 
     private var retryJob: Job? = null
 
-    fun retryPendingMutations(dispatcher: CoroutineDispatcher = ioDispatcher) {
+    fun retryPendingMutations(dispatcher: CoroutineDispatcher = ioDispatcher, maxBackoffAttempts: Int = 3) {
         val targetId = customerId.trim()
         if (targetId.isBlank()) return
         retryJob?.cancel()
         retryJob = viewModelScope.launch(dispatcher) {
-            cartMutex.withLock {
-                isSyncingMutations = true
-                try {
-                    val replaySuccess = replayPendingMutations(targetId)
-                    val check = repository.fetchBackendCart(targetId)
-                    if (check is ApiResult.Success) {
-                        val backendItems = sanitizeCartItems(check.data.items ?: emptyList())
-                        cartItems = backendItems
-                        totals = check.data
-                        errorMessage = null
-                        syncLocalCartCache(targetId, backendItems)
+            var attempt = 0
+            var delayMs = 2000L
+            while (isActive && attempt < maxBackoffAttempts) {
+                attempt++
+                val replaySuccess = cartMutex.withLock {
+                    isSyncingMutations = true
+                    try {
+                        val success = replayPendingMutations(targetId)
+                        val check = repository.fetchBackendCart(targetId)
+                        if (check is ApiResult.Success) {
+                            val rawItems = check.data.items
+                            if (rawItems == null) {
+                                errorMessage = "Server returned incomplete cart response (missing items)."
+                            } else {
+                                val backendItems = sanitizeCartItems(rawItems)
+                                cartItems = backendItems
+                                totals = check.data
+                                errorMessage = null
+                                syncLocalCartCache(targetId, backendItems)
+                            }
+                        }
+                        val remRes = appContext?.let { LocalSaveForLaterStore.getPendingCartMutationsWithResult(it, targetId) }
+                        hasPendingSync = (remRes is StorageResult.Success && remRes.data.isNotEmpty()) || !success
+                        success
+                    } finally {
+                        isSyncingMutations = false
                     }
-                    val remRes = appContext?.let { LocalSaveForLaterStore.getPendingCartMutationsWithResult(it, targetId) }
-                    hasPendingSync = (remRes is StorageResult.Success && remRes.data.isNotEmpty()) || !replaySuccess
-                } finally {
-                    isSyncingMutations = false
+                }
+                if (replaySuccess || !hasPendingSync) break
+                if (attempt < maxBackoffAttempts) {
+                    delay(delayMs)
+                    delayMs = (delayMs * 2).coerceAtMost(8000L)
                 }
             }
         }
@@ -714,6 +736,7 @@ class CartViewModel(
 
         cartLoadJob?.cancel()
         val generation = customerGeneration
+        val capturedRevision = cartRevision
         cartLoadJob = viewModelScope.launch {
             isLoading = true
             try {
@@ -728,14 +751,23 @@ class CartViewModel(
                         }
                         .map { it.toCartItem() }
 
-                    if (generation != customerGeneration || customerId.trim() != activeCustId) return@launch
-                    cartItems = localItems
+                    cartMutex.withLock {
+                        if (cartRevision == capturedRevision && generation == customerGeneration && customerId.trim() == activeCustId) {
+                            cartItems = localItems
+                        }
+                    }
                 }
 
                 when (val result = repository.fetchBackendCart(activeCustId)) {
                     is ApiResult.Success -> {
-                        if (generation != customerGeneration || customerId.trim() != activeCustId) return@launch
-                        val items = sanitizeCartItems(result.data.items ?: emptyList())
+                        val rawItems = result.data.items
+                        if (rawItems == null) {
+                            if (generation == customerGeneration && customerId.trim() == activeCustId) {
+                                errorMessage = "Server returned incomplete cart response (missing items)."
+                            }
+                            return@launch
+                        }
+                        val items = sanitizeCartItems(rawItems)
                         appContext?.let { ctx ->
                             uncertainMoveSkus.addAll(LocalSaveForLaterStore.getUncertainMoveSkus(ctx, activeCustId))
                         }
@@ -761,9 +793,13 @@ class CartViewModel(
                                 }
                             }
                         }
-                        cartItems = items
-                        totals = result.data
-                        errorMessage = null
+                        cartMutex.withLock {
+                            if (cartRevision == capturedRevision && generation == customerGeneration && customerId.trim() == activeCustId) {
+                                cartItems = items
+                                totals = result.data
+                                errorMessage = null
+                            }
+                        }
                         val cached = syncLocalCartCache(activeCustId, items)
                         if (!cached && generation == customerGeneration) {
                             errorMessage = "Could not update offline cart cache."
@@ -861,6 +897,7 @@ class CartViewModel(
                 )
 
                 // 1. Optimistic Instant UI Update (0ms latency for ADD -> [- 1 +] button transition)
+                cartRevision++
                 val previousCartItems = cartItems
                 val previousTotals = totals
                 val existingIndex = cartItems.indexOfFirst { it.sku == item.sku }
@@ -876,25 +913,29 @@ class CartViewModel(
                     cartItems + item
                 }
 
+                val isSecondIntentionalAdd = previousCartItems.any { it.sku == item.sku } && errorMessage == null
                 val opMapKey = "${targetCustomerId}:${item.sku}:${item.quantity}"
-                var existingPendingKey: String? = operationKey ?: pendingAddKeys[opMapKey]
-                val currentCtx = appContext
-                if (existingPendingKey == null && currentCtx != null) {
-                    when (val res = LocalSaveForLaterStore.getPendingAddRecord(currentCtx, targetCustomerId, item.sku)) {
-                        is StorageResult.Success -> {
-                            val record = res.data
-                            if (record.item == null || (record.item.sku == item.sku && record.item.quantity == item.quantity)) {
-                                existingPendingKey = record.key
+                var existingPendingKey: String? = operationKey
+                if (existingPendingKey == null && !isSecondIntentionalAdd) {
+                    existingPendingKey = pendingAddKeys[opMapKey]
+                    val currentCtx = appContext
+                    if (existingPendingKey == null && currentCtx != null) {
+                        when (val res = LocalSaveForLaterStore.getPendingAddRecord(currentCtx, targetCustomerId, item.sku)) {
+                            is StorageResult.Success -> {
+                                val record = res.data
+                                if (record.item == null || (record.item.sku == item.sku && record.item.quantity == item.quantity)) {
+                                    existingPendingKey = record.key
+                                }
                             }
+                            is StorageResult.DecryptError -> {
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                                errorMessage = "Secure storage read fault: could not verify pending cart mutation. Please retry."
+                                _addEvents.trySend(CartAddEvent.Failure("Storage decrypt error"))
+                                return@withLock
+                            }
+                            is StorageResult.NotFound -> {}
                         }
-                        is StorageResult.DecryptError -> {
-                            cartItems = previousCartItems
-                            totals = previousTotals
-                            errorMessage = "Secure storage read fault: could not verify pending cart mutation. Please retry."
-                            _addEvents.trySend(CartAddEvent.Failure("Storage decrypt error"))
-                            return@withLock
-                        }
-                        is StorageResult.NotFound -> {}
                     }
                 }
 
@@ -1303,6 +1344,7 @@ class CartViewModel(
         trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                cartRevision++
                 val previousCartItems = cartItems
                 val previousTotals = totals
                 // Optimistic instant update
@@ -1345,13 +1387,16 @@ class CartViewModel(
                             }
                         }
                         is ApiResult.Failure -> {
-                            if (!updated.error.isAmbiguousMutationFailure()) {
+                            val isAmbiguous = updated.error.isAmbiguousMutationFailure()
+                            if (!isAmbiguous) {
                                 appContext?.let { ctx ->
                                     LocalSaveForLaterStore.removePendingCartMutation(ctx, targetCustomerId, opKey)
                                 }
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                            } else {
+                                hasPendingSync = true
                             }
-                            cartItems = previousCartItems
-                            totals = previousTotals
                             errorMessage = updated.error.message.ifBlank { "Could not update item quantity." }
                         }
                     }
@@ -1389,6 +1434,7 @@ class CartViewModel(
         trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                cartRevision++
                 val previousCartItems = cartItems
                 val previousTotals = totals
                 // Optimistic instant update
@@ -1432,13 +1478,16 @@ class CartViewModel(
                             }
                         }
                         is ApiResult.Failure -> {
-                            if (!updated.error.isAmbiguousMutationFailure()) {
+                            val isAmbiguous = updated.error.isAmbiguousMutationFailure()
+                            if (!isAmbiguous) {
                                 appContext?.let { ctx ->
                                     LocalSaveForLaterStore.removePendingCartMutation(ctx, targetCustomerId, opKey)
                                 }
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                            } else {
+                                hasPendingSync = true
                             }
-                            cartItems = previousCartItems
-                            totals = previousTotals
                             errorMessage = updated.error.message.ifBlank { "Could not remove item from cart." }
                         }
                     }
@@ -1488,6 +1537,7 @@ class CartViewModel(
                     errorMessage = "Item move is pending resolution. Please refresh your cart."
                     return@withLock
                 }
+                cartRevision++
                 val item = cartItems.firstOrNull { it.sku == sku } ?: return@withLock
                 val previousSaved = saveForLaterItems
                 val newSaved = previousSaved.filterNot { it.sku == sku } + item
@@ -1643,6 +1693,7 @@ class CartViewModel(
                     _addEvents.trySend(CartAddEvent.Failure(message))
                     return@withLock
                 }
+                cartRevision++
                 val targetItem = saveForLaterItems.find { it.sku == sku } ?: return@withLock
                 val previousSaved = saveForLaterItems
                 val remainingSaved = previousSaved.filterNot { it.sku == sku }
@@ -1926,6 +1977,8 @@ class CartViewModel(
         val clearGeneration = customerGeneration
         accountSyncJob?.cancel()
         cartLoadJob?.cancel()
+        refreshJob?.cancel()
+        retryJob?.cancel()
         isLoading = false
 
         cartItems = emptyList()

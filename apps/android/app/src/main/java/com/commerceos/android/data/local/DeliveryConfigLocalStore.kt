@@ -69,17 +69,32 @@ object DeliveryConfigLocalStore {
         cachedFee = BigDecimal.valueOf(config.standardDeliveryFee).setScale(2, java.math.RoundingMode.HALF_UP)
     }
 
-    suspend fun syncIfStale(context: Context, force: Boolean = false, dispatcher: CoroutineDispatcher = Dispatchers.IO) {
+    suspend fun syncIfStale(context: Context, force: Boolean = false, dispatcher: CoroutineDispatcher? = null) {
         if (!force && !shouldRefresh(context)) return
         try {
-            withContext(dispatcher) {
+            if (dispatcher != null) {
+                withContext(dispatcher) {
+                    try {
+                        val resp = NetworkClient.promotionsApi.getDeliveryConfig()
+                        saveConfig(context, resp)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Keep local cache offline
+                    }
+                }
+            } else {
                 try {
                     val resp = NetworkClient.promotionsApi.getDeliveryConfig()
                     saveConfig(context, resp)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     // Keep local cache offline
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (_: Exception) {}
     }
 }

@@ -84,7 +84,9 @@ fun CartScreen(
     onAttachPrescription: (String?) -> Unit,
     onProceedToAddress: () -> Unit,
     onStartShopping: () -> Unit,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    hasPendingSync: Boolean = false,
+    onRetrySync: (() -> Unit)? = null
 ) {
     if (cartItems.isEmpty()) {
         EmptyCart(onStartShopping = onStartShopping, onBack = onBack)
@@ -152,7 +154,7 @@ fun CartScreen(
                             }
                         }
                         Text(
-                            text = "⚡ Instant 10-min fulfillment",
+                            text = "⚡ Instant express fulfillment",
                             fontSize = 11.sp,
                             color = Color(0xFF059669),
                             fontWeight = FontWeight.SemiBold
@@ -196,6 +198,57 @@ fun CartScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
         ) {
+            if (hasPendingSync) {
+                item {
+                    Surface(
+                        color = Color(0xFFFEF3C7),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFFF59E0B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Syncing",
+                                    tint = Color(0xFFB45309),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Syncing cart updates with server...",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
+                            if (onRetrySync != null) {
+                                TextButton(
+                                    onClick = onRetrySync,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Retry",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFB45309)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Server-authoritative Free Delivery Progress
             item {
                 FreeDeliveryBanner(
@@ -296,7 +349,7 @@ private fun CancellationPolicyWidget() {
             Spacer(modifier = Modifier.width(Spacing.sm))
             Column {
                 Text("Cancellation Policy", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold, color = CommerceColors.TextPrimary)
-                Text("Orders cannot be cancelled once packed by the store to ensure 10-minute delivery speed.", style = CommerceTypography.Meta, color = CommerceColors.TextMuted, lineHeight = 14.sp)
+                Text("Orders cannot be cancelled once packed by the store to ensure express delivery speed.", style = CommerceTypography.Meta, color = CommerceColors.TextMuted, lineHeight = 14.sp)
             }
         }
     }
@@ -472,7 +525,7 @@ private fun CartShipmentCard(
                         Text("⚡", fontSize = 11.sp)
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
-                            "10 MINS",
+                            "EXPRESS",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
                             color = Color(0xFF059669)
@@ -482,7 +535,7 @@ private fun CartShipmentCard(
                 Spacer(modifier = Modifier.width(8.dp))
                 val totalQty = cartItems.sumOf { it.quantity }
                 Text(
-                    text = "Delivery in 10 minutes • $totalQty ${if (totalQty == 1) "item" else "items"}",
+                    text = "Express Delivery • $totalQty ${if (totalQty == 1) "item" else "items"}",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFF334155)
@@ -1728,7 +1781,7 @@ private fun StickyCheckoutBar(
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
-                                "⚡ 10 MINS",
+                                "⚡ EXPRESS",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF059669),

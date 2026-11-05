@@ -130,9 +130,9 @@ fun RiderOfferCard(
                 // Customer Order Bill Card
                 val cartVal = offer.orderTotal ?: offer.codAmount ?: 0.0
                 val totalItemCount = if (offer.isAccepted && offer.items.isNotEmpty()) {
-                    offer.items.sumOf { it.quantity }
+                    offer.items.sumOf { it.quantity }.coerceIn(1, 100)
                 } else {
-                    offer.packageCount
+                    offer.packageCount.coerceIn(1, 100)
                 }
                 Surface(
                     shape = RoundedCornerShape(16.dp),
@@ -236,11 +236,12 @@ fun RiderOfferCard(
 
                         Column {
                             Text("CUSTOMER DROP", color = RiderColors.Primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            val dropLocality = if (offer.isAccepted) offer.customerAddress else com.commerceos.rider.model.OfferPayloadValidator.extractCoarseLocality(null, offer.customerAddress)
                             Text(
                                 text = if (hasDropLeg && dropDistKm > 0.0) {
-                                    "${offer.customerAddress} (${String.format(java.util.Locale.US, "%.1f", dropDistKm)} km)"
+                                    "$dropLocality (${String.format(java.util.Locale.US, "%.1f", dropDistKm)} km)"
                                 } else {
-                                    offer.customerAddress
+                                    dropLocality
                                 },
                                 color = RiderColors.TextPrimary,
                                 fontSize = 13.sp,

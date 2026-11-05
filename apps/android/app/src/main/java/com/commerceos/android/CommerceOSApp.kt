@@ -785,6 +785,8 @@ fun CommerceOSApp(
                     onRemoveItem = { cartViewModel.removeItem(it) },
                     onUploadPrescription = { showRxUploadDialog = true },
                     onAttachPrescription = { checkoutViewModel.attachPrescription(it) },
+                    hasPendingSync = cartViewModel.hasPendingSync,
+                    onRetrySync = { cartViewModel.retryPendingMutations() },
                     onProceedToAddress = {
                         val currentSelected = addressViewModel.selectedAddress
                             ?: addressViewModel.addresses.firstOrNull { it.isDefault }

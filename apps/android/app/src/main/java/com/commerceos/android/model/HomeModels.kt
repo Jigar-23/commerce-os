@@ -384,9 +384,9 @@ data class HomeHeroDto(
     @com.google.gson.annotations.SerializedName(value = "title", alternate = ["headline", "name"])
     val title: String = "Special Offers & Quick Delivery",
     @com.google.gson.annotations.SerializedName(value = "subtitle", alternate = ["subHeadline", "desc", "description"])
-    val subtitle: String = "Medicines & daily essentials delivered in 10 minutes",
+    val subtitle: String = "Medicines & daily essentials delivered fast",
     @com.google.gson.annotations.SerializedName(value = "badge", alternate = ["badgeText", "tag"])
-    val badge: String = "EXPRESS 10 MINS",
+    val badge: String = "EXPRESS DELIVERY",
     @com.google.gson.annotations.SerializedName(value = "ctaText", alternate = ["cta", "buttonText"])
     val ctaText: String = "Explore Catalog",
     @com.google.gson.annotations.SerializedName(value = "imageUrl", alternate = ["bannerUrl", "image", "banner"])

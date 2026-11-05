@@ -262,7 +262,20 @@ class RiderForegroundLocationService : Service(), LocationListener {
             try {
                 val update = if (pendingPresenceRetry != null) {
                     delay(retryBackoffMs)
-                    presenceChannel.tryReceive().getOrNull() ?: pendingPresenceRetry!!
+                    val candidate = presenceChannel.tryReceive().getOrNull()
+                    if (candidate != null) {
+                        pendingPresenceRetry = null
+                        retryBackoffMs = 2000L
+                        candidate
+                    } else {
+                        val currentMs = System.currentTimeMillis()
+                        if (currentMs - pendingPresenceRetry.timestamp > 60_000L) {
+                            pendingPresenceRetry = null
+                            retryBackoffMs = 2000L
+                            continue
+                        }
+                        pendingPresenceRetry
+                    }
                 } else {
                     presenceChannel.receive()
                 }
@@ -327,8 +340,15 @@ class RiderForegroundLocationService : Service(), LocationListener {
                         pendingPresenceRetry = null
                         retryBackoffMs = 2000L
                     } else {
-                        pendingPresenceRetry = update
-                        retryBackoffMs = (retryBackoffMs * 2).coerceAtMost(16000L)
+                        val currentMs = System.currentTimeMillis()
+                        if (currentMs - update.timestamp > 60_000L) {
+                            pendingPresenceRetry = null
+                            retryBackoffMs = 2000L
+                            _isStale.value = true
+                        } else {
+                            pendingPresenceRetry = update
+                            retryBackoffMs = (retryBackoffMs * 2).coerceAtMost(16000L)
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -338,16 +358,55 @@ class RiderForegroundLocationService : Service(), LocationListener {
     private suspend fun stationaryHeartbeatLoop() {
         while (serviceScope.isActive) {
             delay(15000L)
-            if (activeDeliveryId.isNotBlank() && isCurrentlyStationary) {
-                val lastLoc = _lastLocation.value
-                if (lastLoc != null) {
+            val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+            val isShiftOnline = sessionMgr.isShiftOnline()
+            val isActiveDelivery = activeDeliveryId.isNotBlank()
+
+            val shouldHeartbeat = if (isActiveDelivery) {
+                isCurrentlyStationary
+            } else {
+                isShiftOnline
+            }
+
+            if (shouldHeartbeat) {
+                val now = System.currentTimeMillis()
+                var lastLoc = _lastLocation.value
+                if (lastLoc == null || (now - lastLoc.timestamp > 60_000L)) {
+                    val lastGps = try { locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER) } catch (_: Exception) { null }
+                    val lastNet = try { locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) } catch (_: Exception) { null }
+                    val lastPassive = try { locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER) } catch (_: Exception) { null }
+                    val freshFix = listOfNotNull(lastGps, lastNet, lastPassive)
+                        .filter { (now - it.time) < 60_000L && it.time <= now + 15_000L && (if (it.hasAccuracy()) it.accuracy <= 150.0f else true) }
+                        .maxByOrNull { it.time }
+                    if (freshFix != null) {
+                        currentSequenceNumber++
+                        val newUpdate = RiderLocationUpdate(
+                            deliveryId = if (activeDeliveryId.isNotBlank()) activeDeliveryId else "idle_presence",
+                            sequenceNumber = currentSequenceNumber,
+                            riderId = activeRiderId,
+                            latitude = freshFix.latitude,
+                            longitude = freshFix.longitude,
+                            accuracyMeters = if (freshFix.hasAccuracy()) freshFix.accuracy else 5.0f,
+                            speedKmh = 0.0f,
+                            heading = if (freshFix.hasBearing()) freshFix.bearing else null,
+                            timestamp = now
+                        )
+                        _lastLocation.value = newUpdate
+                        _isStale.value = false
+                        lastLoc = newUpdate
+                    }
+                }
+
+                if (lastLoc != null && (now - lastLoc.timestamp <= 60_000L)) {
                     currentSequenceNumber++
                     val update = lastLoc.copy(
                         sequenceNumber = currentSequenceNumber,
-                        timestamp = System.currentTimeMillis()
+                        timestamp = now,
+                        speedKmh = 0.0f
                     )
                     dbHelper?.enqueue(update)
                     _lastLocation.value = update
+                    _isStale.value = false
                     presenceChannel.trySend(
                         PresenceUpdate(
                             latitude = update.latitude,
@@ -355,11 +414,14 @@ class RiderForegroundLocationService : Service(), LocationListener {
                             speedKmh = 0.0f,
                             heading = update.heading,
                             accuracy = update.accuracyMeters,
-                            isOnline = true,
+                            isOnline = isShiftOnline,
                             sequenceNumber = currentSequenceNumber,
                             timestamp = update.timestamp
                         )
                     )
+                    lastDispatchedTime = now
+                } else {
+                    _isStale.value = true
                 }
             }
         }
@@ -468,10 +530,12 @@ class RiderForegroundLocationService : Service(), LocationListener {
             val lastPassive = try { locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER) } catch (_: Exception) { null }
             val allFixes = listOfNotNull(lastGps, lastNet, lastPassive)
             val now = System.currentTimeMillis()
-            val freshFixes = allFixes.filter { (now - it.time) < 60_000L }
+            val freshFixes = allFixes.filter { (now - it.time) < 60_000L && it.time <= now + 15_000L && (if (it.hasAccuracy()) it.accuracy <= 150.0f else true) }
             val freshest = freshFixes.maxByOrNull { it.time }
             if (freshest != null) {
                 onLocationChanged(freshest)
+            } else {
+                _isStale.value = true
             }
 
             val isActiveDelivery = activeDeliveryId.isNotBlank()
@@ -487,7 +551,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 }
             } else {
                 minTimeMs = 30000L     // 30s low-power idle
-                minDistanceM = 25.0f
+                minDistanceM = 0.0f    // 0.0m low-power periodic updates even when stationary
             }
             val mainLooper = android.os.Looper.getMainLooper()
 
@@ -548,26 +612,28 @@ class RiderForegroundLocationService : Service(), LocationListener {
     private var lastDispatchedLng: Double = 0.0
 
     override fun onLocationChanged(location: Location) {
-        val accuracy = if (location.hasAccuracy()) location.accuracy else 5.0f
-        _isLowAccuracy.value = accuracy > 100.0f
-        _isStale.value = false
-
-        // Filter out extreme noise fixes (>150m)
-        if (accuracy > 150.0f) {
+        val now = System.currentTimeMillis()
+        val fixTime = if (location.time > 0L) location.time else now
+        if (now - fixTime > 60_000L || fixTime > now + 15_000L) {
+            _isStale.value = true
             return
         }
+
+        val accuracy = if (location.hasAccuracy()) location.accuracy else 5.0f
+        // Filter out extreme noise fixes (>150m)
+        if (accuracy > 150.0f) {
+            _isStale.value = true
+            return
+        }
+
+        _isLowAccuracy.value = accuracy > 100.0f
+        _isStale.value = false
 
         val isMock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             location.isMock
         } else {
             @Suppress("DEPRECATION")
             location.isFromMockProvider
-        }
-
-        val now = System.currentTimeMillis()
-        val fixTime = if (location.time > 0L) location.time else now
-        if (now - fixTime > 60_000L) {
-            return
         }
 
         if (isMock) {
@@ -606,7 +672,8 @@ class RiderForegroundLocationService : Service(), LocationListener {
             }
         }
         if (isStationaryHeartbeat) {
-            Log.d(TAG, "Dispatching stationary presence heartbeat for rider=$activeRiderId")
+            val correlationId = (activeRiderId.ifBlank { "anonymous" }).hashCode().toString().takeLast(6)
+            Log.d(TAG, "Dispatching stationary presence heartbeat for correlationId=$correlationId")
         }
 
         lastDispatchedLat = location.latitude

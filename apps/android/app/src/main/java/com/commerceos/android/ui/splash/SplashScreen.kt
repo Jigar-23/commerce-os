@@ -192,7 +192,7 @@ fun SplashScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "10-Minute Express Delivery",
+                        text = "Superfast Express Delivery",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF065F46)

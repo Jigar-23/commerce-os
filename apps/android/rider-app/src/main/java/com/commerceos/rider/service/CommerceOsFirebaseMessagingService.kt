@@ -61,7 +61,7 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
         val isOnline = sessionMgr.isShiftOnline()
         val authenticatedRiderId = sessionMgr.getRiderId().takeIf { it.isNotBlank() }
 
-        Log.d(TAG, "Rider Background Check: isLoggedIn=$isLoggedIn, isOnline=$isOnline, riderId=$authenticatedRiderId")
+        Log.d(TAG, "Rider Background Check: isLoggedIn=$isLoggedIn, isOnline=$isOnline, hasRiderId=${authenticatedRiderId != null}")
 
         // Handle Silent Watchdog PING_LOCATION Wakeups
         val action = data["action"] ?: data["type"] ?: ""
@@ -131,7 +131,7 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
                 return
             }
         } else if (authenticatedRiderId != null && !targetRiderId.equals(authenticatedRiderId, ignoreCase = true)) {
-            Log.w(TAG, "DROPPED_FCM_OFFER: Target rider $targetRiderId does not match current rider $authenticatedRiderId.")
+            Log.w(TAG, "DROPPED_FCM_OFFER: Target rider does not match current authenticated rider.")
             return
         }
 

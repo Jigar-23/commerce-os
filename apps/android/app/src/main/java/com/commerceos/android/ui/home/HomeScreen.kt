@@ -1028,7 +1028,7 @@ private fun CanopyLocationBar(
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            text = if (calculatedEtaMinutes > 0) "⚡ $calculatedEtaMinutes MINS" else "⚡ 10 MINS",
+                            text = if (calculatedEtaMinutes > 0) "⚡ $calculatedEtaMinutes MINS" else "⚡ EXPRESS",
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Black,
                             color = Color(0xFF166534),

@@ -91,7 +91,7 @@ fun GlobalCartBar(
                             color = Color.White
                         )
                         Text(
-                            text = if (!etaLabel.isNullOrBlank()) "⚡ $etaLabel" else "⚡ 10 MINS DELIVERY",
+                            text = if (!etaLabel.isNullOrBlank()) "⚡ $etaLabel" else "⚡ EXPRESS DELIVERY",
                             fontSize = 10.sp,
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.SemiBold,

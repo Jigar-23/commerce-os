@@ -45,32 +45,36 @@ fun RxUploadDialog(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var patientName by rememberSaveable { mutableStateOf("") }
-    var attachment by rememberSaveable { mutableStateOf<String?>(null) }
-    var attachmentName by rememberSaveable { mutableStateOf<String?>(null) }
-    var cameraError by rememberSaveable { mutableStateOf<String?>(null) }
-    var uploadError by rememberSaveable { mutableStateOf<String?>(null) }
-    var draftError by rememberSaveable { mutableStateOf<String?>(null) }
+    var patientName by rememberSaveable(customerId) { mutableStateOf("") }
+    var attachment by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
+    var attachmentName by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
+    var cameraError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
+    var uploadError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
+    var draftError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
     var draftJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     LaunchedEffect(customerId) {
-        if (attachment == null && patientName.isEmpty()) {
-            val draft = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                LocalPrescriptionManager.getDraft(context, customerId)
+        patientName = ""
+        attachment = null
+        attachmentName = null
+        cameraError = null
+        uploadError = null
+        draftError = null
+        val draft = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            LocalPrescriptionManager.getDraft(context, customerId)
+        }
+        if (draft != null) {
+            if (draft.patientName.isNotBlank()) {
+                patientName = draft.patientName
             }
-            if (draft != null) {
-                if (draft.patientName.isNotBlank()) {
-                    patientName = draft.patientName
-                }
-                if (!draft.attachmentPath.isNullOrBlank()) {
-                    val file = File(draft.attachmentPath)
-                    if (file.exists() && file.length() > 0) {
-                        attachment = draft.attachmentPath
-                        attachmentName = draft.attachmentName ?: file.name
-                    }
+            if (!draft.attachmentPath.isNullOrBlank()) {
+                val file = File(draft.attachmentPath)
+                if (file.exists() && file.length() > 0) {
+                    attachment = draft.attachmentPath
+                    attachmentName = draft.attachmentName ?: file.name
                 }
             }
         }
