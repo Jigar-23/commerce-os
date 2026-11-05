@@ -9342,13 +9342,26 @@ const server = http.createServer(async (req, res) => {
           const p = meta.actionPayload;
           const status = String(p.status || n.status || '').toUpperCase();
           const assignedRider = p.assignedRiderId || p.riderId || n.riderId;
-          const isAssignedToCaller = (assignedRider === authClaims.sub) &&
-            ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(status);
+          const acceptedOfferStatuses = new Set([
+            'ACCEPTED',
+            'EN_ROUTE_PICKUP',
+            'ARRIVED_PICKUP',
+            'PICKED_UP',
+            'EN_ROUTE_CUSTOMER',
+            'ARRIVED_CUSTOMER',
+            'HANDOFF_STARTED',
+            'DELIVERED'
+          ]);
+
+          const isAcceptedByCaller =
+            (assignedRider === authClaims.sub) && acceptedOfferStatuses.has(status);
 
           const rawDrop = p.dropAddress || p.customerAddress || (typeof p.deliveryAddress === 'string' ? p.deliveryAddress : '') || '';
           const coarseLocality = extractCoarseLocality(rawDrop, p.deliveryAddress);
-          const effectiveDrop = isAssignedToCaller ? (rawDrop || 'Drop Area') : coarseLocality;
-          const effectiveLocality = isAssignedToCaller ? (p.customerLocality || coarseLocality) : coarseLocality;
+          const effectiveDrop = isAcceptedByCaller ? (rawDrop || 'Drop Area') : coarseLocality;
+          const effectiveLocality = isAcceptedByCaller
+            ? (p.customerLocality || coarseLocality)
+            : coarseLocality;
 
           meta = {
             ...meta,

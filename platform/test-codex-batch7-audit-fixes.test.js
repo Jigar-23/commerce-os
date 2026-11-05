@@ -182,7 +182,7 @@ async function runBatch7Tests() {
   assert.ok(payload1.customerLocality.includes('South Delhi'), 'customerLocality should be coarse locality');
   console.log('  ✅ 1.1 PASS: Unaccepted broadcast notification dropAddress redacted strictly to coarse locality without house/street.');
 
-  // 1.2: When offer is assigned to Rider A, Rider A receives the full drop address
+  // 1.2: When offer is assigned to Rider A (unaccepted), Rider A receives coarse locality only
   const assignedOfferId = `off_assigned_${Date.now()}`;
   const notifId2 = `notif_b7_assigned_${Date.now()}`;
   if (pool) {
@@ -217,8 +217,47 @@ async function runBatch7Tests() {
   const foundAssigned = notifs2.find(n => n.id === notifId2 || n.notificationId === notifId2);
   assert.ok(foundAssigned, 'Rider A should find assigned notification');
   const payload2 = foundAssigned.metadata?.actionPayload || {};
-  assert.strictEqual(payload2.dropAddress, 'Flat 12, Example Street, South Delhi', 'Assigned rider receives full drop address');
-  console.log('  ✅ 1.2 PASS: Assigned rider receives full delivery drop address upon assignment.\n');
+  assert.strictEqual(payload2.dropAddress, 'South Delhi', 'Directly assigned but unaccepted offer notification must return coarse locality');
+  assert.ok(!payload2.dropAddress.includes('Flat 12'), 'Unaccepted offer notification must not leak unit/flat details');
+  console.log('  ✅ 1.2 PASS: Assigned but unaccepted notification dropAddress strictly redacted to coarse locality.');
+
+  // 1.3: When offer is accepted by Rider A (ACCEPTED), Rider A receives the full drop address
+  const acceptedOfferId = `off_accepted_${Date.now()}`;
+  const notifId3 = `notif_b7_accepted_${Date.now()}`;
+  if (pool) {
+    const rawAcceptedMetadata = {
+      storeId: testStoreA,
+      orderId: `ord_b7_ac_${Date.now()}`,
+      deliveryId: `del_b7_ac_${Date.now()}`,
+      offerId: acceptedOfferId,
+      actionPayload: {
+        offerId: acceptedOfferId,
+        storeId: testStoreA,
+        status: 'ACCEPTED',
+        assignedRiderId: riderAId,
+        riderId: riderAId,
+        dropAddress: 'Flat 12, Example Street, South Delhi',
+        customerAddress: 'Flat 12, Example Street, South Delhi',
+        earningsAmount: 50
+      }
+    };
+
+    await pool.query(`
+      INSERT INTO rider_notifications (id, notification_id, rider_id, category, title, body, status, metadata, created_at)
+      VALUES ($1, $1, $2, 'ORDERS', '🚨 DELIVERY ACCEPTED · ₹50', 'Accepted order', 'UNREAD', $3, NOW())
+    `, [notifId3, riderAId, JSON.stringify(rawAcceptedMetadata)]);
+  }
+
+  const res3 = await request('GET', '/api/v1/delivery/rider/notifications', null, {
+    Authorization: `Bearer ${riderAToken}`
+  });
+  assert.strictEqual(res3.status, 200);
+  const notifs3 = res3.body.notifications || [];
+  const foundAccepted = notifs3.find(n => n.id === notifId3 || n.notificationId === notifId3);
+  assert.ok(foundAccepted, 'Rider A should find accepted notification');
+  const payload3 = foundAccepted.metadata?.actionPayload || {};
+  assert.strictEqual(payload3.dropAddress, 'Flat 12, Example Street, South Delhi', 'Accepted offer notification reveals full drop address');
+  console.log('  ✅ 1.3 PASS: Authoritatively accepted notification reveals full delivery drop address.\n');
 
   // -------------------------------------------------------------
   // Test 2: Dispatch Neutral Score Tie-Breaking
