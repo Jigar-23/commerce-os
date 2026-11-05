@@ -46,18 +46,22 @@ open class SecureCredentialStore(private val context: Context? = null) {
         }
     }
 
-    open fun clear(alias: String) {
-        prefs?.edit()?.remove(alias)?.apply()
+    open fun clear(alias: String): Boolean {
+        return try {
+            prefs?.edit()?.remove(alias)?.commit() ?: true
+        } catch (e: Exception) {
+            false
+        }
     }
 
-    open fun deleteKeyAndValue(alias: String) {
+    open fun deleteKeyAndValue(alias: String): Boolean {
         try {
             val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
             if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
         } catch (e: Exception) {
             // best-effort key removal; the value is still cleared below
         }
-        clear(alias)
+        return clear(alias)
     }
 
     private fun getOrCreateKey(alias: String): SecretKey {

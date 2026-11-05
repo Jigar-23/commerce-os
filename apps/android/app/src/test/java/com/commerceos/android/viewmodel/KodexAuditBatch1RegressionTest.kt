@@ -39,17 +39,21 @@ class KodexAuditBatch1RegressionTest {
     class FakeSecureCredentialStore : com.commerceos.android.session.SecureCredentialStore(null) {
         val data = mutableMapOf<String, String>()
         var shouldFailSave = false
+        var shouldFailClear = false
         override fun save(alias: String, value: String): Boolean {
             if (shouldFailSave) return false
             data[alias] = value
             return true
         }
         override fun read(alias: String): String? = data[alias]
-        override fun clear(alias: String) {
+        override fun clear(alias: String): Boolean {
+            if (shouldFailClear) return false
             data.remove(alias)
+            return true
         }
-        override fun deleteKeyAndValue(alias: String) {
+        override fun deleteKeyAndValue(alias: String): Boolean {
             data.remove(alias)
+            return true
         }
     }
 
@@ -67,18 +71,45 @@ class KodexAuditBatch1RegressionTest {
         Dispatchers.resetMain()
     }
 
-    private fun createFakeContext(store: MutableMap<String, String>): android.content.Context {
+    private fun createFakeContext(
+        store: MutableMap<String, String>,
+        shouldFailCommit: Boolean = false,
+        filesDirectory: java.io.File? = null
+    ): android.content.Context {
+        val pendingChanges = mutableMapOf<String, Any?>()
         lateinit var editor: android.content.SharedPreferences.Editor
         editor = java.lang.reflect.Proxy.newProxyInstance(
             android.content.SharedPreferences.Editor::class.java.classLoader,
             arrayOf(android.content.SharedPreferences.Editor::class.java)
         ) { _, method, args ->
             when (method?.name) {
-                "putString" -> { store[args[0] as String] = args[1] as String; editor }
-                "putLong" -> { store[args[0] as String] = (args[1] as Long).toString(); editor }
-                "remove" -> { store.remove(args[0] as String); editor }
-                "commit" -> true
-                "apply" -> null
+                "putString" -> { pendingChanges[args[0] as String] = args[1] as String; editor }
+                "putLong" -> { pendingChanges[args[0] as String] = (args[1] as Long).toString(); editor }
+                "putStringSet" -> {
+                    val set = args[1] as? Set<*>
+                    pendingChanges[args[0] as String] = set?.joinToString(":::") ?: ""
+                    editor
+                }
+                "remove" -> { pendingChanges[args[0] as String] = null; editor }
+                "commit" -> {
+                    if (shouldFailCommit) {
+                        pendingChanges.clear()
+                        false
+                    } else {
+                        for ((k, v) in pendingChanges) {
+                            if (v == null) store.remove(k) else store[k] = v.toString()
+                        }
+                        pendingChanges.clear()
+                        true
+                    }
+                }
+                "apply" -> {
+                    for ((k, v) in pendingChanges) {
+                        if (v == null) store.remove(k) else store[k] = v.toString()
+                    }
+                    pendingChanges.clear()
+                    null
+                }
                 else -> editor
             }
         } as android.content.SharedPreferences.Editor
@@ -92,14 +123,28 @@ class KodexAuditBatch1RegressionTest {
                 "getLong" -> (args.getOrNull(1) as? Long) ?: 0L
                 "getInt" -> (args.getOrNull(1) as? Int) ?: 0
                 "getBoolean" -> (args.getOrNull(1) as? Boolean) ?: false
+                "getStringSet" -> {
+                    val raw = store[args[0] as String]
+                    if (raw != null) {
+                        raw.split(":::").filter { it.isNotBlank() }.toSet()
+                    } else {
+                        @Suppress("UNCHECKED_CAST")
+                        (args.getOrNull(1) as? Set<String>) ?: emptySet<String>()
+                    }
+                }
+                "contains" -> store.containsKey(args[0] as String)
                 "edit" -> editor
                 else -> null
             }
         } as android.content.SharedPreferences
 
+        val fDir = filesDirectory ?: java.io.File(System.getProperty("java.io.tmpdir"), "commerce_os_test_${System.currentTimeMillis()}").also { it.mkdirs() }
         return object : android.content.ContextWrapper(null) {
             override fun getSharedPreferences(name: String?, mode: Int): android.content.SharedPreferences = prefs
             override fun getApplicationContext(): android.content.Context = this
+            override fun getFilesDir(): java.io.File = fDir
+            override fun getCacheDir(): java.io.File = fDir
+            override fun getPackageName(): String = "com.commerceos.android"
         }
     }
 
@@ -985,6 +1030,7 @@ class KodexAuditBatch1RegressionTest {
                 "getLong" -> (args.getOrNull(1) as? Long) ?: 0L
                 "getInt" -> (args.getOrNull(1) as? Int) ?: 0
                 "getBoolean" -> (args.getOrNull(1) as? Boolean) ?: false
+                "contains" -> store.containsKey(args[0] as String)
                 "edit" -> editor
                 else -> null
             }
@@ -1172,6 +1218,7 @@ class KodexAuditBatch1RegressionTest {
                 "getLong" -> (args.getOrNull(1) as? Long) ?: 0L
                 "getInt" -> (args.getOrNull(1) as? Int) ?: 0
                 "getBoolean" -> (args.getOrNull(1) as? Boolean) ?: false
+                "contains" -> store.containsKey(args[0] as String)
                 "edit" -> editor
                 else -> null
             }
@@ -2112,5 +2159,440 @@ class KodexAuditBatch1RegressionTest {
         assertEquals(1, underscoreList.size)
         assertEquals("rx_underscore", underscoreList[0].id)
         assertEquals("cust_a", underscoreList[0].customerId)
+    }
+
+    @Test
+    fun testCartViewModel_addItem_operationKeyPreservedAcrossProcessDeath() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val capturedKeys = mutableListOf<String>()
+        val product = CommerceProduct(id = "p1", sku = "sku_durable_add", name = "Durable Med", price = 100.0, inStock = true)
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = emptyList()))
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                if (idempotencyKey != null) capturedKeys.add(idempotencyKey)
+                return if (capturedKeys.size == 1) {
+                    ApiResult.Failure(AppError.Network("Dropped response"))
+                } else {
+                    ApiResult.Success(CartResponse(items = listOf(item)))
+                }
+            }
+        }
+
+        // 1. Process 1: attempt add, network fails
+        val vm1 = CartViewModel(repo, appContext = fakeContext)
+        vm1.init("cust_durable_1")
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm1.addItem(product)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, capturedKeys.size)
+        val firstKey = capturedKeys[0]
+
+        // Durable store must hold the pending add key
+        val persistedKey = com.commerceos.android.data.local.LocalSaveForLaterStore.getPendingAddKey(fakeContext, "cust_durable_1", "sku_durable_add")
+        assertEquals(firstKey, persistedKey)
+
+        // 2. Process Death simulation: fresh ViewModel, same durable store
+        val vm2 = CartViewModel(repo, appContext = fakeContext)
+        vm2.init("cust_durable_1")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // User retries Add
+        vm2.addItem(product)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, capturedKeys.size)
+        // Must reuse the exact same operation key across process death!
+        assertEquals(firstKey, capturedKeys[1])
+
+        // After successful add, the pending operation key must be durably cleared
+        assertNull(com.commerceos.android.data.local.LocalSaveForLaterStore.getPendingAddKey(fakeContext, "cust_durable_1", "sku_durable_add"))
+    }
+
+    @Test
+    fun testCartViewModel_reorderAll_batchRecordPreservedAcrossProcessDeath() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val orderItems = listOf(
+            OrderItem(productId = "p1", sku = "sku_r1", name = "Reorder 1", price = BigDecimal("20.00"), quantity = 1),
+            OrderItem(productId = "p2", sku = "sku_r2", name = "Reorder 2", price = BigDecimal("30.00"), quantity = 1)
+        )
+
+        val attemptedSkus = mutableListOf<String>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = emptyList()))
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                attemptedSkus.add(item.sku)
+                return if (item.sku == "sku_r1") {
+                    ApiResult.Success(CartResponse(items = listOf(item)))
+                } else {
+                    ApiResult.Failure(AppError.Network("Timeout on item 2"))
+                }
+            }
+        }
+
+        val vm1 = CartViewModel(repo, appContext = fakeContext)
+        vm1.init("cust_reorder_death")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm1.reorderAll(orderItems)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf("sku_r1", "sku_r2"), attemptedSkus)
+
+        // Process Death simulation: fresh ViewModel instance
+        attemptedSkus.clear()
+        val vm2 = CartViewModel(repo, appContext = fakeContext)
+        vm2.init("cust_reorder_death")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Retry reorderAll: sku_r1 was already successful, so it must NOT be re-added!
+        vm2.reorderAll(orderItems)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf("sku_r2"), attemptedSkus)
+    }
+
+    @Test
+    fun testCartViewModel_guestReorderAll_recordsLocalSuccessesAndSkipsOnRetry() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val orderItems = listOf(
+            OrderItem(productId = "p1", sku = "sku_g1", name = "Guest 1", price = BigDecimal("25.00"), quantity = 1),
+            OrderItem(productId = "p2", sku = "sku_g2", name = "Guest 2", price = BigDecimal("35.00"), quantity = 1)
+        )
+
+        val localInsertedSkus = mutableListOf<String>()
+        var shouldFailSecondItem = true
+        val fakeDao = object : CartDao {
+            override fun observeCartItems(customerId: String): kotlinx.coroutines.flow.Flow<List<CartItemEntity>> = kotlinx.coroutines.flow.emptyFlow()
+            override suspend fun getCartItems(customerId: String): List<CartItemEntity> = emptyList()
+            override suspend fun insertOrUpdate(item: CartItemEntity) {
+                if (item.sku == "sku_g2" && shouldFailSecondItem) {
+                    throw RuntimeException("Disk I/O error on second item")
+                }
+                localInsertedSkus.add(item.sku)
+            }
+            override suspend fun insertAll(items: List<CartItemEntity>) {}
+            override suspend fun deleteBySku(sku: String, customerId: String) {}
+            override suspend fun clearCart(customerId: String) {}
+        }
+
+        val repo = object : FakeAppRepository() {}
+        val vm = CartViewModel(repo, cartDao = fakeDao, appContext = fakeContext)
+        vm.init("") // Guest cart
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.reorderAll(orderItems)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // First item was inserted, second item failed
+        assertEquals(listOf("sku_g1"), localInsertedSkus)
+
+        // Retry reorderAll: first item must NOT be processed again (must not increment quantity)
+        shouldFailSecondItem = false
+        localInsertedSkus.clear()
+        vm.reorderAll(orderItems)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Only the second item should be processed on retry!
+        assertEquals(listOf("sku_g2"), localInsertedSkus)
+    }
+
+    @Test
+    fun testCartViewModel_uncertainMove_preservesGuardAcrossRestartAndBlocksCheckoutIfSaveFails() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val initialItem = CartItem(productId = "p1", sku = "sku_unc", name = "Uncertain Item", unitPrice = BigDecimal("40.00"), quantity = 1)
+
+        var fetchCallCount = 0
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                fetchCallCount++
+                return if (fetchCallCount == 1) {
+                    ApiResult.Success(CartResponse(items = listOf(initialItem)))
+                } else {
+                    ApiResult.Failure(AppError.Network("Read timed out"))
+                }
+            }
+            override suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> {
+                return ApiResult.Failure(AppError.Network("DELETE timed out"))
+            }
+        }
+
+        val vm1 = CartViewModel(repo, appContext = fakeContext)
+        vm1.init("cust_unc")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Prepopulate cart
+        vm1.loadCart()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Move to save for later hits ambiguous failure -> SKU added to uncertainMoveSkus and persisted
+        vm1.moveToSaveForLater("sku_unc")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(vm1.uncertainMoveSkus.contains("sku_unc"))
+        val persistedUncertain = com.commerceos.android.data.local.LocalSaveForLaterStore.getUncertainMoveSkus(fakeContext, "cust_unc")
+        assertTrue(persistedUncertain.contains("sku_unc"))
+
+        // Restart simulation: vm2 recovers uncertainMoveSkus on init
+        val repo2 = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                return ApiResult.Success(CartResponse(items = listOf(initialItem)))
+            }
+        }
+        // Simulate save failure so reconciliation cannot clear the guard
+        fakeSecureStore.shouldFailSave = true
+        fakeSecureStore.shouldFailClear = true
+        val vm2 = CartViewModel(repo2, appContext = fakeContext)
+        vm2.init("cust_unc")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(vm2.uncertainMoveSkus.contains("sku_unc"))
+
+        var exceptionThrown: Throwable? = null
+        try {
+            vm2.awaitMutationsIdle()
+        } catch (t: Throwable) {
+            exceptionThrown = t
+        }
+
+        // Must fail closed and block checkout
+        assertNotNull(exceptionThrown)
+        assertTrue(exceptionThrown is IllegalStateException)
+        assertTrue(vm2.uncertainMoveSkus.contains("sku_unc"))
+    }
+
+    @Test
+    fun testPrescriptionViewModel_uploadKeyPreservedAcrossProcessDeath() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val capturedKeys = mutableListOf<String>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> = ApiResult.Success(emptyList())
+            override suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> {
+                if (request.idempotencyKey != null) capturedKeys.add(request.idempotencyKey!!)
+                return if (capturedKeys.size == 1) {
+                    ApiResult.Failure(AppError.Network("Upload timed out"))
+                } else {
+                    ApiResult.Success(Prescription(id = "rx_success", customerId = request.customerId, note = request.note))
+                }
+            }
+        }
+
+        val vm1 = PrescriptionViewModel(repo, appContext = fakeContext, ioDispatcher = testDispatcher)
+        vm1.load("cust_rx_death")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm1.upload("cust_rx_death", "Patient A", listOf("data:image/jpeg;base64,AAAA"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, capturedKeys.size)
+        val firstKey = capturedKeys[0]
+
+        // Durable pending record exists
+        val pendingRecord = com.commerceos.android.data.local.LocalPrescriptionManager.getPendingUpload(fakeContext, "cust_rx_death")
+        assertNotNull(pendingRecord)
+        assertEquals(firstKey, pendingRecord!!.idempotencyKey)
+
+        // Process restart: new ViewModel instance
+        val vm2 = PrescriptionViewModel(repo, appContext = fakeContext, ioDispatcher = testDispatcher)
+        vm2.load("cust_rx_death")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm2.upload("cust_rx_death", "Patient A", listOf("data:image/jpeg;base64,AAAA"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, capturedKeys.size)
+        // Must reuse the exact same upload idempotency key across process restart
+        assertEquals(firstKey, capturedKeys[1])
+
+        // After successful upload, pending record is cleared
+        assertNull(com.commerceos.android.data.local.LocalPrescriptionManager.getPendingUpload(fakeContext, "cust_rx_death"))
+    }
+
+    @Test
+    fun testPrescriptionViewModel_pendingUploadReconciledByLoad() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val pendingKey = "rx_upload_cust_recon_12345"
+        com.commerceos.android.data.local.LocalPrescriptionManager.setPendingUpload(
+            fakeContext,
+            "cust_recon",
+            com.commerceos.android.data.local.LocalPrescriptionManager.PendingUploadRecord(pendingKey, "fingerprint_abc")
+        )
+
+        val serverPrescription = Prescription(
+            id = "rx_committed",
+            customerId = "cust_recon",
+            note = "prescription_document_upload [idemp:$pendingKey]"
+        )
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> =
+                ApiResult.Success(listOf(serverPrescription))
+        }
+
+        val vm = PrescriptionViewModel(repo, appContext = fakeContext)
+        vm.load("cust_recon")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // load() reconciled that the pending upload already committed on server -> pending upload cleared!
+        assertNull(com.commerceos.android.data.local.LocalPrescriptionManager.getPendingUpload(fakeContext, "cust_recon"))
+    }
+
+    @Test
+    fun testPrescriptionViewModel_canonicalSha256FingerprintCollisionFree() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val capturedKeys = mutableListOf<String>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> = ApiResult.Success(emptyList())
+            override suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> {
+                if (request.idempotencyKey != null) capturedKeys.add(request.idempotencyKey!!)
+                return ApiResult.Failure(AppError.Network("Fail for key observation"))
+            }
+        }
+
+        val vm = PrescriptionViewModel(repo, appContext = fakeContext, ioDispatcher = testDispatcher)
+        vm.load("cust_fp")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Upload with attachment 1
+        vm.upload("cust_fp", "Patient", listOf("data:image/jpeg;base64,payloadONE"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Upload with different attachment payload
+        vm.upload("cust_fp", "Patient", listOf("data:image/jpeg;base64,payloadTWO"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, capturedKeys.size)
+        // Must generate distinct keys for different attachments under canonical SHA-256 fingerprinting
+        assertNotEquals(capturedKeys[0], capturedKeys[1])
+    }
+
+    @Test
+    fun testLocalSaveForLaterStore_clearPendingMoveKey_synchronousAndFailsWhenClearFails() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        com.commerceos.android.data.local.LocalSaveForLaterStore.setPendingMoveKey(fakeContext, "cust_clear_test", "sku_test", "key_123")
+        assertEquals("key_123", com.commerceos.android.data.local.LocalSaveForLaterStore.getPendingMoveKey(fakeContext, "cust_clear_test", "sku_test"))
+
+        fakeSecureStore.shouldFailClear = true
+        val result = com.commerceos.android.data.local.LocalSaveForLaterStore.clearPendingMoveKey(fakeContext, "cust_clear_test", "sku_test")
+        assertFalse(result)
+
+        // Move back to cart must fail closed if clearing key fails
+        val savedItem = CartItem(productId = "p1", sku = "sku_test", name = "Test Item", unitPrice = BigDecimal("10.00"), quantity = 1)
+        val savedItemKeep = CartItem(productId = "p2", sku = "sku_keep", name = "Keep Item", unitPrice = BigDecimal("10.00"), quantity = 1)
+        fakeSecureStore.shouldFailClear = false
+        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_clear_test", listOf(savedItem, savedItemKeep))
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = emptyList()))
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> =
+                ApiResult.Success(CartResponse(items = listOf(item)))
+        }
+
+        val vm = CartViewModel(repo, appContext = fakeContext)
+        vm.init("cust_clear_test")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        fakeSecureStore.shouldFailClear = true
+        vm.moveBackToCart("sku_test")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("Could not durably clear pending move operation key.", vm.errorMessage)
+    }
+
+    @Test
+    fun testLegacyMigration_failsClosedWhenCleanupCommitFails() {
+        val store = mutableMapOf<String, String>()
+        // Create context where editor.commit() fails
+        val fakeContext = createFakeContext(store, shouldFailCommit = true)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        // 1. LocalSaveForLaterStore: legacy data exists
+        store["saved_items_cust_leg"] = """[{"productId":"p1","sku":"s1","name":"N1","unitPrice":10.0,"quantity":1}]"""
+        val savedItems = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(fakeContext, "cust_leg")
+        // Must fail closed because commit() on plaintext removal failed
+        assertEquals(emptyList<CartItem>(), savedItems)
+
+        // 2. LocalPrescriptionManager: savePrescription cleanup fails
+        store["rx_records_cust_leg"] = """[{"id":"rx1","customerId":"cust_leg","patientName":"P1","attachments":[]}]"""
+        val newRx = Prescription(id = "rx2", customerId = "cust_leg", patientName = "P2")
+        val savedRxResult = com.commerceos.android.data.local.LocalPrescriptionManager.savePrescription(fakeContext, newRx)
+        // Must return false because legacy cleanup commit failed
+        assertFalse(savedRxResult)
+    }
+
+    @Test
+    fun testLocalPrescriptionManager_deletePrescription_tracksOrphanAndCleanupCleansIt() {
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "rx_test_dir_${System.currentTimeMillis()}").also { it.mkdirs() }
+        val rxDir = java.io.File(tempDir, "prescriptions").also { it.mkdirs() }
+        val testFile = java.io.File(rxDir, "rx_orphan_test.jpg")
+        testFile.writeText("fake image content")
+
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store, filesDirectory = tempDir)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val rx = Prescription(
+            id = "rx_delete_test",
+            customerId = "cust_del",
+            patientName = "Del Patient",
+            attachments = listOf(testFile.absolutePath)
+        )
+        com.commerceos.android.data.local.LocalPrescriptionManager.savePrescription(fakeContext, rx)
+
+        // Make file non-deletable (directory containing it read-only)
+        rxDir.setWritable(false, false)
+        testFile.setWritable(false, false)
+
+        val deleteSuccess = com.commerceos.android.data.local.LocalPrescriptionManager.deletePrescription(fakeContext, "cust_del", "rx_delete_test")
+        assertTrue(deleteSuccess) // Metadata update succeeded
+
+        // File could not be deleted, so orphan cleanup must have recorded it
+        val orphanSet = store["pending_orphan_files"]
+        assertNotNull(orphanSet)
+        assertTrue(orphanSet!!.contains(testFile.absolutePath))
+
+        // Restore permissions and run cleanupOrphanedFiles
+        rxDir.setWritable(true, false)
+        testFile.setWritable(true, false)
+
+        val cleanedCount = com.commerceos.android.data.local.LocalPrescriptionManager.cleanupOrphanedFiles(fakeContext)
+        assertEquals(1, cleanedCount)
+        assertFalse(testFile.exists())
     }
 }

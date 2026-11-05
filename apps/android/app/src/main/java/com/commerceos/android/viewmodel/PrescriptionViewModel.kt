@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.MessageDigest
 import java.util.UUID
 
 class PrescriptionViewModel(
@@ -98,6 +99,22 @@ class PrescriptionViewModel(
                                 )
                             }
                             prescriptions = mergedServer + local.filterNot { it.id in serverIds }
+
+                            if (appContext != null) {
+                                val pendingRx = LocalPrescriptionManager.getPendingUpload(appContext, id)
+                                if (pendingRx != null) {
+                                    val committedOnServer = server.any { rx ->
+                                        rx.note.contains(pendingRx.idempotencyKey)
+                                    }
+                                    if (committedOnServer) {
+                                        LocalPrescriptionManager.clearPendingUpload(appContext, id)
+                                        if (activeCustomerId == id) {
+                                            currentUploadKey = null
+                                            currentUploadFingerprint = null
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     is ApiResult.Failure -> {
@@ -167,6 +184,19 @@ class PrescriptionViewModel(
             }
         }
 
+    private fun computeUploadFingerprint(customerId: String, patientName: String, attachments: List<String>): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        md.update(customerId.trim().toByteArray(Charsets.UTF_8))
+        md.update(0.toByte())
+        md.update(patientName.trim().toByteArray(Charsets.UTF_8))
+        md.update(0.toByte())
+        for (att in attachments) {
+            md.update(att.toByteArray(Charsets.UTF_8))
+            md.update(0.toByte())
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
     fun upload(
         customerId: String,
         patientName: String,
@@ -204,14 +234,26 @@ class PrescriptionViewModel(
             errorMessage = null
             try {
                 val lightweightAttachments = encodeAttachments(attachments)
-                val uploadFingerprint = "${safeCustomerId}|${patientName.trim()}|${lightweightAttachments.hashCode()}"
+                val uploadFingerprint = computeUploadFingerprint(safeCustomerId, patientName, lightweightAttachments)
+                val persistedUpload = appContext?.let { LocalPrescriptionManager.getPendingUpload(it, safeCustomerId) }
                 val stableIdempotencyKey = operationKey
                     ?: if (currentUploadKey != null && currentUploadFingerprint == uploadFingerprint) {
                         currentUploadKey!!
+                    } else if (persistedUpload != null && persistedUpload.fingerprint == uploadFingerprint) {
+                        currentUploadKey = persistedUpload.idempotencyKey
+                        currentUploadFingerprint = persistedUpload.fingerprint
+                        persistedUpload.idempotencyKey
                     } else {
                         "rx_upload_${safeCustomerId}_${UUID.randomUUID()}".also {
                             currentUploadKey = it
                             currentUploadFingerprint = uploadFingerprint
+                            appContext?.let { ctx ->
+                                LocalPrescriptionManager.setPendingUpload(
+                                    ctx,
+                                    safeCustomerId,
+                                    LocalPrescriptionManager.PendingUploadRecord(it, uploadFingerprint)
+                                )
+                            }
                         }
                     }
 
@@ -228,6 +270,9 @@ class PrescriptionViewModel(
                         if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
                             currentUploadKey = null
                             currentUploadFingerprint = null
+                            appContext?.let { ctx ->
+                                LocalPrescriptionManager.clearPendingUpload(ctx, safeCustomerId)
+                            }
                             val serverRx = if (result.data.attachments.isNotEmpty()) result.data else result.data.copy(attachments = attachments)
                             prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
                             errorMessage = null

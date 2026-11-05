@@ -21,9 +21,17 @@ object LocalPrescriptionManager {
     private const val PREFS_NAME = "commerce_os_local_prescriptions"
     private const val KEY_PREFIX = "rx_records_"
     private const val PRESCRIPTIONS_DIR = "prescriptions"
+    private const val ORPHAN_CLEANUP_PREFS = "commerce_os_rx_orphan_cleanup"
+    private const val KEY_PENDING_ORPHAN_FILES = "pending_orphan_files"
+    private const val PENDING_UPLOAD_PREFIX = "pending_rx_upload_"
 
     private val gson = Gson()
     internal var secureStoreProvider: ((Context) -> com.commerceos.android.session.SecureCredentialStore)? = null
+
+    data class PendingUploadRecord(
+        val idempotencyKey: String,
+        val fingerprint: String
+    )
 
     private fun sanitizeCustomerId(customerId: String): String {
         return customerId.replace(Regex("[^a-zA-Z0-9_]"), "_").ifBlank { "default_user" }
@@ -139,6 +147,9 @@ object LocalPrescriptionManager {
             val exactRaw = customerId.trim()
             if (exactRaw.isBlank()) return emptyList()
 
+            // Best-effort cleanup of any previously failed file deletions
+            cleanupOrphanedFiles(context)
+
             val storageKey = customerStorageKey(exactRaw)
             val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
             val type = object : TypeToken<List<Prescription>>() {}.type
@@ -184,12 +195,23 @@ object LocalPrescriptionManager {
                         val migratedJson = gson.toJson(exactMatches, type)
                         val saved = secureStore.save(storageKey, migratedJson)
                         if (saved) {
-                            if (remaining.isEmpty()) {
-                                prefs.edit().remove(legacyPrefKey).commit()
-                            } else {
-                                prefs.edit().putString(legacyPrefKey, gson.toJson(remaining, type)).commit()
+                            var committed = false
+                            for (attempt in 1..3) {
+                                val editor = prefs.edit()
+                                if (remaining.isEmpty()) {
+                                    editor.remove(legacyPrefKey)
+                                } else {
+                                    editor.putString(legacyPrefKey, gson.toJson(remaining, type))
+                                }
+                                committed = editor.commit()
+                                if (committed) break
                             }
-                            json = migratedJson
+                            if (committed) {
+                                json = migratedJson
+                            } else {
+                                // Fail closed: if plaintext cleanup fails, do not expose migratedJson or leave cleanup ignored
+                                json = null
+                            }
                         } else {
                             // Fail closed: never return plaintext fallback if secure store save fails
                             json = null
@@ -247,10 +269,20 @@ object LocalPrescriptionManager {
                 if (legacyJson != null) {
                     val legacyList: List<Prescription> = gson.fromJson(legacyJson, type) ?: emptyList()
                     val remaining = legacyList.filterNot { it.customerId == exactRaw }
-                    if (remaining.isEmpty()) {
-                        prefs.edit().remove(legacyPrefKey).commit()
-                    } else {
-                        prefs.edit().putString(legacyPrefKey, gson.toJson(remaining, type)).commit()
+                    var committed = false
+                    for (attempt in 1..3) {
+                        val editor = prefs.edit()
+                        if (remaining.isEmpty()) {
+                            editor.remove(legacyPrefKey)
+                        } else {
+                            editor.putString(legacyPrefKey, gson.toJson(remaining, type))
+                        }
+                        committed = editor.commit()
+                        if (committed) break
+                    }
+                    if (!committed) {
+                        Log.e(TAG, "Failed to cleanup legacy plaintext prescription after encrypted save")
+                        return false
                     }
                 }
                 true
@@ -285,16 +317,24 @@ object LocalPrescriptionManager {
                 // Only delete attachment files AFTER metadata save succeeds
                 // Constrain file deletion to the prescriptions directory
                 val rxDirCanonical = getPrescriptionsDir(context).canonicalPath
+                val failedDeletions = mutableListOf<String>()
                 target.attachments.forEach { path ->
                     val cleanPath = path.removePrefix("file://")
                     if (cleanPath.startsWith("/")) {
                         try {
                             val file = File(cleanPath).canonicalFile
                             if (file.canonicalPath.startsWith(rxDirCanonical + File.separator)) {
-                                file.delete()
+                                if (file.exists() && !file.delete()) {
+                                    failedDeletions.add(file.absolutePath)
+                                }
                             }
-                        } catch (_: Exception) {}
+                        } catch (_: Exception) {
+                            failedDeletions.add(cleanPath)
+                        }
                     }
+                }
+                if (failedDeletions.isNotEmpty()) {
+                    scheduleOrphanCleanup(context, failedDeletions)
                 }
                 true
             } else {
@@ -303,6 +343,86 @@ object LocalPrescriptionManager {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete prescription locally", e)
+            false
+        }
+    }
+
+    private fun scheduleOrphanCleanup(context: Context, failedPaths: List<String>) {
+        try {
+            val prefs = context.getSharedPreferences(ORPHAN_CLEANUP_PREFS, Context.MODE_PRIVATE)
+            val existing = prefs.getStringSet(KEY_PENDING_ORPHAN_FILES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            existing.addAll(failedPaths)
+            prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, existing).commit()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to schedule orphan cleanup", e)
+        }
+    }
+
+    /**
+     * Attempts to delete any orphaned prescription image files that previously failed deletion.
+     * Returns the count of successfully cleaned up files.
+     */
+    fun cleanupOrphanedFiles(context: Context): Int {
+        return try {
+            val rxDirCanonical = getPrescriptionsDir(context).canonicalPath
+            val prefs = context.getSharedPreferences(ORPHAN_CLEANUP_PREFS, Context.MODE_PRIVATE)
+            val pending = prefs.getStringSet(KEY_PENDING_ORPHAN_FILES, emptySet())?.toSet() ?: emptySet()
+            if (pending.isEmpty()) return 0
+            var cleanedCount = 0
+            val remaining = mutableSetOf<String>()
+            for (path in pending) {
+                try {
+                    val file = File(path).canonicalFile
+                    if (!file.exists()) {
+                        cleanedCount++
+                    } else if (file.canonicalPath.startsWith(rxDirCanonical + File.separator)) {
+                        if (file.delete()) {
+                            cleanedCount++
+                        } else {
+                            remaining.add(path)
+                        }
+                    } else {
+                        cleanedCount++
+                    }
+                } catch (_: Exception) {
+                    remaining.add(path)
+                }
+            }
+            prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, remaining).commit()
+            cleanedCount
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cleaning up orphaned prescription files", e)
+            0
+        }
+    }
+
+    fun getPendingUpload(context: Context, customerId: String): PendingUploadRecord? {
+        return try {
+            val safeId = customerStorageKey(customerId)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            val json = secureStore.read(PENDING_UPLOAD_PREFIX + safeId) ?: return null
+            gson.fromJson(json, PendingUploadRecord::class.java)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun setPendingUpload(context: Context, customerId: String, record: PendingUploadRecord): Boolean {
+        return try {
+            val safeId = customerStorageKey(customerId)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            secureStore.save(PENDING_UPLOAD_PREFIX + safeId, gson.toJson(record))
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun clearPendingUpload(context: Context, customerId: String): Boolean {
+        return try {
+            val safeId = customerStorageKey(customerId)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            secureStore.clear(PENDING_UPLOAD_PREFIX + safeId)
+        } catch (_: Exception) {
             false
         }
     }
