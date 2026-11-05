@@ -52,6 +52,8 @@ fun RxUploadDialog(
     var uploadError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
     var draftError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
     var hasDraftStorageError by rememberSaveable(customerId) { mutableStateOf(false) }
+    var isDraftLoading by rememberSaveable(customerId) { mutableStateOf(true) }
+    var showDiscardConfirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
@@ -65,33 +67,38 @@ fun RxUploadDialog(
         uploadError = null
         draftError = null
         hasDraftStorageError = false
-        val draftResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
-            LocalPrescriptionManager.getDraftWithResult(context, customerId)
-        }
-        when (draftResult) {
-            is LocalPrescriptionManager.DraftResult.Found -> {
-                val draft = draftResult.draft
-                if (draft.patientName.isNotBlank()) {
-                    patientName = draft.patientName
-                }
-                if (!draft.attachmentPath.isNullOrBlank()) {
-                    val file = File(draft.attachmentPath)
-                    if (file.exists() && file.length() > 0) {
-                        attachment = draft.attachmentPath
-                        attachmentName = draft.attachmentName ?: file.name
+        isDraftLoading = true
+        try {
+            val draftResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                LocalPrescriptionManager.getDraftWithResult(context, customerId)
+            }
+            when (draftResult) {
+                is LocalPrescriptionManager.DraftResult.Found -> {
+                    val draft = draftResult.draft
+                    if (draft.patientName.isNotBlank()) {
+                        patientName = draft.patientName
+                    }
+                    if (!draft.attachmentPath.isNullOrBlank()) {
+                        val file = File(draft.attachmentPath)
+                        if (file.exists() && file.length() > 0) {
+                            attachment = draft.attachmentPath
+                            attachmentName = draft.attachmentName ?: file.name
+                        }
                     }
                 }
+                is LocalPrescriptionManager.DraftResult.StorageError -> {
+                    hasDraftStorageError = true
+                    draftError = "Secure storage error: saved draft could not be decrypted. Editing and upload are disabled to protect saved prescription data."
+                }
+                is LocalPrescriptionManager.DraftResult.None -> Unit
             }
-            is LocalPrescriptionManager.DraftResult.StorageError -> {
-                hasDraftStorageError = true
-                draftError = "Secure storage error: saved draft could not be decrypted. Editing is disabled to protect saved prescription data."
-            }
-            is LocalPrescriptionManager.DraftResult.None -> Unit
+        } finally {
+            isDraftLoading = false
         }
     }
 
     fun persistDraftDebounced(name: String, path: String?, fileName: String?, debounceMs: Long = 300L) {
-        if (hasDraftStorageError) {
+        if (hasDraftStorageError || isDraftLoading) {
             draftError = "Cannot save draft: existing encrypted draft is unreadable. Overwrite prevented."
             return
         }
@@ -117,6 +124,12 @@ fun RxUploadDialog(
     }
 
     val takeCameraPhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (isDraftLoading || hasDraftStorageError) {
+            draftError = "Cannot attach prescription while draft is loading or unreadable."
+            try { tempCameraFile?.delete() } catch (_: Exception) {}
+            tempCameraFile = null
+            return@rememberLauncherForActivityResult
+        }
         if (success && tempCameraFile != null) {
             val permanentFile = LocalPrescriptionManager.saveCameraCaptureFile(context, tempCameraFile!!)
             if (permanentFile != null) {
@@ -152,10 +165,18 @@ fun RxUploadDialog(
     }
 
     val pickGalleryImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (isDraftLoading || hasDraftStorageError) {
+            draftError = "Cannot attach prescription while draft is loading or unreadable."
+            return@rememberLauncherForActivityResult
+        }
         if (uri != null) {
             coroutineScope.launch(Dispatchers.IO) {
                 val file = LocalPrescriptionManager.savePrescriptionUriAsync(context, uri)
                 withContext(Dispatchers.Main) {
+                    if (isDraftLoading || hasDraftStorageError) {
+                        draftError = "Cannot attach prescription while draft is loading or unreadable."
+                        return@withContext
+                    }
                     if (file != null) {
                         attachment = file.absolutePath
                         attachmentName = file.name
@@ -326,7 +347,7 @@ fun RxUploadDialog(
                 OutlinedTextField(
                     value = patientName,
                     onValueChange = {
-                        if (!hasDraftStorageError) {
+                        if (!hasDraftStorageError && !isDraftLoading) {
                             patientName = it
                             persistDraftDebounced(it, attachment, attachmentName, 300L)
                         }
@@ -339,8 +360,25 @@ fun RxUploadDialog(
                         unfocusedBorderColor = Color(0xFFE2E8F0)
                     ),
                     singleLine = true,
-                    enabled = !busy && !hasDraftStorageError
+                    enabled = !busy && !isDraftLoading && !hasDraftStorageError
                 )
+
+                if (hasDraftStorageError) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { showDiscardConfirm = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFEE2E2), contentColor = Color(0xFFB91C1C)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Discard Corrupted Draft & Start Fresh",
+                            fontSize = 12.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -365,7 +403,7 @@ fun RxUploadDialog(
                             border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable(enabled = !busy && !hasDraftStorageError) { launchCameraFlow() }
+                                .clickable(enabled = !busy && !isDraftLoading && !hasDraftStorageError) { launchCameraFlow() }
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
@@ -409,7 +447,7 @@ fun RxUploadDialog(
                             border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable(enabled = !busy && !hasDraftStorageError) { pickGalleryImage.launch("image/*") }
+                                .clickable(enabled = !busy && !isDraftLoading && !hasDraftStorageError) { pickGalleryImage.launch("image/*") }
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
@@ -526,14 +564,14 @@ fun RxUploadDialog(
                 // Action Button
                 Button(
                     onClick = {
-                        if (attachment == null || busy) return@Button
+                        if (attachment == null || busy || isDraftLoading || hasDraftStorageError) return@Button
                         busy = true
                         uploadError = null
                         onUpload(patientName.trim(), listOfNotNull(attachment)) { success, errorMsg ->
                             busy = false
                             if (success) {
                                 coroutineScope.launch(Dispatchers.IO) {
-                                    LocalPrescriptionManager.clearDraft(context, customerId)
+                                    LocalPrescriptionManager.clearDraft(context, customerId, force = false)
                                 }
                                 onDismiss()
                             } else {
@@ -541,7 +579,7 @@ fun RxUploadDialog(
                             }
                         }
                     },
-                    enabled = !busy && attachment != null,
+                    enabled = !busy && !isDraftLoading && !hasDraftStorageError && attachment != null,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
@@ -561,6 +599,42 @@ fun RxUploadDialog(
                     }
                 }
             }
+        }
+
+        if (showDiscardConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDiscardConfirm = false },
+                title = { Text("Discard Corrupted Draft?", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold) },
+                text = { Text("The saved prescription draft cannot be decrypted. Discarding it will permanently remove the corrupt draft so you can create a new prescription.", fontFamily = PlusJakartaSans, fontSize = 13.sp) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showDiscardConfirm = false
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val cleared = LocalPrescriptionManager.clearDraft(context, customerId, force = true)
+                                withContext(Dispatchers.Main) {
+                                    if (cleared) {
+                                        hasDraftStorageError = false
+                                        draftError = null
+                                        patientName = ""
+                                        attachment = null
+                                        attachmentName = null
+                                    } else {
+                                        draftError = "Failed to clear corrupted draft."
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Discard", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDiscardConfirm = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }

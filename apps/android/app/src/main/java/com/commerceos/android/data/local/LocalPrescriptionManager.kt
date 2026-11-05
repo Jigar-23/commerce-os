@@ -741,10 +741,19 @@ object LocalPrescriptionManager {
         return getDraft(context, "default_user")
     }
 
-    fun clearDraft(context: Context, customerId: String): Boolean {
+    fun clearDraft(context: Context, customerId: String, force: Boolean = false): Boolean {
         return try {
             val key = customerDraftKey(customerId)
             val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            if (!force) {
+                when (secureStore.readWithResult(key)) {
+                    is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError -> {
+                        Log.e(TAG, "Existing prescription draft ciphertext could not be decrypted; refusing to clear without explicit force confirmation")
+                        return false
+                    }
+                    else -> Unit
+                }
+            }
             secureStore.clear(key)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to clear prescription draft", e)
@@ -752,7 +761,7 @@ object LocalPrescriptionManager {
         }
     }
 
-    fun clearDraft(context: Context): Boolean {
-        return clearDraft(context, "default_user")
+    fun clearDraft(context: Context, force: Boolean = false): Boolean {
+        return clearDraft(context, "default_user", force)
     }
 }

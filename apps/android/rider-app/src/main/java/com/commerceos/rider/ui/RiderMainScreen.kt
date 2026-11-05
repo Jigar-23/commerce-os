@@ -643,21 +643,47 @@ fun RiderMainScreen(
                     val currentOffer = activeOffer
 
                     if (currentSession != null && currentSession.state != "DELIVERED") {
-                        val effectiveRiderLat = if (!isStale && stickyLat != null) {
-                            stickyLat
-                        } else if (currentSession.telemetry != null && !currentSession.telemetry.isStale) {
-                            currentSession.telemetry.latitude
+                        val isLocalGpsFresh = !isStale && stickyLat != null && stickyLng != null
+                        val isServerTelemetryFresh = currentSession.telemetry != null && !currentSession.telemetry.isStale &&
+                            currentSession.telemetry.latitude != 0.0 && currentSession.telemetry.longitude != 0.0
+
+                        val isFromLocalGps: Boolean
+                        val effectiveRiderLat: Double?
+                        val effectiveRiderLng: Double?
+                        val effectiveRiderHeading: Float?
+                        val isCoordinateStale: Boolean
+
+                        if (isLocalGpsFresh) {
+                            isFromLocalGps = true
+                            effectiveRiderLat = stickyLat
+                            effectiveRiderLng = stickyLng
+                            effectiveRiderHeading = stickyHeading
+                            isCoordinateStale = false
+                        } else if (isServerTelemetryFresh) {
+                            isFromLocalGps = false
+                            effectiveRiderLat = currentSession.telemetry!!.latitude
+                            effectiveRiderLng = currentSession.telemetry.longitude
+                            effectiveRiderHeading = currentSession.telemetry.heading
+                            isCoordinateStale = false
+                        } else if (stickyLat != null && stickyLng != null) {
+                            isFromLocalGps = true
+                            effectiveRiderLat = stickyLat
+                            effectiveRiderLng = stickyLng
+                            effectiveRiderHeading = stickyHeading
+                            isCoordinateStale = isStale
+                        } else if (currentSession.telemetry != null) {
+                            isFromLocalGps = false
+                            effectiveRiderLat = currentSession.telemetry.latitude
+                            effectiveRiderLng = currentSession.telemetry.longitude
+                            effectiveRiderHeading = currentSession.telemetry.heading
+                            isCoordinateStale = currentSession.telemetry.isStale
                         } else {
-                            null
+                            isFromLocalGps = false
+                            effectiveRiderLat = null
+                            effectiveRiderLng = null
+                            effectiveRiderHeading = null
+                            isCoordinateStale = true
                         }
-                        val effectiveRiderLng = if (!isStale && stickyLng != null) {
-                            stickyLng
-                        } else if (currentSession.telemetry != null && !currentSession.telemetry.isStale) {
-                            currentSession.telemetry.longitude
-                        } else {
-                            null
-                        }
-                        val effectiveRiderHeading = if (!isStale) stickyHeading ?: currentSession.telemetry?.heading else null
 
                         ActiveDeliveryScreen(
                             session = currentSession,
@@ -665,7 +691,8 @@ fun RiderMainScreen(
                             riderLat = effectiveRiderLat,
                             riderLng = effectiveRiderLng,
                             riderHeading = effectiveRiderHeading,
-                            isStale = isStale,
+                            isStale = isCoordinateStale,
+                            isLocalGps = isFromLocalGps,
                             onArrivedStore = {
                                 scope.launch {
                                     actionLoading = true

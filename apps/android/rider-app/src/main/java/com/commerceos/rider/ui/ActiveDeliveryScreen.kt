@@ -55,6 +55,7 @@ fun ActiveDeliveryScreen(
     riderLng: Double?,
     riderHeading: Float?,
     isStale: Boolean,
+    isLocalGps: Boolean = false,
     onArrivedStore: () -> Unit,
     onConfirmPickup: () -> Unit,
     onArrivedCustomer: () -> Unit,
@@ -109,7 +110,13 @@ fun ActiveDeliveryScreen(
         session.customerPhone.ifBlank { session.maskedCustomerPhone }
     }
 
-    val hasValidFreshRiderGps = !isStale && (session.telemetry?.isStale != true) &&
+    val isCoordinateStale = if (isLocalGps) {
+        isStale
+    } else {
+        isStale || (session.telemetry?.isStale == true)
+    }
+
+    val hasValidFreshRiderGps = !isCoordinateStale &&
         com.commerceos.rider.model.OfferPayloadValidator.isValidLat(riderLat) &&
         com.commerceos.rider.model.OfferPayloadValidator.isValidLng(riderLng)
 

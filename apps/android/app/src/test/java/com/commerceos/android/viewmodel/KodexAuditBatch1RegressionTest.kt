@@ -2745,4 +2745,58 @@ class KodexAuditBatch1RegressionTest {
         assertTrue(resRecovered is com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.Found)
         assertEquals("Original Patient", (resRecovered as com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.Found).draft.patientName)
     }
+
+    @Test
+    fun testLocalPrescriptionManager_clearDraft_refusesClearOnDecryptErrorUnlessForced() {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = object : com.commerceos.android.session.SecureCredentialStore(null) {
+            val data = mutableMapOf<String, String>()
+            var failDecrypt = false
+            override fun save(alias: String, value: String): Boolean {
+                data[alias] = value
+                return true
+            }
+            override fun read(alias: String): String? = data[alias]
+            override fun readWithResult(alias: String): com.commerceos.android.session.SecureCredentialStore.SecureReadResult {
+                if (failDecrypt) {
+                    return com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError(
+                        java.security.GeneralSecurityException("Keystore key corrupted")
+                    )
+                }
+                val v = data[alias]
+                return if (v != null) com.commerceos.android.session.SecureCredentialStore.SecureReadResult.Success(v) else com.commerceos.android.session.SecureCredentialStore.SecureReadResult.NotFound
+            }
+            override fun clear(alias: String): Boolean {
+                data.remove(alias)
+                return true
+            }
+            override fun deleteKeyAndValue(alias: String): Boolean {
+                data.remove(alias)
+                return true
+            }
+        }
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        // Save a draft
+        val draft = com.commerceos.android.data.local.LocalPrescriptionManager.PrescriptionDraft(
+            patientName = "Original Patient",
+            attachmentPath = "/path/to/rx.jpg",
+            attachmentName = "rx.jpg"
+        )
+        assertTrue(com.commerceos.android.data.local.LocalPrescriptionManager.saveDraft(fakeContext, "cust_draft_clear", draft))
+
+        // Decryption fails
+        fakeSecureStore.failDecrypt = true
+
+        // Default clearDraft (force=false, e.g. from upload completion) must REFUSE to delete unreadable ciphertext
+        val refused = com.commerceos.android.data.local.LocalPrescriptionManager.clearDraft(fakeContext, "cust_draft_clear", force = false)
+        assertFalse("clearDraft without force must refuse to clear when DecryptError occurs", refused)
+        assertTrue("Ciphertext must be preserved in storage", fakeSecureStore.data.isNotEmpty())
+
+        // User explicit discard (force=true) deletes the corrupted entry
+        val forceCleared = com.commerceos.android.data.local.LocalPrescriptionManager.clearDraft(fakeContext, "cust_draft_clear", force = true)
+        assertTrue("clearDraft with force=true must succeed", forceCleared)
+        assertTrue("Storage must be empty after forced discard", fakeSecureStore.data.isEmpty())
+    }
 }
