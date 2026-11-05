@@ -236,11 +236,16 @@ fun CommerceOSApp(
         }
     }
 
+    LaunchedEffect(cartViewModel, checkoutViewModel) {
+        checkoutViewModel.setMutationGate(cartViewModel)
+    }
+
     LaunchedEffect(Unit) {
         checkoutViewModel.events.collect { event ->
             when (event) {
                 is CheckoutEvent.OrderPlaced -> {
                     checkoutViewModel.reset()
+                    cartViewModel.unlockMutations()
                     cartViewModel.clear()
                     cartViewModel.loadCart()
                     val pin = event.order?.effectiveDeliveryPin

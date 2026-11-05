@@ -16,24 +16,24 @@ import javax.crypto.spec.GCMParameterSpec
  * SharedPreferences. Used to persist the CommerceOS access/refresh tokens so a
  * session survives process death without exposing secrets in plaintext.
  */
-class SecureCredentialStore(context: Context) {
+open class SecureCredentialStore(private val context: Context? = null) {
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs by lazy { context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
-    fun save(alias: String, value: String): Boolean = try {
+    open fun save(alias: String, value: String): Boolean = try {
         val key = getOrCreateKey(alias)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         val payload = cipher.iv + ciphertext
-        prefs.edit().putString(alias, Base64.encodeToString(payload, Base64.NO_WRAP)).commit()
+        prefs?.edit()?.putString(alias, Base64.encodeToString(payload, Base64.NO_WRAP))?.commit() ?: false
     } catch (e: Exception) {
         false
     }
 
-    fun read(alias: String): String? {
+    open fun read(alias: String): String? {
         return try {
-            val stored = prefs.getString(alias, null) ?: return null
+            val stored = prefs?.getString(alias, null) ?: return null
             val payload = Base64.decode(stored, Base64.NO_WRAP)
             val iv = payload.copyOfRange(0, IV_LENGTH)
             val ciphertext = payload.copyOfRange(IV_LENGTH, payload.size)
@@ -46,11 +46,11 @@ class SecureCredentialStore(context: Context) {
         }
     }
 
-    fun clear(alias: String) {
-        prefs.edit().remove(alias).apply()
+    open fun clear(alias: String) {
+        prefs?.edit()?.remove(alias)?.apply()
     }
 
-    fun deleteKeyAndValue(alias: String) {
+    open fun deleteKeyAndValue(alias: String) {
         try {
             val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
             if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)

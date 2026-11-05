@@ -25,6 +25,7 @@ object LocalPrescriptionManager {
     private const val PRESCRIPTIONS_DIR = "prescriptions"
 
     private val gson = Gson()
+    internal var secureStoreProvider: ((Context) -> com.commerceos.android.session.SecureCredentialStore)? = null
 
     private fun sanitizeCustomerId(customerId: String): String {
         return customerId.replace(Regex("[^a-zA-Z0-9_]"), "_").ifBlank { "default_user" }
@@ -116,36 +117,13 @@ object LocalPrescriptionManager {
     }
 
     /**
-     * Retrieves all prescriptions stored on this device across all customer keys.
-     * Guarantees saved doctor slips are always discovered and displayed.
+     * Retrieves prescriptions stored locally for the specified customer.
+     * Enforces customer partition boundary so records from other accounts are never leaked.
      */
-    fun getAllPrescriptions(context: Context): List<Prescription> {
-        return try {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val allEntries = prefs.all
-            val result = mutableListOf<Prescription>()
-            val type = object : TypeToken<List<Prescription>>() {}.type
-            for ((key, value) in allEntries) {
-                if (key.startsWith(KEY_PREFIX) && value is String) {
-                    try {
-                        val list: List<Prescription> = gson.fromJson(value, type) ?: emptyList()
-                        result.addAll(list)
-                    } catch (_: Exception) {}
-                }
-            }
-            result.filter { rx ->
-                val firstAtt = rx.attachments.firstOrNull()
-                if (firstAtt != null && (firstAtt.startsWith("/") || firstAtt.startsWith("file:"))) {
-                    val path = firstAtt.removePrefix("file://")
-                    File(path).exists()
-                } else {
-                    true
-                }
-            }.distinctBy { it.id }.sortedByDescending { it.createdAt }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get all prescriptions", e)
-            emptyList()
-        }
+    fun getAllPrescriptions(context: Context, customerId: String = ""): List<Prescription> {
+        val safeId = sanitizeCustomerId(customerId)
+        if (safeId.isBlank()) return emptyList()
+        return getPrescriptions(context, safeId)
     }
 
     /**
@@ -157,14 +135,16 @@ object LocalPrescriptionManager {
             if (safeId.isBlank()) return emptyList()
 
             // Try reading encrypted storage first via SecureCredentialStore
-            val secureStore = com.commerceos.android.session.SecureCredentialStore(context)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
             val json = secureStore.read(KEY_PREFIX + safeId)
                 ?: run {
                     // Fallback / migration from legacy plaintext prefs
                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     prefs.getString(KEY_PREFIX + safeId, null)?.also { legacyJson ->
-                        secureStore.save(KEY_PREFIX + safeId, legacyJson)
-                        prefs.edit().remove(KEY_PREFIX + safeId).apply()
+                        val migrated = secureStore.save(KEY_PREFIX + safeId, legacyJson)
+                        if (migrated) {
+                            prefs.edit().remove(KEY_PREFIX + safeId).commit()
+                        }
                     }
                 }
 
@@ -192,10 +172,12 @@ object LocalPrescriptionManager {
 
     /**
      * Stores or updates a [Prescription] in the device app's personal encrypted storage.
+     * Returns true if encrypted persistence succeeded; preserves legacy data and returns false on failure.
      */
-    fun savePrescription(context: Context, rx: Prescription) {
-        try {
+    fun savePrescription(context: Context, rx: Prescription): Boolean {
+        return try {
             val safeId = sanitizeCustomerId(rx.customerId)
+            if (safeId.isBlank()) return false
             val existing = getPrescriptions(context, rx.customerId).toMutableList()
             existing.removeAll { it.id == rx.id }
             existing.add(0, rx) // Most recent first
@@ -203,14 +185,21 @@ object LocalPrescriptionManager {
             val json = gson.toJson(existing, type)
 
             // Persist to Keystore-backed AES-GCM encrypted store
-            val secureStore = com.commerceos.android.session.SecureCredentialStore(context)
-            secureStore.save(KEY_PREFIX + safeId, json)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            val saved = secureStore.save(KEY_PREFIX + safeId, json)
 
-            // Clear any old unencrypted preference
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().remove(KEY_PREFIX + safeId).apply()
+            if (saved) {
+                // Clear any old unencrypted preference only after verified encrypted save
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().remove(KEY_PREFIX + safeId).commit()
+                true
+            } else {
+                Log.e(TAG, "Failed to securely save prescription for $safeId")
+                false
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save prescription locally", e)
+            false
         }
     }
 
@@ -232,7 +221,7 @@ object LocalPrescriptionManager {
                 existing.removeAll { it.id == rxId }
                 val type = object : TypeToken<List<Prescription>>() {}.type
                 val json = gson.toJson(existing, type)
-                val secureStore = com.commerceos.android.session.SecureCredentialStore(context)
+                val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
                 secureStore.save(KEY_PREFIX + safeId, json)
             }
         } catch (e: Exception) {

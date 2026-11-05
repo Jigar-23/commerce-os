@@ -1079,6 +1079,90 @@ function hasRole(claims, roles) {
   return targetRoles.some(r => userRoles.includes(r));
 }
 
+let googleCertsCache = null;
+let googleCertsExpiry = 0;
+
+async function fetchGooglePublicCerts() {
+  if (googleCertsCache && Date.now() < googleCertsExpiry) {
+    return googleCertsCache;
+  }
+  try {
+    const res = await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com', {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) throw new Error(`Google certs endpoint returned HTTP ${res.status}`);
+    const certs = await res.json();
+    googleCertsCache = certs;
+    googleCertsExpiry = Date.now() + 6 * 3600 * 1000;
+    return certs;
+  } catch (err) {
+    console.warn('[FirebaseTokenVerifier] Failed to fetch Google certificates:', err.message);
+    return googleCertsCache || null;
+  }
+}
+
+async function verifyFirebaseIdToken(idToken, expectedProjectId = process.env.FIREBASE_PROJECT_ID) {
+  if (!idToken || typeof idToken !== 'string') return { ok: false, error: 'MISSING_TOKEN', message: 'Token string is required.' };
+  const parts = idToken.split('.');
+  if (parts.length !== 3) return { ok: false, error: 'MALFORMED_TOKEN', message: 'JWT must contain three parts.' };
+
+  let header, payload;
+  try {
+    header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch (_) {
+    return { ok: false, error: 'INVALID_TOKEN_ENCODING', message: 'Token segments must be valid Base64URL.' };
+  }
+
+  if (header.alg !== 'RS256' || !header.kid) {
+    return { ok: false, error: 'INVALID_ALGORITHM', message: 'Firebase tokens must use RS256 algorithm with kid header.' };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp < now) {
+    return { ok: false, error: 'TOKEN_EXPIRED', message: 'Firebase token has expired.' };
+  }
+  if (!payload.sub || typeof payload.sub !== 'string') {
+    return { ok: false, error: 'INVALID_SUBJECT', message: 'Token subject is missing.' };
+  }
+
+  const projectId = expectedProjectId || payload.aud;
+  if (!projectId) {
+    return { ok: false, error: 'MISSING_PROJECT_ID', message: 'Firebase project ID cannot be determined.' };
+  }
+  if (payload.aud !== projectId) {
+    return { ok: false, error: 'AUDIENCE_MISMATCH', message: 'Token audience does not match project ID.' };
+  }
+  if (payload.iss !== `https://securetoken.google.com/${projectId}`) {
+    return { ok: false, error: 'ISSUER_MISMATCH', message: 'Token issuer is not authentic Google SecureToken.' };
+  }
+  if (!payload.phone_number) {
+    return { ok: false, error: 'MISSING_PHONE_NUMBER', message: 'Token does not contain a verified phone number claim.' };
+  }
+
+  // Cryptographic Signature Verification against Google Public Certificates
+  const certs = await fetchGooglePublicCerts();
+  if (!certs || !certs[header.kid]) {
+    return { ok: false, error: 'KEY_NOT_FOUND', message: 'Google public key matching kid not found or unavailable.' };
+  }
+
+  const cert = certs[header.kid];
+  try {
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(`${parts[0]}.${parts[1]}`);
+    const signatureBuf = Buffer.from(parts[2], 'base64url');
+    const isValid = verifier.verify(cert, signatureBuf);
+
+    if (!isValid) {
+      return { ok: false, error: 'INVALID_SIGNATURE', message: 'Cryptographic signature verification failed against Google public key.' };
+    }
+  } catch (err) {
+    return { ok: false, error: 'VERIFICATION_ERROR', message: `Signature check error: ${err.message}` };
+  }
+
+  return { ok: true, payload, phoneNumber: payload.phone_number };
+}
+
 function stripNullBytes(obj) {
   if (typeof obj === 'string') {
     return obj.replace(/\0/g, '');
@@ -1349,15 +1433,20 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        if (targetOrder || targetDelivery) {
-          const isCustomer = targetOrder && (targetOrder.customerId === authClaims.sub || targetOrder.customer_id === authClaims.sub);
-          const isRider = targetDelivery && (targetDelivery.riderId === authClaims.sub || targetDelivery.rider_id === authClaims.sub);
-          const isStoreSeller = targetOrder && authClaims.storeId && (targetOrder.storeId === authClaims.storeId || targetOrder.store_id === authClaims.storeId);
-          const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+        if (!targetOrder && !targetDelivery) {
+          return sendJson(res, 404, {
+            error: 'NOT_FOUND',
+            message: `${streamType === 'order' ? 'Order' : 'Delivery session'} '${streamId}' not found.`
+          });
+        }
 
-          if (!isCustomer && !isRider && !isStoreSeller && !isAdmin) {
-            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to access this delivery stream.' });
-          }
+        const isCustomer = targetOrder && (targetOrder.customerId === authClaims.sub || targetOrder.customer_id === authClaims.sub);
+        const isRider = targetDelivery && (targetDelivery.riderId === authClaims.sub || targetDelivery.rider_id === authClaims.sub);
+        const isStoreSeller = targetOrder && authClaims.storeId && (targetOrder.storeId === authClaims.storeId || targetOrder.store_id === authClaims.storeId);
+        const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+
+        if (!isCustomer && !isRider && !isStoreSeller && !isAdmin) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to access this delivery stream.' });
         }
       }
 
@@ -1660,7 +1749,7 @@ const server = http.createServer(async (req, res) => {
                 `, ['evt_' + crypto.randomUUID(), targetOrderId, JSON.stringify(outboxPayload)]);
               } else {
                 // Rx approved, but order still awaits payment or seller approval
-                const nextStatus = isPaidOrCod ? 'ACCEPTED' : 'PAYMENT_PENDING';
+                const nextStatus = isPaidOrCod ? (isSellerAccepted ? 'READY_FOR_PICKUP' : 'SELLER_PENDING') : 'PAYMENT_PENDING';
                 await client.query(`
                   UPDATE orders
                   SET status = $2, updated_at = NOW()
@@ -2311,47 +2400,31 @@ const server = http.createServer(async (req, res) => {
     if ((pathname === '/api/v1/auth/google-sms/verify' || pathname === '/api/v1/auth/firebase/verify' || pathname === '/api/v1/auth/firebase-phone/verify') && method === 'POST') {
       const body = await parseJsonBody(req);
       const idToken = String(body.idToken || body.id_token || body.token || '').trim();
-      const rawPhone = String(body.phone || body.phoneNumber || body.mobileNumber || '').trim();
       const roleParam = String(body.role || '').toUpperCase();
 
-      if (!idToken && !rawPhone) {
-        return sendJson(res, 400, { error: 'INVALID_REQUEST', message: 'idToken or phone is required.' });
+      if (!idToken) {
+        return sendJson(res, 400, {
+          error: 'ID_TOKEN_REQUIRED',
+          message: 'An authentic, cryptographically verified Firebase ID token is required. Direct unauthenticated phone number exchange is strictly prohibited. Please authenticate using the SMS OTP challenge flow (/api/v1/auth/customer/otp/send).'
+        });
       }
 
-      let verifiedPhone = null;
-
-      // Extract and verify Google Firebase ID Token payload
-      if (idToken && idToken.includes('.')) {
-        try {
-          const parts = idToken.split('.');
-          if (parts.length === 3) {
-            const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-            const now = Math.floor(Date.now() / 1000);
-            if (payload.exp && payload.exp < now) {
-              return sendJson(res, 401, { error: 'EXPIRED_GOOGLE_TOKEN', message: 'Google authentication token has expired.' });
-            }
-            if (payload.phone_number) {
-              verifiedPhone = payload.phone_number;
-            }
-          }
-        } catch (_) {}
+      const verifyRes = await verifyFirebaseIdToken(idToken);
+      if (!verifyRes.ok) {
+        return sendJson(res, 401, {
+          error: 'FIREBASE_VERIFICATION_FAILED',
+          code: verifyRes.error,
+          message: verifyRes.message || 'Firebase ID token verification failed. Please authenticate via the SMS OTP challenge flow.'
+        });
       }
 
-      if (!verifiedPhone && rawPhone) {
-        const digits = rawPhone.replace(/\D/g, '').slice(-10);
-        if (digits.length === 10) verifiedPhone = `+91${digits}`;
-      }
-
-      if (!verifiedPhone) {
-        return sendJson(res, 400, { error: 'PHONE_NOT_VERIFIED', message: 'Could not extract verified phone from Google token.' });
-      }
-
+      const verifiedPhone = verifyRes.phoneNumber;
       const phoneDigits = verifiedPhone.replace(/\D/g, '').slice(-10);
       const formattedPhone = `+91${phoneDigits}`;
 
       if (roleParam === 'RIDER' || roleParam === 'ROLE_RIDER') {
         const rdrPreCheck = await pool.query(
-          `SELECT id, rider_id, name, phone, status, roles, is_approved, assigned_store_id
+          `SELECT id, rider_id, full_name, phone, status, store_id
            FROM riders WHERE (phone = $1 OR phone = $2 OR rider_id = $3 OR id = $3)`,
           [formattedPhone, phoneDigits, `rdr_${phoneDigits}`]
         );
@@ -5430,9 +5503,7 @@ const server = http.createServer(async (req, res) => {
       let isAuthorizedSeller = false;
       if (isAdmin) {
         isAuthorizedSeller = true;
-      } else if (authClaims.storeId === orderStoreId || authClaims.sellerId === order.seller_id) {
-        isAuthorizedSeller = true;
-      } else if (authClaims.role?.toUpperCase().includes('SELLER') || (authClaims.roles && authClaims.roles.some(r => String(r).toUpperCase().includes('SELLER')))) {
+      } else {
         const authorizedStore = await resolveAuthorizedSellerStoreId(authClaims);
         if (authorizedStore && authorizedStore === orderStoreId) {
           isAuthorizedSeller = true;
@@ -6012,48 +6083,49 @@ const server = http.createServer(async (req, res) => {
 
           const finalAmount = collectedAmount;
 
-          // Update COD ledger to reconciled via UPI
+          // Update COD ledger: record collection but mark pending bank reconciliation
           await client.query(
             `UPDATE cod_ledger
-             SET status = 'COLLECTED_RECONCILED',
+             SET status = 'COLLECTED_PENDING_RECONCILIATION',
                  amount_collected = $2,
                  collector_id = $3,
                  notes = $4,
-                 reconciled = TRUE,
+                 reconciled = FALSE,
                  updated_at = NOW()
              WHERE (order_id = $1 OR id = $1)`,
-            [session.order_id, finalAmount, session.rider_id, `Doorstep UPI collected via UTR: ${cleanUtr}`]
+            [session.order_id, finalAmount, session.rider_id, `Doorstep UPI submitted via UTR: ${cleanUtr}. Pending bank reconciliation.`]
           );
 
-          // Update order payment status
+          // Update order payment status to VERIFICATION_PENDING (bank verification required before marking PAID)
           await client.query(
-            `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
+            `UPDATE orders SET payment_status = 'VERIFICATION_PENDING', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
             [session.order_id]
           );
 
-          // Record in payments table
+          // Record in payments table with PENDING_VERIFICATION
           const paymentId = 'pay_' + crypto.randomUUID();
           await client.query(
             `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'UPI', 'DOORSTEP_UPI', $5, $6, NOW(), NOW())`,
+             VALUES ($1, $2, $3, $4, 'INR', 'PENDING_VERIFICATION', 'UPI', 'DOORSTEP_UPI', $5, $6, NOW(), NOW())`,
             [
               paymentId,
               paymentId,
               session.order_id,
               finalAmount,
               cleanUtr,
-              JSON.stringify({ utr: cleanUtr, collectedByRider: session.rider_id, collectedAt: new Date().toISOString() })
+              JSON.stringify({ utr: cleanUtr, collectedByRider: session.rider_id, collectedAt: new Date().toISOString(), status: 'PENDING_BANK_RECONCILIATION' })
             ]
           );
 
           await client.query('COMMIT');
           return sendJson(res, 200, {
             ok: true,
+            status: 'RECORDED_PENDING_RECONCILIATION',
             deliveryId: session.delivery_id,
             orderId: session.order_id,
-            paymentStatus: 'PAID',
-            reconciled: true,
-            message: 'Doorstep UPI payment verified and reconciled.'
+            paymentStatus: 'VERIFICATION_PENDING',
+            reconciled: false,
+            message: 'Doorstep UPI reference recorded. Pending bank confirmation.'
           });
         } catch (err) {
           await client.query('ROLLBACK');
@@ -7009,23 +7081,41 @@ const server = http.createServer(async (req, res) => {
             COALESCE(SUM(CASE WHEN o.status != 'CANCELLED' THEN o.total_amount ELSE 0 END), 0)::numeric AS total_spend,
             MAX(o.created_at) AS last_order_date,
             (
-              SELECT address_line || ', ' || city || ' - ' || postal_code
+              SELECT ca.address_line || ', ' || ca.city || ' - ' || ca.postal_code
               FROM customer_addresses ca
               WHERE ca.customer_id = c.id
-              ORDER BY is_default DESC, created_at DESC
+                ${!isAdmin && authorizedStoreId ? `AND EXISTS (
+                  SELECT 1 FROM orders o2 
+                  WHERE o2.store_id = '${authorizedStoreId}' 
+                    AND (o2.customer_id = c.id OR o2.customer_id = c.phone)
+                    AND (o2.delivery_address->>'id' = ca.id OR o2.delivery_address->>'addressLine' = ca.address_line)
+                )` : ''}
+              ORDER BY ca.is_default DESC, ca.created_at DESC
               LIMIT 1
             ) AS primary_address,
             (
-              SELECT city 
+              SELECT ca.city 
               FROM customer_addresses ca 
               WHERE ca.customer_id = c.id 
-              ORDER BY is_default DESC, created_at DESC 
+                ${!isAdmin && authorizedStoreId ? `AND EXISTS (
+                  SELECT 1 FROM orders o2 
+                  WHERE o2.store_id = '${authorizedStoreId}' 
+                    AND (o2.customer_id = c.id OR o2.customer_id = c.phone)
+                    AND (o2.delivery_address->>'id' = ca.id OR o2.delivery_address->>'addressLine' = ca.address_line)
+                )` : ''}
+              ORDER BY ca.is_default DESC, ca.created_at DESC 
               LIMIT 1
             ) AS primary_city,
             (
               SELECT COUNT(*)::int 
               FROM customer_addresses ca 
               WHERE ca.customer_id = c.id
+                ${!isAdmin && authorizedStoreId ? `AND EXISTS (
+                  SELECT 1 FROM orders o2 
+                  WHERE o2.store_id = '${authorizedStoreId}' 
+                    AND (o2.customer_id = c.id OR o2.customer_id = c.phone)
+                    AND (o2.delivery_address->>'id' = ca.id OR o2.delivery_address->>'addressLine' = ca.address_line)
+                )` : ''}
             ) AS addresses_count
           FROM customers c
           ${isAdmin ? 'LEFT' : 'INNER'} JOIN orders o ON (o.customer_id = c.id OR o.customer_id = c.phone)
@@ -7356,12 +7446,12 @@ const server = http.createServer(async (req, res) => {
       try {
         const body = await parseJsonBody(req);
 
-        // Restrict phone number, tier, and status modification to Administrator only
-        if (body.phone && !isAdmin) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer phone number (login identity) can only be modified by an administrator.' });
-        }
-        if ((body.isActive !== undefined || body.is_active !== undefined || body.tier !== undefined) && !isAdmin) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer active status and tier can only be modified by an administrator.' });
+        // Restrict global customer profile modification to Administrator or the customer themselves
+        if (!isAdmin && !isSelf) {
+          return sendJson(res, 403, {
+            error: 'FORBIDDEN',
+            message: 'Sellers cannot modify global customer profile fields. Only an administrator or the customer can update profile identity.'
+          });
         }
 
         const fullName = body.fullName || body.full_name || body.name;
@@ -7446,45 +7536,47 @@ const server = http.createServer(async (req, res) => {
       const riderId = authClaims.riderId || authClaims.sub;
       const now = Date.now();
 
+      const isRiderCaller = authClaims.role?.includes('RIDER') || authClaims.roles?.includes('ROLE_RIDER') || authClaims.scope?.includes('rider');
+      if (!isRiderCaller) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider account is required to query delivery offers.' });
+      }
+
       try {
+        // Enforce active rider identity check
+        let riderStoreId = null;
+        if (pool && !isLocalMode) {
+          const rdrCheck = await pool.query(
+            `SELECT id, rider_id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+            [riderId]
+          );
+          if (rdrCheck.rows.length > 0) {
+            if (rdrCheck.rows[0].status !== 'ACTIVE') {
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Rider account is suspended or inactive.' });
+            }
+            riderStoreId = rdrCheck.rows[0].store_id;
+          }
+        }
+
         const offRes = await pool.query(
           `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount, ord.is_cod, ord.store_id, ord.created_at AS order_created_at,
                   s.store_name, s.address AS store_address, s.latitude AS store_lat, s.longitude AS store_lng
            FROM offers o
            LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
            LEFT JOIN stores s ON s.id = ord.store_id
-           WHERE (o.rider_id = $1 OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE OR o.rider_id IS NULL)
+           WHERE (o.rider_id = $1 OR (o.is_broadcast = TRUE AND ord.store_id = $2))
              AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
              AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
            ORDER BY o.created_at DESC LIMIT 5`,
-          [riderId]
+          [riderId, riderStoreId]
         );
-
-        if (offRes.rows.length === 0) {
-          const fallbackRes = await pool.query(
-            `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount, ord.is_cod, ord.store_id, ord.created_at AS order_created_at,
-                    s.store_name, s.address AS store_address, s.latitude AS store_lat, s.longitude AS store_lng
-             FROM offers o
-             LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
-             LEFT JOIN stores s ON s.id = ord.store_id
-             WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
-               AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
-               AND NOT EXISTS (
-                 SELECT 1 FROM delivery_sessions active_ds
-                 WHERE active_ds.rider_id = $1
-                   AND active_ds.state IN ('ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
-               )
-             ORDER BY o.created_at DESC LIMIT 5`,
-            [riderId]
-          );
-          if (fallbackRes.rows.length > 0) {
-            offRes.rows = fallbackRes.rows;
-          }
-        }
 
         const mappedOffers = offRes.rows.map(o => {
           const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
-          const customerAddrStr = addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Delivery Address');
+          const isAssignedToCaller = (o.rider_id === riderId && (o.status === 'ASSIGNED' || o.status === 'ACCEPTED'));
+          const coarseLocality = addr.locality || addr.area || addr.city || 'Delivery Area';
+          const customerAddrStr = isAssignedToCaller
+            ? (addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Delivery Address'))
+            : coarseLocality;
           const expMs = Number(o.offer_expires_at) || (now + 1800000);
           const ordTotal = Number(o.total_amount || 0);
           const billVal = ordTotal > 0 ? ordTotal : Number(o.earnings_amount || o.total_earnings || 0);
@@ -7508,10 +7600,10 @@ const server = http.createServer(async (req, res) => {
             payoutFormatted: `₹${billVal.toFixed(2)}`,
             pickupAddress: o.store_name || 'Fulfillment Hub',
             deliveryAddress: customerAddrStr,
-            customerName: addr.contactName || 'Customer',
+            customerName: isAssignedToCaller ? (addr.contactName || 'Customer') : 'Customer',
             customerAddress: customerAddrStr,
-            customerLat: Number(addr.latitude) || null,
-            customerLng: Number(addr.longitude) || null,
+            customerLat: isAssignedToCaller ? (Number(addr.latitude) || null) : null,
+            customerLng: isAssignedToCaller ? (Number(addr.longitude) || null) : null,
             merchantName: o.store_name || 'Commerce OS Fulfillment Hub',
             merchantAddress: o.store_address || 'Fulfillment Hub Address',
             merchantLat: Number(o.store_lat) || null,
@@ -8694,12 +8786,90 @@ const server = http.createServer(async (req, res) => {
       if (delivery.rider_id !== authClaims.sub && !authClaims.role?.includes('ADMIN')) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only assigned rider or admin can cancel delivery.' });
       }
-      await appRepositories.deliveryRepo.transitionStateTransactionally(delivery.delivery_id || deliveryId, 'CANCELLED', authClaims.sub);
-      if (pool && delivery.order_id) {
-        pool.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`, [delivery.order_id, delivery.delivery_id || deliveryId]).catch(() => {});
-        pool.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [delivery.order_id]).catch(() => {});
+
+      // Disallow rider cancellation post-pickup
+      const postPickupStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'];
+      if (postPickupStates.includes(delivery.state) && !authClaims.role?.includes('ADMIN')) {
+        return sendJson(res, 409, {
+          error: 'CANNOT_CANCEL_POST_PICKUP',
+          message: `Delivery in state '${delivery.state}' cannot be cancelled by rider after pickup. Please contact dispatch support.`
+        });
       }
-      return sendJson(res, 200, { ok: true, deliveryId, state: 'CANCELLED', reason: body.reason || 'Rider cancelled' });
+
+      if (pool && !isLocalMode) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+          const sessLock = await client.query(
+            `SELECT * FROM delivery_sessions WHERE (delivery_id = $1 OR id = $1) FOR UPDATE`,
+            [delivery.delivery_id || deliveryId]
+          );
+          if (sessLock.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'SESSION_NOT_FOUND', message: 'Delivery session not found.' });
+          }
+          const currentSession = sessLock.rows[0];
+          if (currentSession.state === 'DELIVERED') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, { error: 'DELIVERY_ALREADY_COMPLETED', message: 'Cannot cancel an order that has already been delivered.' });
+          }
+
+          const transitionResult = await appRepositories.deliveryRepo.transitionStateTransactionally(
+            currentSession.delivery_id || deliveryId,
+            'CANCELLED',
+            authClaims.sub
+          );
+
+          if (!transitionResult || !transitionResult.ok) {
+            await client.query('ROLLBACK');
+            return sendJson(res, transitionResult?.httpStatus || 409, {
+              error: transitionResult?.error || 'TRANSITION_FAILED',
+              message: transitionResult?.message || 'Failed to cancel delivery session.'
+            });
+          }
+
+          if (currentSession.order_id) {
+            const ordLock = await client.query(
+              `SELECT id, status, store_id, items FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+              [currentSession.order_id]
+            );
+            if (ordLock.rows.length > 0) {
+              const currentOrd = ordLock.rows[0];
+              if (currentOrd.status === 'DELIVERED') {
+                await client.query('ROLLBACK');
+                return sendJson(res, 409, { error: 'ORDER_ALREADY_DELIVERED', message: 'Cannot cancel a delivered order.' });
+              }
+              await client.query(
+                `UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE id = $1`,
+                [currentOrd.id]
+              );
+              await client.query(
+                `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`,
+                [currentOrd.id, currentSession.delivery_id || deliveryId]
+              );
+              const ordItems = Array.isArray(currentOrd.items) ? currentOrd.items : (typeof currentOrd.items === 'string' ? JSON.parse(currentOrd.items) : []);
+              if (appRepositories?.inventoryRepo?.releaseStockTransactionally && currentOrd.store_id && ordItems.length > 0) {
+                await appRepositories.inventoryRepo.releaseStockTransactionally(client, currentOrd.store_id, ordItems);
+              }
+            }
+          }
+
+          await client.query('COMMIT');
+          return sendJson(res, 200, { ok: true, deliveryId, state: 'CANCELLED', reason: body.reason || 'Rider cancelled' });
+        } catch (err) {
+          await client.query('ROLLBACK');
+          return sendJson(res, 500, { error: 'CANCELLATION_FAILED', message: err.message });
+        } finally {
+          client.release();
+        }
+      } else {
+        const transitionResult = await appRepositories.deliveryRepo.transitionStateTransactionally(delivery.delivery_id || deliveryId, 'CANCELLED', authClaims.sub);
+        if (!transitionResult || !transitionResult.ok) {
+          return sendJson(res, transitionResult?.httpStatus || 409, { error: transitionResult?.error || 'TRANSITION_FAILED', message: transitionResult?.message });
+        }
+        return sendJson(res, 200, { ok: true, deliveryId, state: 'CANCELLED', reason: body.reason || 'Rider cancelled' });
+      }
     }
 
     // GET /api/v1/delivery/order/:orderId OR /api/v1/delivery/session/:deliveryId

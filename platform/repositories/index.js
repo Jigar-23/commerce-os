@@ -3053,10 +3053,10 @@ class TransactionalDeliveryRepository {
         'OUT_FOR_PICKUP': ['ARRIVED_STORE', 'ARRIVED_MERCHANT', 'CANCELLED'],
         'ARRIVED_STORE': ['PICKED_UP', 'OUT_FOR_DELIVERY', 'CANCELLED'],
         'ARRIVED_MERCHANT': ['PICKED_UP', 'OUT_FOR_DELIVERY', 'CANCELLED'],
-        'PICKED_UP': ['OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED', 'CANCELLED'],
-        'OUT_FOR_DELIVERY': ['ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED', 'CANCELLED'],
-        'ARRIVED_CUSTOMER': ['HANDOFF_STARTED', 'DELIVERED', 'CANCELLED'],
-        'HANDOFF_STARTED': ['DELIVERED', 'CANCELLED'],
+        'PICKED_UP': ['OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'],
+        'OUT_FOR_DELIVERY': ['ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'],
+        'ARRIVED_CUSTOMER': ['HANDOFF_STARTED', 'DELIVERED'],
+        'HANDOFF_STARTED': ['DELIVERED'],
         'DELIVERED': [],
         'CANCELLED': [],
         'DECLINED': [],
@@ -3523,6 +3523,25 @@ class TransactionalOrderRepository {
         // Fast-path Idempotency Replay Check: Return winning order immediately if already placed
         const idempotencyKey = data.idempotencyKey || data.idempotency_key || null;
         if (idempotencyKey) {
+          const rawItems = Array.isArray(data.items) ? data.items : [];
+          const sortedItems = [...rawItems]
+            .map(it => ({
+              sku: String(it.sku || it.productId || ''),
+              qty: Number(it.quantity || it.qty || 1)
+            }))
+            .sort((a, b) => a.sku.localeCompare(b.sku));
+
+          requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+            customerId,
+            addressId: data.addressId || null,
+            orderType: (data.orderType || 'QUICK_COMMERCE_10MIN').toUpperCase(),
+            paymentMethod: (data.paymentMethod || 'COD').toUpperCase(),
+            couponCode: data.couponCode ? String(data.couponCode).trim().toUpperCase() : null,
+            tip: Number(data.tip || data.tipAmount || 0),
+            prescriptionId: data.prescriptionId || null,
+            items: sortedItems
+          })).digest('hex');
+
           const existingOrderRes = await client.query(
             `SELECT id, order_id, customer_id, store_id, status, total_amount, payment_status, request_hash, items, delivery_address
              FROM orders 
@@ -3531,6 +3550,15 @@ class TransactionalOrderRepository {
           );
           if (existingOrderRes.rows.length > 0) {
             const existingOrder = existingOrderRes.rows[0];
+            if (existingOrder.request_hash && requestFingerprint && existingOrder.request_hash !== requestFingerprint) {
+              await client.query('ROLLBACK');
+              return {
+                ok: false,
+                httpStatus: 409,
+                error: 'IDEMPOTENCY_KEY_REUSE_MISMATCH',
+                message: 'Idempotency key was previously used with a different request payload.'
+              };
+            }
             const existingSessionRes = await client.query(
               `SELECT id, delivery_id, order_id, store_id, rider_id, state, merchant_name, customer_name
                FROM delivery_sessions WHERE order_id = $1 LIMIT 1`,
@@ -3744,19 +3772,19 @@ class TransactionalOrderRepository {
         };
       }
 
-      // 10. Comprehensive Request Fingerprint Hash (Covers all material request inputs)
+      // 10. Canonical Request Fingerprint Hash (Covers all material request inputs)
       const sortedItemsForHash = resolvedItemSnapshots
-        .map(it => ({ productId: it.productId, sku: it.sku, qty: it.quantity }))
+        .map(it => ({ sku: String(it.sku || it.productId || ''), qty: Number(it.quantity || it.qty || 1) }))
         .sort((a, b) => a.sku.localeCompare(b.sku));
 
       requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
         customerId,
-        addressId: data.addressId,
-        orderType: authoritativeOrderType,
-        paymentMethod: requestedMethod,
+        addressId: data.addressId || null,
+        orderType: (authoritativeOrderType || 'QUICK_COMMERCE_10MIN').toUpperCase(),
+        paymentMethod: (requestedMethod || 'COD').toUpperCase(),
+        couponCode: data.couponCode ? String(data.couponCode).trim().toUpperCase() : null,
+        tip: Number(data.tip || data.tipAmount || 0),
         prescriptionId: data.prescriptionId || null,
-        preferredStoreId: data.preferredStoreId || data.storeId || null,
-        fulfillmentStoreId: targetStoreId,
         items: sortedItemsForHash
       })).digest('hex');
 
@@ -3918,18 +3946,41 @@ class TransactionalOrderRepository {
       const authoritativeInitialStatus = hasRxRequiredItem ? 'PRESCRIPTION_VERIFICATION_PENDING' : 'PLACED';
 
       // Prescription Ownership and Eligibility Verification
-      if (data.prescriptionId) {
+      if (hasRxRequiredItem) {
+        if (!data.prescriptionId) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 400,
+            error: 'PRESCRIPTION_REQUIRED',
+            message: 'One or more items in the order require a prescription. Please provide a valid prescriptionId.'
+          };
+        }
         const rxCheck = await client.query(
           `SELECT id, customer_id, status FROM prescriptions WHERE id = $1 AND customer_id = $2`,
           [data.prescriptionId, customer.id]
         );
-        if (rxCheck.rows.length === 0) {
+        if (rxCheck.rows.length === 0 || ['REJECTED', 'EXPIRED'].includes(rxCheck.rows[0].status)) {
           await client.query('ROLLBACK');
           return {
             ok: false,
             httpStatus: 400,
             error: 'INVALID_PRESCRIPTION',
-            message: 'Prescription does not exist or does not belong to the authenticated customer.'
+            message: 'Prescription does not exist, is expired/rejected, or does not belong to the authenticated customer.'
+          };
+        }
+      } else if (data.prescriptionId) {
+        const rxCheck = await client.query(
+          `SELECT id, customer_id, status FROM prescriptions WHERE id = $1 AND customer_id = $2`,
+          [data.prescriptionId, customer.id]
+        );
+        if (rxCheck.rows.length === 0 || ['REJECTED', 'EXPIRED'].includes(rxCheck.rows[0].status)) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 400,
+            error: 'INVALID_PRESCRIPTION',
+            message: 'Prescription does not exist, is expired/rejected, or does not belong to the authenticated customer.'
           };
         }
       }
@@ -4324,25 +4375,46 @@ class TransactionalOrderRepository {
           return { ok: true, order, isIdempotent: true, isRebroadcast: true };
         }
 
-        // Precondition Check: Must be in PLACED, SELLER_PENDING, or CREATED (PAYMENT_PENDING must be rejected)
+        // Precondition Check: Must not have pending payment for non-COD orders
         if (order.status === 'PAYMENT_PENDING' || (!order.is_cod && order.payment_status === 'PAYMENT_PENDING')) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 409, error: 'PAYMENT_PENDING', message: 'Cannot accept order while payment is pending.' };
         }
 
-        if (!['PLACED', 'SELLER_PENDING', 'CREATED'].includes(order.status)) {
+        const allowedAcceptStates = ['PLACED', 'SELLER_PENDING', 'CREATED', 'PRESCRIPTION_VERIFICATION_PENDING', 'ACCEPTED', 'PROCESSING'];
+        if (!allowedAcceptStates.includes(order.status)) {
           await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'. Must be PLACED or SELLER_PENDING.` };
+          return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'.` };
         }
 
-        await client.query(`UPDATE orders SET status = 'SELLER_ACCEPTED', seller_approval_status = 'ACCEPTED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
+        // Check if Rx verification is still pending
+        let isRxPending = false;
+        if (order.prescription_id || order.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+          if (order.prescription_id) {
+            const rxCheck = await client.query('SELECT status FROM prescriptions WHERE id = $1', [order.prescription_id]);
+            if (rxCheck.rows.length === 0 || rxCheck.rows[0].status !== 'APPROVED') {
+              isRxPending = true;
+            }
+          } else {
+            isRxPending = true;
+          }
+        }
+
+        const nextStatus = isRxPending ? 'PRESCRIPTION_VERIFICATION_PENDING' : 'SELLER_ACCEPTED';
         await client.query(
-          `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
-           VALUES ($1, $2, $3, $4, 'PENDING')`,
-          ['ORDER', order.order_id || order.id, 'ORDER_SELLER_ACCEPTED', JSON.stringify({ orderId: order.order_id || order.id, sellerId })]
+          `UPDATE orders SET status = $1, seller_approval_status = 'ACCEPTED', updated_at = NOW() WHERE order_id = $2`,
+          [nextStatus, order.order_id || order.id]
         );
+
+        if (!isRxPending) {
+          await client.query(
+            `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
+             VALUES ($1, $2, $3, $4, 'PENDING')`,
+            ['ORDER', order.order_id || order.id, 'ORDER_SELLER_ACCEPTED', JSON.stringify({ orderId: order.order_id || order.id, sellerId })]
+          );
+        }
         await client.query('COMMIT');
-        return { ok: true, order: { ...order, status: 'SELLER_ACCEPTED', seller_approval_status: 'ACCEPTED' } };
+        return { ok: true, order: { ...order, status: nextStatus, seller_approval_status: 'ACCEPTED' } };
       } catch (err) {
         await client.query('ROLLBACK');
         if (err.code === '40001' && attempt < MAX_RETRIES - 1) {
@@ -6599,14 +6671,15 @@ class TransactionalPaymentRepository {
         `SELECT * FROM payment_webhook_events WHERE event_id = $1 LIMIT 1`,
         [eventId]
       );
-      if (existing.rows.length > 0) {
+      if (existing.rows.length > 0 && existing.rows[0].status === 'PROCESSED') {
         await client.query('COMMIT');
         return { deduplicated: true, status: 'ALREADY_PROCESSED', event: existing.rows[0] };
       }
       const id = 'evt_' + crypto.randomUUID();
       const res = await client.query(
         `INSERT INTO payment_webhook_events (id, event_id, event_type, provider, payload, status, processed_at)
-         VALUES ($1, $2, $3, $4, $5, 'PROCESSED', NOW())
+         VALUES ($1, $2, $3, $4, $5, 'RECEIVED', NOW())
+         ON CONFLICT (event_id) DO UPDATE SET status = 'RECEIVED', processed_at = NOW()
          RETURNING *`,
         [id, eventId, eventType, provider || 'STRIPE', JSON.stringify(payload || {})]
       );
@@ -6635,10 +6708,17 @@ class TransactionalPaymentRepository {
 
             if (webhookCurrency !== 'INR') {
               console.warn(`[WebhookReconciliation] Currency mismatch: ${webhookCurrency} !== INR`);
+              await client.query(`UPDATE payment_webhook_events SET status = 'MISMATCH_REJECTED', processed_at = NOW() WHERE event_id = $1`, [eventId]);
+              await client.query('COMMIT');
+              return { deduplicated: false, status: 'MISMATCH_REJECTED', reason: 'CURRENCY_MISMATCH' };
             } else if (Math.abs(amountCaptured - Number(ord.total_amount)) > 0.5) {
               console.warn(`[WebhookReconciliation] Amount mismatch: ${amountCaptured} !== ${ord.total_amount}`);
+              await client.query(`UPDATE payment_webhook_events SET status = 'MISMATCH_REJECTED', processed_at = NOW() WHERE event_id = $1`, [eventId]);
+              await client.query('COMMIT');
+              return { deduplicated: false, status: 'MISMATCH_REJECTED', reason: 'AMOUNT_MISMATCH' };
             } else {
               await client.query(`UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE id = $1`, [ord.id]);
+              await client.query(`UPDATE payment_webhook_events SET status = 'PROCESSED', processed_at = NOW() WHERE event_id = $1`, [eventId]);
               const payId = 'pay_' + crypto.randomUUID();
               await client.query(
                 `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
@@ -6757,19 +6837,19 @@ class TransactionalPaymentRepository {
       const refundId = 'ref_' + crypto.randomUUID();
       const refRes = await client.query(
         `INSERT INTO payment_refunds (id, refund_id, order_id, amount, currency, reason, idempotency_key, status, created_at)
-         VALUES ($1, $2, $3, $4, 'INR', $5, $6, 'COMPLETED', NOW())
+         VALUES ($1, $2, $3, $4, 'INR', $5, $6, 'PENDING', NOW())
          RETURNING *`,
         [refundId, refundId, order.order_id, requested, reason || 'Customer requested refund', idempotencyKey]
       );
 
-      const newStatus = (priorRefunded + requested >= totalCaptured) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+      const newStatus = (priorRefunded + requested >= totalCaptured) ? 'REFUND_PENDING' : 'PARTIALLY_REFUNDED_PENDING';
       await client.query(
         `UPDATE orders SET payment_status = $1, updated_at = NOW() WHERE id = $2`,
         [newStatus, order.id]
       );
 
       await client.query('COMMIT');
-      return { status: 'SUCCESS', refund: refRes.rows[0], newOrderStatus: newStatus };
+      return { status: 'PENDING', refund: refRes.rows[0], newOrderStatus: newStatus };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -6867,15 +6947,15 @@ class LocalDevelopmentPaymentRepository {
       currency: 'INR',
       reason: reason || 'Customer refund',
       idempotencyKey,
-      status: 'COMPLETED',
+      status: 'PENDING',
       createdAt: new Date().toISOString()
     };
     this.db.paymentRefunds.push(rec);
-    const newStatus = (priorRefunded + requested >= total) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+    const newStatus = (priorRefunded + requested >= total) ? 'REFUND_PENDING' : 'PARTIALLY_REFUNDED_PENDING';
     order.paymentStatus = newStatus;
     order.payment_status = newStatus;
     this.saveDb();
-    return { status: 'SUCCESS', refund: rec, newOrderStatus: newStatus };
+    return { status: 'PENDING', refund: rec, newOrderStatus: newStatus };
   }
 }
 
@@ -7730,12 +7810,40 @@ function createProductionRepositories(pool, options = {}) {
       const oRes = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [targetOrderId]);
       const ord = oRes.rows[0] || null;
 
-      if (!ord || ['CANCELLED', 'DELIVERED'].includes(ord.status)) {
+      if (!ord || ['CANCELLED', 'DELIVERED', 'REJECTED'].includes(ord.status)) {
         return { ok: true, skipped: true, reason: 'ORDER_TERMINAL' };
       }
 
-      if (ord.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
-        return { ok: true, dispatchGated: true, reason: 'PRESCRIPTION_PENDING' };
+      // 1. Prescription Safety Gate: Must be approved by licensed pharmacist
+      if (ord.prescription_id || ord.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+        if (ord.prescription_id) {
+          const rxCheck = await pool.query('SELECT status FROM prescriptions WHERE id = $1', [ord.prescription_id]);
+          if (rxCheck.rows.length === 0 || rxCheck.rows[0].status !== 'APPROVED') {
+            console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting pharmacist verification`);
+            return { ok: true, dispatchGated: true, reason: 'PRESCRIPTION_PENDING' };
+          }
+        } else {
+          console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting pharmacist verification`);
+          return { ok: true, dispatchGated: true, reason: 'PRESCRIPTION_PENDING' };
+        }
+      }
+
+      // 2. Payment Safety Gate: Non-COD orders MUST have verified captured payment
+      const isCod = ord ? (ord.payment_method === 'COD' || ord.is_cod === true || ord.payment_status === 'COD_PENDING') : true;
+      const isPaid = ord ? (ord.payment_status === 'PAID' || ord.payment_status === 'CAPTURED') : false;
+      if (!isCod && !isPaid) {
+        if (options.sseBroadcaster) {
+          await options.sseBroadcaster(event.aggregate_id || 'global', 'ORDER_SELLER_ACCEPTED', { ...payload, dispatchGated: 'AWAITING_PAYMENT' });
+        }
+        return { ok: true, dispatchGated: true, reason: 'AWAITING_PAYMENT' };
+      }
+
+      // 3. Seller Approval Gate: Must not be rejected or pending seller acceptance
+      if (ord.seller_approval_status === 'REJECTED') {
+        return { ok: true, skipped: true, reason: 'SELLER_REJECTED' };
+      }
+      if (ord.seller_approval_status === 'PENDING') {
+        return { ok: true, dispatchGated: true, reason: 'AWAITING_SELLER_APPROVAL' };
       }
 
       if (ord.status === 'PLACED') {
@@ -7744,18 +7852,6 @@ function createProductionRepositories(pool, options = {}) {
           [ord.order_id || ord.id]
         );
         ord.status = 'READY_FOR_PICKUP';
-      }
-
-      // Payment Gating: Prepaid orders with PAYMENT_PENDING must NOT dispatch until payment is captured
-      const isCod = ord ? (ord.payment_method === 'COD' || ord.is_cod === true || ord.payment_status === 'COD_PENDING') : true;
-      const isPaid = ord ? (ord.payment_status === 'PAID' || ord.payment_status === 'CAPTURED') : true;
-      const canDispatch = isCod || isPaid;
-
-      if (!canDispatch) {
-        if (options.sseBroadcaster) {
-          await options.sseBroadcaster(event.aggregate_id || 'global', 'ORDER_SELLER_ACCEPTED', { ...payload, dispatchGated: 'AWAITING_PAYMENT' });
-        }
-        return { ok: true, dispatchGated: true };
       }
 
       if ((!deliverySession.customerLat && !deliverySession.customer_lat) && event.aggregate_id) {

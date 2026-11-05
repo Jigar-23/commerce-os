@@ -50,6 +50,10 @@ class PrescriptionViewModel(
             uploadGeneration++
             uploadJob?.cancel()
             isUploading = false
+            loadGeneration++
+            loadJob?.cancel()
+            prescriptions = emptyList()
+            isLoading = false
         }
         loadGeneration++
         val generation = loadGeneration
@@ -175,7 +179,15 @@ class PrescriptionViewModel(
             errorMessage = "Attach at least one prescription image"
             return
         }
-        activeCustomerId = safeCustomerId
+        if (activeCustomerId != safeCustomerId) {
+            activeCustomerId = safeCustomerId
+            loadGeneration++
+            loadJob?.cancel()
+            prescriptions = emptyList()
+            isLoading = false
+            uploadJob?.cancel()
+            isUploading = false
+        }
         val requestGeneration = ++uploadGeneration
         uploadJob?.cancel()
         uploadJob = viewModelScope.launch {

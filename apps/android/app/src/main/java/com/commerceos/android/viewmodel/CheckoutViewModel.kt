@@ -101,7 +101,14 @@ data class CheckoutUiState(
             !isProcessing
 }
 
-class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
+class CheckoutViewModel(
+    private val repository: AppRepository,
+    private var mutationGate: CartMutationGate? = null
+) : ViewModel() {
+
+    fun setMutationGate(gate: CartMutationGate?) {
+        this.mutationGate = gate
+    }
 
     var uiState by mutableStateOf(CheckoutUiState())
         private set
@@ -310,6 +317,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
         items.fold(BigDecimal.ZERO) { acc, item -> acc.add(item.unitPrice.multiply(BigDecimal.valueOf(item.quantity.toLong()))) }
 
     private fun failCheckout(code: String, message: String) {
+        mutationGate?.unlockMutations()
         uiState = uiState.copy(
             state = CheckoutState.Failed(code, message),
             errorMessage = message,
@@ -318,33 +326,42 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
     }
 
     fun executeCheckout(paymentMethod: String) {
-        val snapshot = uiState
-        if (snapshot.isProcessing || snapshot.state is CheckoutState.Confirmed) return
+        if (uiState.isProcessing || uiState.state is CheckoutState.Confirmed) return
         val customerIdSnapshot = customerId.trim()
-
-        if (!snapshot.readyForPayment) {
-            val reason = when {
-                !snapshot.addressValid -> "Select a delivery address"
-                !snapshot.serviceabilityValid -> "Resolve delivery availability first"
-                !snapshot.cartValid -> "Cart is empty"
-                !snapshot.pricingValid -> "Checkout quote is incomplete"
-                !snapshot.prescriptionValid -> "Attach a pharmacist-approved prescription"
-                else -> "Checkout is not ready for payment"
-            }
-            uiState = snapshot.copy(state = CheckoutState.Failed("CHECKOUT_NOT_READY", reason), errorMessage = reason)
-            return
-        }
         if (customerIdSnapshot.isBlank()) {
-            uiState = snapshot.copy(errorMessage = "Authentication required for checkout")
+            uiState = uiState.copy(errorMessage = "Authentication required for checkout")
             return
         }
-        val address = snapshot.address ?: return
 
         checkoutJob?.cancel()
         checkoutJob = viewModelScope.launch {
-            uiState = snapshot.copy(isProcessing = true, errorMessage = null, state = CheckoutState.PlacingOrder)
+            mutationGate?.lockMutations()
+            mutationGate?.awaitMutationsIdle()
 
-            val prescriptionApproved = if (snapshot.items.any { it.prescriptionRequired }) {
+            // Re-read and revalidate state after mutation barrier
+            val freshSnapshot = uiState
+            if (!freshSnapshot.readyForPayment) {
+                val reason = when {
+                    !freshSnapshot.addressValid -> "Select a delivery address"
+                    !freshSnapshot.serviceabilityValid -> "Resolve delivery availability first"
+                    !freshSnapshot.cartValid -> "Cart is empty"
+                    !freshSnapshot.pricingValid -> "Checkout quote is incomplete"
+                    !freshSnapshot.prescriptionValid -> "Attach a pharmacist-approved prescription"
+                    else -> "Checkout is not ready for payment"
+                }
+                failCheckout("CHECKOUT_NOT_READY", reason)
+                return@launch
+            }
+
+            val address = freshSnapshot.address
+            if (address == null) {
+                failCheckout("CHECKOUT_NOT_READY", "Select a delivery address")
+                return@launch
+            }
+
+            uiState = freshSnapshot.copy(isProcessing = true, errorMessage = null, state = CheckoutState.PlacingOrder)
+
+            val prescriptionApproved = if (freshSnapshot.items.any { it.prescriptionRequired }) {
                 val serverPrescriptions = when (
                     val result = repository.getCustomerPrescriptions(customerIdSnapshot)
                 ) {
@@ -356,7 +373,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
                 }
 
                 serverPrescriptions.any {
-                    it.id == snapshot.prescriptionId &&
+                    it.id == freshSnapshot.prescriptionId &&
                         it.customerId == customerIdSnapshot &&
                         it.status.equals("APPROVED", ignoreCase = true)
                 }
@@ -375,11 +392,11 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
             val currentFingerprint = computePayloadFingerprint(
                 customerIdSnapshot,
                 address,
-                snapshot.items,
-                snapshot.prescriptionId,
-                snapshot.couponCode,
+                freshSnapshot.items,
+                freshSnapshot.prescriptionId,
+                freshSnapshot.couponCode,
                 paymentMethod,
-                snapshot.selectedSlotText
+                freshSnapshot.selectedSlotText
             )
             if (lastPayloadFingerprint != currentFingerprint) {
                 checkoutIdempotencyKey = null
@@ -392,20 +409,20 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
             // SERVER-AUTHORITATIVE AMOUNTS: omit client-calculated fees/discounts to eliminate trust-boundary risk
             val request = CartCheckoutRequest(
                 addressId = address.id,
-                prescriptionId = snapshot.prescriptionId,
+                prescriptionId = freshSnapshot.prescriptionId,
                 paymentMethod = paymentMethod,
                 idempotencyKey = idempotencyKey,
                 deliveryAddress = address,
                 deliveryFee = null,
                 discountAmount = null,
-                couponCode = snapshot.couponCode,
+                couponCode = freshSnapshot.couponCode,
                 packagingFee = null,
-                slotText = snapshot.selectedSlotText
+                slotText = freshSnapshot.selectedSlotText
             )
 
             when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
                 is ApiResult.Success -> {
-                    uiState = snapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
+                    uiState = freshSnapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
                     checkoutIdempotencyKey = null
                     lastPayloadFingerprint = null
                     _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
@@ -419,6 +436,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
     }
 
     fun reset() {
+        mutationGate?.unlockMutations()
         serviceabilityJob?.cancel()
         checkoutJob?.cancel()
         checkoutIdempotencyKey = null

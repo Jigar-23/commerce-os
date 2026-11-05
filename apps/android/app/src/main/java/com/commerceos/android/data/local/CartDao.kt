@@ -25,4 +25,12 @@ interface CartDao {
 
     @Query("DELETE FROM cart_items WHERE customerId = :customerId")
     suspend fun clearCart(customerId: String)
+
+    @androidx.room.Transaction
+    suspend fun replaceCart(customerId: String, items: List<CartItemEntity>) {
+        clearCart(customerId)
+        if (items.isNotEmpty()) {
+            insertAll(items)
+        }
+    }
 }

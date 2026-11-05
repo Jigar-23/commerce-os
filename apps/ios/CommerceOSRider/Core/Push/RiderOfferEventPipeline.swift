@@ -149,12 +149,26 @@ public final class RiderOfferEventPipeline: ObservableObject {
                 do {
                     let (bytes, response) = try await URLSession.shared.bytes(for: req)
                     guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
+                        if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 401 || httpRes.statusCode == 403 {
+                            print("[RiderOfferEventPipeline] SSE stream unauthorized (HTTP \(httpRes.statusCode)). Halting reconnect loop.")
+                            await MainActor.run {
+                                RiderSessionManager.shared.handleAuthExpired()
+                            }
+                            break
+                        }
                         try? await Task.sleep(nanoseconds: 5_000_000_000)
                         continue
                     }
 
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
+                        if line.contains("token_expired") {
+                            print("[RiderOfferEventPipeline] SSE received token_expired event. Halting reconnect loop.")
+                            await MainActor.run {
+                                RiderSessionManager.shared.handleAuthExpired()
+                            }
+                            break
+                        }
                         if line.hasPrefix("data:") {
                             let jsonString = String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
                             if let data = jsonString.data(using: .utf8),

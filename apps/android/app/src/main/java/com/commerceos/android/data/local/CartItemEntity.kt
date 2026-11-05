@@ -6,11 +6,13 @@ import com.commerceos.android.model.CartItem
 import com.commerceos.android.model.PharmacyCartAttributes
 import java.math.BigDecimal
 
-@Entity(tableName = "cart_items")
+@Entity(
+    tableName = "cart_items",
+    primaryKeys = ["customerId", "sku"]
+)
 data class CartItemEntity(
-    @PrimaryKey
-    val sku: String,
     val customerId: String,
+    val sku: String,
     val productId: String,
     val name: String,
     val unitPrice: Double,
@@ -51,13 +53,13 @@ data class CartItemEntity(
         fun fromCartItem(item: CartItem, customerId: String): CartItemEntity = CartItemEntity(
             sku = item.sku,
             customerId = customerId,
-            productId = (item.productId ?: item.sku).ifBlank { item.sku },
-            name = (item.name ?: item.sku).ifBlank { item.sku.ifBlank { "Prescribed Medicine" } },
-            unitPrice = (item.unitPrice ?: BigDecimal.ZERO).toDouble(),
-            quantity = (item.quantity ?: 1).coerceAtLeast(1),
-            verticalId = (item.verticalId ?: "general").ifBlank { "general" },
+            productId = item.productId.ifBlank { item.sku },
+            name = item.name.ifBlank { item.sku.ifBlank { "Prescribed Medicine" } },
+            unitPrice = item.unitPrice.toDouble(),
+            quantity = item.quantity.coerceAtLeast(1),
+            verticalId = item.verticalId.ifBlank { "general" },
             merchantId = item.merchantId,
-            mrp = (item.mrp ?: item.unitPrice ?: BigDecimal.ZERO).toDouble(),
+            mrp = item.mrp.toDouble(),
             brand = item.brand,
             packSize = item.packSize,
             image = item.image,

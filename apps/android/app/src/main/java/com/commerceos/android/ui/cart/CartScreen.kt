@@ -232,14 +232,9 @@ fun CartScreen(
 
             // Prescription verification card
             item {
-                val context = LocalContext.current
-                val localRx = remember { LocalPrescriptionManager.getAllPrescriptions(context) }
-                val allPrescriptions = remember(prescriptions, localRx) {
-                    (prescriptions + localRx).distinctBy { it.id }
-                }
                 OptionalPrescriptionCard(
-                    attachedRx = allPrescriptions.firstOrNull { it.id == attachedPrescriptionId },
-                    savedPrescriptions = allPrescriptions,
+                    attachedRx = prescriptions.firstOrNull { it.id == attachedPrescriptionId },
+                    savedPrescriptions = prescriptions,
                     onUploadPrescription = onUploadPrescription,
                     onAttachPrescription = onAttachPrescription
                 )
@@ -722,10 +717,8 @@ private fun OptionalPrescriptionCard(
     onUploadPrescription: () -> Unit,
     onAttachPrescription: (String?) -> Unit
 ) {
-    val context = LocalContext.current
-    val localRx = remember { LocalPrescriptionManager.getAllPrescriptions(context) }
-    val allSavedRx = remember(savedPrescriptions, localRx) {
-        (savedPrescriptions + localRx).distinctBy { it.id }
+    val allSavedRx = remember(savedPrescriptions) {
+        savedPrescriptions.distinctBy { it.id }
     }
     var showSavedRxSheet by remember { mutableStateOf(false) }
     var previewPrescription by remember { mutableStateOf<Prescription?>(null) }

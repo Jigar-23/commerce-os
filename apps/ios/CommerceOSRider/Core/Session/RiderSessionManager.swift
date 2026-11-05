@@ -109,6 +109,20 @@ public final class RiderSessionManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "rider_name")
     }
 
+    public func handleAuthExpired() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+        isShiftOnline = false
+        UserDefaults.standard.set(false, forKey: "rider_shift_online")
+        activeSession = nil
+        profile = nil
+        apiClient.clearAuth()
+        UserDefaults.standard.removeObject(forKey: "rider_id")
+        UserDefaults.standard.removeObject(forKey: "rider_phone")
+        UserDefaults.standard.removeObject(forKey: "rider_name")
+        RiderOfferEventPipeline.shared.stopListening()
+    }
+
     public func ensureOnlineShift() async {
         guard apiClient.isAuthenticated else { return }
         isShiftOnline = true

@@ -32,7 +32,7 @@ class CartViewModel(
     private val repository: AppRepository,
     private val cartDao: CartDao? = null,
     private val appContext: android.content.Context? = null
-) : ViewModel() {
+) : ViewModel(), CartMutationGate {
 
     var customerId by mutableStateOf("")
         private set
@@ -41,6 +41,25 @@ class CartViewModel(
     private var cartLoadJob: Job? = null
     private var accountSyncJob: Job? = null
     private var reorderAllJob: Job? = null
+    private var sanitizationCleanupJob: Job? = null
+    private var isInitialized = false
+
+    override var isLockedForCheckout by mutableStateOf(false)
+        private set
+
+    override fun lockMutations() {
+        isLockedForCheckout = true
+    }
+
+    override fun unlockMutations() {
+        isLockedForCheckout = false
+    }
+
+    override suspend fun awaitMutationsIdle() {
+        cartMutex.withLock {
+            // Barrier: all queued mutations serialized through cartMutex have finished
+        }
+    }
 
     var cartItems by mutableStateOf<List<CartItem>>(emptyList())
         private set
@@ -186,6 +205,9 @@ class CartViewModel(
     private val LOCAL_OFFLINE_CART_KEY = "local_offline_cart"
 
     init {
+        saveForLaterItems = appContext?.let { ctx ->
+            com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(ctx, "")
+        } ?: emptyList()
         loadFromLocalStorage(LOCAL_OFFLINE_CART_KEY)
         refreshDeliveryConfigAndPromotions()
     }
@@ -223,10 +245,11 @@ class CartViewModel(
 
     fun init(customerId: String) {
         val targetId = customerId.trim()
-        if (this.customerId == targetId) {
+        if (isInitialized && this.customerId == targetId) {
             refreshDeliveryConfigAndPromotions()
             return
         }
+        isInitialized = true
 
         customerGeneration++
         val generation = customerGeneration
@@ -254,28 +277,31 @@ class CartViewModel(
         }
 
         accountSyncJob = viewModelScope.launch {
-            if (cartDao != null) {
-                try {
-                    val guestItems = cartDao.getCartItems(LOCAL_OFFLINE_CART_KEY)
-                    for (guestItem in guestItems) {
-                        if (generation != customerGeneration || customerId.trim() != targetId) return@launch
-                        when (repository.addCartItem(targetId, guestItem.toCartItem())) {
-                            is ApiResult.Success ->
-                                cartDao.deleteBySku(guestItem.sku, LOCAL_OFFLINE_CART_KEY)
-                            is ApiResult.Failure ->
-                                errorMessage = "Some offline guest cart items could not be synced to your account."
+            cartMutex.withLock {
+                if (generation != customerGeneration || customerId.trim() != targetId) return@withLock
+                if (cartDao != null) {
+                    try {
+                        val guestItems = cartDao.getCartItems(LOCAL_OFFLINE_CART_KEY)
+                        for (guestItem in guestItems) {
+                            if (generation != customerGeneration || customerId.trim() != targetId) return@withLock
+                            when (repository.addCartItem(targetId, guestItem.toCartItem())) {
+                                is ApiResult.Success ->
+                                    cartDao.deleteBySku(guestItem.sku, LOCAL_OFFLINE_CART_KEY)
+                                is ApiResult.Failure ->
+                                    errorMessage = "Some offline guest cart items could not be synced to your account."
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (generation == customerGeneration && customerId.trim() == targetId) {
+                            errorMessage = "Cart synchronization encountered an error."
                         }
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (generation == customerGeneration && customerId.trim() == targetId) {
-                        errorMessage = "Cart synchronization encountered an error."
-                    }
                 }
-            }
 
-            if (generation == customerGeneration && customerId.trim() == targetId) loadCart()
+                if (generation == customerGeneration && customerId.trim() == targetId) loadCart()
+            }
         }
     }
 
@@ -287,21 +313,99 @@ class CartViewModel(
             item.name.isNotBlank() &&
             !item.name.equals("Medicine Item", ignoreCase = true)
 
+    private suspend fun syncLocalCartCache(
+        targetCustId: String,
+        items: List<CartItem>,
+        retries: Int = 1
+    ): Boolean {
+        val dao = cartDao ?: return true
+        if (targetCustId.isBlank()) return true
+        var attempt = 0
+        while (attempt <= retries) {
+            try {
+                dao.replaceCart(targetCustId, items.map { CartItemEntity.fromCartItem(it, targetCustId) })
+                return true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                attempt++
+                if (attempt > retries) return false
+            }
+        }
+        return false
+    }
+
+    private suspend fun deleteLocalCartItem(
+        targetCustId: String,
+        sku: String,
+        retries: Int = 1
+    ): Boolean {
+        val dao = cartDao ?: return true
+        if (targetCustId.isBlank()) return true
+        var attempt = 0
+        while (attempt <= retries) {
+            try {
+                dao.deleteBySku(sku, targetCustId)
+                return true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                attempt++
+                if (attempt > retries) return false
+            }
+        }
+        return false
+    }
+
     private fun sanitizeCartItems(rawItems: List<CartItem>): List<CartItem> {
         val valid = rawItems.filter(::isValidCartItem)
         val invalid = rawItems.filterNot(::isValidCartItem)
         val activeCustId = customerId.trim()
+        val generation = customerGeneration
 
-        invalid.forEach { item ->
-            viewModelScope.launch {
-                if (activeCustId.isNotBlank() && item.sku.isNotBlank()) {
-                    try { repository.removeCartItem(activeCustId, item.sku) } catch (_: Exception) {}
-                }
-                if (cartDao != null && item.sku.isNotBlank()) {
-                    try {
-                        if (activeCustId.isNotBlank()) cartDao.deleteBySku(item.sku, activeCustId)
-                        cartDao.deleteBySku(item.sku, LOCAL_OFFLINE_CART_KEY)
-                    } catch (_: Exception) {}
+        if (invalid.isNotEmpty()) {
+            val previousJob = sanitizationCleanupJob
+            sanitizationCleanupJob = viewModelScope.launch {
+                previousJob?.join()
+                cartMutex.withLock {
+                    for (item in invalid) {
+                        if (generation != customerGeneration || customerId.trim() != activeCustId) return@withLock
+                        val sku = item.sku.trim()
+                        if (sku.isBlank()) continue
+
+                        var serverDeleted = false
+                        if (activeCustId.isNotBlank()) {
+                            try {
+                                when (val result = repository.removeCartItem(activeCustId, sku)) {
+                                    is ApiResult.Success -> serverDeleted = true
+                                    is ApiResult.Failure -> {
+                                        val retry = repository.removeCartItem(activeCustId, sku)
+                                        serverDeleted = (retry is ApiResult.Success)
+                                        if (!serverDeleted && generation == customerGeneration) {
+                                            errorMessage = "Failed to prune invalid cart item: ${result.error.message}"
+                                        }
+                                    }
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                if (generation == customerGeneration) {
+                                    errorMessage = "Could not reach server to prune invalid cart item."
+                                }
+                            }
+                        } else {
+                            serverDeleted = true
+                        }
+
+                        if (serverDeleted && cartDao != null) {
+                            try {
+                                if (activeCustId.isNotBlank()) cartDao.deleteBySku(sku, activeCustId)
+                                cartDao.deleteBySku(sku, LOCAL_OFFLINE_CART_KEY)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {}
+                        }
+                    }
                 }
             }
         }
@@ -377,14 +481,9 @@ class CartViewModel(
                         cartItems = items
                         totals = result.data
                         errorMessage = null
-
-                        if (cartDao != null) {
-                            try {
-                                cartDao.clearCart(activeCustId)
-                                if (items.isNotEmpty()) {
-                                    cartDao.insertAll(items.map { CartItemEntity.fromCartItem(it, activeCustId) })
-                                }
-                            } catch (_: Exception) {}
+                        val cached = syncLocalCartCache(activeCustId, items)
+                        if (!cached && generation == customerGeneration) {
+                            errorMessage = "Could not update offline cart cache."
                         }
                     }
                     is ApiResult.Failure -> {
@@ -406,11 +505,17 @@ class CartViewModel(
     private val cartMutex = kotlinx.coroutines.sync.Mutex()
 
     fun addItem(product: CommerceProduct) {
+        if (isLockedForCheckout) {
+            val message = "Cart cannot be modified while checkout is in progress."
+            errorMessage = message
+            _addEvents.trySend(CartAddEvent.Failure(message))
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
 
                 if (product.sku.isBlank()) {
                     val message = "This product cannot be added because its SKU is missing."
@@ -483,11 +588,9 @@ class CartViewModel(
                             totals = updated.data
                             errorMessage = null
                             _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
-                            if (cartDao != null) {
-                                try {
-                                    cartDao.clearCart(targetCustomerId)
-                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
-                                } catch (_: Exception) {}
+                            val cached = syncLocalCartCache(targetCustomerId, backendItems)
+                            if (!cached && generation == customerGeneration) {
+                                errorMessage = "Could not update offline cart cache."
                             }
                         }
                         is ApiResult.Failure -> {
@@ -524,11 +627,17 @@ class CartViewModel(
     }
 
     fun addReorderItem(item: OrderItem) {
+        if (isLockedForCheckout) {
+            val message = "Cart cannot be modified while checkout is in progress."
+            errorMessage = message
+            _addEvents.trySend(CartAddEvent.Failure(message))
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
 
                 val sku = item.effectiveSku
                 val name = item.effectiveName
@@ -581,11 +690,9 @@ class CartViewModel(
                             totals = updated.data
                             errorMessage = null
                             _addEvents.trySend(CartAddEvent.Success(sku, name))
-                            if (cartDao != null) {
-                                try {
-                                    cartDao.clearCart(targetCustomerId)
-                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
-                                } catch (_: Exception) {}
+                            val cached = syncLocalCartCache(targetCustomerId, backendItems)
+                            if (!cached && generation == customerGeneration) {
+                                errorMessage = "Could not update offline cart cache."
                             }
                         }
                         is ApiResult.Failure -> {
@@ -622,13 +729,19 @@ class CartViewModel(
 
     fun reorderAll(items: List<OrderItem>) {
         if (items.isEmpty()) return
+        if (isLockedForCheckout) {
+            val message = "Cart cannot be modified while checkout is in progress."
+            errorMessage = message
+            _addEvents.trySend(CartAddEvent.Failure(message))
+            return
+        }
         if (reorderAllJob?.isActive == true) return
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         reorderAllJob = viewModelScope.launch {
             try {
                 cartMutex.withLock {
-                    if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                    if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     val failedSkus = mutableListOf<String>()
                     items.forEach { item ->
                         if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
@@ -699,11 +812,11 @@ class CartViewModel(
                         }
                     }
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
-                    if (cartDao != null && targetCustomerId.isNotBlank()) {
-                        try {
-                            cartDao.clearCart(targetCustomerId)
-                            cartDao.insertAll(cartItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
-                        } catch (_: Exception) {}
+                    if (targetCustomerId.isNotBlank()) {
+                        val cached = syncLocalCartCache(targetCustomerId, cartItems)
+                        if (!cached && generation == customerGeneration) {
+                            errorMessage = "Could not update offline cart cache."
+                        }
                     }
                     if (failedSkus.isNotEmpty()) {
                         val message = "Could not reorder ${failedSkus.size} item(s). Please refresh your cart."
@@ -725,11 +838,15 @@ class CartViewModel(
             removeItem(sku)
             return
         }
+        if (isLockedForCheckout) {
+            errorMessage = "Cart cannot be modified while checkout is in progress."
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val previousCartItems = cartItems
                 val previousTotals = totals
                 // Optimistic instant update
@@ -744,11 +861,9 @@ class CartViewModel(
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
-                            if (cartDao != null) {
-                                try {
-                                    cartDao.clearCart(targetCustomerId)
-                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
-                                } catch (_: Exception) {}
+                            val cached = syncLocalCartCache(targetCustomerId, backendItems)
+                            if (!cached && generation == customerGeneration) {
+                                errorMessage = "Could not update offline cart cache."
                             }
                         }
                         is ApiResult.Failure -> {
@@ -782,11 +897,15 @@ class CartViewModel(
     }
 
     fun removeItem(sku: String) {
+        if (isLockedForCheckout) {
+            errorMessage = "Cart cannot be modified while checkout is in progress."
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val previousCartItems = cartItems
                 val previousTotals = totals
                 // Optimistic instant update
@@ -801,11 +920,7 @@ class CartViewModel(
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
-                            if (cartDao != null) {
-                                try {
-                                    cartDao.deleteBySku(sku, targetCustomerId)
-                                } catch (_: Exception) {}
-                            }
+                            deleteLocalCartItem(targetCustomerId, sku)
                         }
                         is ApiResult.Failure -> {
                             cartItems = previousCartItems
@@ -835,18 +950,27 @@ class CartViewModel(
     }
 
     fun moveToSaveForLater(sku: String) {
+        if (isLockedForCheckout) {
+            errorMessage = "Cart cannot be modified while checkout is in progress."
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val item = cartItems.firstOrNull { it.sku == sku } ?: return@withLock
                 val previousSaved = saveForLaterItems
                 val newSaved = previousSaved.filterNot { it.sku == sku } + item
 
                 // Persist the saved item before removing it from the cart
-                appContext?.let { ctx ->
+                val persisted = appContext?.let { ctx ->
                     com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, newSaved)
+                } ?: true
+
+                if (!persisted) {
+                    errorMessage = "Could not securely save this item for later."
+                    return@withLock
                 }
 
                 if (targetCustomerId.isNotBlank()) {
@@ -867,15 +991,13 @@ class CartViewModel(
                             )
                             cartItems = backendItems
                             totals = result.data
-                            if (cartDao != null) {
-                                try { cartDao.deleteBySku(sku, targetCustomerId) } catch (_: Exception) {}
-                            }
+                            deleteLocalCartItem(targetCustomerId, sku)
+                            if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                         }
                     }
                 } else {
                     try {
                         cartDao?.deleteBySku(sku, LOCAL_OFFLINE_CART_KEY)
-                        cartItems = cartItems.filterNot { it.sku == sku }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
                         appContext?.let { ctx ->
@@ -884,8 +1006,11 @@ class CartViewModel(
                         errorMessage = "Could not save this item for later."
                         return@withLock
                     }
+                    if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                    cartItems = cartItems.filterNot { it.sku == sku }
                 }
 
+                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 saveForLaterItems = newSaved
                 syncCouponDiscount()
             }
@@ -893,11 +1018,17 @@ class CartViewModel(
     }
 
     fun moveBackToCart(sku: String) {
+        if (isLockedForCheckout) {
+            val message = "Cart cannot be modified while checkout is in progress."
+            errorMessage = message
+            _addEvents.trySend(CartAddEvent.Failure(message))
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val targetItem = saveForLaterItems.find { it.sku == sku } ?: return@withLock
                 val prodSellingPrice = targetItem.unitPrice.toDouble().coerceAtLeast(1.0)
                 val prodPrice = targetItem.mrp.toDouble().coerceAtLeast(prodSellingPrice)
@@ -935,26 +1066,35 @@ class CartViewModel(
                     cartItems + targetItem
                 }
 
+                val remainingSaved = saveForLaterItems.filterNot { it.sku == sku }
+
                 if (targetCustomerId.isNotBlank()) {
                     val updated = repository.addCartItem(targetCustomerId, targetItem)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (updated) {
                         is ApiResult.Success -> {
                             val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
+                            val persisted = appContext?.let { ctx ->
+                                com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, remainingSaved)
+                            } ?: true
+                            if (!persisted) {
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                                val errMsg = "Could not update saved items storage."
+                                errorMessage = errMsg
+                                _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                                return@withLock
+                            }
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
-                            saveForLaterItems = saveForLaterItems.filterNot { it.sku == sku }
-                            appContext?.let { ctx ->
-                                com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, saveForLaterItems)
-                            }
+                            saveForLaterItems = remainingSaved
                             _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
-                            if (cartDao != null) {
-                                try {
-                                    cartDao.clearCart(targetCustomerId)
-                                    cartDao.insertAll(backendItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
-                                } catch (_: Exception) {}
+                            val cached = syncLocalCartCache(targetCustomerId, backendItems)
+                            if (!cached && generation == customerGeneration) {
+                                errorMessage = "Could not update offline cart cache."
                             }
+                            if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                         }
                         is ApiResult.Failure -> {
                             cartItems = previousCartItems
@@ -980,10 +1120,20 @@ class CartViewModel(
                             return@withLock
                         }
                     }
-                    saveForLaterItems = saveForLaterItems.filterNot { it.sku == sku }
-                    appContext?.let { ctx ->
-                        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, saveForLaterItems)
+                    if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                    val persisted = appContext?.let { ctx ->
+                        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, remainingSaved)
+                    } ?: true
+                    if (!persisted) {
+                        cartItems = previousCartItems
+                        totals = previousTotals
+                        val errMsg = "Could not update saved items storage."
+                        errorMessage = errMsg
+                        _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                        return@withLock
                     }
+                    if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                    saveForLaterItems = remainingSaved
                     _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
                 }
                 syncCouponDiscount()
@@ -1124,9 +1274,15 @@ class CartViewModel(
     fun reset() {
         reorderAllJob?.cancel()
         reorderAllJob = null
+        sanitizationCleanupJob?.cancel()
+        sanitizationCleanupJob = null
+        isLockedForCheckout = false
         clear()
         customerId = ""
-        saveForLaterItems = emptyList()
+        isInitialized = false
+        saveForLaterItems = appContext?.let { ctx ->
+            com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(ctx, "")
+        } ?: emptyList()
         errorMessage = null
         availableCampaigns = emptyList()
     }
