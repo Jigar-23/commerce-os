@@ -995,7 +995,10 @@ setTimeout(startActiveDeliveryWatchdog, 10000);
 // Helper: Resolve Authorized Store ID for Sellers (Fail-closed: strictly requires DB mapping)
 async function resolveAuthorizedSellerStoreId(authClaims) {
   if (!authClaims || !authClaims.sub) return null;
-  if (pool) {
+  const isSellerRole = hasRole(authClaims, ['ROLE_SELLER', 'SELLER']);
+  if (!isSellerRole) return null;
+
+  if (pool && !isLocalMode) {
     try {
       const sellerRes = await pool.query(
         `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1)`,
@@ -1007,22 +1010,27 @@ async function resolveAuthorizedSellerStoreId(authClaims) {
         }
         return sellerRes.rows[0].store_id || null;
       }
-      return authClaims.storeId || authClaims.store_id || null;
+      return null;
     } catch {
-      return authClaims.storeId || authClaims.store_id || null;
+      return null;
     }
   }
   const repos = await getAppRepositories();
   if (repos && repos.sellerRepo) {
-    const seller = await repos.sellerRepo.getSellerById(authClaims.sub);
-    if (seller) {
-      if (seller.status && seller.status !== 'ACTIVE') {
-        return null;
+    try {
+      const seller = await repos.sellerRepo.getSellerById(authClaims.sub);
+      if (seller) {
+        if (seller.status && seller.status !== 'ACTIVE') {
+          return null;
+        }
+        return seller.store_id || seller.storeId || null;
       }
-      return seller.store_id || seller.storeId || null;
+      return null;
+    } catch {
+      return null;
     }
   }
-  return authClaims.storeId || authClaims.store_id || null;
+  return null;
 }
 
 const sseTicketStore = new Map();
@@ -9775,7 +9783,13 @@ const server = http.createServer(async (req, res) => {
       // Authorization guard: customer, assigned rider, authorized store seller, or admin
       const isCustomerOwner = delivery.customer_id === authClaims.sub;
       const isAssignedRider = delivery.rider_id === authClaims.sub || delivery.rider_id === authClaims.riderId;
-      let isStoreSeller = Boolean(authClaims.storeId && authClaims.storeId === delivery.store_id);
+      let isStoreSeller = false;
+      if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+        const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+        if (authorizedStoreId && (authorizedStoreId === delivery.store_id || authorizedStoreId === delivery.storeId)) {
+          isStoreSeller = true;
+        }
+      }
       const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
 
       if (!isCustomerOwner && !isAssignedRider && !isStoreSeller && !isAdmin) {
@@ -10388,7 +10402,13 @@ const server = http.createServer(async (req, res) => {
         if (order) {
           // Ownership authorization check on order: Customer owner, Store seller, or Admin
           const isCustomerOwner = (order.customer_id === authClaims.sub || order.customerId === authClaims.sub);
-          const isStoreSeller = Boolean(authClaims.storeId && (authClaims.storeId === order.store_id || authClaims.storeId === order.storeId));
+          let isStoreSeller = false;
+          if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+            const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+            if (authorizedStoreId && (authorizedStoreId === order.store_id || authorizedStoreId === order.storeId)) {
+              isStoreSeller = true;
+            }
+          }
           const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
           if (!isCustomerOwner && !isStoreSeller && !isAdmin) {
             return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You do not have permission to view tracking for this delivery.' });
@@ -10469,7 +10489,13 @@ const server = http.createServer(async (req, res) => {
       const cleanCustPhone = String(customerPhone || '').replace(/\D/g, '').slice(-10);
       const isCustomerOwner = (customerId && customerId === authClaims.sub) || (cleanAuthPhone && cleanCustPhone && cleanAuthPhone === cleanCustPhone);
       const isAssignedRider = delivery.rider_id === authClaims.sub || delivery.riderId === authClaims.sub || delivery.rider_id === authClaims.riderId;
-      let isStoreSeller = Boolean(authClaims.storeId && (authClaims.storeId === delivery.store_id || authClaims.storeId === delivery.storeId));
+      let isStoreSeller = false;
+      if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+        const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+        if (authorizedStoreId && (authorizedStoreId === delivery.store_id || authorizedStoreId === delivery.storeId)) {
+          isStoreSeller = true;
+        }
+      }
       const isAdmin = ['ROLE_ADMIN', 'ADMIN'].includes(authClaims.role);
 
       if (!isCustomerOwner && !isAssignedRider && !isStoreSeller && !isAdmin) {
@@ -10497,23 +10523,25 @@ const server = http.createServer(async (req, res) => {
       }
 
       let isAdmin = authClaims.role === 'ROLE_ADMIN' || authClaims.roles?.includes('ROLE_ADMIN');
-      let isSeller = authClaims.role === 'ROLE_SELLER' || authClaims.roles?.includes('ROLE_SELLER');
-      let authorizedStoreId = authClaims.storeId || authClaims.store_id || 'STORE_GURUGRAM_01';
-
-      if (pool) {
+      if (pool && !isLocalMode) {
         try {
           const adminRes = await pool.query(
             `SELECT admin_id, status FROM admins WHERE (admin_id = $1 OR id = $1) AND status = 'ACTIVE'`,
             [authClaims.sub]
           );
           isAdmin = adminRes.rows.length > 0;
-          const sellerRes = await pool.query(
-            `SELECT store_id, status FROM sellers WHERE (seller_id = $1 OR id = $1) AND status = 'ACTIVE'`,
-            [authClaims.sub]
-          );
-          isSeller = sellerRes.rows.length > 0;
-          if (isSeller) authorizedStoreId = sellerRes.rows[0].store_id;
-        } catch {}
+        } catch {
+          isAdmin = false;
+        }
+      }
+
+      let isSeller = false;
+      let authorizedStoreId = null;
+      if (!isAdmin && hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+        authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+        if (authorizedStoreId) {
+          isSeller = true;
+        }
       }
 
       if (!isAdmin && !isSeller) {
