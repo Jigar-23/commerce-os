@@ -23,6 +23,24 @@ object OfferPayloadValidator {
 
     private val COD_PAYMENT_ALLOWLIST = setOf("COD", "CASH", "PAY_ON_DELIVERY", "CASH_ON_DELIVERY", "POD")
 
+    private val POST_ACCEPTANCE_OFFER_STATES = setOf(
+        "ACCEPTED",
+        "EN_ROUTE_PICKUP",
+        "ARRIVED_PICKUP",
+        "PICKED_UP",
+        "EN_ROUTE_CUSTOMER",
+        "ARRIVED_CUSTOMER",
+        "HANDOFF_STARTED",
+        "DELIVERED"
+    )
+
+    private val GEOGRAPHIC_INDICATORS = Regex(
+        "(?i).*\\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\\b.*"
+    )
+
+    fun isPostAcceptanceOfferStatus(status: String?): Boolean =
+        status?.trim()?.uppercase(java.util.Locale.ROOT)?.let { it in POST_ACCEPTANCE_OFFER_STATES } == true
+
     fun extractCoarseLocality(rawAddress: String?, localityCandidate: String? = null): String {
         val candidate = localityCandidate?.trim().takeUnless { it.isNullOrBlank() }
             ?: rawAddress?.trim().takeUnless { it.isNullOrBlank() }
@@ -35,7 +53,7 @@ object OfferPayloadValidator {
                 candidate.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE))
 
             if (!candidate.contains(",") && candidate.length in 3..40 && !isBuildingOrPremise) {
-                val isPersonName = candidate.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
+                val isPersonName = candidate.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$")) && !candidate.matches(GEOGRAPHIC_INDICATORS)
                 if (!isPersonName) return candidate
             }
 
@@ -46,7 +64,7 @@ object OfferPayloadValidator {
                 part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
                 part.matches(Regex("^#?\\d+.*")) ||
                 part.matches(Regex(".*\\b\\d+\\b.*")) ||
-                part.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
+                (part.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$")) && !part.matches(GEOGRAPHIC_INDICATORS))
             }
 
             if (filtered.isNotEmpty()) {
@@ -115,7 +133,7 @@ object OfferPayloadValidator {
             val merchantLng = json.optDoubleOrNull("merchantLng") ?: json.optDoubleOrNull("merchant_lng") ?: json.optDoubleOrNull("storeLng") ?: 0.0
 
             val offerStatus = json.optString("status", "CREATED")
-            val isAccepted = offerStatus.equals("ACCEPTED", ignoreCase = true) || offerStatus.equals("ASSIGNED", ignoreCase = true)
+            val isAccepted = isPostAcceptanceOfferStatus(offerStatus)
 
             val rawCustomerName = json.optString("customerName").takeIf { it.isNotBlank() }
                 ?: json.optString("customer_name").takeIf { it.isNotBlank() }
@@ -135,7 +153,7 @@ object OfferPayloadValidator {
                 ?: json.optString("customerLocality").takeIf { it.isNotBlank() }
 
             val customerName = if (isAccepted) rawCustomerName else "Customer"
-            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(null, localityHint)
+            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
             val customerLat = if (isAccepted) rawCustomerLat else 0.0
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
@@ -305,7 +323,7 @@ object OfferPayloadValidator {
             val merchantLng = data["merchantLng"]?.toDoubleOrNull() ?: 0.0
 
             val offerStatus = data["status"] ?: "CREATED"
-            val isAccepted = offerStatus.equals("ACCEPTED", ignoreCase = true) || offerStatus.equals("ASSIGNED", ignoreCase = true)
+            val isAccepted = isPostAcceptanceOfferStatus(offerStatus)
 
             val rawCustomerName = data["customerName"]?.takeIf { it.isNotBlank() } ?: "Customer"
 
@@ -322,7 +340,7 @@ object OfferPayloadValidator {
                 ?: data["customerLocality"]?.takeIf { it.isNotBlank() }
 
             val customerName = if (isAccepted) rawCustomerName else "Customer"
-            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(null, localityHint)
+            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
             val customerLat = if (isAccepted) rawCustomerLat else 0.0
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 

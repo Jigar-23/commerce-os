@@ -7049,9 +7049,9 @@ async function handleRequest(port, req, res) {
                   (addr.postal_code || addr.postalCode) ? ('PIN: ' + (addr.postal_code || addr.postalCode)) : null
                 ].filter(Boolean);
                 const customerAddrStr = parts.length > 0 ? parts.join(', ') : (addr.address_line || addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Company Bagh, Rewari'));
-                const isAssigned = (o.rider_id === riderId && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status));
+                const isAccepted = (o.rider_id === riderId && ['ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status));
                 const coarseLocality = extractCoarseLocality(customerAddrStr, addr);
-                const effectiveAddr = isAssigned ? customerAddrStr : coarseLocality;
+                const effectiveAddr = isAccepted ? customerAddrStr : coarseLocality;
                 const expMs = Number(o.offer_expires_at) || (now + 1800000);
                 const payoutVal = Number(o.earnings_amount || o.total_earnings || 74.69);
                 const ordTot = Number(o.total_amount || 172);
@@ -7115,10 +7115,10 @@ async function handleRequest(port, req, res) {
               const o = dbOffers[0];
               const expMs = Number(o.offer_expires_at || o.offerExpiresAt) || (now + 1800000);
               const payoutVal = Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 74.69);
-              const isAssigned = (o.rider_id === riderId || o.riderId === riderId) && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status);
+              const isAccepted = (o.rider_id === riderId || o.riderId === riderId) && ['ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status);
               const rawAddr = o.delivery_address || o.deliveryAddress || o.customerAddress || 'Delivery Area';
               const coarse = extractCoarseLocality(rawAddr);
-              const effectiveAddr = isAssigned ? rawAddr : coarse;
+              const effectiveAddr = isAccepted ? rawAddr : coarse;
               const mapped = {
                 id: o.offer_id || o.offerId || o.id,
                 offerId: o.offer_id || o.offerId || o.id,
@@ -7182,18 +7182,18 @@ async function handleRequest(port, req, res) {
         );
         const activeOffer = activeOffers.sort((a, b) => (b.offerCreatedAt || 0) - (a.offerCreatedAt || 0))[0];
         if (activeOffer) {
-          const isAssigned = (activeOffer.riderId === riderId && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(activeOffer.status));
+          const isAccepted = (activeOffer.riderId === riderId && ['ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(activeOffer.status));
           const rawAddr = activeOffer.deliveryAddress || activeOffer.customerAddress || 'Delivery Area';
           const coarse = extractCoarseLocality(rawAddr);
           const sanitizedOffer = {
             ...activeOffer,
             riderId: activeOffer.riderId || riderId,
-            deliveryAddress: isAssigned ? rawAddr : coarse,
-            customerAddress: isAssigned ? rawAddr : coarse,
+            deliveryAddress: isAccepted ? rawAddr : coarse,
+            customerAddress: isAccepted ? rawAddr : coarse,
             customerLocality: coarse,
-            customerName: isAssigned ? (activeOffer.customerName || 'Customer') : 'Customer',
-            customerLat: isAssigned ? activeOffer.customerLat : null,
-            customerLng: isAssigned ? activeOffer.customerLng : null
+            customerName: isAccepted ? (activeOffer.customerName || 'Customer') : 'Customer',
+            customerLat: isAccepted ? activeOffer.customerLat : null,
+            customerLng: isAccepted ? activeOffer.customerLng : null
           };
           return json(res, 200, { ok: true, count: 1, offers: [sanitizedOffer], ...sanitizedOffer, serverTime: now });
         }

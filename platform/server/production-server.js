@@ -8711,9 +8711,9 @@ const server = http.createServer(async (req, res) => {
 
         const mappedOffers = offRes.rows.map(o => {
           const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
-          const isAssignedToCaller = (o.rider_id === riderId && (o.status === 'ASSIGNED' || o.status === 'ACCEPTED'));
+          const isAcceptedByCaller = (o.rider_id === riderId && ['ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status));
           const coarseLocality = extractCoarseLocality(typeof o.delivery_address === 'string' ? o.delivery_address : '', addr);
-          const customerAddrStr = isAssignedToCaller
+          const customerAddrStr = isAcceptedByCaller
             ? (addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Customer Delivery Address'))
             : coarseLocality;
           const expMs = Number(o.offer_expires_at) || (now + 1800000);
@@ -8739,10 +8739,10 @@ const server = http.createServer(async (req, res) => {
             payoutFormatted: `₹${billVal.toFixed(2)}`,
             pickupAddress: o.store_name || 'Fulfillment Hub',
             deliveryAddress: customerAddrStr,
-            customerName: isAssignedToCaller ? (addr.contactName || 'Customer') : 'Customer',
+            customerName: isAcceptedByCaller ? (addr.contactName || 'Customer') : 'Customer',
             customerAddress: customerAddrStr,
-            customerLat: isAssignedToCaller ? (Number(addr.latitude) || null) : null,
-            customerLng: isAssignedToCaller ? (Number(addr.longitude) || null) : null,
+            customerLat: isAcceptedByCaller ? (Number(addr.latitude) || null) : null,
+            customerLng: isAcceptedByCaller ? (Number(addr.longitude) || null) : null,
             merchantName: o.store_name || 'Commerce OS Fulfillment Hub',
             merchantAddress: o.store_address || 'Fulfillment Hub Address',
             merchantLat: Number(o.store_lat) || null,
@@ -8752,9 +8752,9 @@ const server = http.createServer(async (req, res) => {
             estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 15),
             isCod: Boolean(o.is_cod),
             codAmountToCollect: Boolean(o.is_cod) ? Number(o.total_amount || 0) : 0,
-            waypoints: isAssignedToCaller ? ((typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || []) : [],
-            routeGeometry: isAssignedToCaller ? (o.route_geometry || o.routeGeometry || null) : null,
-            polyline: isAssignedToCaller ? (o.polyline || null) : null,
+            waypoints: isAcceptedByCaller ? ((typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || []) : [],
+            routeGeometry: isAcceptedByCaller ? (o.route_geometry || o.routeGeometry || null) : null,
+            polyline: isAcceptedByCaller ? (o.polyline || null) : null,
             offerCreatedAt: Number(o.offer_created_at || (o.created_at ? new Date(o.created_at).getTime() : now)),
             offerExpiresAt: expMs,
             expiresAt: new Date(expMs).toISOString(),
@@ -8854,10 +8854,10 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      const isAssignedToCaller = isDirectlyAssigned && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(offer.status);
+      const isAcceptedByCaller = isDirectlyAssigned && ['ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(offer.status);
 
-      // Sanitize response: redact customer PII, precise coordinates, and route geometry if caller is not assigned or admin (Finding 1)
-      if (!isAssignedToCaller && !isAdminCaller) {
+      // Sanitize response: redact customer PII, precise coordinates, and route geometry if caller has not accepted or is not admin (Finding 1)
+      if (!isAcceptedByCaller && !isAdminCaller) {
         const rawAddr = offer.customerAddress || offer.deliveryAddress || '';
         const coarseLocality = extractCoarseLocality(rawAddr, offer.deliveryAddress);
         const {
