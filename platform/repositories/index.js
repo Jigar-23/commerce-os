@@ -6844,6 +6844,7 @@ class DispatchService {
     serviceabilityRepo = null,
     orderRepo = null,
     routeResolver = null,
+    alternateRouteResolver = null,
     pricingCalculator = null,
     isProduction = false
   }) {
@@ -6871,6 +6872,7 @@ class DispatchService {
       const mins = Math.max(4, Math.round(dist * 3));
       return { ok: true, distanceKm: dist, durationMins: mins };
     });
+    this.alternateRouteResolver = alternateRouteResolver || null;
     this.pricingCalculator = pricingCalculator || (require('../pricing-engine').calculateAuthoritativeEarnings);
   }
 
@@ -7144,8 +7146,23 @@ class DispatchService {
       throw new Error('NO_RIDERS_AVAILABLE: No active eligible fleet rider available for dispatch.');
     }
 
-    // 3. Resolve Store -> Customer Route (Authoritative OSRM)
-    const deliveryRoute = await this.routeResolver(mLat, mLng, Number(cLat), Number(cLng));
+    // 3. Resolve Store -> Customer Route (Authoritative OSRM with Alternate Routing Provider Fallback)
+    let deliveryRoute = null;
+    try {
+      deliveryRoute = await this.routeResolver(mLat, mLng, Number(cLat), Number(cLng));
+    } catch (routeErr) {
+      console.warn('[DispatchService] Primary route resolver failed:', routeErr.message);
+    }
+    if ((!deliveryRoute || !deliveryRoute.ok) && typeof this.alternateRouteResolver === 'function') {
+      try {
+        deliveryRoute = await this.alternateRouteResolver(mLat, mLng, Number(cLat), Number(cLng));
+        if (deliveryRoute && deliveryRoute.ok) {
+          deliveryRoute.provider = deliveryRoute.provider || 'ALTERNATE_ROUTING_PROVIDER';
+        }
+      } catch (altErr) {
+        console.warn('[DispatchService] Alternate route resolver failed:', altErr.message);
+      }
+    }
     if (!deliveryRoute || !deliveryRoute.ok) {
       throw new Error(`ROUTE_UNAVAILABLE: Routing calculation failed between store (${mLat}, ${mLng}) and customer (${cLat}, ${cLng}).`);
     }
@@ -7240,9 +7257,9 @@ class DispatchService {
       dispatchBudgetExpired: timeBudgetExpired,
       dispatchCandidateCount: candidatePool.length,
       dispatchRoutedCount: routedSuccessCount,
-      etaConfidence: selectedCandidate?.isApproximate ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE',
+      etaConfidence: (selectedCandidate?.isApproximate || deliveryRoute?.isApproximate) ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE',
       etaRange: { min: Math.max(8, totalDurationMins - 2), max: totalDurationMins + 3 },
-      isApproximateEta: Boolean(selectedCandidate?.isApproximate),
+      isApproximateEta: Boolean(selectedCandidate?.isApproximate || deliveryRoute?.isApproximate),
       offerCreatedAt: now,
       offerExpiresAt: offerExpiresAt,
       history: [{ status: 'CREATED', timestamp: new Date().toISOString(), riderId: selectedRiderId }]
@@ -8403,7 +8420,7 @@ class ProductionNotificationService {
 }
 
 class OutboxProcessor {
-  constructor(dbPool, eventDispatcher) {
+  constructor(dbPool, eventDispatcher, options = {}) {
     if (!eventDispatcher || typeof eventDispatcher !== 'function') {
       throw new Error('FATAL: OutboxProcessor requires a valid eventDispatcher function');
     }
@@ -8411,6 +8428,10 @@ class OutboxProcessor {
     this.dispatcher = eventDispatcher;
     this.isProcessing = false;
     this.intervalHandle = null;
+    this.redriveHandle = null;
+    this.sseBroadcaster = options.sseBroadcaster || null;
+    this.opsAlertHandler = options.opsAlertHandler || null;
+    this.dispatchSlaSeconds = options.dispatchSlaSeconds || 300; // 5-minute dispatch SLA
   }
 
   start(intervalMs = 2000) {
@@ -8420,6 +8441,15 @@ class OutboxProcessor {
         console.error('[OutboxProcessor] Uncaught error in outbox worker loop:', err.message);
       });
     }, intervalMs);
+
+    // Automated durable redrive and stalled dispatch sweeper (runs every 30 seconds)
+    if (!this.redriveHandle) {
+      this.redriveHandle = setInterval(() => {
+        this.redriveStalledDispatches().catch((err) => {
+          console.error('[OutboxProcessor] Uncaught error in redrive loop:', err.message);
+        });
+      }, 30000);
+    }
     console.log('[OutboxProcessor] Worker started with active event dispatcher.');
   }
 
@@ -8427,6 +8457,10 @@ class OutboxProcessor {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
+    }
+    if (this.redriveHandle) {
+      clearInterval(this.redriveHandle);
+      this.redriveHandle = null;
     }
   }
 
@@ -8451,7 +8485,10 @@ class OutboxProcessor {
 
   async _processSingleBatch() {
     const BACKOFF_SCHEDULE_SEC = [5, 15, 30, 60, 120];
-    const MAX_RETRIES = 5;
+    const TRANSIENT_DISPATCH_BACKOFF_SEC = [5, 10, 20, 30, 45, 60, 90, 120];
+    const MAX_STANDARD_RETRIES = 5;
+    const MAX_TRANSIENT_DISPATCH_RETRIES = 120; // Durable retry state for transient dispatch failures
+    const DISPATCH_SLA_ALERT_THRESHOLD = 5;
 
     let claimedEvents = [];
 
@@ -8468,9 +8505,10 @@ class OutboxProcessor {
 
       const claimRes = await claimClient.query(
         `SELECT * FROM outbox_events 
-         WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()) AND retry_count < $1
+         WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()) 
+           AND (retry_count < $1 OR event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED'))
          ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-        [MAX_RETRIES]
+        [MAX_STANDARD_RETRIES]
       );
       claimedEvents = claimRes.rows;
 
@@ -8511,8 +8549,73 @@ class OutboxProcessor {
         processedCount++;
       } catch (err) {
         const newRetryCount = (event.retry_count || 0) + 1;
-        const delaySec = BACKOFF_SCHEDULE_SEC[Math.min(newRetryCount - 1, BACKOFF_SCHEDULE_SEC.length - 1)] || 120;
-        const status = newRetryCount >= MAX_RETRIES ? 'DEAD_LETTER' : 'PENDING';
+        const errMsg = String(err?.message || '').toUpperCase();
+        const eventType = String(event?.event_type || '').toUpperCase();
+        const isDispatchEvent = ['ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED'].includes(eventType);
+        const isTransientFailure = isDispatchEvent && (
+          errMsg.includes('NO_RIDERS_AVAILABLE') ||
+          errMsg.includes('ROUTE_UNAVAILABLE') ||
+          errMsg.includes('ROUTING_TIMEOUT') ||
+          errMsg.includes('CIRCUIT_BREAKER') ||
+          errMsg.includes('ECONNREFUSED') ||
+          errMsg.includes('ETIMEDOUT') ||
+          errMsg.includes('SERVICE_UNAVAILABLE') ||
+          errMsg.includes('FETCH_ERROR') ||
+          errMsg.includes('DISPATCH_CAPACITY_EXHAUSTED') ||
+          errMsg.includes('RATE_LIMITED')
+        );
+
+        let delaySec;
+        let status;
+
+        if (isTransientFailure) {
+          // Keep transient routing and rider-capacity failures in a durable retry state with progressive backoff
+          delaySec = TRANSIENT_DISPATCH_BACKOFF_SEC[Math.min(newRetryCount - 1, TRANSIENT_DISPATCH_BACKOFF_SEC.length - 1)] || 120;
+          status = newRetryCount >= MAX_TRANSIENT_DISPATCH_RETRIES ? 'DEAD_LETTER' : 'PENDING';
+        } else {
+          delaySec = BACKOFF_SCHEDULE_SEC[Math.min(newRetryCount - 1, BACKOFF_SCHEDULE_SEC.length - 1)] || 120;
+          status = newRetryCount >= MAX_STANDARD_RETRIES ? 'DEAD_LETTER' : 'PENDING';
+        }
+
+        // Alert operations when an accepted order exceeds its dispatch SLA
+        const orderCreatedAt = event.created_at ? new Date(event.created_at).getTime() : Date.now();
+        const ageSec = Math.round((Date.now() - orderCreatedAt) / 1000);
+        const isSlaBreached = isDispatchEvent && (newRetryCount >= DISPATCH_SLA_ALERT_THRESHOLD || ageSec >= this.dispatchSlaSeconds);
+
+        if (isSlaBreached) {
+          const orderId = event.aggregate_id;
+          console.warn(`[OPS_ALERT][DISPATCH_SLA_BREACH] Order ${orderId} dispatch delayed (attempts: ${newRetryCount}, age: ${ageSec}s). Last error: ${err.message}`);
+
+          if (typeof this.opsAlertHandler === 'function') {
+            try {
+              await this.opsAlertHandler({
+                alert: 'DISPATCH_SLA_BREACH',
+                orderId,
+                eventId: event.id,
+                retryCount: newRetryCount,
+                ageSec,
+                error: err.message,
+                status
+              });
+            } catch (alertErr) {
+              console.error('[OutboxProcessor] opsAlertHandler failed:', alertErr.message);
+            }
+          }
+          if (this.sseBroadcaster) {
+            try {
+              await this.sseBroadcaster('ops_alerts', 'DISPATCH_SLA_BREACH', {
+                orderId,
+                eventId: event.id,
+                retryCount: newRetryCount,
+                ageSec,
+                error: err.message,
+                status,
+                alertLevel: 'HIGH',
+                actionRequired: 'OPERATIONS_INTERVENTION_OR_ROUTING_RECOVERY'
+              });
+            } catch {}
+          }
+        }
 
         await execClient.query(
           `UPDATE outbox_events 
@@ -8529,6 +8632,95 @@ class OutboxProcessor {
     }
 
     return processedCount;
+  }
+
+  async redriveDeadLetters(maxAgeHours = 48) {
+    if (!this.pool) return 0;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const res = await client.query(
+        `UPDATE outbox_events oe
+         SET status = 'PENDING',
+             next_attempt_at = NOW(),
+             retry_count = 0,
+             last_error = CONCAT('REDRIVEN_BY_OPS: ', COALESCE(oe.last_error, ''))
+         FROM orders o
+         WHERE oe.status = 'DEAD_LETTER'
+           AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
+           AND (oe.aggregate_id = o.order_id OR oe.aggregate_id = o.id)
+           AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED')
+           AND oe.created_at >= NOW() - ($1 || ' hours')::INTERVAL
+         RETURNING oe.id, oe.aggregate_id`,
+        [maxAgeHours]
+      );
+      await client.query('COMMIT');
+      if (res.rows && res.rows.length > 0) {
+        console.log(`[OutboxProcessor] Successfully redrove ${res.rows.length} dead-lettered dispatch events.`);
+      }
+      return res.rows ? res.rows.length : 0;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('[OutboxProcessor] Failed to redrive dead letters:', err.message);
+      return 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  async redriveStalledDispatches() {
+    if (!this.pool) return 0;
+    let redrivenCount = 0;
+    redrivenCount += await this.redriveDeadLetters();
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const strandedOrdersRes = await client.query(
+        `SELECT o.order_id, o.id, ds.delivery_id, ds.store_id
+         FROM orders o
+         JOIN delivery_sessions ds ON (ds.order_id = o.order_id OR ds.order_id = o.id)
+         WHERE ds.state = 'LOOKING_FOR_RIDER'
+           AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED')
+           AND (o.seller_approval_status = 'ACCEPTED' OR o.status = 'ACCEPTED')
+           AND NOT EXISTS (
+             SELECT 1 FROM outbox_events oe 
+             WHERE (oe.aggregate_id = o.order_id OR oe.aggregate_id = o.id)
+               AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
+               AND oe.status IN ('PENDING', 'PROCESSING')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM delivery_offers dfo
+             WHERE (dfo.order_id = o.order_id OR dfo.order_id = o.id)
+               AND dfo.status IN ('OFFERED', 'BROADCAST')
+               AND dfo.expires_at > NOW()
+           )
+           AND ds.created_at <= NOW() - INTERVAL '30 seconds'
+         LIMIT 10
+         FOR UPDATE OF o SKIP LOCKED`
+      );
+
+      if (strandedOrdersRes && strandedOrdersRes.rows) {
+        for (const stranded of strandedOrdersRes.rows) {
+          const orderId = stranded.order_id || stranded.id;
+          await client.query(
+            `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, next_attempt_at, retry_count)
+             VALUES ('order', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', NOW(), 0)`,
+            [orderId, JSON.stringify({ orderId, deliveryId: stranded.delivery_id, storeId: stranded.store_id, redriven: true })]
+          );
+          redrivenCount++;
+          console.log(`[OutboxProcessor] Re-enqueued stranded accepted order ${orderId} into outbox dispatch.`);
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('[OutboxProcessor] Error checking stalled dispatches:', err.message);
+    } finally {
+      client.release();
+    }
+    return redrivenCount;
   }
 }
 
@@ -8605,6 +8797,7 @@ async function initApplicationRepositories(options = {}) {
       serviceabilityRepo,
       orderRepo,
       routeResolver,
+      alternateRouteResolver: options.alternateRouteResolver || null,
       pricingCalculator,
       isProduction: true
     });
@@ -8826,6 +9019,10 @@ async function initApplicationRepositories(options = {}) {
           await sseBroadcaster(orderId, 'PAYMENT_REFUND_COMPLETED', { orderId, refundId, amount, status: 'COMPLETED' });
         }
       }
+    }, {
+      sseBroadcaster,
+      opsAlertHandler: options.opsAlertHandler || null,
+      dispatchSlaSeconds: options.dispatchSlaSeconds || 300
     });
 
     outboxProcessor.start();
@@ -8969,6 +9166,7 @@ function createProductionRepositories(pool, options = {}) {
     serviceabilityRepo,
     orderRepo,
     routeResolver: options.routeResolver || null,
+    alternateRouteResolver: options.alternateRouteResolver || null,
     pricingCalculator: options.pricingCalculator || null,
     isProduction: true
   });
@@ -9209,7 +9407,11 @@ function createProductionRepositories(pool, options = {}) {
     return { ok: true };
   };
 
-  const outboxProcessor = new OutboxProcessor(pool, eventDispatcher);
+  const outboxProcessor = new OutboxProcessor(pool, eventDispatcher, {
+    sseBroadcaster: options.sseBroadcaster || null,
+    opsAlertHandler: options.opsAlertHandler || null,
+    dispatchSlaSeconds: options.dispatchSlaSeconds || 300
+  });
 
   return {
     isProduction: true,
@@ -9273,6 +9475,7 @@ function createLocalDevelopmentRepositories(db, saveDbFn = () => {}, options = {
     offerRepo,
     serviceabilityRepo,
     routeResolver: options.routeResolver || null,
+    alternateRouteResolver: options.alternateRouteResolver || null,
     pricingCalculator: options.pricingCalculator || null,
     isProduction: false
   });

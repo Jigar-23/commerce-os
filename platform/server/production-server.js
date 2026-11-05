@@ -214,17 +214,16 @@ if (DATABASE_URL) {
   if (keepAliveTimer.unref) keepAliveTimer.unref();
 }
 
-// 3. Authoritative OSRM Route Resolver Adapter
-async function osrmRouteResolver(lat1, lon1, lat2, lon2, withWaypoints = true) {
-  if (!OSRM_BASE_URL) {
-    return { ok: false, error: 'OSRM_BASE_URL_UNCONFIGURED' };
-  }
+// 3. Authoritative OSRM Route Resolver Adapter with Alternate Routing Provider Fallback
+const OSRM_FALLBACK_URL = process.env.OSRM_FALLBACK_URL || process.env.ROUTING_FALLBACK_URL || '';
+
+async function queryOsrmEndpoint(baseUrl, lon1, lat1, lon2, lat2, withWaypoints) {
+  const geomParam = withWaypoints ? 'overview=full&geometries=geojson' : 'overview=false';
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  const url = `${cleanBase}/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?${geomParam}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
   try {
-    const geomParam = withWaypoints ? 'overview=full&geometries=geojson' : 'overview=false';
-    const baseUrl = OSRM_BASE_URL.replace(/\/+$/, '');
-    const url = `${baseUrl}/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?${geomParam}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
     const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
     clearTimeout(timeout);
 
@@ -243,8 +242,30 @@ async function osrmRouteResolver(lat1, lon1, lat2, lon2, withWaypoints = true) {
     }
     return { ok: false, error: 'NO_OSRM_ROUTE' };
   } catch (err) {
+    clearTimeout(timeout);
     return { ok: false, error: err.name === 'AbortError' ? 'OSRM_TIMEOUT' : 'OSRM_NETWORK_ERROR' };
   }
+}
+
+async function osrmRouteResolver(lat1, lon1, lat2, lon2, withWaypoints = true) {
+  if (!OSRM_BASE_URL) {
+    return { ok: false, error: 'OSRM_BASE_URL_UNCONFIGURED' };
+  }
+  const primaryResult = await queryOsrmEndpoint(OSRM_BASE_URL, lon1, lat1, lon2, lat2, withWaypoints);
+  if (primaryResult && primaryResult.ok) {
+    return primaryResult;
+  }
+  // Try alternate routing provider if configured
+  if (OSRM_FALLBACK_URL) {
+    try {
+      const fallbackResult = await queryOsrmEndpoint(OSRM_FALLBACK_URL, lon1, lat1, lon2, lat2, withWaypoints);
+      if (fallbackResult && fallbackResult.ok) {
+        fallbackResult.provider = 'OSRM_FALLBACK_ROUTER';
+        return fallbackResult;
+      }
+    } catch {}
+  }
+  return primaryResult || { ok: false, error: 'ROUTE_CALCULATION_FAILED' };
 }
 
 function normalizePrivateKey(rawKey) {
@@ -868,7 +889,19 @@ async function getAppRepositories() {
         routeResolver: osrmRouteResolver,
         fcmSender: fcmSenderInstance,
         apnsDispatcher: apnsDispatcherInstance,
-        sseBroadcaster: (channel, event, payload) => sseBroadcasterInstance.broadcast(channel, event, payload)
+        sseBroadcaster: (channel, event, payload) => sseBroadcasterInstance.broadcast(channel, event, payload),
+        opsAlertHandler: async (alertData) => {
+          console.warn('[OperationsAlert] Dispatch SLA alert:', alertData);
+          if (pool && alertData.orderId) {
+            try {
+              await pool.query(
+                `INSERT INTO audit_logs (actor_id, actor_role, action, details, store_id, ip_address, metadata)
+                 VALUES ($1, 'SYSTEM', 'DISPATCH_SLA_BREACH', $2, NULL, '127.0.0.1', $3)`,
+                ['outbox_processor', `Dispatch SLA breached for order ${alertData.orderId}: ${alertData.error}`, JSON.stringify(alertData)]
+              );
+            } catch {}
+          }
+        }
       });
       if (appRepositories && appRepositories.deviceTokenRepo) {
         apnsDispatcherInstance.deviceTokenRepo = appRepositories.deviceTokenRepo;
@@ -2368,6 +2401,30 @@ const server = http.createServer(async (req, res) => {
         }
       }
       return sendJson(res, 200, { ok: true, count: logs.length, auditLogs: logs });
+    }
+
+    // -------------------------------------------------------------
+    // Operations & Admin Stalled Dispatch Redrive Endpoint
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/admin/dispatch/redrive' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for dispatch redrive.' });
+      }
+      const isAdmin = authClaims.role === 'ADMIN' ||
+        authClaims.role === 'ROLE_ADMIN' ||
+        authClaims.sub === 'admin' ||
+        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+      }
+
+      const repos = await getAppRepositories();
+      let redrivenCount = 0;
+      if (repos && repos.outboxProcessor && typeof repos.outboxProcessor.redriveStalledDispatches === 'function') {
+        redrivenCount = await repos.outboxProcessor.redriveStalledDispatches();
+      }
+      return sendJson(res, 200, { ok: true, redrivenCount, timestamp: new Date().toISOString() });
     }
 
     // -------------------------------------------------------------
