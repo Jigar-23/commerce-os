@@ -96,56 +96,72 @@ function calculateCustomerOrderPricing({
   customDeliveryFee = null,
   discountAmount = 0,
   packagingFee = 0,
+  surgeFee = 0,
   taxAmount = 0
 }) {
   const subtotal = Math.round(Number(itemsSubtotal || 0) * 100) / 100;
   const discount = Math.max(0, Math.round(Number(discountAmount || 0) * 100) / 100);
   const deliveryFee = customDeliveryFee !== null ? Math.max(0, Number(customDeliveryFee)) : (subtotal >= 199.0 ? 0.0 : 2.0);
   const handlingFee = Math.max(0, Number(packagingFee || 0));
+  const surgeAmount = Math.max(0, Number(surgeFee || 0));
   const tipAmount = Math.max(0, Number(tip) || 0);
   const codFee = 0.0;
 
-  // Authoritative GST Tax Calculation:
+  // Authoritative GST Tax Calculation & Per-Line Breakdown (Finding 8):
   // Catalog item prices in quick-commerce pharmacy are tax-inclusive:
   // - Per-item medicine rate (CBIC GST rates: 5% or 12% per SKU HSN)
-  // - 18% GST for delivery & handling service fees
-  let computedTax = Number(taxAmount || 0);
-  if (computedTax <= 0 && subtotal > 0) {
-    let medicineGst = 0;
-    if (Array.isArray(items) && items.length > 0) {
-      for (const it of items) {
-        const rate = Number(it.gstRate != null ? it.gstRate : (it.gst_rate != null ? it.gst_rate : 5.0));
-        const lineTotal = Number(it.lineTotal != null ? it.lineTotal : (it.line_total != null ? it.line_total : ((it.unitPrice || it.price || 0) * (it.quantity || 1))));
-        if (lineTotal > 0 && rate > 0) {
-          const lineTax = lineTotal - (lineTotal / (1 + (rate / 100)));
-          medicineGst += lineTax;
-        }
-      }
-      medicineGst = Math.round(medicineGst * 100) / 100;
-    } else {
-      medicineGst = Math.round((subtotal - (subtotal / 1.05)) * 100) / 100;
+  // - 18% GST for delivery, surge & handling service fees
+  let lineTaxes = [];
+  let medicineGst = 0;
+  if (Array.isArray(items) && items.length > 0) {
+    for (const it of items) {
+      const rate = Number(it.gstRate != null ? it.gstRate : (it.gst_rate != null ? it.gst_rate : 5.0));
+      const lineTotal = Number(it.lineTotal != null ? it.lineTotal : (it.line_total != null ? it.line_total : ((it.unitPrice || it.price || 0) * (it.quantity || 1))));
+      const lineTax = lineTotal > 0 && rate > 0 ? Math.round((lineTotal - (lineTotal / (1 + (rate / 100)))) * 100) / 100 : 0.0;
+      const lineCgst = Math.round((lineTax / 2) * 100) / 100;
+      const lineSgst = Math.round((lineTax - lineCgst) * 100) / 100;
+      medicineGst += lineTax;
+      lineTaxes.push({
+        productId: it.productId || it.product_id || null,
+        sku: it.sku || null,
+        hsnCode: it.hsnCode || it.hsn_code || '3004',
+        gstRatePercent: rate,
+        taxableAmount: Math.round((lineTotal - lineTax) * 100) / 100,
+        taxAmount: lineTax,
+        cgst: lineCgst,
+        sgst: lineSgst
+      });
     }
-    const feeGst = (deliveryFee + handlingFee) > 0 ? Math.round(((deliveryFee + handlingFee) - ((deliveryFee + handlingFee) / 1.18)) * 100) / 100 : 0.0;
-    computedTax = Math.round((medicineGst + feeGst) * 100) / 100;
+    medicineGst = Math.round(medicineGst * 100) / 100;
+  } else if (subtotal > 0) {
+    medicineGst = Math.round((subtotal - (subtotal / 1.05)) * 100) / 100;
   }
+
+  const serviceFees = deliveryFee + handlingFee + surgeAmount;
+  const feeGst = serviceFees > 0 ? Math.round((serviceFees - (serviceFees / 1.18)) * 100) / 100 : 0.0;
+  const computedTax = Number(taxAmount || 0) > 0 ? Number(taxAmount) : Math.round((medicineGst + feeGst) * 100) / 100;
   const tax = Math.max(0, computedTax);
   const cgst = Math.round((tax / 2) * 100) / 100;
   const sgst = Math.round((tax - cgst) * 100) / 100;
 
-  // Subtotal is tax-inclusive of medicine GST; delivery/handling fees are tax-inclusive of service GST.
-  const totalAmount = Math.max(0, Math.round((subtotal - discount + deliveryFee + handlingFee + tipAmount + codFee) * 100) / 100);
+  // Subtotal is tax-inclusive of medicine GST; delivery/handling/surge fees are tax-inclusive of service GST.
+  const totalAmount = Math.max(0, Math.round((subtotal - discount + deliveryFee + handlingFee + surgeAmount + tipAmount + codFee) * 100) / 100);
 
   return {
     itemsSubtotal: subtotal,
     discountAmount: discount,
     deliveryFee,
     handlingFee,
+    surgeFee: surgeAmount,
     taxAmount: tax,
     taxBreakdown: {
       cgst,
       sgst,
       totalTax: tax,
-      gstRatePercent: items.length > 0 && items[0].gstRate ? Number(items[0].gstRate) : 5,
+      lineTaxes,
+      itemTaxes: lineTaxes,
+      totalMedicineTax: medicineGst,
+      totalFeeTax: feeGst,
       isTaxInclusive: true
     },
     tipAmount,

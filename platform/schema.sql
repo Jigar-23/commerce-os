@@ -656,8 +656,19 @@ ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_time_utc VARCHAR(8) NOT NULL
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS closing_time_utc VARCHAR(8) NOT NULL DEFAULT '23:59';
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS max_active_orders INT NOT NULL DEFAULT 50;
 
-ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(16) NOT NULL DEFAULT '3004';
-ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(4, 2) NOT NULL DEFAULT 5.0;
+-- Categorized per-product tax classification (Finding 8)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(16);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(4, 2);
+UPDATE products SET hsn_code = '3004' WHERE hsn_code IS NULL AND category IN ('Medicines', 'Pharmacy', 'Rx', 'Allopathy', 'Ayurveda');
+UPDATE products SET hsn_code = '9018' WHERE hsn_code IS NULL AND category IN ('Medical Devices', 'Diagnostics', 'Equipment');
+UPDATE products SET hsn_code = '2106' WHERE hsn_code IS NULL AND category IN ('Supplements', 'Nutrition', 'Wellness');
+UPDATE products SET hsn_code = '3004' WHERE hsn_code IS NULL;
+UPDATE products SET gst_rate = 5.0 WHERE gst_rate IS NULL AND hsn_code = '3004';
+UPDATE products SET gst_rate = 12.0 WHERE gst_rate IS NULL AND hsn_code = '9018';
+UPDATE products SET gst_rate = 18.0 WHERE gst_rate IS NULL AND hsn_code = '2106';
+UPDATE products SET gst_rate = 5.0 WHERE gst_rate IS NULL;
+ALTER TABLE products ALTER COLUMN hsn_code SET DEFAULT '3004';
+ALTER TABLE products ALTER COLUMN gst_rate SET DEFAULT 5.0;
 
 
 

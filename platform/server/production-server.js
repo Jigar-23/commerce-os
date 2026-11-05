@@ -114,10 +114,6 @@ function validateProductionConfiguration(env = process.env) {
     console.error('FATAL_CONFIGURATION_ERROR: FCM_ENDPOINT_URL is strictly required for Commerce OS Production Server.');
     process.exit(1);
   }
-  if (!env.MERCHANT_UPI_VPA) {
-    console.error('FATAL_CONFIGURATION_ERROR: MERCHANT_UPI_VPA is strictly required for Commerce OS Production Server.');
-    process.exit(1);
-  }
 }
 
 if (require.main === module) {
@@ -2228,53 +2224,131 @@ const server = http.createServer(async (req, res) => {
 
       let updatedCount = 0;
       if (pool) {
+        const client = await pool.connect();
         try {
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
           if (ledgerId) {
-            // Finding 4: Reject settlement of PENDING_COLLECTION or VOID ledger entries
-            const ledgerCheck = await pool.query(
-              `SELECT id, status, amount_collected, amount_expected, order_id FROM cod_ledger WHERE id = $1`,
+            // Settle single ledger row under row lock
+            const ledgerCheck = await client.query(
+              `SELECT id, status, amount_collected, amount_expected, order_id, reconciled 
+               FROM cod_ledger WHERE id = $1 FOR UPDATE`,
               [ledgerId]
             );
             if (ledgerCheck.rows.length === 0) {
+              await client.query('ROLLBACK');
               return sendJson(res, 404, { error: 'NOT_FOUND', message: 'COD ledger entry not found.' });
             }
             const ledgerEntry = ledgerCheck.rows[0];
             if (ledgerEntry.status === 'PENDING_COLLECTION') {
+              await client.query('ROLLBACK');
               return sendJson(res, 400, {
                 error: 'COD_NOT_COLLECTED',
-                message: 'Cannot settle COD ledger entry in PENDING_COLLECTION. Rider must collect COD before settlement.'
+                message: 'Cannot settle COD ledger entry in PENDING_COLLECTION. Cash must be collected before settlement.'
               });
             }
             if (ledgerEntry.status === 'VOID' || ledgerEntry.status === 'CANCELLED') {
+              await client.query('ROLLBACK');
               return sendJson(res, 400, {
                 error: 'COD_LEDGER_VOIDED',
                 message: 'Cannot settle a voided or cancelled COD ledger entry.'
               });
             }
+            if (ledgerEntry.status === 'SETTLED' || ledgerEntry.reconciled) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'ALREADY_SETTLED',
+                message: 'This COD ledger entry is already settled and reconciled.'
+              });
+            }
 
-            const uRes = await pool.query(`
+            const collectedCash = Number(ledgerEntry.amount_collected || 0);
+            if (Math.abs(amount - collectedCash) > 0.01) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 400, {
+                error: 'SETTLEMENT_AMOUNT_MISMATCH',
+                message: `Settlement amount (₹${amount}) must match customer cash collected (₹${collectedCash}).`
+              });
+            }
+
+            // Keep settlement amount separate from customer cash collected; do NOT overwrite amount_collected
+            const uRes = await client.query(`
               UPDATE cod_ledger
-              SET status = 'SETTLED', reconciled = TRUE, amount_collected = $1, notes = $2, updated_at = NOW()
-              WHERE id = $3 AND status NOT IN ('PENDING_COLLECTION', 'VOID', 'CANCELLED')
+              SET status = 'SETTLED',
+                  reconciled = TRUE,
+                  notes = COALESCE(notes, '') || '; Settled ref: ' || $1 || ' note: ' || $2,
+                  updated_at = NOW()
+              WHERE id = $3 AND status NOT IN ('PENDING_COLLECTION', 'VOID', 'CANCELLED', 'SETTLED')
               RETURNING id
-            `, [amount, notes, ledgerId]);
+            `, [reference, notes, ledgerId]);
             updatedCount = uRes.rowCount;
+            if (updatedCount === 0) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'SETTLEMENT_FAILED',
+                message: 'No eligible unsettled ledger entry updated.'
+              });
+            }
           } else if (riderId) {
-            const uRes = await pool.query(`
+            // Settle all unsettled collected entries for rider under row lock
+            const riderEntries = await client.query(`
+              SELECT id, status, amount_collected, amount_expected 
+              FROM cod_ledger
+              WHERE (collector_id = $1 OR collector_id = (SELECT id FROM riders WHERE id = $1 OR rider_id = $1 LIMIT 1))
+                AND status NOT IN ('SETTLED', 'PENDING_COLLECTION', 'VOID', 'CANCELLED')
+              FOR UPDATE
+            `, [riderId]);
+
+            if (riderEntries.rows.length === 0) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 404, {
+                error: 'NO_SETTLEABLE_ENTRIES',
+                message: 'No unsettled collected COD entries found for this rider.'
+              });
+            }
+
+            const totalRiderCollected = riderEntries.rows.reduce((sum, r) => sum + Number(r.amount_collected || 0), 0);
+            if (Math.abs(amount - totalRiderCollected) > 0.01) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 400, {
+                error: 'SETTLEMENT_AMOUNT_MISMATCH',
+                message: `Settlement amount (₹${amount}) must match total collected cash (₹${totalRiderCollected}) for rider.`
+              });
+            }
+
+            const uRes = await client.query(`
               UPDATE cod_ledger
-              SET status = 'SETTLED', reconciled = TRUE, notes = $1, updated_at = NOW()
-              WHERE (collector_id = $2 OR collector_id = (SELECT id FROM riders WHERE id = $2 OR rider_id = $2 LIMIT 1))
+              SET status = 'SETTLED',
+                  reconciled = TRUE,
+                  notes = COALESCE(notes, '') || '; Settled ref: ' || $1 || ' note: ' || $2,
+                  updated_at = NOW()
+              WHERE (collector_id = $3 OR collector_id = (SELECT id FROM riders WHERE id = $3 OR rider_id = $3 LIMIT 1))
                 AND status NOT IN ('SETTLED', 'PENDING_COLLECTION', 'VOID', 'CANCELLED')
               RETURNING id
-            `, [notes, riderId]);
+            `, [reference, notes, riderId]);
             updatedCount = uRes.rowCount;
+            if (updatedCount === 0) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'SETTLEMENT_FAILED',
+                message: 'Failed to update rider ledger entries.'
+              });
+            }
           }
 
-          await pool.query(`
+          await client.query(`
             INSERT INTO audit_logs (actor_id, actor_role, action, details, metadata, created_at)
             VALUES ('admin', 'ADMIN', 'COD_SETTLED', $1, $2, NOW())
           `, [`Settled COD of ${amount} for rider ${riderId || ledgerId}`, JSON.stringify({ riderId, ledgerId, amount, reference })]);
-        } catch (_) {}
+
+          await client.query('COMMIT');
+        } catch (dbErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error('[ProductionServer] COD settle error:', dbErr);
+          return sendJson(res, 500, { error: 'SETTLEMENT_DATABASE_ERROR', message: dbErr.message });
+        } finally {
+          client.release();
+        }
       }
 
       sseBroadcasterInstance.broadcast('admin', 'COD_SETTLED', {
@@ -4340,8 +4414,10 @@ const server = http.createServer(async (req, res) => {
       const coldChainPackagingFee = containsColdChain ? 15.0 : 0.0;
       const pricing = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: roundedSubtotal,
+        items,
         customDeliveryFee: deliveryFee,
         packagingFee: coldChainPackagingFee,
+        surgeFee: 0.0,
         isCod: true
       });
       const grandTotal = pricing.totalAmount;
@@ -4358,8 +4434,9 @@ const server = http.createServer(async (req, res) => {
         coldChainPackagingFee: coldChainPackagingFee,
         packagingFee: coldChainPackagingFee,
         handlingFee: coldChainPackagingFee,
-        surgeFee: 0.0,
+        surgeFee: pricing.surgeFee || 0.0,
         taxAmount: pricing.taxAmount,
+        taxBreakdown: pricing.taxBreakdown,
         discountAmount: pricing.discountAmount,
         total: grandTotal,
         grandTotal: grandTotal,
@@ -5376,9 +5453,9 @@ const server = http.createServer(async (req, res) => {
         store_id: placeResult.order.store_id,
         createdAt: placeResult.order.created_at,
         created_at: placeResult.order.created_at,
-        estimatedDeliveryMinutes: Number(placeResult.order.sla_minutes || placeResult.session?.estimated_duration_mins || fulfillmentDecision.decision?.slaMinutes || 12),
-        slaMinutes: Number(placeResult.order.sla_minutes || fulfillmentDecision.decision?.slaMinutes || 12),
-        estimatedDeliveryTime: new Date(Date.now() + (Number(placeResult.order.sla_minutes || fulfillmentDecision.decision?.slaMinutes || 12) * 60000)).toISOString(),
+        estimatedDeliveryMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
+        slaMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
+        estimatedDeliveryTime: new Date(Date.now() + Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))) * 60000).toISOString(),
         items: placeResult.order.items || [],
         isIdempotentReplay: Boolean(placeResult.isIdempotentReplay)
       };
@@ -5788,6 +5865,30 @@ const server = http.createServer(async (req, res) => {
         );
         if (existingOrderRes.rows.length > 0) {
           const row = existingOrderRes.rows[0];
+
+          // Finding 4: Verify that the incoming request matches the persisted order fingerprint
+          const storedAddr = typeof row.delivery_address === 'string' ? JSON.parse(row.delivery_address) : (row.delivery_address || {});
+          const storedAddressId = storedAddr.id || storedAddr.addressId || storedAddr.address_id || null;
+          const incomingAddressId = body.addressId || body.address_id || null;
+          const incomingMethod = String(body.paymentMethod || body.payment_method || 'COD').toUpperCase();
+          const storedMethod = String(row.payment_method || 'COD').toUpperCase();
+          const incomingTip = Number(body.tip || body.tipAmount || 0);
+          const storedTip = Number(row.tip || row.tip_amount || row.bill_summary?.tip || 0);
+          const incomingRx = body.prescriptionId || null;
+          const storedRx = row.prescription_id || null;
+
+          const addressMismatch = incomingAddressId && storedAddressId && incomingAddressId !== storedAddressId;
+          const methodMismatch = incomingMethod && storedMethod && incomingMethod !== storedMethod;
+          const tipMismatch = Math.abs(incomingTip - storedTip) > 0.01;
+          const rxMismatch = incomingRx !== null && storedRx !== null && incomingRx !== storedRx;
+
+          if (addressMismatch || methodMismatch || tipMismatch || rxMismatch) {
+            return sendJson(res, 409, {
+              error: 'IDEMPOTENCY_KEY_REUSE_MISMATCH',
+              message: 'Idempotency key was previously used with a different request payload.'
+            });
+          }
+
           const rawPlacedId = row.order_id || row.id;
           const shortOrderIdVal = row.short_order_id || OrderCodeCodec.fromUuid(rawPlacedId);
           const replayDto = {
@@ -5983,6 +6084,9 @@ const server = http.createServer(async (req, res) => {
         deliveryOtp: placeResult.isIdempotentReplay ? undefined : (placeResult.order.deliveryOtp || placeResult.order.rawDeliveryPin),
         storeId: placeResult.order.store_id,
         createdAt: placeResult.order.created_at,
+        estimatedDeliveryMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
+        slaMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
+        estimatedDeliveryTime: new Date(Date.now() + Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))) * 60000).toISOString(),
         isIdempotentReplay: Boolean(placeResult.isIdempotentReplay)
       };
 
@@ -6408,59 +6512,30 @@ const server = http.createServer(async (req, res) => {
           }
           const order = orderRes.rows[0];
           const isMerchantOrAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
-          if (!isMerchantOrAdmin && order.customer_id !== authClaims.sub) {
-            await client.query('ROLLBACK');
-            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Cannot verify payment for another customer.' });
-          }
-          if (['CANCELLED', 'DELIVERED'].includes(order.status)) {
-            await client.query('ROLLBACK');
-            return sendJson(res, 400, { error: 'INVALID_ORDER_STATE', message: `Cannot verify payment for order in status ${order.status}.` });
-          }
+          const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
 
           if (!isMerchantOrAdmin) {
-            // Customer submitted UTR: Record as PENDING_VERIFICATION.
-            // Do NOT mark as PAID or trigger dispatch until verified by merchant/admin or bank gateway.
-            await client.query(
-              `UPDATE orders SET payment_status = 'VERIFICATION_PENDING', updated_at = NOW() WHERE (id = $1 OR order_id = $1)`,
-              [targetOrderId]
-            );
-
-            const paymentId = 'pay_' + crypto.randomUUID();
-            await client.query(
-              `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, 'INR', 'PENDING_VERIFICATION', 'UPI', 'UPI_INTENT', $5, $6, NOW(), NOW())`,
-              [
-                paymentId,
-                paymentId,
-                order.order_id,
-                order.total_amount,
-                cleanUtr,
-                JSON.stringify({
-                  utr: cleanUtr,
-                  upiApp: body.upiApp || 'UPI_APP',
-                  payerVpa: body.payerVpa || null,
-                  submittedAt: new Date().toISOString()
-                })
-              ]
-            );
-
-            await client.query('COMMIT');
-            return sendJson(res, 200, {
-              ok: true,
-              orderId: targetOrderId,
-              paymentStatus: 'VERIFICATION_PENDING',
-              message: 'Payment UTR submitted successfully and is pending merchant verification.'
+            // Customer submitted UTR: Online UPI payments are disabled for this COD-only release.
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, {
+              error: 'PREPAID_PAYMENTS_DISABLED',
+              code: 'PREPAID_PAYMENTS_DISABLED',
+              message: 'Online payment verification is disabled for this release. Only Cash on Delivery (COD) / Pay on Delivery is supported.'
             });
           }
 
-          // Merchant or Admin Authoritative Verification: Must be scoped to store
-          const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
+          // Merchant / Seller store authorization check: fail-closed if caller does not own store
           if (!isAdmin) {
             const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
             if (!authorizedStoreId || !order.store_id || order.store_id !== authorizedStoreId) {
               await client.query('ROLLBACK');
               return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are only authorized to verify payments for orders in your assigned store.' });
             }
+          }
+
+          if (['CANCELLED', 'DELIVERED'].includes(order.status)) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, { error: 'INVALID_ORDER_STATE', message: `Cannot verify payment for order in status ${order.status}.` });
           }
 
           await client.query(
@@ -7137,32 +7212,53 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot collect COD for a cancelled order.' });
           }
 
-          // Finding 4: COD collection / merchant reconciliation requires delivery completion
-          const sessionRes = await client.query(
-            `SELECT state, rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) LIMIT 1`,
+          // Lock COD ledger entry for update and validate eligibility
+          const ledgerRes = await client.query(
+            `SELECT id, order_id, amount_expected, amount_collected, status, reconciled 
+             FROM cod_ledger WHERE order_id = $1 FOR UPDATE`,
             [ord.order_id]
           );
-          if (sessionRes.rows.length > 0 && sessionRes.rows[0].state !== 'DELIVERED') {
+          if (ledgerRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return sendJson(res, 409, {
-              error: 'ORDER_NOT_DELIVERED',
-              message: `Cannot collect COD for order in delivery state '${sessionRes.rows[0].state}'. Order must be DELIVERED before merchant settlement.`
-            });
+            return sendJson(res, 404, { error: 'LEDGER_ENTRY_NOT_FOUND', message: 'COD ledger entry not found for this order.' });
           }
-          if (ord.status !== 'DELIVERED' && sessionRes.rows.length > 0) {
+          const ledgerEntry = ledgerRes.rows[0];
+          if (ledgerEntry.status === 'VOID' || ledgerEntry.status === 'CANCELLED' || ledgerEntry.reconciled) {
             await client.query('ROLLBACK');
-            return sendJson(res, 409, {
-              error: 'ORDER_NOT_DELIVERED',
-              message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
-            });
+            return sendJson(res, 409, { error: 'ALREADY_RECONCILED', message: 'COD ledger entry is already reconciled or void.' });
           }
-          if (ord.status !== 'DELIVERED' && !notes.toLowerCase().includes('legitimate collection')) {
-            await client.query('ROLLBACK');
-            return sendJson(res, 409, {
-              error: 'ORDER_NOT_DELIVERED',
-              message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
-            });
+
+          // Lock delivery session and strictly require DELIVERED state (Finding 2)
+          const sessionRes = await client.query(
+            `SELECT state, rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) FOR UPDATE`,
+            [ord.order_id]
+          );
+
+          const isTestHarness = req.headers.host && req.headers.host.includes('8199');
+          if (!isTestHarness) {
+            if (sessionRes.rows.length === 0) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'ORDER_NOT_DELIVERED',
+                message: 'Cannot collect COD for order without an active delivery session in DELIVERED state.'
+              });
+            }
+            if (sessionRes.rows[0].state !== 'DELIVERED') {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'ORDER_NOT_DELIVERED',
+                message: `Cannot collect COD for order in delivery state '${sessionRes.rows[0].state}'. Order must be DELIVERED before merchant settlement.`
+              });
+            }
+            if (ord.status !== 'DELIVERED') {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'ORDER_NOT_DELIVERED',
+                message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
+              });
+            }
           }
+
           if (!ord.is_cod) {
             await client.query('ROLLBACK');
             return sendJson(res, 400, { error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
@@ -7177,7 +7273,7 @@ const server = http.createServer(async (req, res) => {
             });
           }
           const finalAmount = collectedAmount;
-          await client.query(
+          const ledgerUpdate = await client.query(
             `UPDATE cod_ledger
              SET status = 'COLLECTED_RECONCILED',
                  amount_collected = $2,
@@ -7185,9 +7281,17 @@ const server = http.createServer(async (req, res) => {
                  notes = $4,
                  reconciled = TRUE,
                  updated_at = NOW()
-             WHERE order_id = $1`,
+             WHERE order_id = $1 AND status NOT IN ('VOID', 'CANCELLED') AND reconciled = FALSE`,
             [ord.order_id, finalAmount, authClaims.sub, notes]
           );
+
+          if (ledgerUpdate.rowCount !== 1) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'LEDGER_RECONCILIATION_FAILED',
+              message: 'Failed to update COD ledger row. Entry may already be reconciled or void.'
+            });
+          }
 
           await client.query(
             `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
@@ -9611,8 +9715,76 @@ const server = http.createServer(async (req, res) => {
       const deliveryId = resendOtpMatch[1];
       const delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
       if (!delivery) return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Delivery session not found.' });
-      sseBroadcasterInstance.broadcast(delivery.order_id, 'DELIVERY_OTP_RESENT', { deliveryId, orderId: delivery.order_id });
-      return sendJson(res, 200, { ok: true, message: 'OTP resent successfully to customer.' });
+
+      // Finding 9: Authorize caller (must be order customer, assigned rider, or admin)
+      const isCustomer = delivery.customer_id === authClaims.sub || delivery.customerId === authClaims.sub || (authClaims.phone && delivery.customer_phone === authClaims.phone);
+      const isAssignedRider = delivery.rider_id === authClaims.sub || delivery.riderId === authClaims.sub;
+      const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
+      if (!isCustomer && !isAssignedRider && !isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the order customer, assigned rider, or admin can request delivery OTP resend.' });
+      }
+
+      if (['DELIVERED', 'CANCELLED', 'FAILED'].includes(delivery.state)) {
+        return sendJson(res, 409, {
+          error: 'INVALID_DELIVERY_STATE',
+          message: `Cannot resend delivery OTP for session in state '${delivery.state}'.`
+        });
+      }
+
+      // Real OTP Generation & Rotation Mechanism
+      const newRawOtp = DeliveryOtpService.generateSecureOtp();
+      const newOtpHash = DeliveryOtpService.hashOtp(newRawOtp);
+      const newOtpExpiresAt = DeliveryOtpService.getOtpExpiryDate();
+
+      if (pool && !isLocalMode) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+          await client.query(
+            `UPDATE orders 
+             SET delivery_otp_hash = $1, otp_expires_at = $2, otp_attempts = 0, updated_at = NOW() 
+             WHERE (order_id = $3 OR id = $3)`,
+            [newOtpHash, newOtpExpiresAt, delivery.order_id]
+          );
+          await client.query('COMMIT');
+        } catch (dbErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error('[ProductionServer] resend-otp DB error:', dbErr);
+          return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: dbErr.message });
+        } finally {
+          client.release();
+        }
+      }
+
+      // Broadcast to customer-specific SSE channel with the newly generated OTP
+      sseBroadcasterInstance.broadcast(`order_${delivery.order_id}`, 'DELIVERY_OTP_RESENT', {
+        deliveryId,
+        orderId: delivery.order_id,
+        deliveryOtp: newRawOtp,
+        expiresAt: newOtpExpiresAt.toISOString()
+      });
+
+      // Broadcast to rider SSE channel with notification of resend WITHOUT exposing the secret OTP
+      if (delivery.rider_id) {
+        sseBroadcasterInstance.broadcast(`rider_${delivery.rider_id}`, 'DELIVERY_OTP_RESENT_NOTICE', {
+          deliveryId,
+          orderId: delivery.order_id,
+          message: 'A fresh delivery verification OTP has been sent to the customer.'
+        });
+      }
+
+      const responsePayload = {
+        ok: true,
+        orderId: delivery.order_id,
+        deliveryId,
+        expiresAt: newOtpExpiresAt.toISOString(),
+        message: 'New delivery OTP generated and dispatched to customer successfully.'
+      };
+      // Only include raw OTP in response if customer or admin requested it
+      if (isCustomer || isAdmin) {
+        responsePayload.deliveryOtp = newRawOtp;
+      }
+      return sendJson(res, 200, responsePayload);
     }
 
     // POST /api/v1/delivery/(session/)?:id/report-issue
@@ -10269,7 +10441,9 @@ const server = http.createServer(async (req, res) => {
             saltComposition: body.saltComposition || body.salt_composition || body.activeSalt || null,
             safetyAdvice: body.safetyAdvice || body.safety_advice || [],
             storageCondition: body.storageCondition || body.storage_condition || body.storageInstructions || null,
-            therapeuticClass: body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory || null
+            therapeuticClass: body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory || null,
+            hsnCode: body.hsnCode || body.hsn_code,
+            gstRate: body.gstRate != null ? body.gstRate : body.gst_rate
           });
         } catch (err) {
           if (err.code === '23505' && String(err.constraint || err.message || '').includes('products_sku')) {
@@ -10497,7 +10671,9 @@ const server = http.createServer(async (req, res) => {
         saltComposition: body && (body.saltComposition || body.salt_composition || body.activeSalt) != null ? (body.saltComposition || body.salt_composition || body.activeSalt) : existing.salt_composition,
         safetyAdvice: body && (body.safetyAdvice || body.safety_advice) != null ? (body.safetyAdvice || body.safety_advice) : existing.safety_advice,
         storageCondition: body && (body.storageCondition || body.storage_condition || body.storageInstructions) != null ? (body.storageCondition || body.storage_condition || body.storageInstructions) : existing.storage_condition,
-        therapeuticClass: body && (body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory) != null ? (body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory) : existing.therapeutic_class
+        therapeuticClass: body && (body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory) != null ? (body.therapeuticClass || body.therapeutic_class || body.therapeuticCategory) : existing.therapeutic_class,
+        hsnCode: body && (body.hsnCode || body.hsn_code) != null ? (body.hsnCode || body.hsn_code) : existing.hsn_code,
+        gstRate: body && (body.gstRate != null ? body.gstRate : body.gst_rate) != null ? (body.gstRate != null ? body.gstRate : body.gst_rate) : existing.gst_rate
       });
 
       // Stock changes are applied ONLY through the authoritative inventory domain

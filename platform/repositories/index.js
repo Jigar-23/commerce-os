@@ -259,13 +259,26 @@ class TransactionalCatalogRepository {
           : JSON.stringify([product.safetyAdvice || product.safety_advice])
         : '[]');
 
+    const categoryLower = String(product.category || '').toLowerCase();
+    let defaultHsn = '3004';
+    let defaultGst = 5.0;
+    if (categoryLower.includes('device') || categoryLower.includes('diagnostic') || categoryLower.includes('equipment')) {
+      defaultHsn = '9018';
+      defaultGst = 12.0;
+    } else if (categoryLower.includes('supplement') || categoryLower.includes('nutrition') || categoryLower.includes('wellness')) {
+      defaultHsn = '2106';
+      defaultGst = 18.0;
+    }
+    const resolvedHsn = product.hsnCode || product.hsn_code || defaultHsn;
+    const resolvedGst = Number(product.gstRate != null ? product.gstRate : (product.gst_rate != null ? product.gst_rate : defaultGst));
+
     const res = await this.pool.query(
       `INSERT INTO products (
         id, sku, name, brand_name, pack_size, mrp, price, discounted_price,
         rx_requirement, category, image_url, images, description, expiry_date, manufacturing_date,
         manufacturer, salt_composition, safety_advice, storage_condition, therapeutic_class,
-        is_active, store_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, TRUE, NULL, NOW(), NOW())
+        hsn_code, gst_rate, is_active, store_id, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, TRUE, NULL, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         brand_name = EXCLUDED.brand_name,
@@ -285,6 +298,8 @@ class TransactionalCatalogRepository {
         safety_advice = COALESCE(EXCLUDED.safety_advice, products.safety_advice),
         storage_condition = COALESCE(EXCLUDED.storage_condition, products.storage_condition),
         therapeutic_class = COALESCE(EXCLUDED.therapeutic_class, products.therapeutic_class),
+        hsn_code = EXCLUDED.hsn_code,
+        gst_rate = EXCLUDED.gst_rate,
         store_id = NULL,
         updated_at = NOW()
       RETURNING *`,
@@ -308,7 +323,9 @@ class TransactionalCatalogRepository {
         product.saltComposition || product.salt_composition || product.activeSalt || null,
         safetyAdviceVal,
         product.storageCondition || product.storage_condition || product.storageInstructions || null,
-        product.therapeuticClass || product.therapeutic_class || product.therapeuticCategory || null
+        product.therapeuticClass || product.therapeutic_class || product.therapeuticCategory || null,
+        resolvedHsn,
+        resolvedGst
       ]
     );
     return res.rows[0] || null;
@@ -1319,13 +1336,16 @@ class ServiceabilityService {
         continue;
       }
 
-      // 2b. Authoritative Operating Hours Guard (UTC)
+      // 2b. Authoritative Operating Hours Guard (UTC with midnight-crossing / overnight support)
       if (store.opening_time_utc && store.closing_time_utc) {
         const [openH, openM] = String(store.opening_time_utc).split(':').map(Number);
         const [closeH, closeM] = String(store.closing_time_utc).split(':').map(Number);
         const openMin = (openH || 0) * 60 + (openM || 0);
         const closeMin = (closeH || 23) * 60 + (closeM || 59);
-        if (closeMin >= openMin && (currentUtcMinutes < openMin || currentUtcMinutes > closeMin)) {
+        const isWithinHours = closeMin >= openMin
+          ? (currentUtcMinutes >= openMin && currentUtcMinutes <= closeMin)
+          : (currentUtcMinutes >= openMin || currentUtcMinutes <= closeMin);
+        if (!isWithinHours) {
           continue;
         }
       }
@@ -1337,12 +1357,12 @@ class ServiceabilityService {
         continue;
       }
 
-      // 2d. Surge & Active Order Capacity Guard (Finding 7)
+      // 2d. Surge & Active Order Capacity Guard (Count all nonterminal orders)
       if (pool && store.max_active_orders) {
         try {
           const capRes = await pool.query(
             `SELECT COUNT(*) FROM orders 
-             WHERE store_id = $1 AND status IN ('PLACED', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'LOOKING_FOR_RIDER', 'OUT_FOR_DELIVERY')`,
+             WHERE store_id = $1 AND status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')`,
             [store.id]
           );
           const activeOrderCount = Number(capRes.rows[0]?.count || 0);
@@ -3963,7 +3983,7 @@ class TransactionalOrderRepository {
         return { ok: false, httpStatus: 400, error: 'STORE_CLOSED', message: `Store ${store.store_name} is currently closed or offline.` };
       }
 
-      // Operational Hours Guard (Finding 7)
+      // Operational Hours Guard (UTC with midnight-crossing / overnight support)
       if (store.opening_time_utc && store.closing_time_utc) {
         const nowUtc = new Date();
         const currentUtcMinutes = nowUtc.getUTCHours() * 60 + nowUtc.getUTCMinutes();
@@ -3971,17 +3991,20 @@ class TransactionalOrderRepository {
         const [closeH, closeM] = String(store.closing_time_utc).split(':').map(Number);
         const openMin = (openH || 0) * 60 + (openM || 0);
         const closeMin = (closeH || 23) * 60 + (closeM || 59);
-        if (closeMin >= openMin && (currentUtcMinutes < openMin || currentUtcMinutes > closeMin)) {
+        const isWithinHours = closeMin >= openMin
+          ? (currentUtcMinutes >= openMin && currentUtcMinutes <= closeMin)
+          : (currentUtcMinutes >= openMin || currentUtcMinutes <= closeMin);
+        if (!isWithinHours) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 400, error: 'STORE_OUTSIDE_OPERATING_HOURS', message: `Store ${store.store_name} is outside operating hours (${store.opening_time_utc} - ${store.closing_time_utc} UTC).` };
         }
       }
 
-      // Capacity & Surge Guard (Finding 7)
+      // Capacity & Surge Guard (Count all nonterminal orders)
       if (store.max_active_orders) {
         const activeCapRes = await client.query(
           `SELECT COUNT(*) FROM orders 
-           WHERE store_id = $1 AND status IN ('PLACED', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'LOOKING_FOR_RIDER', 'OUT_FOR_DELIVERY')`,
+           WHERE store_id = $1 AND status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')`,
           [store.id]
         );
         const activeCount = Number(activeCapRes.rows[0]?.count || 0);
@@ -5788,7 +5811,18 @@ class TransactionalStoreRepository {
 
   async getStoreSettings(storeId) {
     if (!this.pool) return { storeId, sellerApprovalRequired: false };
-    const res = await this.pool.query(`SELECT id, store_name, address, latitude, longitude, sla_minutes, seller_approval_required, is_active FROM stores WHERE id = $1`, [storeId]);
+    const res = await this.pool.query(
+      `SELECT id, store_name, address, latitude, longitude, sla_minutes, seller_approval_required, is_active,
+              COALESCE(is_open, TRUE) AS is_open,
+              COALESCE(is_offline, FALSE) AS is_offline,
+              COALESCE(surge_mode, FALSE) AS surge_mode,
+              COALESCE(opening_time_utc, '00:00') AS opening_time_utc,
+              COALESCE(closing_time_utc, '23:59') AS closing_time_utc,
+              COALESCE(max_active_orders, 50) AS max_active_orders,
+              COALESCE(service_radius_km, 10.0) AS service_radius_km
+       FROM stores WHERE id = $1`,
+      [storeId]
+    );
     if (res.rows.length === 0) return { storeId, sellerApprovalRequired: false };
     const row = res.rows[0];
     return {
@@ -5799,7 +5833,14 @@ class TransactionalStoreRepository {
       longitude: row.longitude,
       slaMinutes: row.sla_minutes,
       sellerApprovalRequired: row.seller_approval_required === true,
-      isActive: row.is_active
+      isActive: row.is_active,
+      isOpen: row.is_open,
+      isOffline: row.is_offline,
+      surgeMode: row.surge_mode,
+      openingTimeUtc: row.opening_time_utc,
+      closingTimeUtc: row.closing_time_utc,
+      maxActiveOrders: row.max_active_orders,
+      serviceRadiusKm: Number(row.service_radius_km)
     };
   }
 
@@ -5821,6 +5862,34 @@ class TransactionalStoreRepository {
       fields.push(`sla_minutes = $${idx++}`);
       values.push(Number(settings.slaMinutes));
     }
+    if (settings.isOpen !== undefined || settings.is_open !== undefined) {
+      fields.push(`is_open = $${idx++}`);
+      values.push(settings.isOpen !== undefined ? settings.isOpen === true : settings.is_open === true);
+    }
+    if (settings.isOffline !== undefined || settings.is_offline !== undefined) {
+      fields.push(`is_offline = $${idx++}`);
+      values.push(settings.isOffline !== undefined ? settings.isOffline === true : settings.is_offline === true);
+    }
+    if (settings.surgeMode !== undefined || settings.surge_mode !== undefined) {
+      fields.push(`surge_mode = $${idx++}`);
+      values.push(settings.surgeMode !== undefined ? settings.surgeMode === true : settings.surge_mode === true);
+    }
+    if (settings.openingTimeUtc !== undefined || settings.opening_time_utc !== undefined) {
+      fields.push(`opening_time_utc = $${idx++}`);
+      values.push(String(settings.openingTimeUtc || settings.opening_time_utc));
+    }
+    if (settings.closingTimeUtc !== undefined || settings.closing_time_utc !== undefined) {
+      fields.push(`closing_time_utc = $${idx++}`);
+      values.push(String(settings.closingTimeUtc || settings.closing_time_utc));
+    }
+    if (settings.maxActiveOrders !== undefined || settings.max_active_orders !== undefined) {
+      fields.push(`max_active_orders = $${idx++}`);
+      values.push(Number(settings.maxActiveOrders || settings.max_active_orders));
+    }
+    if (settings.serviceRadiusKm !== undefined || settings.service_radius_km !== undefined) {
+      fields.push(`service_radius_km = $${idx++}`);
+      values.push(Number(settings.serviceRadiusKm || settings.service_radius_km));
+    }
     if (fields.length === 0) return { ok: true, message: 'NO_CHANGES' };
 
     fields.push(`updated_at = NOW()`);
@@ -5835,7 +5904,14 @@ class TransactionalStoreRepository {
         storeId: row.id,
         storeName: row.store_name,
         sellerApprovalRequired: row.seller_approval_required === true,
-        slaMinutes: row.sla_minutes
+        slaMinutes: row.sla_minutes,
+        isOpen: row.is_open,
+        isOffline: row.is_offline,
+        surgeMode: row.surge_mode,
+        openingTimeUtc: row.opening_time_utc,
+        closingTimeUtc: row.closing_time_utc,
+        maxActiveOrders: row.max_active_orders,
+        serviceRadiusKm: Number(row.service_radius_km)
       }
     };
   }
@@ -5864,7 +5940,14 @@ class LocalDevelopmentStoreRepository {
       storeName: AUTHORITATIVE_STORE_MASTER.name,
       sellerApprovalRequired: Boolean(AUTHORITATIVE_STORE_MASTER.sellerApprovalRequired),
       slaMinutes: 10,
-      isActive: true
+      isActive: true,
+      isOpen: true,
+      isOffline: false,
+      surgeMode: false,
+      openingTimeUtc: '00:00',
+      closingTimeUtc: '23:59',
+      maxActiveOrders: 50,
+      serviceRadiusKm: 10.0
     };
   }
 
@@ -5875,13 +5958,25 @@ class LocalDevelopmentStoreRepository {
     if (settings.storeName) {
       AUTHORITATIVE_STORE_MASTER.name = settings.storeName;
     }
+    if (settings.isOpen !== undefined || settings.is_open !== undefined) {
+      AUTHORITATIVE_STORE_MASTER.isOpen = settings.isOpen !== undefined ? settings.isOpen === true : settings.is_open === true;
+    }
+    if (settings.isOffline !== undefined || settings.is_offline !== undefined) {
+      AUTHORITATIVE_STORE_MASTER.isOffline = settings.isOffline !== undefined ? settings.isOffline === true : settings.is_offline === true;
+    }
+    if (settings.surgeMode !== undefined || settings.surge_mode !== undefined) {
+      AUTHORITATIVE_STORE_MASTER.surgeMode = settings.surgeMode !== undefined ? settings.surgeMode === true : settings.surge_mode === true;
+    }
     return {
       ok: true,
       store: {
         storeId: AUTHORITATIVE_STORE_MASTER.id,
         storeName: AUTHORITATIVE_STORE_MASTER.name,
         sellerApprovalRequired: AUTHORITATIVE_STORE_MASTER.sellerApprovalRequired === true,
-        slaMinutes: 10
+        slaMinutes: 10,
+        isOpen: AUTHORITATIVE_STORE_MASTER.isOpen !== false,
+        isOffline: AUTHORITATIVE_STORE_MASTER.isOffline === true,
+        surgeMode: AUTHORITATIVE_STORE_MASTER.surgeMode === true
       }
     };
   }
@@ -5916,7 +6011,14 @@ class TransactionalPresenceRepository {
   async getEligibleOnlineRiders(storeId = null) {
     if (!this.pool) return [];
     const res = await this.pool.query(
-      `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier, r.store_id as rider_store_id
+      `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier, r.store_id as rider_store_id,
+              COALESCE((
+                SELECT COUNT(*) 
+                FROM delivery_sessions ds 
+                WHERE (ds.rider_id = r.rider_id OR ds.rider_id = r.id)
+                  AND ds.state IN ('ALLOCATED', 'ASSIGNED', 'ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+                  AND ds.updated_at >= NOW() - INTERVAL '1 hour'
+              ), 0) AS active_workload
        FROM rider_presence rp
        JOIN riders r ON (rp.rider_id = r.rider_id OR rp.rider_id = r.id)
        WHERE rp.status = 'ONLINE' 
@@ -5936,6 +6038,7 @@ class TransactionalPresenceRepository {
     return res.rows.map(r => {
       const lat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
       const lng = r.last_known_lng != null ? Number(r.last_known_lng) : null;
+      const workload = Number(r.active_workload || 0);
       return {
         id: r.rider_id,
         riderId: r.rider_id,
@@ -5952,7 +6055,10 @@ class TransactionalPresenceRepository {
         fullName: r.full_name,
         phone: r.phone,
         vehicleNumber: r.vehicle_number,
-        tier: r.rider_tier || 'STANDARD'
+        tier: r.rider_tier || 'STANDARD',
+        activeWorkload: workload,
+        activeDeliveries: workload,
+        activeOrdersCount: workload
       };
     });
   }
@@ -8598,25 +8704,41 @@ function createProductionRepositories(pool, options = {}) {
         }
       }
 
-      // Durable Customer Notification Dispatch (Finding 6)
+      // Multi-Platform & Durable Customer Notification Dispatch (Finding 6)
       const targetCustomerId = payload.customerId || payload.customer_id || (payload.order && (payload.order.customerId || payload.order.customer_id));
       if (pool && targetCustomerId) {
-        try {
-          const tokRes = await pool.query(
-            `SELECT token, platform FROM customer_device_tokens WHERE customer_id = $1 ORDER BY updated_at DESC`,
-            [targetCustomerId]
-          );
-          for (const row of tokRes.rows) {
-            if (row.token && options.apnsDispatcher) {
+        const tokRes = await pool.query(
+          `SELECT token, platform FROM customer_device_tokens WHERE customer_id = $1 ORDER BY updated_at DESC`,
+          [targetCustomerId]
+        );
+        for (const row of tokRes.rows) {
+          if (!row.token) continue;
+          const platform = String(row.platform || 'ios').toLowerCase();
+          if (platform === 'ios' || platform === 'apple') {
+            if (options.apnsDispatcher) {
               const custPayload = options.apnsDispatcher.createOrderStatusPayload(
                 { orderId: event.aggregate_id, customerId: targetCustomerId },
                 event.event_type
               );
-              options.apnsDispatcher.send(row.token, custPayload, { topic: 'io.commerceos.customer' }).catch(() => {});
+              const pushResult = await options.apnsDispatcher.send(row.token, custPayload, { topic: 'io.commerceos.customer' });
+              if (pushResult && pushResult.ok === false && pushResult.retryable) {
+                throw new Error(`CUSTOMER_APNS_DELIVERY_FAILED: ${pushResult.error}`);
+              }
+            }
+          } else if (platform === 'android') {
+            const sender = options.fcmSender || (notificationService && notificationService.fcmSender) || fcmSender;
+            if (sender && typeof sender.sendDataMessage === 'function') {
+              const fcmRes = await sender.sendDataMessage(row.token, {
+                type: 'ORDER_STATUS_UPDATE',
+                orderId: String(event.aggregate_id || ''),
+                eventType: event.event_type,
+                timestamp: new Date().toISOString()
+              });
+              if (fcmRes && fcmRes.ok === false && fcmRes.retryable) {
+                throw new Error(`CUSTOMER_FCM_DELIVERY_FAILED: ${fcmRes.error}`);
+              }
             }
           }
-        } catch (pushErr) {
-          console.warn('[OutboxProcessor] Customer push notification warning:', pushErr.message);
         }
       }
       return { ok: true };

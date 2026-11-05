@@ -14,6 +14,8 @@ public struct OrderTrackingScreen: View {
     
     @State private var trackingData: CustomerOrderTrackingDto? = nil
     @State private var orderDetail: ServerOrderResponse? = nil
+    @State private var lastEtaUpdatedAt: Date = Date()
+    @State private var timerTick: Date = Date()
     @State private var copiedOrderId: Bool = false
     @State private var userRating: Int = 5
     @State private var ratingSubmitted: Bool = false
@@ -103,15 +105,19 @@ public struct OrderTrackingScreen: View {
                s == "SEARCHING_FOR_RIDER" || s == "LOOKING_FOR_RIDER"
     }
     
-    /// Dynamic countdown ETA without artificial floors (Finding 9)
+    /// Dynamic ticking countdown ETA without artificial floors (Finding 7)
     private var dynamicEtaMins: Int {
+        _ = timerTick
+        let baseMins: Int
         if let liveMins = trackingData?.estimatedMinutes, liveMins > 0 {
-            return liveMins
+            baseMins = liveMins
+        } else if let sla = orderDetail?.effectiveSlaMins, sla > 0 {
+            baseMins = sla
+        } else {
+            baseMins = 10
         }
-        if let sla = orderDetail?.effectiveSlaMins, sla > 0 {
-            return sla
-        }
-        return 10
+        let elapsedMins = Int(Date().timeIntervalSince(lastEtaUpdatedAt) / 60.0)
+        return max(1, baseMins - elapsedMins)
     }
     
     private var displayOtp: String? {
@@ -288,11 +294,15 @@ public struct OrderTrackingScreen: View {
                 deliveryOtp: update.deliveryOtp ?? self.trackingData?.deliveryOtp ?? self.orderDetail?.deliveryOtp
             )
             self.trackingData = updatedDto
+            self.lastEtaUpdatedAt = Date()
             if let lat = updatedDto.riderLat, let lng = updatedDto.riderLng, lat != 0.0, lng != 0.0 {
                 self.lastKnownRiderCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
             }
             self.updateLiveActivity(with: updatedDto)
             self.resolveRoadRouteIfNeeded(for: updatedDto)
+        }
+        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { now in
+            self.timerTick = now
         }
         .sheet(isPresented: $isShowingCancelSheet) {
             CancelOrderSheet(orderId: effectiveOrderId) {
