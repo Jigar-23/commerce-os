@@ -4699,15 +4699,15 @@ const server = http.createServer(async (req, res) => {
         tag: r.address_type === 'WORK' ? 'Work' : (r.address_type === 'OTHER' ? 'Other' : 'Home'),
         addressType: r.address_type || 'HOME',
         addressLine: r.address_line,
-        city: r.city || 'Rewari',
-        state: 'Haryana',
-        postalCode: r.postal_code || '123401',
-        country: 'India',
-        landmark: 'Near Company Bagh',
-        contactName: 'Customer',
+        city: r.city || '',
+        state: r.state || '',
+        postalCode: r.postal_code || '',
+        country: r.country || 'India',
+        landmark: r.landmark || null,
+        contactName: r.contact_name || 'Customer',
         contactPhone: r.contact_phone || '',
-        latitude: Number(r.latitude) || 28.202224,
-        longitude: Number(r.longitude) || 76.615418,
+        latitude: r.latitude != null ? Number(r.latitude) : null,
+        longitude: r.longitude != null ? Number(r.longitude) : null,
         isDefault: Boolean(r.is_default)
       })));
     }
@@ -4735,16 +4735,16 @@ const server = http.createServer(async (req, res) => {
       const addrLine = String(body.addressLine || body.street || body.formattedAddress || '').trim();
       const city = String(body.city || '').trim();
       const postalCode = String(body.postalCode || '').trim();
-      const lat = Number(body.latitude || (body.geoLocation && body.geoLocation.latitude));
-      const lng = Number(body.longitude || (body.geoLocation && body.geoLocation.longitude));
+      const lat = Number(body.latitude != null ? body.latitude : (body.geoLocation && body.geoLocation.latitude));
+      const lng = Number(body.longitude != null ? body.longitude : (body.geoLocation && body.geoLocation.longitude));
 
-      if (!addrLine || !city || !postalCode || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, city, postalCode, and valid legal latitude [-90, 90] and longitude [-180, 180] are mandatory.' });
+      if (!addrLine || !city || !postalCode || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)) {
+        return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, city, postalCode, and valid legal non-zero coordinates [-90, 90] and [-180, 180] are mandatory; (0,0) placeholder coordinates are strictly rejected.' });
       }
 
       const cityCheckWords = city.split(/\s+/);
       const GEOGRAPHIC_INDICATORS = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
-      if (cityCheckWords.length >= 2 && cityCheckWords.every(w => /^[a-z]+$/i.test(w)) && !GEOGRAPHIC_INDICATORS.test(city)) {
+      if ((cityCheckWords.length === 1 || (cityCheckWords.length >= 2 && cityCheckWords.every(w => /^[a-z]+$/i.test(w)))) && !GEOGRAPHIC_INDICATORS.test(city)) {
         return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
       }
 
@@ -5104,11 +5104,44 @@ const server = http.createServer(async (req, res) => {
       }
 
       const itemsList = body.items || [];
-      const containsColdChain = itemsList.some(it => it.coldChain);
+      let authoritativeSubtotal = 0;
+      let containsColdChain = false;
+
+      if (itemsList.length > 0 && pool) {
+        const skus = itemsList.map(i => i.sku || i.productId || i.id).filter(Boolean);
+        if (skus.length > 0) {
+          try {
+            const pRes = await pool.query(
+              `SELECT sku, id, price, discounted_price, mrp, rx_requirement, cold_chain_required 
+               FROM products 
+               WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
+              [skus]
+            );
+            const pMap = new Map();
+            for (const row of pRes.rows) {
+              pMap.set(row.sku, row);
+              pMap.set(row.id, row);
+            }
+            for (const it of itemsList) {
+              const sku = it.sku || it.productId || it.id;
+              const product = pMap.get(sku);
+              const qty = Math.max(1, Number(it.quantity || 1));
+              const unitPrice = product ? Number(product.discounted_price || product.price || product.mrp || 15) : (Number(it.price || it.unitPrice || 0) || 15);
+              authoritativeSubtotal += (unitPrice * qty);
+              if (product ? Boolean(product.cold_chain_required) : Boolean(it.coldChain)) {
+                containsColdChain = true;
+              }
+            }
+          } catch (_) {}
+        }
+      } else {
+        authoritativeSubtotal = itemsList.reduce((acc, it) => acc + (Number(it.price || it.unitPrice || 0) * (Number(it.quantity) || 1)), 0);
+        containsColdChain = itemsList.some(it => it.coldChain);
+      }
+
       const coldChainFee = containsColdChain ? 15.0 : 0.0;
-      const subtotalVal = itemsList.reduce((acc, it) => acc + (Number(it.price || it.unitPrice || 0) * (Number(it.quantity) || 1)), 0);
-      const deliveryFee = subtotalVal >= 199.0 ? 0.0 : (itemsList.length > 0 ? 2.0 : 0.0);
-      const estMins = Math.max(10, Math.ceil(fulfillmentDecision.decision.distanceKm * 3));
+      const deliveryFee = authoritativeSubtotal >= 199.0 ? 0.0 : (itemsList.length > 0 ? 2.0 : 0.0);
+      const estMins = Number(fulfillmentDecision.decision.slaMinutes || Math.max(10, Math.ceil(fulfillmentDecision.decision.distanceKm * 3)));
 
       return sendJson(res, 200, {
         serviceable: true,
@@ -5118,8 +5151,11 @@ const server = http.createServer(async (req, res) => {
         distanceKm: fulfillmentDecision.decision.distanceKm,
         deliveryFee: deliveryFee,
         coldChainFee: coldChainFee,
+        itemsSubtotal: authoritativeSubtotal,
+        slaMinutes: estMins,
         estimatedDeliveryMins: estMins,
-        etaLabel: `${estMins} mins`
+        etaLabel: `${estMins} mins`,
+        isApproximateEta: Boolean(fulfillmentDecision.decision.isApproximateEta)
       });
     }
 
@@ -5383,7 +5419,7 @@ const server = http.createServer(async (req, res) => {
           }
           const cityWords = city.split(/\s+/);
           const GEOGRAPHIC_INDICATORS_LOCAL = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
-          if (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
+          if ((cityWords.length === 1 || (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)))) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
             return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
           }
           if (!postalCode || postalCode.length < 3) {
@@ -6079,7 +6115,7 @@ const server = http.createServer(async (req, res) => {
           }
           const cityWords = city.split(/\s+/);
           const GEOGRAPHIC_INDICATORS_LOCAL = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
-          if (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
+          if ((cityWords.length === 1 || (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)))) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
             return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
           }
           if (!postalCode || postalCode.length < 3) {
@@ -9013,36 +9049,30 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, registered: true, platform: normalizedPlatform, customerId: authClaims.sub });
     }
 
-    // DELETE /api/v1/customer/device-token & POST /api/v1/customer/device-token/unregister (Finding 3)
+    // DELETE /api/v1/customer/device-token & POST /api/v1/customer/device-token/unregister (Finding 3 & 6)
     if ((pathname === '/api/v1/customer/device-token' && method === 'DELETE') ||
         (pathname === '/api/v1/customer/device-token/unregister' && (method === 'POST' || method === 'DELETE'))) {
       const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is strictly required for customer device token unregistration.' });
+      }
       let token = null;
       try {
         const body = await parseJsonBody(req);
         token = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
       } catch (_) {}
 
-      if (!authClaims && !token) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or deviceToken is required for customer token unregistration.' });
-      }
-
       if (pool && !isLocalMode) {
         try {
-          if (authClaims && authClaims.sub && token) {
+          if (token) {
             await pool.query(
               `DELETE FROM customer_device_tokens WHERE customer_id = $1 AND token = $2`,
               [authClaims.sub, token]
             );
-          } else if (authClaims && authClaims.sub) {
+          } else {
             await pool.query(
               `DELETE FROM customer_device_tokens WHERE customer_id = $1`,
               [authClaims.sub]
-            );
-          } else if (token) {
-            await pool.query(
-              `DELETE FROM customer_device_tokens WHERE token = $1`,
-              [token]
             );
           }
         } catch (dbErr) {
@@ -9050,7 +9080,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 500, { error: 'INTERNAL_SERVER_ERROR', message: 'Failed to unregister customer device token.' });
         }
       }
-      return sendJson(res, 200, { ok: true, unregistered: true, customerId: authClaims?.sub || null });
+      return sendJson(res, 200, { ok: true, unregistered: true, customerId: authClaims.sub });
     }
 
     // GET /api/v1/delivery/rider/notifications

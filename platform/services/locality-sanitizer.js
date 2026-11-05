@@ -31,12 +31,17 @@ function sanitizeSegment(segment) {
     return '';
   }
 
-  // Reject personal name segments (e.g. 'Asha Mehta', 'ramesh kumar', 'Dr. Ramesh Gupta') without geographic indicators
+  // Reject personal name segments (e.g. 'Asha', 'Asha Mehta', 'ramesh kumar', 'Dr. Ramesh Gupta') without geographic indicators
   if (NAME_TITLES.test(s) && !GEOGRAPHIC_INDICATORS.test(s)) {
     return '';
   }
   const words = s.split(/\s+/);
-  if (words.length >= 2 && words.length <= 4) {
+  if (words.length === 1) {
+    // Single alphabetic token without geographic keyword (e.g. 'Asha', 'Rahul') must be rejected as personal name (Finding 2)
+    if (/^[a-z]+$/i.test(s) && !GEOGRAPHIC_INDICATORS.test(s)) {
+      return '';
+    }
+  } else if (words.length >= 2 && words.length <= 4) {
     const allAlphabetic = words.every(w => /^[a-z]+$/i.test(w));
     if (allAlphabetic && !GEOGRAPHIC_INDICATORS.test(s)) {
       return '';
@@ -90,6 +95,16 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
   if (validTokens.length > 0) {
     return validTokens.slice(-2).join(', ');
   }
+
+  // Derive coarse geospatial cell from coordinates if no verified geographic indicator was present (Finding 2)
+  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
+    const lat = Number(deliveryAddrObj.latitude != null ? deliveryAddrObj.latitude : deliveryAddrObj.lat);
+    const lng = Number(deliveryAddrObj.longitude != null ? deliveryAddrObj.longitude : deliveryAddrObj.lng);
+    if (!isNaN(lat) && !isNaN(lng) && !(Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)) {
+      return `Delivery Zone (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
+    }
+  }
+
   return 'Delivery Area';
 }
 

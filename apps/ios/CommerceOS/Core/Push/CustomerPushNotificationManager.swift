@@ -46,8 +46,9 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
 
     public func syncPendingToken() {
         if let unregisterToken = UserDefaults.standard.string(forKey: "pending_apns_unregister_token"), !unregisterToken.isEmpty {
+            let pendingAuth = UserDefaults.standard.string(forKey: "pending_unregister_auth_token") ?? KeychainHelper.shared.get(key: "auth_token")
             Task {
-                await self.unregisterTokenWithBackend()
+                await self.unregisterTokenWithBackend(explicitToken: unregisterToken, authToken: pendingAuth)
             }
         }
         guard let token = UserDefaults.standard.string(forKey: "pending_apns_device_token"), !token.isEmpty else {
@@ -75,12 +76,18 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
         }
     }
 
-    public func unregisterTokenWithBackend(authToken: String? = nil) async {
-        let tokenToUnregister = self.deviceToken ?? UserDefaults.standard.string(forKey: "pending_apns_device_token")
-        self.deviceToken = nil
-        self.isRegisteredForRemoteNotifications = false
-        UserDefaults.standard.removeObject(forKey: "pending_apns_device_token")
-        UserDefaults.standard.removeObject(forKey: "apns_device_token_synced")
+    public func unregisterTokenWithBackend(explicitToken: String? = nil, authToken: String? = nil) async {
+        let tokenToUnregister = explicitToken 
+            ?? self.deviceToken 
+            ?? UserDefaults.standard.string(forKey: "pending_apns_unregister_token")
+            ?? UserDefaults.standard.string(forKey: "pending_apns_device_token")
+
+        if explicitToken == nil {
+            self.deviceToken = nil
+            self.isRegisteredForRemoteNotifications = false
+            UserDefaults.standard.removeObject(forKey: "pending_apns_device_token")
+            UserDefaults.standard.removeObject(forKey: "apns_device_token_synced")
+        }
 
         struct UnregisterPayload: Encodable {
             let deviceToken: String?
@@ -89,7 +96,8 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
         let body = UnregisterPayload(deviceToken: tokenToUnregister, platform: "IOS")
 
         var headers: [String: String] = [:]
-        if let token = authToken, !token.isEmpty {
+        let effectiveAuth = authToken ?? KeychainHelper.shared.get(key: "auth_token")
+        if let token = effectiveAuth, !token.isEmpty {
             headers["Authorization"] = "Bearer \(token)"
         }
 
@@ -103,10 +111,16 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
                 body: data,
                 headers: headers
             )
+            // Clear pending retry markers strictly upon backend confirmation (Finding 5)
             UserDefaults.standard.removeObject(forKey: "pending_apns_unregister_token")
+            UserDefaults.standard.removeObject(forKey: "pending_unregister_auth_token")
         } catch {
+            // Persist failed unregister token and auth context for reliable retry on next sync (Finding 5)
             if let t = tokenToUnregister {
                 UserDefaults.standard.set(t, forKey: "pending_apns_unregister_token")
+            }
+            if let a = effectiveAuth {
+                UserDefaults.standard.set(a, forKey: "pending_unregister_auth_token")
             }
         }
     }

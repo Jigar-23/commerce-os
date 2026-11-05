@@ -1508,39 +1508,45 @@ class ServiceabilityService {
       };
     }
 
-    // 4. Dynamic Traffic-Aware ETA derived for all candidate stores (Finding 5)
+    // 4. Dynamic Traffic-Aware ETA derived for all candidate stores (Finding 4 & 5)
     const totalItemCount = normalizedItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
     const pickPackMinutes = totalItemCount > 5 ? 4 : (totalItemCount > 2 ? 3 : 2);
+
+    // Limit live routing calls to top 4 nearest candidates to bound concurrency and avoid routing tail-latency (Finding 4)
+    const storesToRoute = fulfillableStores.slice().sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 4);
+    const storesToRouteSet = new Set(storesToRoute.map(s => s.id));
 
     await Promise.all(fulfillableStores.map(async (candidateStore) => {
       let routedTravelMinutes = null;
       let routedDistanceKm = null;
       let isApproximateEta = false;
 
-      if (typeof routeResolver === 'function') {
-        try {
-          const routeRes = await routeResolver(Number(candidateStore.latitude), Number(candidateStore.longitude), cLat, cLng, false);
-          if (routeRes && routeRes.ok && routeRes.durationMins != null) {
-            routedTravelMinutes = Math.max(1, Math.round(Number(routeRes.durationMins)));
-            if (routeRes.distanceKm != null) routedDistanceKm = Number(routeRes.distanceKm);
-          }
-        } catch (_) {}
-      } else if (process.env.OSRM_BASE_URL) {
-        try {
-          const baseUrl = process.env.OSRM_BASE_URL.replace(/\/+$/, '');
-          const osrmUrl = `${baseUrl}/route/v1/driving/${cLng},${cLat};${candidateStore.longitude},${candidateStore.latitude}?overview=false`;
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 2000);
-          const oRes = await fetch(osrmUrl, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
-          clearTimeout(timeout);
-          if (oRes.ok) {
-            const oData = await oRes.json();
-            if (oData.routes && oData.routes.length > 0) {
-              routedTravelMinutes = Math.max(1, Math.round(oData.routes[0].duration / 60));
-              routedDistanceKm = Math.round((oData.routes[0].distance / 1000) * 10) / 10;
+      if (storesToRouteSet.has(candidateStore.id)) {
+        if (typeof routeResolver === 'function') {
+          try {
+            const routeRes = await routeResolver(Number(candidateStore.latitude), Number(candidateStore.longitude), cLat, cLng, false);
+            if (routeRes && routeRes.ok && routeRes.durationMins != null) {
+              routedTravelMinutes = Math.max(1, Math.round(Number(routeRes.durationMins)));
+              if (routeRes.distanceKm != null) routedDistanceKm = Number(routeRes.distanceKm);
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        } else if (process.env.OSRM_BASE_URL) {
+          try {
+            const baseUrl = process.env.OSRM_BASE_URL.replace(/\/+$/, '');
+            const osrmUrl = `${baseUrl}/route/v1/driving/${cLng},${cLat};${candidateStore.longitude},${candidateStore.latitude}?overview=false`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 1500);
+            const oRes = await fetch(osrmUrl, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
+            clearTimeout(timeout);
+            if (oRes.ok) {
+              const oData = await oRes.json();
+              if (oData.routes && oData.routes.length > 0) {
+                routedTravelMinutes = Math.max(1, Math.round(oData.routes[0].duration / 60));
+                routedDistanceKm = Math.round((oData.routes[0].distance / 1000) * 10) / 10;
+              }
+            }
+          } catch (_) {}
+        }
       }
 
       if (routedTravelMinutes == null) {
@@ -1582,12 +1588,13 @@ class ServiceabilityService {
     let selectedStore = fulfillableStores[0];
     let decisionSource = 'OPTIMAL_PREDICTED_ETA_PROXIMITY_RANK';
 
+    // Strict SLA-optimal bound: preferred store cannot degrade customer ETA by more than 2 minutes (Finding 4)
+    const MAX_PREFERRED_STORE_ETA_DELTA_MINUTES = 2;
     if (preferredStoreId) {
       const preferred = fulfillableStores.find(s => s.id === preferredStoreId);
-      if (preferred && (
-        preferred.predictedEtaMinutes <= selectedStore.predictedEtaMinutes ||
-        preferred.distanceKm <= selectedStore.distanceKm + ServiceabilityService.PREFERRED_STORE_DISTANCE_TOLERANCE_KM
-      )) {
+      if (preferred &&
+          preferred.predictedEtaMinutes <= selectedStore.predictedEtaMinutes + MAX_PREFERRED_STORE_ETA_DELTA_MINUTES &&
+          preferred.distanceKm <= selectedStore.distanceKm + ServiceabilityService.PREFERRED_STORE_DISTANCE_TOLERANCE_KM) {
         selectedStore = preferred;
         decisionSource = 'CLIENT_PREFERENCE_SERVICEABLE_APPROVED';
       }

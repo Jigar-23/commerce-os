@@ -633,10 +633,13 @@ public final class AddressViewModel: ObservableObject {
     private func parsePlacemarkToGeocodedPlace(placemark: CLPlacemark?, geoPoint: GeoPoint) -> GeocodedPlace {
         guard let p = placemark else {
             return GeocodedPlace(
+                placeId: "geo_\(geoPoint.latitude)_\(geoPoint.longitude)",
                 formattedAddress: String(format: "Location (%.4f, %.4f)", geoPoint.latitude, geoPoint.longitude),
-                city: "Local Area",
+                city: "",
                 state: "",
                 postalCode: "",
+                country: "India",
+                confidence: .low,
                 geoPoint: geoPoint
             )
         }
@@ -644,7 +647,7 @@ public final class AddressViewModel: ObservableObject {
         let street = p.thoroughfare
         let subLocality = p.subLocality
         let locality = p.locality ?? p.subAdministrativeArea
-        let city = locality ?? p.administrativeArea ?? "Gurugram"
+        let city = locality ?? p.administrativeArea ?? ""
         let state = p.administrativeArea ?? ""
         let postalCode = p.postalCode ?? ""
         let country = p.country ?? "India"
@@ -657,8 +660,13 @@ public final class AddressViewModel: ObservableObject {
         if !state.isEmpty { parts.append(state) }
         if !postalCode.isEmpty { parts.append(postalCode) }
 
+        // Require customer to confirm incomplete results; never fabricate defaults (Finding 1)
+        let isComplete = !city.isEmpty && !postalCode.isEmpty && !state.isEmpty
+        let isPartial = !city.isEmpty || !state.isEmpty
+        let confidence: GeocodeConfidence = isComplete ? .high : (isPartial ? .medium : .low)
+
         return GeocodedPlace(
-            placeId: nil,
+            placeId: "geo_\(geoPoint.latitude)_\(geoPoint.longitude)",
             formattedAddress: parts.isEmpty ? (p.name ?? "Pinned Location") : parts.joined(separator: ", "),
             houseNumber: houseNo,
             street: street,
@@ -669,7 +677,7 @@ public final class AddressViewModel: ObservableObject {
             state: state,
             postalCode: postalCode,
             country: country,
-            confidence: (!postalCode.isEmpty && (street != nil || subLocality != nil)) ? .high : (locality != nil ? .medium : .low),
+            confidence: confidence,
             geoPoint: geoPoint
         )
     }
