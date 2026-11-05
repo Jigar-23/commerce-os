@@ -24,30 +24,40 @@ object OfferPayloadValidator {
     private val COD_PAYMENT_ALLOWLIST = setOf("COD", "CASH", "PAY_ON_DELIVERY", "CASH_ON_DELIVERY")
 
     fun extractCoarseLocality(rawAddress: String?, localityCandidate: String? = null): String {
-        if (!localityCandidate.isNullOrBlank()) {
-            val candidate = localityCandidate.trim()
-            val isStreetOrHouse = candidate.matches(Regex("(?i).*\\b(street|road|st\\b|rd\\b|lane|ave|avenue|dr\\b|drive|gali|marg|sector|house|h\\.no|flat|apt|apartment|unit|tower|villa|plot|floor|block|room|bldg|b-?\\d+)\\b.*")) ||
+        val candidate = localityCandidate?.trim().takeUnless { it.isNullOrBlank() }
+            ?: rawAddress?.trim().takeUnless { it.isNullOrBlank() }
+
+        if (!candidate.isNullOrBlank()) {
+            val isBuildingOrPremise = candidate.matches(Regex("(?i).*\\b(building|bldg|tower|wing|block|flat|apt|apartment|unit|floor|suite|house|h\\.no|villa|plot|room|door|gate|pillar|premise|premises|b-?\\d+)\\b.*")) ||
+                candidate.matches(Regex("(?i).*\\b(street|road|st\\b|rd\\b|lane|ave|avenue|dr\\b|drive|gali|marg|sector|cross|main)\\b.*")) ||
                 candidate.matches(Regex("^#?\\d+.*")) ||
+                candidate.matches(Regex(".*\\b\\d+\\b.*")) ||
                 candidate.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE))
 
-            if (!candidate.contains(",") && candidate.length in 3..40 && !candidate.matches(Regex(".*\\d{3,}.*")) && !isStreetOrHouse) {
+            if (!candidate.contains(",") && candidate.length in 3..40 && !isBuildingOrPremise) {
                 val isPersonName = candidate.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
                 if (!isPersonName) return candidate
             }
+
             val parts = candidate.split(",").map { it.trim() }.filter { it.isNotBlank() }
             val filtered = parts.filterNot { part ->
-                part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
+                part.matches(Regex("(?i).*(building|bldg|tower|wing|block|flat|apt|apartment|unit|floor|suite|house|h\\.no|villa|plot|room|door|gate|pillar|premise|premises|b-?\\d+).*")) ||
+                part.matches(Regex("(?i).*(street|road|st|rd|lane|ave|avenue|dr|drive|gali|marg|sector|cross|main).*")) ||
                 part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
                 part.matches(Regex("^#?\\d+.*")) ||
-                part.matches(Regex(".*\\b(street|road|st|rd|lane|ave|avenue|dr|drive|gali|marg|sector)\\b.*", RegexOption.IGNORE_CASE)) ||
+                part.matches(Regex(".*\\b\\d+\\b.*")) ||
                 part.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
             }
+
             if (filtered.isNotEmpty()) {
                 val chosen = filtered.last()
-                val isChosenStreetOrHouse = chosen.matches(Regex("(?i).*\\b(street|road|st\\b|rd\\b|lane|ave|avenue|dr\\b|drive|gali|marg|sector|house|h\\.no|flat|apt|apartment|unit|tower|villa|plot|floor|block|room|bldg|b-?\\d+)\\b.*")) ||
+                val isChosenBuildingOrPremise = chosen.matches(Regex("(?i).*\\b(building|bldg|tower|wing|block|flat|apt|apartment|unit|floor|suite|house|h\\.no|villa|plot|room|door|gate|pillar|premise|premises|b-?\\d+)\\b.*")) ||
+                    chosen.matches(Regex("(?i).*\\b(street|road|st\\b|rd\\b|lane|ave|avenue|dr\\b|drive|gali|marg|sector|cross|main)\\b.*")) ||
                     chosen.matches(Regex("^#?\\d+.*")) ||
+                    chosen.matches(Regex(".*\\b\\d+\\b.*")) ||
                     chosen.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE))
-                if (!isChosenStreetOrHouse) {
+
+                if (!isChosenBuildingOrPremise && chosen.length in 3..40) {
                     return chosen
                 }
             }
@@ -154,14 +164,14 @@ object OfferPayloadValidator {
                 ?: json.optDoubleOrNull("total_amount")
                 ?: json.optDoubleOrNull("cartValue")
 
-            val codAmount = (parsedCodAmount?.takeIf { it > 0.0 })
-                ?: (parsedOrderTotal?.takeIf { it > 0.0 })
-            if (codAmount == null || codAmount <= 0.0) {
+            val codAmount = (parsedCodAmount?.takeIf { isValidPositiveNumber(it) })
+                ?: (parsedOrderTotal?.takeIf { isValidPositiveNumber(it) })
+            if (codAmount == null || !isValidPositiveNumber(codAmount)) {
                 Log.w(TAG, "Rejecting offer $offerId: positive COD amount is required in COD deployment.")
                 return null
             }
 
-            val orderTotal = parsedOrderTotal ?: codAmount
+            val orderTotal = parsedOrderTotal?.takeIf { isValidPositiveNumber(it) } ?: codAmount
 
             val earningsAmount = (json.optDoubleOrNull("earningsAmount")
                 ?: json.optDoubleOrNull("earnings_amount")
@@ -335,14 +345,14 @@ object OfferPayloadValidator {
                 ?: data["totalAmount"]?.toDoubleOrNull()
                 ?: data["total_amount"]?.toDoubleOrNull()
                 ?: data["cartValue"]?.toDoubleOrNull()
-            val codAmount = (parsedCodAmount?.takeIf { it > 0.0 })
-                ?: (parsedOrderTotal?.takeIf { it > 0.0 })
-            if (codAmount == null || codAmount <= 0.0) {
+            val codAmount = (parsedCodAmount?.takeIf { isValidPositiveNumber(it) })
+                ?: (parsedOrderTotal?.takeIf { isValidPositiveNumber(it) })
+            if (codAmount == null || !isValidPositiveNumber(codAmount)) {
                 Log.w(TAG, "Rejecting offer $offerId: positive COD amount is required in COD deployment.")
                 return null
             }
 
-            val orderTotal = parsedOrderTotal ?: codAmount
+            val orderTotal = parsedOrderTotal?.takeIf { isValidPositiveNumber(it) } ?: codAmount
 
             val earningsAmount = data["earningsAmount"]?.toDoubleOrNull()
                 ?: data["totalEarnings"]?.toDoubleOrNull()
@@ -418,7 +428,7 @@ object OfferPayloadValidator {
         if (!has(key) || isNull(key)) return null
         return try {
             val v = getDouble(key)
-            if (v.isNaN()) null else v
+            if (v.isNaN() || v.isInfinite()) null else v
         } catch (e: Exception) {
             null
         }

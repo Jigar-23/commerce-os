@@ -342,7 +342,7 @@ private fun CompactProductCard(
 
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    "⚡ In 10 mins",
+                    "⚡ Express eligible",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF059669)
@@ -486,7 +486,7 @@ private fun GridProductCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        "⚡ In 10 mins",
+                        "⚡ Express eligible",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF059669)

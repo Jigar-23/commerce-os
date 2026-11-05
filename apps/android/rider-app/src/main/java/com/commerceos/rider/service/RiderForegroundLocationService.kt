@@ -141,6 +141,10 @@ class RiderForegroundLocationService : Service(), LocationListener {
         staticDbHelper = dbHelper
 
         val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+        val savedRiderId = sessionMgr.getRiderId()
+        if (savedRiderId.isNotBlank()) {
+            activeRiderId = savedRiderId
+        }
         val savedDelivery = sessionMgr.getActiveDeliveryId()
         if (savedDelivery.isNotBlank()) {
             activeDeliveryId = savedDelivery
@@ -450,6 +454,15 @@ class RiderForegroundLocationService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+        val savedRiderId = sessionMgr.getRiderId()
+        if (savedRiderId.isNotBlank()) {
+            activeRiderId = savedRiderId
+        }
+        val savedDelivery = sessionMgr.getActiveDeliveryId()
+        if (savedDelivery.isNotBlank()) {
+            activeDeliveryId = savedDelivery
+        }
         acquireWakeLock()
         requestLocationUpdates()
         return START_STICKY
@@ -638,9 +651,13 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
         if (isMock) {
             lastMockTimestamp = now
+            _isStale.value = true
+            Log.w(TAG, "Mock location detected; rejecting coordinates and marking telemetry stale.")
+            return
         } else if (now - lastMockTimestamp < 5000L) {
-            // A mock location app/simulator is actively injecting test coordinates.
-            // Ignore non-mock hardware satellite fixes to prevent bouncing between test and physical location!
+            // A mock location app/simulator was recently detected.
+            // Reject non-mock fixes to prevent bouncing and enforce location integrity.
+            _isStale.value = true
             return
         }
 
@@ -679,6 +696,13 @@ class RiderForegroundLocationService : Service(), LocationListener {
         lastDispatchedLat = location.latitude
         lastDispatchedLng = location.longitude
         lastDispatchedTime = now
+
+        if (activeRiderId.isBlank()) {
+            val restoredRider = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext).getRiderId()
+            if (restoredRider.isNotBlank()) {
+                activeRiderId = restoredRider
+            }
+        }
 
         currentSequenceNumber++
         val headingValue: Float? = if (location.hasBearing()) location.bearing else null

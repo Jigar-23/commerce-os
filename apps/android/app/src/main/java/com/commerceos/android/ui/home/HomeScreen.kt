@@ -463,7 +463,7 @@ private fun HeroDualActionCards(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Delivered in 10 mins",
+                        text = "Express Delivery",
                         fontSize = 11.sp,
                         color = Color(0xFF64748B)
                     )
