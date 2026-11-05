@@ -32,6 +32,8 @@ class KodexAuditBatch1RegressionTest {
     open class FakeAppRepository : AppRepository() {
         override suspend fun getPromotions(): ApiResult<List<CouponCampaign>> = ApiResult.Success(emptyList())
         override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = emptyList()))
+        override suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = listOf(item)))
+        override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> = addCartItem(customerId, item)
     }
 
     class FakeSecureCredentialStore : com.commerceos.android.session.SecureCredentialStore(null) {
@@ -1436,14 +1438,15 @@ class KodexAuditBatch1RegressionTest {
     }
 
     @Test
-    fun testCartViewModel_guestCartSyncIdempotentReplayDoesNotDuplicate() = runTest {
+    fun testCartViewModel_guestCartSyncUsesServerSupportedIdempotencyKey() = runTest {
         var addCartItemCalls = 0
+        var capturedKey: String? = null
         var guestDeleted = false
         val mockDao = object : CartDao {
             override fun observeCartItems(customerId: String): Flow<List<CartItemEntity>> = emptyFlow()
             override suspend fun getCartItems(customerId: String): List<CartItemEntity> {
                 return if (customerId == "local_offline_cart" && !guestDeleted) {
-                    listOf(CartItemEntity(sku = "sku_replay", customerId = "local_offline_cart", productId = "p1", name = "Replay Item", unitPrice = 100.0, quantity = 2))
+                    listOf(CartItemEntity(sku = "sku_replay", customerId = "local_offline_cart", productId = "p1", name = "Replay Item", unitPrice = 100.0, quantity = 2, updatedAt = 1000L))
                 } else emptyList()
             }
             override suspend fun insertOrUpdate(item: CartItemEntity) {}
@@ -1456,13 +1459,13 @@ class KodexAuditBatch1RegressionTest {
         }
         val repo = object : FakeAppRepository() {
             override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
-                // Server ALREADY has sku_replay with quantity 2 (from prior sync)
                 return ApiResult.Success(CartResponse(items = listOf(
                     CartItem(productId = "p1", sku = "sku_replay", name = "Replay Item", unitPrice = BigDecimal("100.00"), quantity = 2)
                 )))
             }
-            override suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> {
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
                 addCartItemCalls++
+                capturedKey = idempotencyKey
                 return ApiResult.Success(CartResponse(items = listOf(item)))
             }
         }
@@ -1470,9 +1473,11 @@ class KodexAuditBatch1RegressionTest {
         viewModel.init("cust_replay_user")
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // Must NOT call addCartItem again (idempotent merge prevented doubling quantity to 4)
-        assertEquals(0, addCartItemCalls)
-        // And guest row must have been cleaned up
+        // Calls addCartItem with stable server-supported idempotency key for additive merge
+        assertEquals(1, addCartItemCalls)
+        assertNotNull(capturedKey)
+        assertTrue(capturedKey!!.contains("guest_sync_cust_replay_user_sku_replay_2_1000"))
+        // And guest row must have been cleaned up after success
         assertTrue(guestDeleted)
     }
 
@@ -1559,5 +1564,172 @@ class KodexAuditBatch1RegressionTest {
         assertEquals("Prescription uploaded to server, but offline encrypted cache could not be saved.", viewModel.errorMessage)
         assertEquals(1, viewModel.prescriptions.size)
         assertEquals("rx_uploaded", viewModel.prescriptions[0].id)
+    }
+
+    @Test
+    fun testCartViewModel_guestCartSyncAbortsAndRetainsGuestRowsWhenServerFetchFails() = runTest {
+        var addCartItemCalled = false
+        var guestDeleted = false
+        val mockDao = object : CartDao {
+            override fun observeCartItems(customerId: String): Flow<List<CartItemEntity>> = emptyFlow()
+            override suspend fun getCartItems(customerId: String): List<CartItemEntity> {
+                return if (customerId == "local_offline_cart" && !guestDeleted) {
+                    listOf(CartItemEntity(sku = "sku_1", customerId = "local_offline_cart", productId = "p1", name = "Item 1", unitPrice = 10.0, quantity = 1))
+                } else emptyList()
+            }
+            override suspend fun insertOrUpdate(item: CartItemEntity) {}
+            override suspend fun insertAll(items: List<CartItemEntity>) {}
+            override suspend fun replaceCart(customerId: String, items: List<CartItemEntity>) {}
+            override suspend fun deleteBySku(sku: String, customerId: String) {
+                guestDeleted = true
+            }
+            override suspend fun clearCart(customerId: String) {}
+        }
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                return ApiResult.Failure(AppError.Network("Offline"))
+            }
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                addCartItemCalled = true
+                return ApiResult.Success(CartResponse(items = listOf(item)))
+            }
+        }
+        val viewModel = CartViewModel(repo, cartDao = mockDao)
+        viewModel.init("cust_offline")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // When fetchBackendCart fails, must abort and NOT call addCartItem or delete guest row
+        assertFalse(addCartItemCalled)
+        assertFalse(guestDeleted)
+        assertEquals("Could not sync offline cart. Will retry when connected.", viewModel.errorMessage)
+    }
+
+    @Test
+    fun testCartViewModel_awaitMutationsIdleSettlesCartLoadJobAndDoesNotDeadlock() = runTest {
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                delay(200)
+                return ApiResult.Success(CartResponse(items = listOf(
+                    CartItem(productId = "p1", sku = "s_settled", name = "Settled Item", unitPrice = BigDecimal("100.00"), quantity = 1)
+                )))
+            }
+        }
+        val viewModel = CartViewModel(repo)
+        viewModel.init("cust_slow_load")
+
+        // Before cartLoadJob completes, call awaitMutationsIdle()
+        var settledItems: List<CartItem>? = null
+        launch {
+            settledItems = viewModel.awaitMutationsIdle()
+        }
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertNotNull(settledItems)
+        assertEquals(1, settledItems!!.size)
+        assertEquals("s_settled", settledItems!![0].sku)
+    }
+
+    @Test
+    fun testCartViewModel_moveToSaveForLaterReconcilesAmbiguousNetworkFailureWhenServerCommitted() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val initialItem = CartItem(productId = "p1", sku = "s_ambig", name = "Ambig Item", unitPrice = BigDecimal("50.00"), quantity = 1)
+        var serverHasItem = false
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                val items = if (serverHasItem) listOf(initialItem) else emptyList()
+                return ApiResult.Success(CartResponse(items = items))
+            }
+            override suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> {
+                // Simulate network timeout/error during DELETE
+                return ApiResult.Failure(AppError.Network("Socket timeout"))
+            }
+        }
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        serverHasItem = true
+        viewModel.init("cust_ambig")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        serverHasItem = false // Server processed removal
+        viewModel.moveToSaveForLater("s_ambig")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Reconciled: server removed the item, so item is preserved in Saved for Later and NOT rolled back
+        assertEquals(1, viewModel.saveForLaterItems.size)
+        assertEquals("s_ambig", viewModel.saveForLaterItems[0].sku)
+        val persistedSaved = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(fakeContext, "cust_ambig")
+        assertEquals(1, persistedSaved.size)
+        assertEquals("s_ambig", persistedSaved[0].sku)
+    }
+
+    @Test
+    fun testCartViewModel_moveBackToCartReconcilesAmbiguousNetworkFailureWhenServerCommitted() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val savedItem = CartItem(productId = "p1", sku = "s_ambig_add", name = "Ambig Add", unitPrice = BigDecimal("50.00"), quantity = 1)
+        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_ambig2", listOf(savedItem))
+
+        var serverHasItem = false
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                val items = if (serverHasItem) listOf(savedItem) else emptyList()
+                return ApiResult.Success(CartResponse(items = items))
+            }
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                serverHasItem = true // Server added it before connection dropped
+                return ApiResult.Failure(AppError.Network("Connection dropped"))
+            }
+        }
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        viewModel.init("cust_ambig2")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, viewModel.saveForLaterItems.size)
+        viewModel.moveBackToCart("s_ambig_add")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Reconciled: server committed the add, so cart contains the item and saved items do NOT retain it
+        assertEquals(1, viewModel.cartItems.size)
+        assertEquals("s_ambig_add", viewModel.cartItems[0].sku)
+        assertEquals(0, viewModel.saveForLaterItems.size)
+        val persistedSaved = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(fakeContext, "cust_ambig2")
+        assertEquals(0, persistedSaved.size)
+    }
+
+    @Test
+    fun testPrescriptionViewModel_uploadGeneratesStableIdempotencyKey() = runTest {
+        val keys = mutableListOf<String?>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> {
+                keys.add(request.idempotencyKey)
+                return ApiResult.Success(Prescription(id = "rx_idemp", customerId = request.customerId, patientName = request.patientName))
+            }
+        }
+        val viewModel = PrescriptionViewModel(repo, ioDispatcher = testDispatcher)
+        val attachments = listOf("data:image/jpeg;base64,sample123")
+        viewModel.upload("cust_rx", "Jane Doe", attachments)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, keys.size)
+        val firstKey = keys[0]
+        assertNotNull(firstKey)
+        assertTrue(firstKey!!.startsWith("rx_idemp_"))
+
+        // Reset and trigger another upload with identical customer, patient and attachments
+        viewModel.reset()
+        viewModel.upload("cust_rx", "Jane Doe", attachments)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, keys.size)
+        val secondKey = keys[1]
+        // Key must be deterministic and identical across retries/repeat uploads
+        assertEquals(firstKey, secondKey)
     }
 }
