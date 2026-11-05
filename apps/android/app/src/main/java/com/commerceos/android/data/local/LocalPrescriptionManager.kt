@@ -2,7 +2,6 @@ package com.commerceos.android.data.local
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import com.commerceos.android.model.Prescription
@@ -11,7 +10,6 @@ import com.google.gson.reflect.TypeToken
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
-import kotlin.math.roundToInt
 
 /**
  * Manages customer prescriptions entirely within the app's personal local storage.
