@@ -21,7 +21,7 @@ object OfferPayloadValidator {
     private fun isValidPositiveNumber(n: Double?): Boolean =
         n != null && n.isFinite() && !n.isNaN() && n > 0.0
 
-    private val COD_PAYMENT_ALLOWLIST = setOf("COD", "CASH", "PAY_ON_DELIVERY", "CASH_ON_DELIVERY")
+    private val COD_PAYMENT_ALLOWLIST = setOf("COD", "CASH", "PAY_ON_DELIVERY", "CASH_ON_DELIVERY", "POD")
 
     fun extractCoarseLocality(rawAddress: String?, localityCandidate: String? = null): String {
         val candidate = localityCandidate?.trim().takeUnless { it.isNullOrBlank() }

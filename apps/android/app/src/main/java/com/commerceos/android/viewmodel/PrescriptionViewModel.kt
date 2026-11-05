@@ -261,11 +261,18 @@ class PrescriptionViewModel(
                     } else {
                         val newKey = "rx_upload_${safeCustomerId}_${UUID.randomUUID()}"
                         if (appContext != null) {
-                            LocalPrescriptionManager.setPendingUpload(
+                            val saved = LocalPrescriptionManager.setPendingUpload(
                                 appContext,
                                 safeCustomerId,
                                 LocalPrescriptionManager.PendingUploadRecord(newKey, uploadFingerprint)
                             )
+                            if (!saved) {
+                                val err = "Could not securely save prescription upload state. Please retry."
+                                errorMessage = err
+                                onError?.invoke(err)
+                                isUploading = false
+                                return@launch
+                            }
                         }
                         currentUploadKey = newKey
                         currentUploadFingerprint = uploadFingerprint

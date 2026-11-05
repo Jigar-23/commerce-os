@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -27,7 +28,7 @@ import java.math.BigDecimal
 @OptIn(ExperimentalCoroutinesApi::class)
 class KodexAuditBatch1RegressionTest {
 
-    private val testDispatcher = StandardTestDispatcher()
+    private val testDispatcher = StandardTestDispatcher(TestCoroutineScheduler())
 
     open class FakeAppRepository : AppRepository() {
         var defaultCartItems: List<CartItem> = emptyList()
@@ -1651,7 +1652,7 @@ class KodexAuditBatch1RegressionTest {
             }
         }
         val viewModel = PrescriptionViewModel(repo, appContext = fakeContext, ioDispatcher = testDispatcher)
-        viewModel.upload("cust_1", "Patient A", listOf("data:image/jpeg;base64,123"))
+        viewModel.upload("cust_1", "Patient A", listOf("data:image/jpeg;base64,123"), operationKey = "rx_op_key")
         testDispatcher.scheduler.advanceUntilIdle()
 
         // When server upload succeeds but local encrypted save fails, must report cache warning
@@ -2474,6 +2475,41 @@ class KodexAuditBatch1RegressionTest {
 
         // After successful upload, pending record is cleared
         assertNull(com.commerceos.android.data.local.LocalPrescriptionManager.getPendingUpload(fakeContext, "cust_rx_death"))
+    }
+
+    @Test
+    fun testPrescriptionViewModel_uploadFailsClosedWhenPendingKeyCannotBeSaved() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore().apply { shouldFailSave = true }
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val capturedKeys = mutableListOf<String>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> {
+                if (request.idempotencyKey != null) capturedKeys.add(request.idempotencyKey!!)
+                return ApiResult.Success(Prescription(id = "rx_fail_closed", customerId = request.customerId))
+            }
+        }
+
+        val vm = PrescriptionViewModel(repo, appContext = fakeContext, ioDispatcher = testDispatcher)
+        vm.load("cust_rx_fail")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        var errorReported: String? = null
+        vm.upload(
+            customerId = "cust_rx_fail",
+            patientName = "Patient A",
+            attachments = listOf("data:image/jpeg;base64,AAAA"),
+            onError = { errorReported = it }
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Must fail closed: repository upload must never be invoked if idempotency key failed to persist
+        assertEquals(0, capturedKeys.size)
+        assertEquals("Could not securely save prescription upload state. Please retry.", vm.errorMessage)
+        assertEquals("Could not securely save prescription upload state. Please retry.", errorReported)
+        assertFalse(vm.isUploading)
     }
 
     @Test
