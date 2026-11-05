@@ -208,7 +208,10 @@ async function runBatch6Tests() {
   assert.strictEqual(payload.customerName, undefined, 'customerName must be stripped from actionPayload');
   assert.strictEqual(payload.customerLat, undefined, 'customerLat must be stripped from actionPayload');
   assert.strictEqual(payload.customerLng, undefined, 'customerLng must be stripped from actionPayload');
-  console.log('  ✅ 1.2 PASS: Store A rider received notification with customer PII strictly redacted.');
+  assert.ok(!payload.dropAddress.includes('Secret Apartment 404'), 'dropAddress must not expose house/apartment details');
+  assert.ok(!payload.customerAddress.includes('Secret Apartment 404'), 'customerAddress must not expose house/apartment details');
+  assert.strictEqual(payload.customerLocality, 'Sector 56, Gurgaon', 'customerLocality must be coarse locality');
+  console.log('  ✅ 1.2 PASS: Store A rider received notification with customer PII strictly redacted and coarse locality enforced.');
 
   // 1.4: Store B rider does NOT receive Store A broadcast notification
   const riderBNotifRes = await request('GET', '/api/v1/delivery/rider/notifications', null, {

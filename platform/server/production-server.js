@@ -880,6 +880,36 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
+    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
+    if (loc && typeof loc === 'string' && loc.trim()) {
+      return loc.trim();
+    }
+  }
+  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
+  const trimmed = rawAddr.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const obj = JSON.parse(trimmed);
+      return obj.locality || obj.area || obj.city || 'Delivery Area';
+    } catch (_) {}
+  }
+  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return 'Delivery Area';
+
+  const nonDetailedParts = parts.filter(p => {
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
+    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
+    return true;
+  });
+
+  if (nonDetailedParts.length > 0) {
+    return nonDetailedParts.slice(-2).join(', ');
+  }
+  return 'Delivery Area';
+}
+
 // Pre-warm repositories
 getAppRepositories().catch(() => {});
 
@@ -8595,7 +8625,16 @@ const server = http.createServer(async (req, res) => {
         let meta = typeof n.metadata === 'string' ? (() => { try { return JSON.parse(n.metadata); } catch (_) { return {}; } })() : (n.metadata || {});
         if (meta.actionPayload) {
           const p = meta.actionPayload;
-          const dropAddr = p.dropAddress || p.customerAddress || 'Drop Area';
+          const status = String(p.status || n.status || '').toUpperCase();
+          const assignedRider = p.assignedRiderId || p.riderId || n.riderId;
+          const isAssignedToCaller = (assignedRider === authClaims.sub) &&
+            ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(status);
+
+          const rawDrop = p.dropAddress || p.customerAddress || (typeof p.deliveryAddress === 'string' ? p.deliveryAddress : '') || '';
+          const coarseLocality = extractCoarseLocality(rawDrop, p.deliveryAddress);
+          const effectiveDrop = isAssignedToCaller ? (rawDrop || 'Drop Area') : coarseLocality;
+          const effectiveLocality = isAssignedToCaller ? (p.customerLocality || coarseLocality) : coarseLocality;
+
           meta = {
             ...meta,
             actionPayload: {
@@ -8606,9 +8645,13 @@ const server = http.createServer(async (req, res) => {
               storeId: p.storeId || p.store_id || null,
               merchantName: p.merchantName || p.merchant_name || 'Store',
               merchantAddress: p.merchantAddress || p.merchant_address || '',
-              dropAddress: dropAddr,
-              customerAddress: dropAddr,
-              customerLocality: dropAddr,
+              dropAddress: effectiveDrop,
+              customerAddress: effectiveDrop,
+              customerLocality: effectiveLocality,
+              deliveryAddress: typeof p.deliveryAddress === 'object' && p.deliveryAddress ? {
+                locality: effectiveLocality,
+                city: p.deliveryAddress.city || 'Local Area'
+              } : effectiveDrop,
               totalDistanceKm: p.totalDistanceKm || p.total_distance_km || 1.5,
               estimatedDurationMins: p.estimatedDurationMins || p.estimated_duration_mins || 10,
               earningsAmount: p.earningsAmount || p.earnings_amount || 40,

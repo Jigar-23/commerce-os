@@ -147,9 +147,7 @@ fun RiderMainScreen(
         val savedDuty = sessionManager.isShiftOnline()
         res.onSuccess {
             liveProfile = it
-            if (!it.storeId.isNullOrBlank()) {
-                sessionManager.saveStoreId(it.storeId)
-            }
+            sessionManager.reconcileStoreTopic(it.storeId, savedDuty)
             isOnline = savedDuty
         }.onFailure { err ->
             android.util.Log.e("RiderMainScreen", "fetchRiderProfile failed: ${err.message}", err)
@@ -160,9 +158,7 @@ fun RiderMainScreen(
                     val retry = repository.fetchRiderProfile()
                     retry.onSuccess {
                         liveProfile = it
-                        if (!it.storeId.isNullOrBlank()) {
-                            sessionManager.saveStoreId(it.storeId)
-                        }
+                        sessionManager.reconcileStoreTopic(it.storeId, savedDuty)
                         isOnline = savedDuty
                     }.onFailure {
                         sessionManager.clearSession()
@@ -300,7 +296,10 @@ fun RiderMainScreen(
                 try {
                     val profRes = profileDeferred?.await()
                     if (profRes != null && profRes.isSuccess) {
-                        profRes.getOrNull()?.let { liveProfile = it }
+                        profRes.getOrNull()?.let { p ->
+                            liveProfile = p
+                            sessionManager.reconcileStoreTopic(p.storeId, isOnline)
+                        }
                     }
                 } catch (_: Exception) {}
             }

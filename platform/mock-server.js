@@ -545,6 +545,36 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
+    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
+    if (loc && typeof loc === 'string' && loc.trim()) {
+      return loc.trim();
+    }
+  }
+  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
+  const trimmed = rawAddr.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const obj = JSON.parse(trimmed);
+      return obj.locality || obj.area || obj.city || 'Delivery Area';
+    } catch (_) {}
+  }
+  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return 'Delivery Area';
+
+  const nonDetailedParts = parts.filter(p => {
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
+    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
+    return true;
+  });
+
+  if (nonDetailedParts.length > 0) {
+    return nonDetailedParts.slice(-2).join(', ');
+  }
+  return 'Delivery Area';
+}
+
 function issueTokens(userId, phone, roleOrExtra = 'ROLE_CUSTOMER') {
   db.refreshTokens = db.refreshTokens || {};
   let role = 'ROLE_CUSTOMER';
@@ -2748,7 +2778,7 @@ async function newOrder(customerId, payload, cartItems) {
             uniqueNotifId,
             deliverySession.deliveryId,
             order.id,
-            'rdr_9817916180',
+            'broadcast',
             Date.now(),
             offerRecord.offerExpiresAt,
             estimatedEarn,
@@ -2782,7 +2812,6 @@ async function newOrder(customerId, payload, cartItems) {
         }
       }
       targetRiders.add('rdr_rewari_01');
-      targetRiders.add('rdr_9817916180');
 
       for (const rId of targetRiders) {
         dispatchNotificationEvent(rId, {
@@ -5679,7 +5708,6 @@ async function handleRequest(port, req, res) {
             for (const rId of Object.keys(db.riderPresence)) targetRiders.add(rId);
           }
           targetRiders.add('rdr_rewari_01');
-          targetRiders.add('rdr_9817916180');
 
           broadcastToRiderStream('ALL', 'NEW_OFFER', offerRecord);
           broadcastToRiderStream('ALL', 'NEW_DISPATCH_OFFER', offerRecord);
@@ -6917,7 +6945,11 @@ async function handleRequest(port, req, res) {
       // GET /api/v1/delivery/offers/active (Phase 4 & 5 Server-Authoritative Offer Engine)
       if (path === '/api/v1/delivery/offers/active' && req.method === 'GET') {
         const authClaims = verifyAndDecodeJwt(req);
-        const riderId = authClaims ? (authClaims.sub || authClaims.subject) : 'rdr_9817916180';
+        if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
+          return json(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is strictly required to access active offers.' });
+        }
+        const riderId = authClaims.sub || authClaims.subject;
+        const riderStoreId = authClaims.storeId || authClaims.store_id || null;
         const now = Date.now();
 
         if (productionPgPool) {
@@ -6926,24 +6958,26 @@ async function handleRequest(port, req, res) {
               `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
                FROM offers o
                JOIN orders ord ON ord.order_id = o.order_id
-               WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all')
+               WHERE (o.rider_id = $1 OR (o.is_broadcast = TRUE AND ($2::text IS NULL OR ord.store_id = $2)) OR o.rider_id = 'all' OR o.rider_id = 'broadcast')
                  AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
                  AND (ord.seller_approval_status = 'ACCEPTED' OR ord.seller_approval_status = 'AUTO_ACCEPTED')
                  AND ord.status IN ('SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED')
                  AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
                ORDER BY o.created_at DESC LIMIT 5`,
-              [riderId]
+              [riderId, riderStoreId]
             );
-            if (offRes.rows.length === 0) {
+            if (offRes.rows.length === 0 && riderStoreId) {
               offRes = await productionPgPool.query(
                 `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
                  FROM offers o
                  JOIN orders ord ON ord.order_id = o.order_id
-                 WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+                 WHERE (o.rider_id = $1 OR (o.is_broadcast = TRUE AND ord.store_id = $2) OR o.rider_id = 'all' OR o.rider_id = 'broadcast')
+                   AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
                    AND (ord.seller_approval_status = 'ACCEPTED' OR ord.seller_approval_status = 'AUTO_ACCEPTED')
                    AND ord.status IN ('SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED')
                    AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
-                 ORDER BY o.created_at DESC LIMIT 5`
+                 ORDER BY o.created_at DESC LIMIT 5`,
+                [riderId, riderStoreId]
               );
             }
             if (offRes.rows.length > 0) {
@@ -6957,6 +6991,9 @@ async function handleRequest(port, req, res) {
                   (addr.postal_code || addr.postalCode) ? ('PIN: ' + (addr.postal_code || addr.postalCode)) : null
                 ].filter(Boolean);
                 const customerAddrStr = parts.length > 0 ? parts.join(', ') : (addr.address_line || addr.addressLine || addr.address || (typeof o.delivery_address === 'string' ? o.delivery_address : 'Company Bagh, Rewari'));
+                const isAssigned = (o.rider_id === riderId && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status));
+                const coarseLocality = extractCoarseLocality(customerAddrStr, addr);
+                const effectiveAddr = isAssigned ? customerAddrStr : coarseLocality;
                 const expMs = Number(o.offer_expires_at) || (now + 1800000);
                 const payoutVal = Number(o.earnings_amount || o.total_earnings || 74.69);
                 const ordTot = Number(o.total_amount || 172);
@@ -6967,7 +7004,7 @@ async function handleRequest(port, req, res) {
                   notificationId: o.notification_id || ('notif_' + (o.offer_id || o.id)),
                   deliveryId: o.delivery_id,
                   orderId: o.order_id,
-                  riderId: o.rider_id || 'rdr_9817916180',
+                  riderId: o.rider_id || riderId,
                   status: o.status,
                   orderStatus: o.order_status || 'READY_FOR_PICKUP',
                   payout: payoutVal,
@@ -6981,11 +7018,12 @@ async function handleRequest(port, req, res) {
                   merchantName: 'Rewari Central Fulfillment Hub',
                   merchantLat: 28.202224,
                   merchantLng: 76.615418,
-                  deliveryAddress: customerAddrStr,
-                  customerAddress: customerAddrStr,
-                  customerName: addr.contactName || 'Customer 6180',
-                  customerLat: Number(addr.latitude || 28.1918),
-                  customerLng: Number(addr.longitude || 76.6081),
+                  deliveryAddress: effectiveAddr,
+                  customerAddress: effectiveAddr,
+                  customerLocality: coarseLocality,
+                  customerName: isAssigned ? (addr.contactName || 'Customer') : 'Customer',
+                  customerLat: isAssigned ? Number(addr.latitude || 28.1918) : null,
+                  customerLng: isAssigned ? Number(addr.longitude || 76.6081) : null,
                   distanceKm: Number(o.total_distance_km || 2.1),
                   totalDistanceKm: Number(o.total_distance_km || 2.1),
                   estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 7),
@@ -7019,12 +7057,16 @@ async function handleRequest(port, req, res) {
               const o = dbOffers[0];
               const expMs = Number(o.offer_expires_at || o.offerExpiresAt) || (now + 1800000);
               const payoutVal = Number(o.total_earnings || o.payout || o.earningsAmount || o.earnings_amount || 74.69);
+              const isAssigned = (o.rider_id === riderId || o.riderId === riderId) && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(o.status);
+              const rawAddr = o.delivery_address || o.deliveryAddress || o.customerAddress || 'Delivery Area';
+              const coarse = extractCoarseLocality(rawAddr);
+              const effectiveAddr = isAssigned ? rawAddr : coarse;
               const mapped = {
                 id: o.offer_id || o.offerId || o.id,
                 offerId: o.offer_id || o.offerId || o.id,
                 deliveryId: o.delivery_id || o.deliveryId,
                 orderId: o.order_id || o.orderId,
-                riderId: o.rider_id || o.riderId || 'rdr_9817916180',
+                riderId: o.rider_id || o.riderId || riderId,
                 status: o.status,
                 orderStatus: o.order_status || o.orderStatus || 'READY_FOR_PICKUP',
                 payout: payoutVal,
@@ -7036,11 +7078,12 @@ async function handleRequest(port, req, res) {
                 merchantName: 'Rewari Central Fulfillment Hub',
                 merchantLat: 28.202224,
                 merchantLng: 76.615418,
-                deliveryAddress: o.delivery_address || o.deliveryAddress || o.customerAddress || 'Company Bagh, Rewari',
-                customerAddress: o.delivery_address || o.deliveryAddress || o.customerAddress || 'Company Bagh, Rewari',
-                customerName: o.customer_name || o.customerName || 'Customer 6180',
-                customerLat: 28.1918,
-                customerLng: 76.6081,
+                deliveryAddress: effectiveAddr,
+                customerAddress: effectiveAddr,
+                customerLocality: coarse,
+                customerName: isAssigned ? (o.customer_name || o.customerName || 'Customer') : 'Customer',
+                customerLat: isAssigned ? 28.1918 : null,
+                customerLng: isAssigned ? 76.6081 : null,
                 distanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
                 totalDistanceKm: Number(o.total_distance_km || o.distanceKm || 2.1),
                 estimatedTimeMins: Number(o.total_duration_mins || o.estimatedDurationMins || o.estimatedTimeMins || 7),
@@ -7069,7 +7112,7 @@ async function handleRequest(port, req, res) {
             const ord = findOrder(o.orderId);
             const isApproved = !ord || ord.sellerApprovalStatus === 'ACCEPTED' || ord.sellerApprovalStatus === 'AUTO_ACCEPTED';
             const isValidStatus = !ord || ['SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED'].includes(ord.status || ord.orderStatus);
-            return (o.riderId === riderId || o.riderId === 'rdr_9817916180' || !o.riderId || o.broadcast === true) &&
+            return (o.riderId === riderId || !o.riderId || o.broadcast === true) &&
                    ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status) &&
                    (!o.offerExpiresAt || o.offerExpiresAt > now) &&
                    isApproved && isValidStatus;
@@ -7077,7 +7120,20 @@ async function handleRequest(port, req, res) {
         );
         const activeOffer = activeOffers.sort((a, b) => (b.offerCreatedAt || 0) - (a.offerCreatedAt || 0))[0];
         if (activeOffer) {
-          return json(res, 200, { ok: true, count: 1, offers: [activeOffer], ...activeOffer, serverTime: now });
+          const isAssigned = (activeOffer.riderId === riderId && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(activeOffer.status));
+          const rawAddr = activeOffer.deliveryAddress || activeOffer.customerAddress || 'Delivery Area';
+          const coarse = extractCoarseLocality(rawAddr);
+          const sanitizedOffer = {
+            ...activeOffer,
+            riderId: activeOffer.riderId || riderId,
+            deliveryAddress: isAssigned ? rawAddr : coarse,
+            customerAddress: isAssigned ? rawAddr : coarse,
+            customerLocality: coarse,
+            customerName: isAssigned ? (activeOffer.customerName || 'Customer') : 'Customer',
+            customerLat: isAssigned ? activeOffer.customerLat : null,
+            customerLng: isAssigned ? activeOffer.customerLng : null
+          };
+          return json(res, 200, { ok: true, count: 1, offers: [sanitizedOffer], ...sanitizedOffer, serverTime: now });
         }
         return json(res, 200, { ok: true, count: 0, offers: [], serverTime: now });
       }

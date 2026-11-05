@@ -76,6 +76,36 @@ class DeliveryOtpService {
   }
 }
 
+function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
+    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
+    if (loc && typeof loc === 'string' && loc.trim()) {
+      return loc.trim();
+    }
+  }
+  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
+  const trimmed = rawAddr.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const obj = JSON.parse(trimmed);
+      return obj.locality || obj.area || obj.city || 'Delivery Area';
+    } catch (_) {}
+  }
+  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return 'Delivery Area';
+
+  const nonDetailedParts = parts.filter(p => {
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
+    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
+    return true;
+  });
+
+  if (nonDetailedParts.length > 0) {
+    return nonDetailedParts.slice(-2).join(', ');
+  }
+  return 'Delivery Area';
+}
+
 class TransactionalCatalogRepository {
   constructor(dbPool) {
     this.pool = dbPool;
@@ -2285,7 +2315,7 @@ class TransactionalOfferRepository {
        FROM offers o
        LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
        LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
-       WHERE (o.rider_id = $1 OR o.rider_id = 'rdr_9817916180' OR o.rider_id IS NULL OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE)
+       WHERE (o.rider_id = $1 OR o.rider_id IS NULL OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE)
          AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
          AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000) OR o.created_at >= NOW() - INTERVAL '60 minutes')
        ORDER BY o.created_at DESC`,
@@ -5622,7 +5652,7 @@ class TransactionalPresenceRepository {
              AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
              AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
          )
-        ORDER BY (CASE WHEN r.rider_id = 'rdr_9817916180' THEN 1 ELSE 2 END), rp.last_seen_at DESC`
+        ORDER BY rp.last_seen_at DESC, r.rider_id ASC`
     );
 
     // Resilient Fallback 1: Any active rider with ONLINE shift status even if idle / last heartbeat > 15 mins
@@ -5639,7 +5669,7 @@ class TransactionalPresenceRepository {
                AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
                AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
            )
-         ORDER BY (CASE WHEN r.rider_id = 'rdr_9817916180' THEN 1 ELSE 2 END), rp.last_seen_at DESC`
+         ORDER BY rp.last_seen_at DESC, r.rider_id ASC`
       );
     }
 
@@ -6334,7 +6364,17 @@ class DispatchService {
           return { ...r, totalScore, distKm };
         });
 
-        scoredRiders.sort((a, b) => b.totalScore - a.totalScore);
+        scoredRiders.sort((a, b) => {
+          if (b.totalScore !== a.totalScore) {
+            return b.totalScore - a.totalScore;
+          }
+          const aTime = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+          const bTime = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0);
+          if (bTime !== aTime) {
+            return bTime - aTime;
+          }
+          return String(a.riderId || a.rider_id || '').localeCompare(String(b.riderId || b.rider_id || ''));
+        });
         selectedRiderId = scoredRiders[0].riderId || scoredRiders[0].rider_id;
       }
     }
@@ -7188,7 +7228,7 @@ class ProductionNotificationService {
     const duration = offer.estimatedDurationMins || offer.estimated_duration_mins || 10;
     const mName = offer.merchantName || offer.merchant_name || 'Store';
     const cAddr = offer.customerAddress || offer.customer_address || '';
-    const conciseDrop = cAddr ? (cAddr.split(',')[0] || cAddr).trim() : 'Drop address unavailable';
+    const conciseDrop = extractCoarseLocality(cAddr, offer.deliveryAddress);
 
     // Whitelist sanitized offer payload for broadcast notifications - strict zero PII exposure
     const sanitizedBroadcastOffer = {

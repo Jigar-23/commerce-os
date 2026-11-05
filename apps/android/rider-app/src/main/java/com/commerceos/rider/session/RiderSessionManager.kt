@@ -88,20 +88,49 @@ class RiderSessionManager private constructor(context: Context) {
     }
 
     fun clearSession(context: Context? = null) {
+        val currentStore = getStoreId().trim()
+        if (currentStore.isNotBlank()) {
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$currentStore")
+            } catch (_: Exception) {}
+        }
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+        } catch (_: Exception) {}
         saveShiftOnline(false)
         secureStore.deleteKeyAndValue(KEY_AUTH_TOKEN)
         secureStore.deleteKeyAndValue(KEY_REFRESH_TOKEN)
         saveRiderId("")
         prefs.edit().clear().apply()
-        try {
-            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
-        } catch (_: Exception) {}
         context?.let { ctx ->
             try {
                 val notifManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
                 notifManager.cancelAll()
             } catch (_: Exception) {}
         }
+    }
+
+    fun reconcileStoreTopic(newStoreId: String?, isOnline: Boolean) {
+        val oldStore = getStoreId().trim()
+        val newStore = newStoreId?.trim() ?: ""
+        if (newStore.isNotBlank() && newStore != oldStore) {
+            saveStoreId(newStore)
+            if (oldStore.isNotBlank()) {
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
+                } catch (_: Exception) {}
+            }
+            if (isOnline) {
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
+                } catch (_: Exception) {}
+            }
+        } else if (newStore.isNotBlank()) {
+            saveStoreId(newStore)
+        }
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+        } catch (_: Exception) {}
     }
 
     fun getFcmToken(): String {
