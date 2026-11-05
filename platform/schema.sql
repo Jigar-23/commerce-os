@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS stores (
 
 CREATE INDEX IF NOT EXISTS idx_stores_active_coords ON stores(is_active, latitude, longitude);
 
+-- Migration safety: ensure runtime availability of store operational status columns
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_offline BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS surge_mode BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_time_utc VARCHAR(8) NOT NULL DEFAULT '00:00';
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS closing_time_utc VARCHAR(8) NOT NULL DEFAULT '23:59';
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS max_active_orders INT NOT NULL DEFAULT 50;
+
 CREATE TABLE IF NOT EXISTS sellers (
     id VARCHAR(64) PRIMARY KEY,
     seller_id VARCHAR(64) UNIQUE NOT NULL,

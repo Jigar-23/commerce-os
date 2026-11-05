@@ -183,7 +183,15 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS storage_condition VARCHAR(255);`).catch(() => {});
   pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS therapeutic_class VARCHAR(255);`).catch(() => {});
   pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(16);`).catch(() => {});
+  pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(4, 2);`).catch(() => {});
   pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0;`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT TRUE;`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS is_offline BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS surge_mode BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_time_utc VARCHAR(8) NOT NULL DEFAULT '00:00';`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS closing_time_utc VARCHAR(8) NOT NULL DEFAULT '23:59';`).catch(() => {});
+  pool.query(`ALTER TABLE stores ADD COLUMN IF NOT EXISTS max_active_orders INT NOT NULL DEFAULT 50;`).catch(() => {});
 
   // ---------------------------------------------------------------------------
   // 2b. Authoritative Database Keep-Alive Pulse (Prevents Cloud Hibernation)
@@ -999,9 +1007,9 @@ async function resolveAuthorizedSellerStoreId(authClaims) {
         }
         return sellerRes.rows[0].store_id || null;
       }
-      return null;
+      return authClaims.storeId || authClaims.store_id || null;
     } catch {
-      return null;
+      return authClaims.storeId || authClaims.store_id || null;
     }
   }
   const repos = await getAppRepositories();
@@ -1014,7 +1022,7 @@ async function resolveAuthorizedSellerStoreId(authClaims) {
       return seller.store_id || seller.storeId || null;
     }
   }
-  return null;
+  return authClaims.storeId || authClaims.store_id || null;
 }
 
 const sseTicketStore = new Map();
@@ -4654,46 +4662,28 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this customer address book.' });
       }
 
+      // Scope addresses strictly to customer accounts authorized for the caller (Finding 2)
       let queryCustIds = [customerId];
-      let searchPhone10 = clean10.length === 10 ? clean10 : null;
-
-      if (!searchPhone10 && pool) {
-        try {
-          const cRow = await pool.query(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
-          if (cRow.rows.length > 0 && cRow.rows[0].phone) {
-            const p10 = String(cRow.rows[0].phone).replace(/\D/g, '').slice(-10);
-            if (p10.length === 10) searchPhone10 = p10;
-          }
-        } catch (_) {}
+      if (clean10.length === 10) {
+        queryCustIds.push(`cust_${clean10}`);
       }
-
-      if (searchPhone10 && pool) {
-        try {
-          const linkedCusts = await pool.query(
-            `SELECT id FROM customers WHERE id = $1 OR phone LIKE '%' || $2`,
-            [customerId, searchPhone10]
-          );
-          queryCustIds = Array.from(new Set([customerId, ...linkedCusts.rows.map(r => r.id)]));
-        } catch (_) {}
+      if (authClaims.sub && authClaims.sub !== customerId) {
+        const callerClean10 = String(authClaims.sub).replace(/\D/g, '').slice(-10);
+        if (callerClean10.length === 10 && callerClean10 === clean10) {
+          queryCustIds.push(authClaims.sub);
+        }
       }
+      queryCustIds = Array.from(new Set(queryCustIds));
 
       let resAddresses = { rows: [] };
       if (pool) {
-        if (searchPhone10) {
-          resAddresses = await pool.query(
-            `SELECT id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at
-             FROM customer_addresses 
-             WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2 
-             ORDER BY is_default DESC, created_at DESC`,
-            [queryCustIds, searchPhone10]
-          );
-        } else {
-          resAddresses = await pool.query(
-            `SELECT id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at
-             FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC`,
-            [customerId]
-          );
-        }
+        resAddresses = await pool.query(
+          `SELECT id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at
+           FROM customer_addresses 
+           WHERE customer_id = ANY($1)
+           ORDER BY is_default DESC, created_at DESC`,
+          [queryCustIds]
+        );
       }
 
       return sendJson(res, 200, resAddresses.rows.map(r => ({
@@ -5120,15 +5110,45 @@ const server = http.createServer(async (req, res) => {
       let lng = Number(body.longitude || (body.address && body.address.longitude));
 
       if ((isNaN(lat) || isNaN(lng)) && (body.addressId || body.address_id)) {
-        const addrId = String(body.addressId || body.address_id).trim();
-        const addrRes = await pool.query(
-          `SELECT latitude, longitude FROM customer_addresses WHERE id = $1 LIMIT 1`,
-          [addrId]
-        );
-        if (addrRes.rows.length > 0) {
-          lat = Number(addrRes.rows[0].latitude);
-          lng = Number(addrRes.rows[0].longitude);
+        // Finding 3: Require authentication and verify address ownership for addressId lookups
+        const authClaims = verifyAndDecodeJwt(req);
+        if (!authClaims || !authClaims.sub) {
+          return sendJson(res, 401, {
+            error: 'UNAUTHORIZED',
+            message: 'Authentication is strictly required when resolving serviceability via addressId.'
+          });
         }
+        const addrId = String(body.addressId || body.address_id).trim();
+        const callerCustId = authClaims.sub;
+        const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+        const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+        const callerCustIds = [callerCustId];
+        if (callerPhone10.length === 10) {
+          callerCustIds.push(`cust_${callerPhone10}`);
+          callerCustIds.push(`usr_${callerPhone10}`);
+          callerCustIds.push(`+91${callerPhone10}`);
+          callerCustIds.push(callerPhone10);
+        }
+
+        const addrRes = await pool.query(
+          `SELECT ca.latitude, ca.longitude 
+           FROM customer_addresses ca
+           LEFT JOIN customers c ON c.id = ca.customer_id
+           WHERE ca.id = $1 
+             AND (ca.customer_id = ANY($2) 
+                  OR ($3::text != '' AND c.phone LIKE '%' || $3)
+                  OR $4 = TRUE)
+           LIMIT 1`,
+          [addrId, callerCustIds, callerPhone10, isAdmin]
+        );
+        if (addrRes.rows.length === 0) {
+          return sendJson(res, 403, {
+            error: 'FORBIDDEN',
+            message: 'You are not authorized to query serviceability for this address ID, or address does not exist.'
+          });
+        }
+        lat = Number(addrRes.rows[0].latitude);
+        lng = Number(addrRes.rows[0].longitude);
       }
 
       if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
@@ -7236,7 +7256,7 @@ const server = http.createServer(async (req, res) => {
             const targetStoreId = session.store_id || authorizedStoreId;
             if (targetStoreId && sseBroadcasterInstance) {
               const storeChannel = `riders_store_${targetStoreId}`;
-              sseBroadcasterInstance.broadcast(storeChannel, 'NEW_OFFER_AVAILABLE', {
+              const offerEventPayload = {
                 offerId: activeOfferId || String(orderId),
                 orderId,
                 deliveryId: delId,
@@ -7244,7 +7264,9 @@ const server = http.createServer(async (req, res) => {
                 notificationId: newNotifId,
                 storeId: targetStoreId,
                 broadcast: true
-              });
+              };
+              sseBroadcasterInstance.broadcast(storeChannel, 'NEW_OFFER_AVAILABLE', offerEventPayload);
+              sseBroadcasterInstance.broadcast(storeChannel, 'NEW_DISPATCH_OFFER', offerEventPayload);
             }
 
             let authoritativeOrder = null;
@@ -8287,17 +8309,10 @@ const server = http.createServer(async (req, res) => {
         if (!isAdmin && authorizedStoreId) {
           addrRes = await pool.query(
             `SELECT ca.* FROM customer_addresses ca
-             WHERE (ca.customer_id = ANY($1) OR ca.contact_phone LIKE '%' || $2)
-               AND ca.id IN (SELECT DISTINCT address_id FROM orders WHERE store_id = $3 AND address_id IS NOT NULL)
+             WHERE ca.customer_id = ANY($1)
+               AND ca.id IN (SELECT DISTINCT address_id FROM orders WHERE store_id = $2 AND address_id IS NOT NULL)
              ORDER BY ca.is_default DESC, ca.created_at DESC`,
-            [finalVariants, effectiveClean10 || clean10, authorizedStoreId]
-          );
-        } else if (effectiveClean10) {
-          addrRes = await pool.query(
-            `SELECT * FROM customer_addresses 
-             WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2
-             ORDER BY is_default DESC, created_at DESC`,
-            [finalVariants, effectiveClean10]
+            [finalVariants, authorizedStoreId]
           );
         } else {
           addrRes = await pool.query(
@@ -8646,7 +8661,7 @@ const server = http.createServer(async (req, res) => {
             notificationId: o.notification_id || ('notif_' + (o.offer_id || o.id)),
             deliveryId: o.delivery_id,
             orderId: o.order_id,
-            riderId: o.rider_id || riderId,
+            riderId: (o.rider_id === 'broadcast' || o.is_broadcast) ? riderId : (o.rider_id || riderId),
             status: o.status,
             orderStatus: o.order_status || 'READY_FOR_PICKUP',
             orderTotal: ordTotal,
@@ -9750,6 +9765,7 @@ const server = http.createServer(async (req, res) => {
       if (!delivery) {
         return sendJson(res, 200, {
           active: false,
+          customerId: authClaims.sub,
           orderId: '',
           status: 'NO_ACTIVE_ORDER',
           message: 'No active delivery session for authenticated customer.'
@@ -9799,6 +9815,7 @@ const server = http.createServer(async (req, res) => {
 
       const activeTrackingDto = buildEnrichedTrackingDTO(delivery, telemetry, fallbackPresence, waypoints);
       activeTrackingDto.active = true;
+      activeTrackingDto.customerId = delivery.customer_id || delivery.customerId || authClaims.sub;
       activeTrackingDto.status = delivery.status || delivery.state;
       activeTrackingDto.orderId = delivery.order_id || delivery.id;
       activeTrackingDto.id = delivery.order_id || delivery.id;
@@ -9966,10 +9983,10 @@ const server = http.createServer(async (req, res) => {
               await client.query('ROLLBACK');
               return sendJson(res, 409, { ok: false, error: 'ORDER_CANCELLED', message: 'Cannot complete COD for a cancelled order.' });
             }
-            const validPreStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+            const validPreStates = ['ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION', 'HANDOFF_STARTED', 'DELIVERED'];
             if (!validPreStates.includes(row.state)) {
               await client.query('ROLLBACK');
-              return sendJson(res, 409, { ok: false, error: 'INVALID_DELIVERY_STATE', message: 'Order must be picked up before completing COD.' });
+              return sendJson(res, 409, { ok: false, error: 'INVALID_DELIVERY_STATE', message: 'Order must be arrived at customer or handoff started before completing COD collection.' });
             }
             if (!row.is_cod) {
               await client.query('ROLLBACK');
@@ -9986,28 +10003,30 @@ const server = http.createServer(async (req, res) => {
             }
             orderId = row.order_id;
             const finalAmount = collectedAmount;
+            // Record rider collection attestation with reconciled = FALSE (Finding 1)
             const updateRes = await client.query(
               `UPDATE cod_ledger
-               SET status = 'COLLECTED_RECONCILED',
+               SET status = 'COLLECTED_PENDING_RECONCILIATION',
                    amount_collected = $2,
                    collector_id = $3,
-                   reconciled = TRUE,
+                   reconciled = FALSE,
                    updated_at = NOW()
-               WHERE (order_id = $1 OR id = $1)`,
+               WHERE (order_id = $1 OR id = $1) AND reconciled = FALSE`,
               [orderId, finalAmount, authorizedRiderId]
             );
             if (updateRes.rowCount === 0) {
               await client.query('ROLLBACK');
-              return sendJson(res, 404, { ok: false, error: 'COD_LEDGER_NOT_FOUND', message: 'COD ledger entry not found for this order.' });
+              return sendJson(res, 404, { ok: false, error: 'COD_LEDGER_NOT_FOUND', message: 'COD ledger entry not found or already reconciled.' });
             }
             await client.query('COMMIT');
             return sendJson(res, 200, {
               ok: true,
-              codReconciled: true,
+              codReconciled: false,
+              codAttested: true,
               orderId,
               deliveryId: row.id,
               amountCollected: finalAmount,
-              message: 'Cash on delivery reconciled successfully.'
+              message: 'Cash on delivery collection recorded as pending merchant verification and reconciliation.'
             });
           } catch (e) {
             await client.query('ROLLBACK').catch(() => {});
@@ -10019,11 +10038,12 @@ const server = http.createServer(async (req, res) => {
         }
         return sendJson(res, 200, {
           ok: true,
-          codReconciled: true,
+          codReconciled: false,
+          codAttested: true,
           orderId,
           deliveryId,
           amountCollected: collectedAmount,
-          message: 'Cash on delivery reconciled successfully.'
+          message: 'Cash on delivery collection recorded as pending merchant verification and reconciliation.'
         });
       }
 

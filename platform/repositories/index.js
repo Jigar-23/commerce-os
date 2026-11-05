@@ -2819,10 +2819,16 @@ class TransactionalOfferRepository {
       await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
 
       // 1. Acquire row-level lock on the target offer
-      const offerRes = await client.query(
-        `SELECT * FROM offers WHERE (offer_id = $1 OR id = $1) FOR UPDATE`,
+      let offerRes = await client.query(
+        `SELECT * FROM offers WHERE offer_id = $1 FOR UPDATE`,
         [offerId]
       );
+      if (offerRes.rows.length === 0) {
+        offerRes = await client.query(
+          `SELECT * FROM offers WHERE id = $1 FOR UPDATE`,
+          [offerId]
+        );
+      }
 
       if (offerRes.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -2874,16 +2880,25 @@ class TransactionalOfferRepository {
 
       // 4. Lock delivery session and verify it is still available
       const targetDelivId = offer.delivery_id || offer.deliveryId;
-      const sessionRes = await client.query(
-        `SELECT * FROM delivery_sessions 
-         WHERE (
-           ($1::text IS NOT NULL AND $1::text != '' AND (delivery_id = $1 OR id = $1))
-           OR (($1::text IS NULL OR $1::text = '') AND (order_id = $2 OR delivery_id = $2))
-         )
-         ORDER BY (CASE WHEN delivery_id = $1 OR id = $1 THEN 0 ELSE 1 END), created_at DESC
-         FOR UPDATE`,
-        [targetDelivId, offer.order_id]
-      );
+      let sessionRes;
+      if (targetDelivId) {
+        sessionRes = await client.query(
+          `SELECT * FROM delivery_sessions WHERE delivery_id = $1 FOR UPDATE`,
+          [targetDelivId]
+        );
+      }
+      if (!sessionRes || sessionRes.rows.length === 0) {
+        sessionRes = await client.query(
+          `SELECT * FROM delivery_sessions 
+           WHERE (
+             ($1::text IS NOT NULL AND $1::text != '' AND (delivery_id = $1 OR id = $1))
+             OR (($1::text IS NULL OR $1::text = '') AND (order_id = $2 OR delivery_id = $2))
+           )
+           ORDER BY (CASE WHEN delivery_id = $1 OR id = $1 THEN 0 ELSE 1 END), created_at DESC
+           FOR UPDATE`,
+          [targetDelivId, offer.order_id]
+        );
+      }
 
       if (sessionRes.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -2920,7 +2935,7 @@ class TransactionalOfferRepository {
       const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
       const orderStoreId = session.store_id || (assocOrderRes.rows.length > 0 ? assocOrderRes.rows[0].store_id : null) || offer.store_id || null;
       const isAdminClaim = Boolean(riderProfile?.isAdmin);
-      if (!isAdminClaim) {
+      if (!isAdminClaim && (riderStoreId || orderStoreId)) {
         if (!riderStoreId || !orderStoreId || riderStoreId !== orderStoreId) {
           await client.query('ROLLBACK');
           return {
@@ -3152,20 +3167,6 @@ class LocalDevelopmentOfferRepository {
       offer.riderId = riderId;
     }
 
-    const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
-    const orderStoreId = offer.store_id || offer.storeId || session?.store_id || session?.storeId || null;
-    const isAdminClaim = Boolean(riderProfile?.isAdmin);
-    if (!isAdminClaim) {
-      if (!riderStoreId || !orderStoreId || riderStoreId !== orderStoreId) {
-        return {
-          ok: false,
-          httpStatus: 403,
-          error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
-          message: 'Riders must be assigned to an active store and can only accept offers from their assigned fulfillment store.'
-        };
-      }
-    }
-
     const now = Date.now();
     if (offer.status === 'ACCEPTED' && offer.riderId === riderId) {
       return { ok: true, httpStatus: 200, offer, session, idempotencyReplay: true };
@@ -3181,6 +3182,20 @@ class LocalDevelopmentOfferRepository {
 
     if (['ACCEPTED', 'DECLINED', 'CANCELLED', 'CLAIMED_BY_OTHER'].includes(offer.status)) {
       return { ok: false, httpStatus: 409, error: 'OFFER_CLAIMED', message: 'This delivery job has already been claimed or declined.' };
+    }
+
+    const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
+    const orderStoreId = offer.store_id || offer.storeId || session?.store_id || session?.storeId || null;
+    const isAdminClaim = Boolean(riderProfile?.isAdmin);
+    if (!isAdminClaim && (riderStoreId || orderStoreId)) {
+      if (!riderStoreId || !orderStoreId || riderStoreId !== orderStoreId) {
+        return {
+          ok: false,
+          httpStatus: 403,
+          error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
+          message: 'Riders must be assigned to an active store and can only accept offers from their assigned fulfillment store.'
+        };
+      }
     }
 
     if (session && session.riderId && session.riderId !== riderId) {
@@ -3726,18 +3741,19 @@ class TransactionalDeliveryRepository {
             };
           }
 
+          // Record rider cash collection attestation as pending merchant reconciliation (Finding 1)
           await client.query(
             `UPDATE cod_ledger 
              SET amount_collected = $2,
                  shortage_amount = 0,
-                 status = 'COLLECTED_RECONCILED',
-                 reconciled = TRUE,
+                 status = 'COLLECTED_PENDING_RECONCILIATION',
+                 reconciled = FALSE,
                  collector_id = $3,
                  updated_at = NOW()
-             WHERE (order_id = $1 OR id = $1)`,
+             WHERE (order_id = $1 OR id = $1) AND reconciled = FALSE`,
             [order.order_id || order.id, resolvedAmount, riderId]
           );
-          isCodPaid = true;
+          isCodPaid = false;
         } else {
           await client.query('ROLLBACK');
           return {
@@ -3760,11 +3776,11 @@ class TransactionalDeliveryRepository {
       await client.query(
         `UPDATE orders 
          SET status = 'DELIVERED', 
-             payment_status = CASE WHEN is_cod THEN (CASE WHEN $2 = TRUE THEN 'PAID' ELSE 'PAYMENT_PENDING' END) ELSE payment_status END, 
+             payment_status = CASE WHEN is_cod THEN 'PAYMENT_PENDING' ELSE payment_status END, 
              otp_verified_at = NOW(), 
              updated_at = NOW()
          WHERE id = $1 OR order_id = $1`,
-        [order.id || order.order_id, isCodPaid]
+        [order.id || order.order_id]
       );
 
       // 6. Transactional Outbox Event
@@ -3786,7 +3802,8 @@ class TransactionalDeliveryRepository {
       );
 
       await client.query('COMMIT');
-      return { ok: true, httpStatus: 200, state: 'DELIVERED', status: 'DELIVERED', order: { ...order, status: 'DELIVERED', payment_status: 'PAID' }, session: { ...session, state: 'DELIVERED', otp_verified: true } };
+      const finalPaymentStatus = order.is_cod ? 'PAYMENT_PENDING' : 'PAID';
+      return { ok: true, httpStatus: 200, state: 'DELIVERED', status: 'DELIVERED', order: { ...order, status: 'DELIVERED', payment_status: finalPaymentStatus }, session: { ...session, state: 'DELIVERED', otp_verified: true, cod_reconciled: false } };
     } catch (err) {
       await client.query('ROLLBACK');
       if ((err.code === '40001' || err.code === '40P01') && attempt < MAX_RETRIES - 1) {
@@ -4433,7 +4450,7 @@ class TransactionalOrderRepository {
       const calculatedDeliveryFee = calculatedItemsSubtotal >= freeDeliveryThreshold ? 0.0 : standardDeliveryFee;
 
       const hasColdChain = resolvedItemSnapshots.some(it => it.cold_chain_required === true);
-      const isSurge = Boolean(store.surge_mode || (fulfillmentDecision && fulfillmentDecision.decision && fulfillmentDecision.decision.surgeMode));
+      const isSurge = Boolean(store.surge_mode || (decision && (decision.surgeMode || (decision.decision && decision.decision.surgeMode))));
       const surgeFee = isSurge ? 25.0 : 0.0;
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,

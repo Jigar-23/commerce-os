@@ -6246,22 +6246,12 @@ async function handleRequest(port, req, res) {
             let customer = custRes.rows[0] || null;
 
             // 2. Fetch all saved addresses
-            let addrRes;
-            if (clean10.length === 10) {
-              addrRes = await productionPgPool.query(
-                `SELECT * FROM customer_addresses 
-                 WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2
-                 ORDER BY is_default DESC, created_at DESC`,
-                [uniqueVariants, clean10]
-              );
-            } else {
-              addrRes = await productionPgPool.query(
-                `SELECT * FROM customer_addresses 
-                 WHERE customer_id = ANY($1)
-                 ORDER BY is_default DESC, created_at DESC`,
-                [uniqueVariants]
-              );
-            }
+            const addrRes = await productionPgPool.query(
+              `SELECT * FROM customer_addresses 
+               WHERE customer_id = ANY($1)
+               ORDER BY is_default DESC, created_at DESC`,
+              [uniqueVariants]
+            );
             const addresses = addrRes.rows;
 
             // 3. Fetch all orders
@@ -6398,7 +6388,7 @@ async function handleRequest(port, req, res) {
         };
 
         const addresses = (db.customer_addresses || db.addresses || []).filter(a =>
-          uniqueVariants.includes(a.customer_id) || (clean10 && String(a.contact_phone || '').includes(clean10))
+          uniqueVariants.includes(a.customer_id)
         );
 
         const orders = (db.orders || []).filter(o =>
@@ -8078,8 +8068,14 @@ async function handleRequest(port, req, res) {
         const session = await getOrFetchDeliverySession(codMatch[1]);
         if (!session) return json(res, 404, { error: 'NOT_FOUND' });
 
+        const validPreStates = ['ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION', 'HANDOFF_STARTED', 'DELIVERED'];
+        if (session.state && !validPreStates.includes(session.state)) {
+          return json(res, 409, { error: 'INVALID_DELIVERY_STATE', message: 'Order must be arrived at customer or handoff started before completing COD collection.' });
+        }
+
         const body = await parseBody(req);
-        session.codReconciled = true;
+        session.codReconciled = false;
+        session.codAttested = true;
         session.codCollectedAmount = body.collectedAmount != null ? Number(body.collectedAmount) : session.codAmount;
         session.codCollectedAt = nowIso();
         session.history = session.history || [];
@@ -8087,11 +8083,11 @@ async function handleRequest(port, req, res) {
 
         const order = findOrder(session.orderId);
         if (order) {
-          order.paymentStatus = 'COD_COLLECTED';
+          order.paymentStatus = 'PAYMENT_PENDING';
           order.trackingCheckpoints = order.trackingCheckpoints || [];
           order.trackingCheckpoints.push({
             status: 'COD_COLLECTED',
-            label: `Cash payment of ₹${session.codCollectedAmount} received by delivery partner`,
+            label: `Cash payment of ₹${session.codCollectedAmount} received by delivery partner (pending merchant reconciliation)`,
             actor: 'RIDER',
             createdAt: nowIso()
           });
@@ -8099,12 +8095,12 @@ async function handleRequest(port, req, res) {
         saveDb();
 
         if (productionPgPool) {
-          productionPgPool.query(`UPDATE delivery_sessions SET cod_reconciled = true, cod_collected_amount = $1, updated_at = NOW() WHERE (delivery_id = $2 OR order_id = $2)`, [session.codCollectedAmount, session.deliveryId]).catch(() => {});
-          productionPgPool.query(`UPDATE orders SET payment_status = 'COD_COLLECTED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId]).catch(() => {});
+          productionPgPool.query(`UPDATE delivery_sessions SET cod_reconciled = false, cod_collected_amount = $1, updated_at = NOW() WHERE (delivery_id = $2 OR order_id = $2)`, [session.codCollectedAmount, session.deliveryId]).catch(() => {});
+          productionPgPool.query(`UPDATE orders SET payment_status = 'PAYMENT_PENDING', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [session.orderId]).catch(() => {});
         }
 
         broadcastDeliveryEvent(session.deliveryId, 'COD_COLLECTED', session);
-        return json(res, 200, { ok: true, reconciled: true, collectedAmount: session.codCollectedAmount, session: buildRiderDeliveryDTO(session) });
+        return json(res, 200, { ok: true, reconciled: false, attested: true, collectedAmount: session.codCollectedAmount, session: buildRiderDeliveryDTO(session) });
       }
 
       // POST /api/v1/delivery/(session/)?:deliveryId/verify-otp
@@ -9085,9 +9081,8 @@ async function handleRequest(port, req, res) {
             const pgAddrs = await activePgPool.query(
               `SELECT * FROM customer_addresses 
                WHERE customer_id = ANY($1) 
-                  OR (contact_phone IS NOT NULL AND contact_phone LIKE '%' || $2)
                ORDER BY is_default DESC, created_at DESC`,
-              [queryCustIds, clean10]
+              [queryCustIds]
             );
             if (pgAddrs.rows.length > 0) {
               return json(res, 200, pgAddrs.rows.map(r => ({
