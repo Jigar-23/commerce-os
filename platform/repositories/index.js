@@ -6957,6 +6957,11 @@ class DispatchService {
     // 2. Resolve Candidate Rider from authoritative presence & fleet
     let selectedRiderId = targetRiderId;
     let selectedCandidate = null;
+    let dispatchRoutingMode = 'TARGET_RIDER_DIRECT';
+    let circuitBreakerTripped = false;
+    let timeBudgetExpired = false;
+    let routedSuccessCount = 0;
+    let candidatePool = [];
     if (selectedRiderId) {
       if (this.presenceRepo) {
         const presence = await this.presenceRepo.getPresence(selectedRiderId);
@@ -6977,73 +6982,128 @@ class DispatchService {
         ? await this.presenceRepo.getEligibleOnlineRiders(storeId || store?.id)
         : [];
       if (eligibleRiders.length > 0) {
-        // Neutral, SLA-optimal Quick-Commerce Dispatch Ranking Engine with Bounded Route Matrix (Findings 7 & 14):
-        // 1. Projected pickup route duration (live road route where fresh location available, bounded to top candidates)
+        // Neutral, SLA-optimal Quick-Commerce Dispatch Ranking Engine with Bounded Parallel Matrix & Circuit Breaker (Finding 1):
+        // 1. Projected pickup route duration (evaluated in bounded parallel batches with hard time budget & circuit breaker)
         // 2. Active delivery queue load penalty (+4 mins per active delivery)
         // 3. Heartbeat freshness tie-breaker (fresher presence preferred)
         // 4. Stable rider ID lexicographical as final deterministic tie-breaker
-        const candidatePool = eligibleRiders.map(r => {
+        candidatePool = eligibleRiders.map(r => {
           const rLat = Number(r.lastKnownLat != null ? r.lastKnownLat : (r.last_known_lat != null ? r.last_known_lat : r.latitude));
           const rLng = Number(r.lastKnownLng != null ? r.lastKnownLng : (r.last_known_lng != null ? r.last_known_lng : r.longitude));
           const hasLocation = !isNaN(rLat) && !isNaN(rLng) && (Math.abs(rLat) > 0.001 || Math.abs(rLng) > 0.001);
           const distKm = hasLocation ? haversineDistanceKm(rLat, rLng, mLat, mLng) : 99.0;
-          return { ...r, rLat, rLng, hasLocation, distKm };
-        }).sort((a, b) => a.distKm - b.distKm);
-
-        // Adaptive road route estimation & confidence-aware ranking
-        // Evaluates road routes for top candidates, expanding adaptively if any unrouted
-        // candidate's best plausible optimistic ETA could beat the current routed leader.
-        const evaluatedRiders = [];
-        let currentBestLeaderEta = Infinity;
-
-        const initialBatchSize = Math.min(5, candidatePool.length);
-        for (let i = 0; i < candidatePool.length; i++) {
-          const r = candidatePool[i];
           const activeWorkload = Number(r.activeOrdersCount || r.activeDeliveries || r.active_deliveries || 0);
           const workloadPenaltyMins = activeWorkload * 4;
-
-          // Best plausible optimistic ETA (assuming 40 km/h straight-line speed with zero road detours)
-          const optimisticPickupMins = Math.max(1, Math.floor((r.distKm / 40) * 60));
+          const optimisticPickupMins = Math.max(1, Math.floor((distKm / 40) * 60));
           const bestPlausibleEta = optimisticPickupMins + workloadPenaltyMins;
-
-          let shouldComputeRoute = (i < initialBatchSize) || (bestPlausibleEta < currentBestLeaderEta);
-          let routedPickupMins = null;
-          let routedPickupDistKm = null;
-          let routeConfidence = 'APPROXIMATE_ESTIMATE';
-          let isApproximate = true;
-
-          if (shouldComputeRoute && r.hasLocation && typeof this.routeResolver === 'function') {
-            try {
-              const route = await this.routeResolver(r.rLat, r.rLng, mLat, mLng);
-              if (route && route.ok && route.durationMins != null) {
-                routedPickupMins = Math.max(1, Math.round(Number(route.durationMins)));
-                routedPickupDistKm = Number(route.distanceKm);
-                routeConfidence = 'ROUTED_EXACT';
-                isApproximate = false;
-              }
-            } catch (_) {}
-          }
-
-          if (routedPickupMins == null) {
-            routedPickupMins = Math.max(2, Math.ceil((r.distKm / 20) * 60));
-            routeConfidence = 'APPROXIMATE_ESTIMATE';
-            isApproximate = true;
-          }
-
-          const projectedPickupEta = routedPickupMins + workloadPenaltyMins;
-          if (routeConfidence === 'ROUTED_EXACT' && projectedPickupEta < currentBestLeaderEta) {
-            currentBestLeaderEta = projectedPickupEta;
-          }
-
-          evaluatedRiders.push({
+          const fallbackMins = Math.max(2, Math.ceil((distKm / 20) * 60));
+          return {
             ...r,
-            pickupEtaMins: routedPickupMins,
-            routedPickupDistKm,
-            routeConfidence,
-            isApproximate,
+            rLat,
+            rLng,
+            hasLocation,
+            distKm,
             activeWorkload,
-            projectedPickupEta
+            workloadPenaltyMins,
+            bestPlausibleEta,
+            fallbackMins,
+            pickupEtaMins: fallbackMins,
+            routedPickupDistKm: null,
+            routeConfidence: 'APPROXIMATE_ESTIMATE',
+            isApproximate: true,
+            projectedPickupEta: fallbackMins + workloadPenaltyMins
+          };
+        }).sort((a, b) => a.distKm - b.distKm);
+
+        // Bounded parallel routing configuration with hard time budget & circuit breaker
+        const MAX_ROUTED_CANDIDATES = 10;
+        const ROUTING_BATCH_SIZE = 4;
+        const ROUTING_TIME_BUDGET_MS = 2500;
+        const CIRCUIT_BREAKER_FAIL_THRESHOLD = 2;
+
+        const routingStartTime = Date.now();
+        let circuitBreakerTripped = false;
+        let timeBudgetExpired = false;
+        let consecutiveFailures = 0;
+        let routedSuccessCount = 0;
+        let currentBestLeaderEta = Infinity;
+
+        const candidatesToConsider = candidatePool.slice(0, MAX_ROUTED_CANDIDATES);
+
+        for (let batchStart = 0; batchStart < candidatesToConsider.length; batchStart += ROUTING_BATCH_SIZE) {
+          const elapsedMs = Date.now() - routingStartTime;
+          if (elapsedMs >= ROUTING_TIME_BUDGET_MS) {
+            timeBudgetExpired = true;
+            break;
+          }
+          if (circuitBreakerTripped) {
+            break;
+          }
+
+          const batch = candidatesToConsider.slice(batchStart, batchStart + ROUTING_BATCH_SIZE);
+          const candidatesToRoute = batch.filter((c, idx) => {
+            const globalIdx = batchStart + idx;
+            if (globalIdx < 4) return true; // Initial batch
+            return c.bestPlausibleEta < currentBestLeaderEta;
           });
+
+          if (candidatesToRoute.length === 0) {
+            break;
+          }
+
+          const remainingBudgetMs = Math.max(200, ROUTING_TIME_BUDGET_MS - (Date.now() - routingStartTime));
+
+          // Route candidates in bounded parallel batch
+          const batchResults = await Promise.all(candidatesToRoute.map(async (c) => {
+            if (!c.hasLocation || typeof this.routeResolver !== 'function') {
+              return { candidate: c, route: null, ok: false };
+            }
+            try {
+              const routePromise = this.routeResolver(c.rLat, c.rLng, mLat, mLng);
+              const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ ok: false, error: 'TIMEOUT' }), remainingBudgetMs));
+              const route = await Promise.race([routePromise, timeoutPromise]);
+              return { candidate: c, route, ok: Boolean(route && route.ok && route.durationMins != null) };
+            } catch (_) {
+              return { candidate: c, route: null, ok: false };
+            }
+          }));
+
+          let batchSuccessCount = 0;
+          for (const res of batchResults) {
+            if (res.ok && res.route) {
+              const routedMins = Math.max(1, Math.round(Number(res.route.durationMins)));
+              res.candidate.pickupEtaMins = routedMins;
+              res.candidate.routedPickupDistKm = Number(res.route.distanceKm);
+              res.candidate.routeConfidence = 'ROUTED_EXACT';
+              res.candidate.isApproximate = false;
+              res.candidate.projectedPickupEta = routedMins + res.candidate.workloadPenaltyMins;
+              if (res.candidate.projectedPickupEta < currentBestLeaderEta) {
+                currentBestLeaderEta = res.candidate.projectedPickupEta;
+              }
+              routedSuccessCount++;
+              batchSuccessCount++;
+              consecutiveFailures = 0;
+            } else {
+              consecutiveFailures++;
+            }
+          }
+
+          // Circuit breaker: if all candidates in this batch failed and consecutive failures reach threshold
+          if (batchSuccessCount === 0 && candidatesToRoute.length > 0) {
+            if (consecutiveFailures >= CIRCUIT_BREAKER_FAIL_THRESHOLD) {
+              circuitBreakerTripped = true;
+              break;
+            }
+          }
+        }
+
+        dispatchRoutingMode = 'ROUTED_OPTIMAL';
+        if (circuitBreakerTripped) {
+          dispatchRoutingMode = 'CIRCUIT_BREAKER_FALLBACK';
+        } else if (timeBudgetExpired) {
+          dispatchRoutingMode = 'TIME_BUDGET_EXPIRED_FALLBACK';
+        } else if (routedSuccessCount === 0) {
+          dispatchRoutingMode = 'APPROXIMATE_FALLBACK';
         }
 
         // Confidence-aware ranking:
@@ -7052,7 +7112,7 @@ class DispatchService {
         // 3. Active workload count
         // 4. Heartbeat freshness
         // 5. Stable deterministic riderId
-        const allRankedRiders = evaluatedRiders.sort((a, b) => {
+        const allRankedRiders = candidatePool.sort((a, b) => {
           if (a.routeConfidence !== b.routeConfidence) {
             // Strictly prefer verified routed riders over unverified estimates when within plausible variance
             if (a.routeConfidence === 'ROUTED_EXACT' && b.routeConfidence === 'APPROXIMATE_ESTIMATE') {
@@ -7175,6 +7235,11 @@ class DispatchService {
       waypoints: deliveryRoute.waypoints || [],
       riderToStoreMins: riderToStoreDurMins,
       storeToCustomerMins: storeToCustomerDurMins,
+      dispatchRoutingMode: dispatchRoutingMode,
+      dispatchCircuitBreaker: circuitBreakerTripped,
+      dispatchBudgetExpired: timeBudgetExpired,
+      dispatchCandidateCount: candidatePool.length,
+      dispatchRoutedCount: routedSuccessCount,
       etaConfidence: selectedCandidate?.isApproximate ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE',
       etaRange: { min: Math.max(8, totalDurationMins - 2), max: totalDurationMins + 3 },
       isApproximateEta: Boolean(selectedCandidate?.isApproximate),
@@ -7189,6 +7254,8 @@ class DispatchService {
       deliverySession.distanceKm = totalDistanceKm;
       deliverySession.riderToStoreMins = riderToStoreDurMins;
       deliverySession.storeToCustomerMins = storeToCustomerDurMins;
+      deliverySession.dispatchRoutingMode = dispatchRoutingMode;
+      deliverySession.dispatchCircuitBreaker = circuitBreakerTripped;
     }
 
     // 7. Persist Offer Transactionally (which writes NEW_DISPATCH_OFFER into outbox)

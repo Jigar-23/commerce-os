@@ -1317,19 +1317,47 @@ public struct OrderTrackingScreen: View {
     private func startOrderDetailPolling(orderId: String) {
         pollingTask?.cancel()
         pollingTask = Task {
+            var reconnectAttempt = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if Task.isCancelled { break }
-                if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: true) {
-                    await MainActor.run {
-                        self.orderDetail = fresh
-                        if let lat = fresh.riderLat, let lng = fresh.riderLng, lat != 0.0, lng != 0.0 {
-                            self.lastKnownRiderCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                let isReconnecting = container.trackingRepository.isStreamReconnecting || !container.trackingRepository.isLiveStreaming
+                
+                if isReconnecting {
+                    // Fallback polling active only while realtime SSE is reconnecting or unavailable, with exponential backoff
+                    let delaySeconds = min(30.0, 3.0 * pow(1.5, Double(reconnectAttempt)))
+                    reconnectAttempt += 1
+                    try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                    if Task.isCancelled { break }
+                    
+                    if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: true) {
+                        await MainActor.run {
+                            self.orderDetail = fresh
+                            if let lat = fresh.riderLat, let lng = fresh.riderLng, lat != 0.0, lng != 0.0 {
+                                self.lastKnownRiderCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                            }
+                        }
+                        let s = fresh.status.uppercased()
+                        if s == "DELIVERED" || s == "CANCELLED" {
+                            break
                         }
                     }
-                    let s = fresh.status.uppercased()
-                    if s == "DELIVERED" || s == "CANCELLED" {
-                        break
+                } else {
+                    // Realtime SSE stream is healthy and active: reset backoff and keep a slower 30s reconciliation poll
+                    reconnectAttempt = 0
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
+                    if Task.isCancelled { break }
+                    
+                    // Slower periodic reconciliation check while realtime SSE is healthy
+                    if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: false) {
+                        await MainActor.run {
+                            self.orderDetail = fresh
+                            if let lat = fresh.riderLat, let lng = fresh.riderLng, lat != 0.0, lng != 0.0 {
+                                self.lastKnownRiderCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                            }
+                        }
+                        let s = fresh.status.uppercased()
+                        if s == "DELIVERED" || s == "CANCELLED" {
+                            break
+                        }
                     }
                 }
             }
