@@ -8660,6 +8660,7 @@ class OutboxProcessor {
              OR (ds.delivery_id IS NOT NULL AND (oe.payload->>'deliveryId' = ds.delivery_id OR oe.payload->'deliverySession'->>'deliveryId' = ds.delivery_id))
            )
            AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED')
+           AND COALESCE(o.seller_approval_status, 'NOT_REQUIRED') != 'PENDING'
            AND oe.created_at >= NOW() - ($1 || ' hours')::INTERVAL
          RETURNING oe.id, oe.aggregate_id`,
         [maxAgeHours]
@@ -8692,9 +8693,10 @@ class OutboxProcessor {
          JOIN delivery_sessions ds ON (ds.order_id = o.order_id OR ds.order_id = o.id)
          WHERE ds.state = 'LOOKING_FOR_RIDER'
            AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED', 'PRESCRIPTION_VERIFICATION_PENDING')
+           AND COALESCE(o.seller_approval_status, 'NOT_REQUIRED') != 'PENDING'
            AND (
-             o.seller_approval_status IN ('ACCEPTED', 'NOT_REQUIRED')
-             OR o.status IN ('ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED', 'PLACED')
+             (COALESCE(o.seller_approval_status, 'NOT_REQUIRED') = 'NOT_REQUIRED' AND o.status IN ('PLACED', 'ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED'))
+             OR (o.seller_approval_status = 'ACCEPTED' AND o.status IN ('ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED'))
            )
            AND (
              o.is_cod = TRUE 
