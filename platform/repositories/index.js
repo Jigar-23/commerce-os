@@ -76,73 +76,7 @@ class DeliveryOtpService {
   }
 }
 
-function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
-  const UNIT_KEYWORDS = /\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\s*[-/ #a-z0-9]*/gi;
-  const UNIT_CODE = /\b#?\d+[a-z]?\b|\b[a-z]?[-/]\d+[a-z\d]*\b|\b\d+[-/][a-z\d]+\b/gi;
-
-  const sanitizeSegment = (segment) => {
-    if (!segment || typeof segment !== 'string') return '';
-    let s = segment.trim();
-    if (!s) return '';
-    const preserved = [];
-    s = s.replace(/\b(sector|phase)\s+\d+[a-z]?\b/gi, (m) => {
-      preserved.push(m);
-      return `__PRESERVED_${preserved.length - 1}__`;
-    });
-
-    s = s.replace(UNIT_KEYWORDS, ' ');
-    s = s.replace(UNIT_CODE, ' ');
-    for (let i = 0; i < preserved.length; i++) {
-      s = s.replace(`__PRESERVED_${i}__`, preserved[i]);
-    }
-    s = s.replace(/^[-,/ ]+|[-,/ ]+$/g, '').replace(/\s+/g, ' ').trim();
-    if (!s || s.length < 3 || !/[a-z]{3,}/i.test(s)) {
-      return '';
-    }
-    return s;
-  };
-
-  const candidates = [];
-  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    if (deliveryAddrObj.locality) {
-      const parts = String(deliveryAddrObj.locality).split(',').map(p => p.trim()).filter(Boolean);
-      candidates.push(...parts);
-    }
-    if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
-    if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
-  }
-  if (candidates.length === 0 && typeof rawAddr === 'string' && rawAddr.trim()) {
-    const trimmed = rawAddr.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        const obj = JSON.parse(trimmed);
-        if (obj.locality) {
-          const parts = String(obj.locality).split(',').map(p => p.trim()).filter(Boolean);
-          candidates.push(...parts);
-        }
-        if (obj.area) candidates.push(obj.area);
-        if (obj.city) candidates.push(obj.city);
-      } catch (_) {}
-    } else {
-      const parts = trimmed.split(',').map(p => p.trim()).filter(Boolean);
-      candidates.push(...parts);
-    }
-  }
-
-  const validTokens = [];
-  for (const cand of candidates) {
-    if (typeof cand !== 'string') continue;
-    const cleaned = sanitizeSegment(cand);
-    if (cleaned && !validTokens.includes(cleaned)) {
-      validTokens.push(cleaned);
-    }
-  }
-
-  if (validTokens.length > 0) {
-    return validTokens.slice(-2).join(', ');
-  }
-  return 'Delivery Area';
-}
+const { extractCoarseLocality, sanitizeSegment } = require('../services/locality-sanitizer');
 
 class TransactionalCatalogRepository {
   constructor(dbPool) {
@@ -1339,7 +1273,8 @@ class ServiceabilityService {
     items = [],
     preferredStoreId = null,
     pool = null,
-    storeRepo = null
+    storeRepo = null,
+    routeResolver = null
   }) {
     if (!address || address.latitude == null || address.longitude == null || isNaN(Number(address.latitude)) || isNaN(Number(address.longitude))) {
       return { ok: false, error: 'INVALID_COORDINATES', message: 'Authoritative customer coordinates are required.' };
@@ -1428,7 +1363,10 @@ class ServiceabilityService {
               continue;
             }
           }
-        } catch (_) {}
+        } catch (err) {
+          // Fail closed when store capacity cannot be verified (Finding 2)
+          continue;
+        }
       }
 
       candidateStores.push({
@@ -1533,9 +1471,43 @@ class ServiceabilityService {
       }
     }
 
-    // Finding 7: Dynamic ETA derived from routable travel time (20 km/h) + 4 mins pick/pack + active store order workload factor + surge mode buffer
-    const travelTimeMinutes = Math.ceil((Number(selectedStore.distanceKm || 1.5) / 20) * 60);
-    const pickPackMinutes = 4;
+    // Finding 7: Dynamic Traffic-Aware ETA derived from authoritative routed road network duration,
+    // partner pick/pack duration (2-4 mins based on basket), store workload, and surge buffer
+    let routedTravelMinutes = null;
+    let routedDistanceKm = null;
+    if (typeof routeResolver === 'function') {
+      try {
+        const routeRes = await routeResolver(Number(selectedStore.latitude), Number(selectedStore.longitude), cLat, cLng, false);
+        if (routeRes && routeRes.ok && routeRes.durationMins != null) {
+          routedTravelMinutes = Math.max(1, Math.round(Number(routeRes.durationMins)));
+          if (routeRes.distanceKm != null) routedDistanceKm = Number(routeRes.distanceKm);
+        }
+      } catch (_) {}
+    } else if (process.env.OSRM_BASE_URL) {
+      try {
+        const baseUrl = process.env.OSRM_BASE_URL.replace(/\/+$/, '');
+        const osrmUrl = `${baseUrl}/route/v1/driving/${cLng},${cLat};${selectedStore.longitude},${selectedStore.latitude}?overview=false`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const oRes = await fetch(osrmUrl, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
+        clearTimeout(timeout);
+        if (oRes.ok) {
+          const oData = await oRes.json();
+          if (oData.routes && oData.routes.length > 0) {
+            routedTravelMinutes = Math.max(1, Math.round(oData.routes[0].duration / 60));
+            routedDistanceKm = Math.round((oData.routes[0].distance / 1000) * 10) / 10;
+          }
+        }
+      } catch (_) {}
+    }
+
+    const effectiveDistanceKm = routedDistanceKm != null ? routedDistanceKm : selectedStore.distanceKm;
+    const travelTimeMinutes = routedTravelMinutes != null
+      ? routedTravelMinutes
+      : Math.ceil((Number(effectiveDistanceKm || 1.5) / 20) * 60);
+
+    const totalItemCount = normalizedItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+    const pickPackMinutes = totalItemCount > 5 ? 4 : (totalItemCount > 2 ? 3 : 2);
     const loadMinutes = Math.min(10, Math.ceil(Number(selectedStore.activeOrders || 0) * 0.5));
     const surgeBufferMinutes = selectedStore.surge_mode ? 5 : 0;
     const dynamicSlaMinutes = Math.max(
@@ -4039,7 +4011,7 @@ class TransactionalOrderRepository {
         return { ok: false, httpStatus: 400, error: 'INVALID_ADDRESS_COORDINATES', message: 'Authoritative customer address has invalid coordinates.' };
       }
 
-      // 8. Authoritative Store Resolution (from stores table with operational guards)
+      // 8. Authoritative Store Resolution (from stores table with operational guards & row-lock for atomic capacity)
       const storeRes = await client.query(
         `SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active, seller_approval_required,
                 COALESCE(service_radius_km, 10.0) AS service_radius_km,
@@ -4049,7 +4021,7 @@ class TransactionalOrderRepository {
                 COALESCE(opening_time_utc, '00:00') AS opening_time_utc,
                 COALESCE(closing_time_utc, '23:59') AS closing_time_utc,
                 COALESCE(max_active_orders, 50) AS max_active_orders
-         FROM stores WHERE id = $1 AND is_active = TRUE`,
+         FROM stores WHERE id = $1 AND is_active = TRUE FOR UPDATE`,
         [targetStoreId]
       );
       if (storeRes.rows.length === 0) {
@@ -4081,15 +4053,20 @@ class TransactionalOrderRepository {
         }
       }
 
-      // Capacity & Surge Guard (Count all nonterminal orders)
+      // Capacity & Surge Guard (Count all nonterminal orders atomically under row lock - Finding 2)
       if (store.max_active_orders) {
+        let effectiveMaxOrders = Number(store.max_active_orders);
+        if (store.surge_mode) {
+          // Finding 6: Reduce capacity threshold by 30% under surge mode
+          effectiveMaxOrders = Math.floor(effectiveMaxOrders * 0.7);
+        }
         const activeCapRes = await client.query(
           `SELECT COUNT(*) FROM orders 
            WHERE store_id = $1 AND status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')`,
           [store.id]
         );
         const activeCount = Number(activeCapRes.rows[0]?.count || 0);
-        if (activeCount >= Number(store.max_active_orders)) {
+        if (activeCount >= effectiveMaxOrders) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 429, error: 'STORE_CAPACITY_EXCEEDED', message: `Store ${store.store_name} has reached maximum fulfillment capacity. Please retry shortly.` };
         }
@@ -7039,8 +7016,11 @@ class TransactionalCartRepository {
 
       const res = await client.query(`SELECT id, items FROM carts WHERE customer_id = $1 FOR UPDATE`, [customerId]);
       let items = [];
-      let itemUnitPrice = Number(item.unitPrice || item.discountedPrice || item.price || 0);
-      if (itemUnitPrice <= 0 && this.pool) {
+      // Authoritative Catalog Pricing Resolution (Finding 5)
+      // Never trust client-supplied unitPrice, price, or discountedPrice
+      let itemUnitPrice = 0;
+      let authoritativeProduct = null;
+      if (this.pool) {
         try {
           const prodCheck = await client.query(
             `SELECT price, discounted_price, mrp, name, brand_name, image_url, rx_requirement, cold_chain_required 
@@ -7049,22 +7029,25 @@ class TransactionalCartRepository {
             [item.sku]
           );
           if (prodCheck.rows.length > 0) {
-            const pRow = prodCheck.rows[0];
-            itemUnitPrice = Number(pRow.discounted_price || pRow.price || pRow.mrp || 15);
+            authoritativeProduct = prodCheck.rows[0];
+            itemUnitPrice = Number(authoritativeProduct.discounted_price || authoritativeProduct.price || authoritativeProduct.mrp || 15);
             if (!item.name || item.name === item.sku || item.name.toLowerCase() === 'medicine') {
-              item.name = pRow.name;
+              item.name = authoritativeProduct.name;
             }
-            if (!item.brand) item.brand = pRow.brand_name;
-            if (!item.image) item.image = pRow.image_url;
-            if (pRow.rx_requirement === 'RX_REQUIRED' || pRow.rx_requirement === 'SCHEDULE_H') {
+            if (!item.brand) item.brand = authoritativeProduct.brand_name;
+            if (!item.image) item.image = authoritativeProduct.image_url;
+            if (authoritativeProduct.rx_requirement === 'RX_REQUIRED' || authoritativeProduct.rx_requirement === 'SCHEDULE_H') {
               item.requiresPrescription = true;
               item.prescriptionRequired = true;
             }
-            if (pRow.cold_chain_required) item.coldChain = true;
+            if (authoritativeProduct.cold_chain_required) item.coldChain = true;
           }
         } catch (_) {}
       }
-      if (itemUnitPrice <= 0) itemUnitPrice = 15;
+      if (itemUnitPrice <= 0) {
+        itemUnitPrice = 15;
+      }
+      const authoritativeMrp = authoritativeProduct ? Number(authoritativeProduct.mrp || authoritativeProduct.price || itemUnitPrice) : itemUnitPrice;
       const isRx = Boolean(item.requiresPrescription || item.prescriptionRequired || (item.pharmacyAttributes && item.pharmacyAttributes.prescriptionRequired));
       const isCold = Boolean(item.coldChain || (item.pharmacyAttributes && item.pharmacyAttributes.coldChain));
       const entryToAdd = {
@@ -7074,9 +7057,9 @@ class TransactionalCartRepository {
         name: item.name || item.sku,
         quantity: Number(item.quantity) || 1,
         unitPrice: itemUnitPrice,
-        price: Number(item.price || itemUnitPrice),
-        discountedPrice: Number(item.discountedPrice || itemUnitPrice),
-        mrp: Number(item.mrp || item.price || itemUnitPrice),
+        price: itemUnitPrice,
+        discountedPrice: itemUnitPrice,
+        mrp: authoritativeMrp,
         brand: item.brand || null,
         packSize: item.packSize || null,
         image: item.image || null,
@@ -7217,11 +7200,25 @@ class LocalDevelopmentCartRepository {
     }
 
     const items = this.db.carts[customerId] || [];
+    const catalogProduct = (this.db.products || []).find(p => p.sku === item.sku || p.id === item.sku);
+    const authoritativePrice = catalogProduct ? Number(catalogProduct.discountedPrice || catalogProduct.price || catalogProduct.mrp || 15) : 15;
+    const authoritativeMrp = catalogProduct ? Number(catalogProduct.mrp || catalogProduct.price || authoritativePrice) : authoritativePrice;
     const existing = items.find(i => i.sku === item.sku);
     if (existing) {
       existing.quantity = (existing.quantity || 1) + (item.quantity || 1);
+      existing.unitPrice = authoritativePrice;
+      existing.price = authoritativePrice;
+      existing.discountedPrice = authoritativePrice;
+      existing.mrp = authoritativeMrp;
     } else {
-      items.push({ ...item, quantity: item.quantity || 1 });
+      items.push({
+        ...item,
+        quantity: item.quantity || 1,
+        unitPrice: authoritativePrice,
+        price: authoritativePrice,
+        discountedPrice: authoritativePrice,
+        mrp: authoritativeMrp
+      });
     }
     this.db.carts[customerId] = items;
 

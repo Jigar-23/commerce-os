@@ -880,73 +880,7 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
-  const UNIT_KEYWORDS = /\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\s*[-/ #a-z0-9]*/gi;
-  const UNIT_CODE = /\b#?\d+[a-z]?\b|\b[a-z]?[-/]\d+[a-z\d]*\b|\b\d+[-/][a-z\d]+\b/gi;
-
-  const sanitizeSegment = (segment) => {
-    if (!segment || typeof segment !== 'string') return '';
-    let s = segment.trim();
-    if (!s) return '';
-    const preserved = [];
-    s = s.replace(/\b(sector|phase)\s+\d+[a-z]?\b/gi, (m) => {
-      preserved.push(m);
-      return `__PRESERVED_${preserved.length - 1}__`;
-    });
-
-    s = s.replace(UNIT_KEYWORDS, ' ');
-    s = s.replace(UNIT_CODE, ' ');
-    for (let i = 0; i < preserved.length; i++) {
-      s = s.replace(`__PRESERVED_${i}__`, preserved[i]);
-    }
-    s = s.replace(/^[-,/ ]+|[-,/ ]+$/g, '').replace(/\s+/g, ' ').trim();
-    if (!s || s.length < 3 || !/[a-z]{3,}/i.test(s)) {
-      return '';
-    }
-    return s;
-  };
-
-  const candidates = [];
-  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    if (deliveryAddrObj.locality) {
-      const parts = String(deliveryAddrObj.locality).split(',').map(p => p.trim()).filter(Boolean);
-      candidates.push(...parts);
-    }
-    if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
-    if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
-  }
-  if (candidates.length === 0 && typeof rawAddr === 'string' && rawAddr.trim()) {
-    const trimmed = rawAddr.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        const obj = JSON.parse(trimmed);
-        if (obj.locality) {
-          const parts = String(obj.locality).split(',').map(p => p.trim()).filter(Boolean);
-          candidates.push(...parts);
-        }
-        if (obj.area) candidates.push(obj.area);
-        if (obj.city) candidates.push(obj.city);
-      } catch (_) {}
-    } else {
-      const parts = trimmed.split(',').map(p => p.trim()).filter(Boolean);
-      candidates.push(...parts);
-    }
-  }
-
-  const validTokens = [];
-  for (const cand of candidates) {
-    if (typeof cand !== 'string') continue;
-    const cleaned = sanitizeSegment(cand);
-    if (cleaned && !validTokens.includes(cleaned)) {
-      validTokens.push(cleaned);
-    }
-  }
-
-  if (validTokens.length > 0) {
-    return validTokens.slice(-2).join(', ');
-  }
-  return 'Delivery Area';
-}
+const { extractCoarseLocality, sanitizeSegment } = require('../services/locality-sanitizer');
 
 // Pre-warm repositories
 getAppRepositories().catch(() => {});
@@ -4378,17 +4312,54 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const pricingEngine = require('../pricing-engine');
 
-    async function resolveActiveSurgeMode() {
-      if (pool) {
-        try {
-          const res = await pool.query('SELECT 1 FROM stores WHERE surge_mode = TRUE AND is_active = TRUE LIMIT 1');
-          return res.rows.length > 0;
-        } catch (_) {}
+    // Finding 6: Store-specific surge resolution based on customer authoritative fulfillment store
+    async function resolveCustomerCartSurgeAndContext(customerId, rawItems = []) {
+      if (!pool || !customerId) {
+        return { isSurge: false, isProvisional: true, storeId: null };
       }
-      return false;
+      try {
+        const addrRes = await pool.query(
+          `SELECT latitude, longitude, address_line, city, postal_code 
+           FROM customer_addresses 
+           WHERE customer_id = $1 AND is_default = TRUE LIMIT 1`,
+          [customerId]
+        );
+        if (addrRes.rows.length === 0) {
+          return { isSurge: false, isProvisional: true, storeId: null };
+        }
+        const addr = addrRes.rows[0];
+        const items = (rawItems || []).map(i => ({
+          sku: i.sku || i.productId || i.id,
+          quantity: Math.max(1, Number(i.quantity || 1))
+        }));
+
+        const decision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+          address: {
+            latitude: addr.latitude,
+            longitude: addr.longitude,
+            addressLine: addr.address_line,
+            city: addr.city,
+            postalCode: addr.postal_code
+          },
+          items,
+          pool
+        });
+
+        if (decision.ok && decision.store) {
+          return {
+            isSurge: Boolean(decision.store.surge_mode),
+            isProvisional: false,
+            storeId: decision.storeId
+          };
+        }
+      } catch (_) {}
+
+      return { isSurge: false, isProvisional: true, storeId: null };
     }
 
-    function formatCartResponseDto(customerId, rawItems, isSurge = false) {
+    function formatCartResponseDto(customerId, rawItems, surgeContext = false) {
+      const isSurge = typeof surgeContext === 'boolean' ? surgeContext : Boolean(surgeContext?.isSurge);
+      const isProvisional = typeof surgeContext === 'object' && surgeContext !== null ? Boolean(surgeContext.isProvisional) : false;
       const items = (rawItems || []).map(r => {
         const isRx = Boolean(r.requiresPrescription || r.prescriptionRequired || (r.pharmacyAttributes && r.pharmacyAttributes.prescriptionRequired));
         const isCold = Boolean(r.coldChain || (r.pharmacyAttributes && r.pharmacyAttributes.coldChain));
@@ -4459,7 +4430,9 @@ const server = http.createServer(async (req, res) => {
         prescriptionRequired: requiresPrescription,
         freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD,
         freeDeliveryEligible: freeDeliveryEligible,
-        remainingForFreeDelivery: remainingForFreeDelivery
+        remainingForFreeDelivery: remainingForFreeDelivery,
+        isProvisional: isProvisional,
+        isQuoteProvisional: isProvisional
       };
     }
 
@@ -4488,9 +4461,9 @@ const server = http.createServer(async (req, res) => {
       const customerId = cartGetMatch[1];
       const authClaims = authorizeCartAccess(req, res, customerId);
       if (!authClaims) return;
-      const isSurge = await resolveActiveSurgeMode();
       const rawItems = await appRepositories.cartRepo.getCart(customerId);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
+      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems);
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, surgeContext));
     }
 
     const cartAddMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items$/);
@@ -4510,9 +4483,9 @@ const server = http.createServer(async (req, res) => {
         }
       }
       try {
-        const isSurge = await resolveActiveSurgeMode();
         const rawItems = await appRepositories.cartRepo.addItem(customerId, body, idempotencyKey);
-        return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
+        const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems);
+        return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, surgeContext));
       } catch (err) {
         if (err.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
           return sendJson(res, 409, { error: 'IDEMPOTENCY_PAYLOAD_MISMATCH', message: err.message });
@@ -4533,9 +4506,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_QUANTITY', message: 'Quantity must be an integer between 0 and 1000.' });
       }
 
-      const isSurge = await resolveActiveSurgeMode();
       const rawItems = await appRepositories.cartRepo.updateQuantity(customerId, sku, quantity);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
+      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems);
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, surgeContext));
     }
 
     if (cartUpdateMatch && method === 'DELETE') {
@@ -4544,9 +4517,9 @@ const server = http.createServer(async (req, res) => {
       const authClaims = authorizeCartAccess(req, res, customerId);
       if (!authClaims) return;
 
-      const isSurge = await resolveActiveSurgeMode();
       const rawItems = await appRepositories.cartRepo.removeItem(customerId, sku);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
+      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems);
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, surgeContext));
     }
 
     if (cartGetMatch && method === 'DELETE') {
@@ -5146,12 +5119,71 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/v1/pricing/quote' && method === 'POST') {
       const body = await parseJsonBody(req);
+      const itemsInput = Array.isArray(body.items) ? body.items : (Array.isArray(body.orderItems) ? body.orderItems : []);
+      let authoritativeSubtotal = 0;
+      const resolvedItems = [];
+
+      if (itemsInput.length > 0 && pool) {
+        const skus = itemsInput.map(i => i.sku || i.productId || i.id).filter(Boolean);
+        if (skus.length > 0) {
+          try {
+            const pRes = await pool.query(
+              `SELECT sku, id, price, discounted_price, mrp, rx_requirement, cold_chain_required 
+               FROM products 
+               WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
+              [skus]
+            );
+            const pMap = new Map();
+            for (const row of pRes.rows) {
+              pMap.set(row.sku, row);
+              pMap.set(row.id, row);
+            }
+            for (const item of itemsInput) {
+              const sku = item.sku || item.productId || item.id;
+              const product = pMap.get(sku);
+              const qty = Math.max(1, Number(item.quantity || 1));
+              const unitPrice = product ? Number(product.discounted_price || product.price || product.mrp || 15) : 15;
+              const mrp = product ? Number(product.mrp || product.price || unitPrice) : unitPrice;
+              authoritativeSubtotal += (unitPrice * qty);
+              resolvedItems.push({
+                sku,
+                quantity: qty,
+                unitPrice,
+                price: unitPrice,
+                discountedPrice: unitPrice,
+                mrp,
+                coldChain: product ? Boolean(product.cold_chain_required) : false
+              });
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (resolvedItems.length === 0) {
+        if (body.itemsSubtotal && typeof body.itemsSubtotal === 'number' && itemsInput.length === 0) {
+          authoritativeSubtotal = Math.max(0, Number(body.itemsSubtotal));
+        }
+      }
+
+      // Check customer store context for store-specific surge pricing (Finding 6)
+      const authClaims = verifyAndDecodeJwt(req);
+      const customerId = (authClaims && authClaims.sub) || body.customerId || null;
+      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, resolvedItems);
+      const surgeFee = surgeContext.isSurge ? 25.0 : 0.0;
+
       const pricing = pricingEngine.calculateCustomerOrderPricing({
-        itemsSubtotal: body.itemsSubtotal || 0,
+        itemsSubtotal: authoritativeSubtotal,
+        items: resolvedItems,
         distanceKm: body.distanceKm || 1.0,
+        surgeFee,
         isCod: true
       });
-      return sendJson(res, 200, pricing);
+
+      return sendJson(res, 200, {
+        ...pricing,
+        isProvisional: surgeContext.isProvisional,
+        isQuoteProvisional: surgeContext.isProvisional
+      });
     }
 
     const orderCustMatch = pathname.match(/^\/api\/v1\/orders\/customer(?:\/([^/]+))?$/);
@@ -7077,6 +7109,28 @@ const server = http.createServer(async (req, res) => {
               });
             }
 
+            let authoritativeOrder = null;
+            if (pool) {
+              try {
+                const ordRes = await pool.query(`SELECT * FROM orders WHERE id = $1 OR order_id = $1 LIMIT 1`, [orderId]);
+                authoritativeOrder = ordRes.rows[0];
+              } catch (_) {}
+            }
+            const isCodOrder = authoritativeOrder ? (Boolean(authoritativeOrder.is_cod) || authoritativeOrder.payment_method === 'COD') : Boolean(session.is_cod || session.isCod || session.payment_method === 'COD');
+            const authoritativeTotal = authoritativeOrder ? Number(authoritativeOrder.total_amount || 0) : Number(session.order_total || session.total_amount || 0);
+            const authoritativeCodAmount = isCodOrder ? (authoritativeOrder && authoritativeOrder.cod_amount ? Number(authoritativeOrder.cod_amount) : Math.max(authoritativeTotal, 1)) : 0;
+            const hasRealRoute = Boolean(session.distance_km && session.duration_mins);
+
+            let parsedDeliveryAddr = null;
+            try {
+              if (typeof session.delivery_address === 'string' && session.delivery_address.startsWith('{')) {
+                parsedDeliveryAddr = JSON.parse(session.delivery_address);
+              } else if (typeof session.delivery_address === 'object') {
+                parsedDeliveryAddr = session.delivery_address;
+              }
+            } catch (_) {}
+            const coarseCustomerLocality = parsedDeliveryAddr ? extractCoarseLocality('', parsedDeliveryAddr) : extractCoarseLocality(session.delivery_address || session.customer_address || '');
+
             if (fcmSenderInstance) {
               const offerPushPayload = {
                 offerId: String(activeOfferId || orderId),
@@ -7097,13 +7151,14 @@ const server = http.createServer(async (req, res) => {
                   riderId: 'broadcast',
                   storeId: String(targetStoreId || ''),
                   merchantName: String(session.store_name || session.merchant_name || 'Store Partner'),
-                  customerAddress: extractCoarseLocality(session.delivery_address || session.customer_address),
-                  isCod: String(Boolean(session.is_cod || session.isCod || session.payment_method === 'COD' || true)),
-                  codAmount: String(session.cod_amount || session.codAmount || session.order_total || session.total_amount || 0),
-                  orderTotal: String(session.order_total || session.total_amount || session.orderTotal || 0),
+                  customerAddress: coarseCustomerLocality,
+                  isCod: String(isCodOrder),
+                  codAmount: String(authoritativeCodAmount),
+                  orderTotal: String(authoritativeTotal),
                   earningsAmount: String(session.delivery_payout || 35.0),
-                  totalDistanceKm: String(session.distance_km || 2.5),
-                  estimatedDurationMins: String(session.duration_mins || 15),
+                  totalDistanceKm: hasRealRoute ? String(session.distance_km) : '',
+                  estimatedDurationMins: hasRealRoute ? String(session.duration_mins) : '',
+                  isApproximateRoute: String(!hasRealRoute),
                   offerExpiresAt: String(expAt || (Date.now() + 900000)),
                   serverTime: String(Date.now())
                 }
@@ -7306,21 +7361,13 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 409, { error: 'ALREADY_RECONCILED', message: 'COD ledger entry is already reconciled or void.' });
           }
 
-          // Lock delivery session and strictly require DELIVERED state (Finding 2)
+          // Lock delivery session and strictly require DELIVERED state (Finding 1 & 2)
           const sessionRes = await client.query(
             `SELECT state, rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) FOR UPDATE`,
             [ord.order_id]
           );
 
-          const isBatch6Harness = typeof process !== 'undefined' && Array.isArray(process.argv) && process.argv.some(a => typeof a === 'string' && a.includes('batch6'));
-          if (!isBatch6Harness) {
-            if (sessionRes.rows.length === 0) {
-              await client.query('ROLLBACK');
-              return sendJson(res, 409, {
-                error: 'ORDER_NOT_DELIVERED',
-                message: 'Cannot collect COD for order without an active delivery session in DELIVERED state.'
-              });
-            }
+          if (sessionRes.rows.length > 0) {
             if (sessionRes.rows[0].state !== 'DELIVERED') {
               await client.query('ROLLBACK');
               return sendJson(res, 409, {
@@ -7333,6 +7380,21 @@ const server = http.createServer(async (req, res) => {
               return sendJson(res, 409, {
                 error: 'ORDER_NOT_DELIVERED',
                 message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
+              });
+            }
+          } else {
+            const hasDeliveryAddress = ord.delivery_address && (
+              ord.delivery_address.latitude != null ||
+              ord.delivery_address.lat != null ||
+              ord.delivery_address.addressLine ||
+              ord.delivery_address.address_line ||
+              (typeof ord.delivery_address === 'string' && ord.delivery_address.length > 10)
+            );
+            if (hasDeliveryAddress && ord.status !== 'DELIVERED') {
+              await client.query('ROLLBACK');
+              return sendJson(res, 409, {
+                error: 'ORDER_NOT_DELIVERED',
+                message: 'Cannot collect COD for delivery order without completed delivery.'
               });
             }
           }
@@ -8884,6 +8946,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (pool && !isLocalMode) {
         try {
+          // Disassociate token from any prior customer account on shared device (Finding 3)
+          await pool.query(
+            `DELETE FROM customer_device_tokens WHERE token = $1 AND customer_id != $2`,
+            [token, authClaims.sub]
+          );
           await pool.query(
             `INSERT INTO customer_device_tokens (customer_id, token, platform, updated_at)
              VALUES ($1, $2, $3, NOW())
@@ -8899,6 +8966,40 @@ const server = http.createServer(async (req, res) => {
         }
       }
       return sendJson(res, 200, { ok: true, registered: true, platform: normalizedPlatform, customerId: authClaims.sub });
+    }
+
+    // DELETE /api/v1/customer/device-token & POST /api/v1/customer/device-token/unregister (Finding 3)
+    if ((pathname === '/api/v1/customer/device-token' && method === 'DELETE') ||
+        (pathname === '/api/v1/customer/device-token/unregister' && (method === 'POST' || method === 'DELETE'))) {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for customer token unregistration.' });
+      }
+      let token = null;
+      try {
+        const body = await parseJsonBody(req);
+        token = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
+      } catch (_) {}
+
+      if (pool && !isLocalMode) {
+        try {
+          if (token) {
+            await pool.query(
+              `DELETE FROM customer_device_tokens WHERE customer_id = $1 AND token = $2`,
+              [authClaims.sub, token]
+            );
+          } else {
+            await pool.query(
+              `DELETE FROM customer_device_tokens WHERE customer_id = $1`,
+              [authClaims.sub]
+            );
+          }
+        } catch (dbErr) {
+          console.error('[CustomerDeviceToken] Failed to unregister device token:', dbErr.message);
+          return sendJson(res, 500, { error: 'INTERNAL_SERVER_ERROR', message: 'Failed to unregister customer device token.' });
+        }
+      }
+      return sendJson(res, 200, { ok: true, unregistered: true, customerId: authClaims.sub });
     }
 
     // GET /api/v1/delivery/rider/notifications

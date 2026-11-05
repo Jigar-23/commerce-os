@@ -70,6 +70,28 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
         }
     }
 
+    public func unregisterTokenWithBackend() async {
+        let tokenToUnregister = self.deviceToken ?? UserDefaults.standard.string(forKey: "pending_apns_device_token")
+        self.deviceToken = nil
+        self.isRegisteredForRemoteNotifications = false
+        UserDefaults.standard.removeObject(forKey: "pending_apns_device_token")
+        UserDefaults.standard.removeObject(forKey: "apns_device_token_synced")
+
+        struct UnregisterPayload: Encodable {
+            let deviceToken: String?
+            let platform: String
+        }
+        let body = UnregisterPayload(deviceToken: tokenToUnregister, platform: "IOS")
+        do {
+            let _: [String: AnyCodable] = try await APIClient.shared.delete(
+                endpoint: "/api/v1/customer/device-token",
+                body: body
+            )
+        } catch {
+            // Best effort token disassociation on logout
+        }
+    }
+
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

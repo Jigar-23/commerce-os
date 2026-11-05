@@ -113,6 +113,9 @@ public final class AppContainer: ObservableObject {
     }
     
     public func logout() {
+        Task {
+            await CustomerPushNotificationManager.shared.unregisterTokenWithBackend()
+        }
         UserDefaults.standard.removeObject(forKey: "customer_id")
         UserDefaults.standard.removeObject(forKey: "customer_phone")
         UserDefaults.standard.removeObject(forKey: "auth_token")

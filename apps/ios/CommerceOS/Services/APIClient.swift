@@ -381,4 +381,15 @@ public class APIClient: ObservableObject {
     public func post<T: Decodable, B: Encodable>(endpoint: APIEndpoint, body: B) async throws -> T {
         try await post(endpoint: endpoint.path, body: body)
     }
+
+    public func delete<T: Decodable>(endpoint: String) async throws -> T {
+        try await request(endpoint: endpoint, method: "DELETE")
+    }
+
+    public func delete<T: Decodable, B: Encodable>(endpoint: String, body: B) async throws -> T {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let data = try encoder.encode(body)
+        return try await request(endpoint: endpoint, method: "DELETE", body: data)
+    }
 }

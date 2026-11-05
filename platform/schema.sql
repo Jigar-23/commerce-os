@@ -528,6 +528,7 @@ CREATE TABLE IF NOT EXISTS customer_device_tokens (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (customer_id, token)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_device_tokens_token ON customer_device_tokens (token);
 
 CREATE TABLE IF NOT EXISTS rider_telemetry (
     id BIGSERIAL PRIMARY KEY,
