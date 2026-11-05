@@ -1677,6 +1677,7 @@ class KodexAuditBatch1RegressionTest {
         com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_ambig2", listOf(savedItem))
 
         var serverHasItem = false
+        var attempts = 0
         val repo = object : FakeAppRepository() {
             override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
                 val items = if (serverHasItem) listOf(savedItem) else emptyList()
@@ -1684,7 +1685,13 @@ class KodexAuditBatch1RegressionTest {
             }
             override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
                 serverHasItem = true // Server added it before connection dropped
-                return ApiResult.Failure(AppError.Network("Connection dropped"))
+                attempts++
+                return if (attempts == 1) {
+                    ApiResult.Failure(AppError.Network("Connection dropped"))
+                } else {
+                    // Reconciled against that operation's authoritative result
+                    ApiResult.Success(CartResponse(items = listOf(savedItem)))
+                }
             }
         }
         val viewModel = CartViewModel(repo, appContext = fakeContext)

@@ -217,6 +217,56 @@ async function runIdempotencyTests() {
 
     console.log('  ✅ PASS: Prescription upload deduplicated atomically; returned same prescription ID.\n');
 
+    // -------------------------------------------------------------
+    // Test 6: Cart-Add Idempotency Key Reuse With Different Payload Rejected
+    // -------------------------------------------------------------
+    console.log('[Test 6] Idempotency Key Reuse With Different Payload Rejected');
+    const reuseKey = `idem_diff_payload_${Date.now()}`;
+    const add1 = await request('POST', `/api/v1/cart/${testCustId}/items`, {
+      sku: 'SKU_DIFF_A',
+      name: 'Item A',
+      quantity: 1
+    }, {
+      ...authHeaders,
+      'Idempotency-Key': reuseKey
+    });
+    assert.strictEqual(add1.status, 200);
+
+    const addDiff = await request('POST', `/api/v1/cart/${testCustId}/items`, {
+      sku: 'SKU_DIFF_B',
+      name: 'Item B',
+      quantity: 5
+    }, {
+      ...authHeaders,
+      'Idempotency-Key': reuseKey
+    });
+    assert.strictEqual(addDiff.status, 409, `Expected 409 Conflict when reusing key with different payload, got ${addDiff.status}`);
+    console.log('  ✅ PASS: Reusing idempotency key with different payload rejected with 409 Conflict.\n');
+
+    // -------------------------------------------------------------
+    // Test 7: Prescription Idempotency Key Reuse With Different Payload Rejected
+    // -------------------------------------------------------------
+    console.log('[Test 7] Prescription Idempotency Key Reuse With Different Payload Rejected');
+    const rxDiffKey = `idem_rx_diff_${Date.now()}`;
+    const rxOrig = await request('POST', '/api/v1/prescriptions', {
+      patientName: 'Original Patient',
+      attachments: ['data:image/jpeg;base64,orig123']
+    }, {
+      ...authHeaders,
+      'Idempotency-Key': rxDiffKey
+    });
+    assert.ok(rxOrig.status === 200 || rxOrig.status === 201);
+
+    const rxAltered = await request('POST', '/api/v1/prescriptions', {
+      patientName: 'Different Patient',
+      attachments: ['data:image/jpeg;base64,orig123']
+    }, {
+      ...authHeaders,
+      'Idempotency-Key': rxDiffKey
+    });
+    assert.strictEqual(rxAltered.status, 409, `Expected 409 Conflict when reusing rx key with different payload, got ${rxAltered.status}`);
+    console.log('  ✅ PASS: Reusing prescription idempotency key with different payload rejected with 409 Conflict.\n');
+
     console.log('================================================================');
     console.log('🎉 ALL KODEX BATCH 1 IDEMPOTENCY & DURABILITY TESTS PASSED!');
     console.log('================================================================\n');
@@ -228,7 +278,9 @@ async function runIdempotencyTests() {
   }
 }
 
-runIdempotencyTests().catch((err) => {
+runIdempotencyTests().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error('❌ TEST FAILED:', err);
   process.exit(1);
 });

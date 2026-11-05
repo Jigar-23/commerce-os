@@ -10,6 +10,7 @@ object LocalSaveForLaterStore {
     private const val PREFS_NAME = "commerce_os_save_for_later"
     private const val SECURE_KEY_PREFIX = "saved_items_sec_"
     private const val LEGACY_KEY_PREFIX = "saved_items_"
+    private const val PENDING_MOVE_KEY_PREFIX = "pending_move_key_"
     private val gson = Gson()
 
     internal var secureStoreProvider: ((Context) -> SecureCredentialStore)? = null
@@ -66,6 +67,37 @@ object LocalSaveForLaterStore {
                     false
                 }
             }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun getPendingMoveKey(context: Context, customerId: String, sku: String): String? {
+        return try {
+            val safeId = customerId.trim().ifBlank { "guest" }
+            val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+            secureStore.read(PENDING_MOVE_KEY_PREFIX + "${safeId}_$sku")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun setPendingMoveKey(context: Context, customerId: String, sku: String, key: String): Boolean {
+        return try {
+            val safeId = customerId.trim().ifBlank { "guest" }
+            val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+            secureStore.save(PENDING_MOVE_KEY_PREFIX + "${safeId}_$sku", key)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun clearPendingMoveKey(context: Context, customerId: String, sku: String): Boolean {
+        return try {
+            val safeId = customerId.trim().ifBlank { "guest" }
+            val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+            secureStore.clear(PENDING_MOVE_KEY_PREFIX + "${safeId}_$sku")
+            true
         } catch (_: Exception) {
             false
         }

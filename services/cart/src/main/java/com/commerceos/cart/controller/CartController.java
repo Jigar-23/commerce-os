@@ -27,18 +27,12 @@ public class CartController {
     private final JwtAuthValidator jwtAuthValidator;
     private final com.commerceos.cart.repository.CartIdempotencyRepository idempotencyRepository;
 
-    public CartController(
-            CartItemRepository repository,
-            CatalogServiceClient catalogClient,
-            JwtAuthValidator jwtAuthValidator) {
-        this(repository, catalogClient, jwtAuthValidator, null);
-    }
-
+    @org.springframework.beans.factory.annotation.Autowired
     public CartController(
             CartItemRepository repository,
             CatalogServiceClient catalogClient,
             JwtAuthValidator jwtAuthValidator,
-            com.commerceos.cart.repository.CartIdempotencyRepository idempotencyRepository) {
+            @org.springframework.beans.factory.annotation.Autowired(required = false) com.commerceos.cart.repository.CartIdempotencyRepository idempotencyRepository) {
         this.repository = repository;
         this.catalogClient = catalogClient;
         this.jwtAuthValidator = jwtAuthValidator;
@@ -73,6 +67,24 @@ public class CartController {
      */
     private static final java.util.Set<String> processedIdempotencyKeys = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
+    private String computePayloadHash(String sku, int quantity) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            String raw = (sku != null ? sku.trim() : "") + ":" + quantity;
+            byte[] hash = digest.digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (Exception e) {
+            return (sku != null ? sku.trim() : "") + ":" + quantity;
+        }
+    }
+
+    @org.springframework.transaction.annotation.Transactional
     @PostMapping("/{customerId}/items")
     public ResponseEntity<?> addItem(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
@@ -84,23 +96,30 @@ public class CartController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("FORBIDDEN: Cart mutation requires authenticated customer ownership.");
         }
 
-        String trimmedIdempotencyKey = (idempotencyKey != null && !idempotencyKey.isBlank()) ? idempotencyKey.trim() : null;
-        if (trimmedIdempotencyKey != null) {
-            String memoryKey = customerId + ":" + trimmedIdempotencyKey;
-            boolean alreadyProcessed = false;
-            if (idempotencyRepository != null) {
-                alreadyProcessed = idempotencyRepository.existsByCustomerIdAndIdempotencyKey(customerId, trimmedIdempotencyKey);
-            }
-            if (!alreadyProcessed) {
-                alreadyProcessed = processedIdempotencyKeys.contains(memoryKey);
-            }
-            if (alreadyProcessed) {
-                return getCart(authHeader, customerId);
-            }
-        }
-
         if (request.getSku() == null || request.getSku().isBlank()) {
             return ResponseEntity.badRequest().body("SKU_REQUIRED");
+        }
+
+        int requestedQty = Math.max(1, request.getQuantity());
+        String payloadHash = computePayloadHash(request.getSku(), requestedQty);
+        String trimmedIdempotencyKey = (idempotencyKey != null && !idempotencyKey.isBlank()) ? idempotencyKey.trim() : null;
+
+        if (trimmedIdempotencyKey != null) {
+            String memoryKey = customerId + ":" + trimmedIdempotencyKey;
+            if (idempotencyRepository != null) {
+                Optional<com.commerceos.cart.domain.CartIdempotencyEntity> existingRecord =
+                        idempotencyRepository.findByCustomerIdAndIdempotencyKey(customerId, trimmedIdempotencyKey);
+                if (existingRecord.isPresent()) {
+                    String existingHash = existingRecord.get().getRequestPayloadHash();
+                    if (existingHash != null && !existingHash.equals(payloadHash)) {
+                        return ResponseEntity.status(HttpStatus.CONFLICT)
+                                .body("IDEMPOTENCY_PAYLOAD_MISMATCH: Idempotency key reused with different payload");
+                    }
+                    return getCart(authHeader, customerId);
+                }
+            } else if (processedIdempotencyKeys.contains(memoryKey)) {
+                return getCart(authHeader, customerId);
+            }
         }
 
         // Authoritative Catalog Resolution
@@ -110,12 +129,31 @@ public class CartController {
         }
 
         CatalogServiceClient.ProductMetadata product = productOpt.get();
-        int requestedQty = Math.max(1, request.getQuantity());
+
+        // Atomically reserve idempotency key in database with unique constraint
+        if (trimmedIdempotencyKey != null && idempotencyRepository != null) {
+            try {
+                idempotencyRepository.saveAndFlush(com.commerceos.cart.domain.CartIdempotencyEntity.builder()
+                        .customerId(customerId)
+                        .idempotencyKey(trimmedIdempotencyKey)
+                        .requestPayloadHash(payloadHash)
+                        .createdAt(java.time.Instant.now())
+                        .build());
+            } catch (org.springframework.dao.DataIntegrityViolationException dive) {
+                Optional<com.commerceos.cart.domain.CartIdempotencyEntity> existing =
+                        idempotencyRepository.findByCustomerIdAndIdempotencyKey(customerId, trimmedIdempotencyKey);
+                if (existing.isPresent() && existing.get().getRequestPayloadHash() != null &&
+                        !existing.get().getRequestPayloadHash().equals(payloadHash)) {
+                    return ResponseEntity.status(HttpStatus.CONFLICT)
+                            .body("IDEMPOTENCY_PAYLOAD_MISMATCH: Idempotency key reused with different payload");
+                }
+                return getCart(authHeader, customerId);
+            }
+        }
 
         CartItemEntity existing = repository.findByCustomerIdAndSku(customerId, product.getSku()).orElse(null);
         if (existing != null) {
             existing.setQuantity(existing.getQuantity() + requestedQty);
-            // Refresh canonical price & metadata from catalog
             existing.setUnitPrice(product.getUnitPrice());
             existing.setMrp(product.getMrp());
             repository.save(existing);
@@ -136,21 +174,8 @@ public class CartController {
                     .build());
         }
 
-        // Atomically record idempotency key ONLY upon successful mutation commit
         if (trimmedIdempotencyKey != null) {
-            String memoryKey = customerId + ":" + trimmedIdempotencyKey;
-            processedIdempotencyKeys.add(memoryKey);
-            if (idempotencyRepository != null) {
-                try {
-                    idempotencyRepository.save(com.commerceos.cart.domain.CartIdempotencyEntity.builder()
-                            .customerId(customerId)
-                            .idempotencyKey(trimmedIdempotencyKey)
-                            .createdAt(java.time.Instant.now())
-                            .build());
-                } catch (Exception e) {
-                    // Unique constraint on retry is safe and acceptable
-                }
-            }
+            processedIdempotencyKeys.add(customerId + ":" + trimmedIdempotencyKey);
         }
 
         return getCart(authHeader, customerId);

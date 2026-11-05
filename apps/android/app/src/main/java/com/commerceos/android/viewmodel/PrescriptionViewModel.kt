@@ -200,11 +200,10 @@ class PrescriptionViewModel(
             errorMessage = null
             try {
                 val lightweightAttachments = encodeAttachments(attachments)
-                val stableIdempotencyKey = activeLogicalUploadKey ?: computeUploadIdempotencyKey(
+                val stableIdempotencyKey = computeUploadIdempotencyKey(
                     safeCustomerId,
                     patientName,
-                    lightweightAttachments,
-                    java.util.UUID.randomUUID().toString()
+                    lightweightAttachments
                 ).also { activeLogicalUploadKey = it }
                 when (val result = repository.uploadPrescription(
                     UploadPrescriptionRequest(
@@ -265,12 +264,9 @@ class PrescriptionViewModel(
     private fun computeUploadIdempotencyKey(
         customerId: String,
         patientName: String,
-        attachments: List<String>,
-        logicalSessionId: String
+        attachments: List<String>
     ): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
-        digest.update(logicalSessionId.toByteArray(Charsets.UTF_8))
-        digest.update(0.toByte())
         digest.update(customerId.trim().toByteArray(Charsets.UTF_8))
         digest.update(0.toByte())
         digest.update(patientName.trim().toByteArray(Charsets.UTF_8))
@@ -279,6 +275,7 @@ class PrescriptionViewModel(
             val attBytes = attachment.toByteArray(Charsets.UTF_8)
             val attDigest = java.security.MessageDigest.getInstance("SHA-256").digest(attBytes)
             digest.update(attDigest)
+            digest.update(0.toByte())
         }
         val finalDigest = digest.digest()
         return "rx_idemp_" + finalDigest.joinToString("") { "%02x".format(it.toInt() and 0xff) }.take(32)

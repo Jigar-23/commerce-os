@@ -22,6 +22,9 @@ public class CartIdempotencyEntity {
     @Column(nullable = false, length = 128)
     private String idempotencyKey;
 
+    @Column(name = "request_payload_hash", length = 64)
+    private String requestPayloadHash;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 }

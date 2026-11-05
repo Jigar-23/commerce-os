@@ -261,6 +261,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
     note TEXT,
     idempotency_key VARCHAR(128),
+    request_payload_hash VARCHAR(64),
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'APPROVED', 'REJECTED'
     pharmacist_id VARCHAR(64),
     license_no VARCHAR(100),

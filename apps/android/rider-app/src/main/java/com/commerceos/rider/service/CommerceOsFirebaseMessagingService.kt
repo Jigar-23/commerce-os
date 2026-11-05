@@ -18,26 +18,33 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM Token received: $token")
+        Log.d(TAG, "New FCM Token received [redacted]")
         val sessionMgr = RiderSessionManager.getInstance(applicationContext)
         sessionMgr.saveFcmToken(token)
 
-        if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline()) {
+        val assignedStoreId = sessionMgr.getStoreId().trim()
+        if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline() && assignedStoreId.isNotBlank()) {
+            val storeTopic = "riders_store_$assignedStoreId"
             try {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic(storeTopic)
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
-                            Log.d(TAG, "Subscribed to topic riders_broadcast on token refresh")
+                            Log.d(TAG, "Subscribed to store topic $storeTopic on token refresh")
                         }
                     }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to subscribe to riders_broadcast on token refresh: ${e.message}")
+                Log.w(TAG, "Failed to subscribe to $storeTopic on token refresh: ${e.message}")
             }
-        } else {
+        } else if (assignedStoreId.isNotBlank()) {
             try {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStoreId")
             } catch (_: Exception) {}
         }
+
+        // Strictly purge fleet-wide broadcast subscription
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+        } catch (_: Exception) {}
 
         val baseUrl = sessionMgr.getBaseUrl()
         val authToken = sessionMgr.getAuthToken()
@@ -125,7 +132,16 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
             targetRiderId.equals("pool", ignoreCase = true) ||
             targetRiderId.isBlank()
 
-        if (!isBroadcastOffer && authenticatedRiderId != null && !targetRiderId.equals(authenticatedRiderId, ignoreCase = true)) {
+        val offerStoreId = (data["storeId"] ?: data["store_id"] ?: "").trim()
+        val riderStoreId = sessionMgr.getStoreId().trim()
+
+        if (isBroadcastOffer) {
+            // Strictly require non-blank matching storeId for broadcast offers
+            if (offerStoreId.isBlank() || riderStoreId.isBlank() || !offerStoreId.equals(riderStoreId, ignoreCase = true)) {
+                Log.w(TAG, "DROPPED_FCM_OFFER: Store mismatch or unassigned rider. Offer store: '$offerStoreId', Rider store: '$riderStoreId'")
+                return
+            }
+        } else if (authenticatedRiderId != null && !targetRiderId.equals(authenticatedRiderId, ignoreCase = true)) {
             Log.w(TAG, "DROPPED_FCM_OFFER: Target rider $targetRiderId does not match current rider $authenticatedRiderId.")
             return
         }

@@ -785,6 +785,7 @@ class TransactionalPrescriptionRepository {
       if (rx.idempotencyKey) {
         await client.query(`
           ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);
           CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency
             ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
         `).catch(() => {});
@@ -793,14 +794,20 @@ class TransactionalPrescriptionRepository {
           [rx.customerId, rx.idempotencyKey]
         );
         if (existing.rows.length > 0) {
-          return existing.rows[0];
+          const row = existing.rows[0];
+          if (row.request_payload_hash && rx.requestPayloadHash && row.request_payload_hash !== rx.requestPayloadHash) {
+            const err = new Error('IDEMPOTENCY_PAYLOAD_MISMATCH: Prescription idempotency key reused with different payload');
+            err.code = 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+            throw err;
+          }
+          return row;
         }
       }
       const res = await client.query(
         `INSERT INTO prescriptions (
           id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no,
-          attachments, note, status, pharmacist_id, license_no, rejection_reason, idempotency_key, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+          attachments, note, status, pharmacist_id, license_no, rejection_reason, idempotency_key, request_payload_hash, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
         ON CONFLICT (customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
         RETURNING *`,
         [
@@ -817,7 +824,8 @@ class TransactionalPrescriptionRepository {
           rx.pharmacistId || null,
           rx.licenseNo || null,
           rx.rejectionReason || null,
-          rx.idempotencyKey || null
+          rx.idempotencyKey || null,
+          rx.requestPayloadHash || null
         ]
       );
       if (res.rows.length > 0) return res.rows[0];
@@ -826,7 +834,15 @@ class TransactionalPrescriptionRepository {
           `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
           [rx.customerId, rx.idempotencyKey]
         );
-        if (raceExisting.rows.length > 0) return raceExisting.rows[0];
+        if (raceExisting.rows.length > 0) {
+          const row = raceExisting.rows[0];
+          if (row.request_payload_hash && rx.requestPayloadHash && row.request_payload_hash !== rx.requestPayloadHash) {
+            const err = new Error('IDEMPOTENCY_PAYLOAD_MISMATCH: Prescription idempotency key reused with different payload');
+            err.code = 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+            throw err;
+          }
+          return row;
+        }
       }
       return null;
     } finally {
@@ -900,7 +916,14 @@ class LocalDevelopmentPrescriptionRepository {
       const existing = this.db.prescriptions.find(
         (p) => p.customerId === rx.customerId && (p.idempotencyKey === rx.idempotencyKey || (p.note && p.note.includes(`[idemp:${rx.idempotencyKey}]`)))
       );
-      if (existing) return existing;
+      if (existing) {
+        if (existing.requestPayloadHash && rx.requestPayloadHash && existing.requestPayloadHash !== rx.requestPayloadHash) {
+          const err = new Error('IDEMPOTENCY_PAYLOAD_MISMATCH: Prescription idempotency key reused with different payload');
+          err.code = 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+          throw err;
+        }
+        return existing;
+      }
     }
     this.db.prescriptions.unshift(rx);
     this.saveDb();
@@ -4436,7 +4459,7 @@ class TransactionalOrderRepository {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
         }
-        if (storeId && order.store_id && order.store_id !== storeId) {
+        if (storeId && (!order.store_id || order.store_id !== storeId)) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' };
         }
@@ -4513,7 +4536,7 @@ class TransactionalOrderRepository {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
         }
-        if (storeId && order.store_id && order.store_id !== storeId) {
+        if (storeId && (!order.store_id || order.store_id !== storeId)) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' };
         }
@@ -4581,7 +4604,7 @@ class TransactionalOrderRepository {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
         }
-        if (storeId && order.store_id && order.store_id !== storeId) {
+        if (storeId && (!order.store_id || order.store_id !== storeId)) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 403, error: 'FORBIDDEN' };
         }
@@ -4632,7 +4655,7 @@ class TransactionalOrderRepository {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 404, error: 'ORDER_NOT_FOUND' };
         }
-        if (storeId && order.store_id && order.store_id !== storeId) {
+        if (storeId && (!order.store_id || order.store_id !== storeId)) {
           await client.query('ROLLBACK');
           return { ok: false, httpStatus: 403, error: 'FORBIDDEN' };
         }
@@ -5807,6 +5830,7 @@ class TransactionalNotificationRepository {
       deliveryId: record.deliveryId,
       orderId: record.orderId,
       offerId: record.offerId,
+      storeId: record.storeId || (record.metadata && (record.metadata.storeId || record.metadata.store_id)) || (record.actionPayload && (record.actionPayload.storeId || record.actionPayload.store_id)) || null,
       actionUrl: record.actionUrl,
       actionPayload: record.actionPayload,
       severity: record.severity,
@@ -6483,23 +6507,33 @@ class TransactionalCartRepository {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cart:' + customerId]);
       const cleanKey = idempotencyKey ? String(idempotencyKey).trim() : null;
+      const payloadFingerprint = item ? crypto.createHash('sha256').update(JSON.stringify({ sku: item.sku, quantity: Number(item.quantity) || 1 })).digest('hex') : null;
       if (cleanKey) {
         await client.query(`
           CREATE TABLE IF NOT EXISTS cart_idempotency_keys (
             customer_id VARCHAR(64) NOT NULL,
             idempotency_key VARCHAR(128) NOT NULL,
+            request_payload_hash VARCHAR(64),
             response_items JSONB,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (customer_id, idempotency_key)
           )
         `);
+        await client.query(`ALTER TABLE cart_idempotency_keys ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);`).catch(() => {});
         const idempCheck = await client.query(
-          `SELECT response_items FROM cart_idempotency_keys WHERE customer_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+          `SELECT request_payload_hash, response_items FROM cart_idempotency_keys WHERE customer_id = $1 AND idempotency_key = $2 FOR UPDATE`,
           [customerId, cleanKey]
         );
         if (idempCheck.rows.length > 0) {
+          const row = idempCheck.rows[0];
+          if (row.request_payload_hash && row.request_payload_hash !== payloadFingerprint) {
+            await client.query('ROLLBACK');
+            const mismatchErr = new Error('IDEMPOTENCY_PAYLOAD_MISMATCH: Idempotency key reused with different payload');
+            mismatchErr.code = 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+            throw mismatchErr;
+          }
           await client.query('COMMIT');
-          const raw = idempCheck.rows[0].response_items;
+          const raw = row.response_items;
           return typeof raw === 'string' ? JSON.parse(raw) : (raw || []);
         }
       }
@@ -6589,10 +6623,10 @@ class TransactionalCartRepository {
       // Record key durably and atomically ONLY upon successful mutation commit
       if (cleanKey) {
         await client.query(
-          `INSERT INTO cart_idempotency_keys (customer_id, idempotency_key, response_items, created_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (customer_id, idempotency_key) DO UPDATE SET response_items = EXCLUDED.response_items`,
-          [customerId, cleanKey, JSON.stringify(items)]
+          `INSERT INTO cart_idempotency_keys (customer_id, idempotency_key, request_payload_hash, response_items, created_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (customer_id, idempotency_key) DO UPDATE SET response_items = EXCLUDED.response_items, request_payload_hash = EXCLUDED.request_payload_hash`,
+          [customerId, cleanKey, payloadFingerprint, JSON.stringify(items)]
         );
       }
       await client.query('COMMIT');
@@ -6667,8 +6701,15 @@ class LocalDevelopmentCartRepository {
 
     const cleanKey = idempotencyKey ? String(idempotencyKey).trim() : null;
     const compoundKey = cleanKey ? `${customerId}:${cleanKey}` : null;
+    const payloadFingerprint = item ? crypto.createHash('sha256').update(JSON.stringify({ sku: item.sku, quantity: Number(item.quantity) || 1 })).digest('hex') : null;
 
     if (compoundKey && this.db.cartIdempotency[compoundKey]) {
+      const entry = this.db.cartIdempotency[compoundKey];
+      if (entry.payloadFingerprint && entry.payloadFingerprint !== payloadFingerprint) {
+        const mismatchErr = new Error('IDEMPOTENCY_PAYLOAD_MISMATCH: Idempotency key reused with different payload');
+        mismatchErr.code = 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+        throw mismatchErr;
+      }
       return this.db.carts[customerId] || [];
     }
 
@@ -6687,6 +6728,7 @@ class LocalDevelopmentCartRepository {
 
     if (compoundKey) {
       this.db.cartIdempotency[compoundKey] = {
+        payloadFingerprint,
         committedAt: Date.now()
       };
     }
@@ -6919,7 +6961,7 @@ class TransactionalPaymentRepository {
       const order = ordRes.rows[0];
 
       // Multi-tenant isolation: fail closed if seller does not own order's store
-      if (authorizedStoreId && order.store_id !== authorizedStoreId) {
+      if (authorizedStoreId && (!order.store_id || order.store_id !== authorizedStoreId)) {
         await client.query('ROLLBACK');
         const storeMismatchErr = new Error('CROSS_STORE_REFUND_FORBIDDEN');
         storeMismatchErr.statusCode = 403;
@@ -7061,7 +7103,7 @@ class LocalDevelopmentPaymentRepository {
       throw err;
     }
     const orderStore = order.store_id || order.storeId;
-    if (authorizedStoreId && orderStore !== authorizedStoreId) {
+    if (authorizedStoreId && (!orderStore || orderStore !== authorizedStoreId)) {
       const err = new Error('CROSS_STORE_REFUND_FORBIDDEN');
       err.statusCode = 403;
       err.message = 'Sellers can only initiate refunds for orders belonging to their authorized store.';
@@ -7135,6 +7177,12 @@ class ProductionNotificationService {
       throw new Error(`TARGET_RIDER_ID_REQUIRED: Missing recipient for offer ${offerId}.`);
     }
 
+    const offerStoreId = offer.storeId || offer.store_id || (offer.store && offer.store.id);
+    const isBroadcast = (riderId === 'broadcast' || riderId === 'ALL' || riderId === 'pool' || !riderId);
+    if (isBroadcast && !offerStoreId) {
+      throw new Error(`OFFER_STORE_ID_REQUIRED: Authoritative storeId is required to dispatch broadcast offer ${offerId}.`);
+    }
+
     const earnings = Math.floor(offer.earningsAmount || offer.earnings_amount || 40);
     const totalDist = offer.totalDistanceKm || offer.total_distance_km || 1.5;
     const duration = offer.estimatedDurationMins || offer.estimated_duration_mins || 10;
@@ -7142,15 +7190,34 @@ class ProductionNotificationService {
     const cAddr = offer.customerAddress || offer.customer_address || '';
     const conciseDrop = cAddr ? (cAddr.split(',')[0] || cAddr).trim() : 'Drop address unavailable';
 
-    // Redact full customer street address for broadcast offers
+    // Whitelist sanitized offer payload for broadcast notifications - strict zero PII exposure
     const sanitizedBroadcastOffer = {
-      ...offer,
+      id: String(offer.offerId || offer.offer_id || offer.id),
+      offerId: String(offer.offerId || offer.offer_id || offer.id),
+      orderId: String(offer.orderId || offer.order_id || ''),
+      deliveryId: String(offer.deliveryId || offer.delivery_id || ''),
+      storeId: String(offerStoreId || ''),
+      store_id: String(offerStoreId || ''),
+      merchantName: mName,
+      merchantAddress: offer.merchantAddress || offer.merchant_address || '',
       dropAddress: conciseDrop,
       customerAddress: conciseDrop,
+      customerLocality: conciseDrop,
       deliveryAddress: typeof offer.deliveryAddress === 'object' && offer.deliveryAddress ? {
         locality: offer.deliveryAddress.locality || conciseDrop,
         city: offer.deliveryAddress.city || 'Local Area'
-      } : conciseDrop
+      } : conciseDrop,
+      totalDistanceKm: totalDist,
+      total_distance_km: totalDist,
+      estimatedDurationMins: duration,
+      estimated_duration_mins: duration,
+      earningsAmount: earnings,
+      earnings_amount: earnings,
+      payout: earnings,
+      currency: offer.currency || 'INR',
+      status: offer.status || 'OFFERED',
+      expiresAt: Number(offer.offerExpiresAt || offer.offer_expires_at || offer.expiresAt || offer.expires_at || (Date.now() + 900000)),
+      offerExpiresAt: Number(offer.offerExpiresAt || offer.offer_expires_at || offer.expiresAt || offer.expires_at || (Date.now() + 900000))
     };
 
     const notifId = offer.notificationId || offer.notification_id || ('notif_' + crypto.randomUUID());
@@ -7165,10 +7232,17 @@ class ProductionNotificationService {
       orderId: offer.orderId || offer.order_id,
       deliveryId: offer.deliveryId || offer.delivery_id,
       offerId: offer.offerId || offer.offer_id,
+      storeId: offerStoreId || null,
       title: `🚨 NEW DELIVERY · ₹${earnings}`,
       body: `${totalDist} km (~${duration} min) • Pickup: ${mName} • Drop: ${conciseDrop}`,
       actionUrl: `commerceos://rider/offer/${offer.offerId || offer.offer_id}`,
       actionPayload: sanitizedBroadcastOffer,
+      metadata: {
+        storeId: offerStoreId || null,
+        orderId: offer.orderId || offer.order_id,
+        deliveryId: offer.deliveryId || offer.delivery_id,
+        offerId: offer.offerId || offer.offer_id
+      },
       createdAt: new Date().toISOString(),
       expiresAt: Number(offer.offerExpiresAt || offer.offer_expires_at),
       readAt: null,
@@ -7178,23 +7252,14 @@ class ProductionNotificationService {
 
     if (this.notificationRepo) {
       await this.notificationRepo.createNotification(notifRecord);
-      if (riderId !== 'rdr_9817916180') {
-        await this.notificationRepo.createNotification({
-          ...notifRecord,
-          id: 'notif_jigar_' + (offer.offerId || offer.offer_id),
-          notificationId: 'notif_jigar_' + (offer.offerId || offer.offer_id),
-          riderId: 'rdr_9817916180'
-        }).catch(() => {});
-      }
     }
 
     let sseOk = false;
     if (this.sseBroadcaster) {
-      const targetChannels = [
-        riderId,
-        `rider_${riderId}`
-      ];
-      const offerStoreId = offer.storeId || offer.store_id;
+      const targetChannels = [];
+      if (!isBroadcast) {
+        targetChannels.push(riderId, `rider_${riderId}`);
+      }
       if (offerStoreId) {
         targetChannels.push(`store_riders_${offerStoreId}`);
         targetChannels.push(`riders_store_${offerStoreId}`);
@@ -7238,6 +7303,7 @@ class ProductionNotificationService {
         offerId: String(offer.offerId || offer.offer_id || ''),
         orderId: String(offer.orderId || offer.order_id || ''),
         deliveryId: String(offer.deliveryId || offer.delivery_id || ''),
+        storeId: String(offerStoreId || ''),
         riderId: String(riderId || 'broadcast'),
         title: notifRecord.title,
         body: notifRecord.body,
@@ -7245,15 +7311,14 @@ class ProductionNotificationService {
           offerId: String(offer.offerId || offer.offer_id || ''),
           orderId: String(offer.orderId || offer.order_id || ''),
           deliveryId: String(offer.deliveryId || offer.delivery_id || ''),
+          storeId: String(offerStoreId || ''),
           riderId: String(riderId || 'broadcast'),
           earningsAmount: String(earnings),
           totalDistanceKm: String(totalDist),
           estimatedDurationMins: String(duration),
           offerExpiresAt: String(offer.offerExpiresAt || offer.offer_expires_at || (Date.now() + 900000)),
           merchantName: mName,
-          customerAddress: (riderId === 'broadcast' || riderId === 'ALL' || !deviceToken)
-            ? (cAddr.split(',').slice(-2).join(', ').trim() || 'Customer Area')
-            : cAddr,
+          customerAddress: conciseDrop,
           merchantAddress: offer.merchantAddress || offer.merchant_address || '',
           serverTime: String(Date.now())
         }
@@ -7265,11 +7330,12 @@ class ProductionNotificationService {
         } else if (typeof this.fcmSender === 'function') {
           fcmOk = await this.fcmSender(riderId, notifRecord.title, notifRecord.body, fcmPayload.data, deviceToken);
         }
-      } else if (riderId === 'broadcast' || riderId === 'ALL' || riderId === 'pool' || !riderId) {
+      } else if (isBroadcast && offerStoreId) {
+        const storeTopic = `riders_store_${offerStoreId}`;
         if (typeof this.fcmSender.sendPushToTopic === 'function') {
-          fcmOk = await this.fcmSender.sendPushToTopic('riders_broadcast', fcmPayload);
+          fcmOk = await this.fcmSender.sendPushToTopic(storeTopic, fcmPayload);
         } else if (typeof this.fcmSender.sendPushNotification === 'function') {
-          fcmOk = await this.fcmSender.sendPushNotification('/topics/riders_broadcast', fcmPayload);
+          fcmOk = await this.fcmSender.sendPushNotification(`/topics/${storeTopic}`, fcmPayload);
         }
       }
     }

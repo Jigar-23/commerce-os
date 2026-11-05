@@ -166,7 +166,7 @@ class MainActivity : ComponentActivity() {
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful && task.result != null) {
                         val token = task.result
-                        android.util.Log.d("MainActivity", "FCM Token retrieved on launch: $token")
+                        android.util.Log.d("MainActivity", "FCM Token retrieved on launch [redacted]")
                         sessionMgr.saveFcmToken(token)
 
                         val baseUrl = sessionMgr.getBaseUrl()

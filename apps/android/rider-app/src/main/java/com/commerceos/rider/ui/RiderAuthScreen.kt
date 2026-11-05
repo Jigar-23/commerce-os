@@ -330,6 +330,9 @@ fun RiderAuthScreen(
                                     res.onSuccess { (token, profile) ->
                                         sessionManager.saveAuthToken(token)
                                         sessionManager.saveRiderId(profile.riderId)
+                                        if (!profile.storeId.isNullOrBlank()) {
+                                            sessionManager.saveStoreId(profile.storeId)
+                                        }
                                         onLoginSuccess(profile)
                                     }.onFailure { err ->
                                         errorMessage = err.message ?: "Verification failed. Please check the OTP sent to your phone."

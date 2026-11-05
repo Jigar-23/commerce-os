@@ -491,7 +491,6 @@ class CheckoutViewModel(
         super.onCleared()
         mutationGate?.unlockMutations()
     }
-    }
 
     fun reset() {
         mutationGate?.unlockMutations()

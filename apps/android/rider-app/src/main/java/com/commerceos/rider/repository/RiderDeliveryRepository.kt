@@ -181,6 +181,8 @@ class RiderDeliveryRepository(
                 ?: riderObj?.optString("vehicle_number")?.takeIf { it.isNotBlank() }
                 ?: fallbackVehicle.ifBlank { "Electric Scooter" }
             val rating = if (riderObj != null && riderObj.has("rating") && !riderObj.isNull("rating")) riderObj.getDouble("rating") else 4.9
+            val storeId = riderObj?.optString("storeId")?.takeIf { it.isNotBlank() }
+                ?: riderObj?.optString("store_id")?.takeIf { it.isNotBlank() }
             val profile = RiderProfile(
                 riderId = riderId,
                 name = riderName,
@@ -190,7 +192,8 @@ class RiderDeliveryRepository(
                 completedToday = riderObj?.optInt("completedToday", 0) ?: 0,
                 earningsTodayFormatted = riderObj?.optString("earningsTodayFormatted", "₹0") ?: "₹0",
                 shiftStatus = riderObj?.optString("shiftStatus", "ONLINE_AVAILABLE") ?: "ONLINE_AVAILABLE",
-                assignedHub = riderObj?.optString("assignedHub", "Rewari Central Hub") ?: "Rewari Central Hub"
+                assignedHub = riderObj?.optString("assignedHub", "Rewari Central Hub") ?: "Rewari Central Hub",
+                storeId = storeId
             )
             Pair(token, profile)
         } catch (_: Exception) {
@@ -255,6 +258,8 @@ class RiderDeliveryRepository(
                 val earningsTodayFormatted = json.optString("earningsTodayFormatted", json.optString("earnings_today", "₹0"))
                 val shiftStatus = json.optString("shiftStatus", json.optString("status", "ONLINE_AVAILABLE"))
                 val assignedHub = json.optString("assignedHub", json.optString("assigned_hub", "Central Hub - Koramangala"))
+                val storeId = json.optString("storeId").takeIf { it.isNotBlank() }
+                    ?: json.optString("store_id").takeIf { it.isNotBlank() }
                 val profile = RiderProfile(
                     riderId = riderId,
                     name = name,
@@ -264,7 +269,8 @@ class RiderDeliveryRepository(
                     completedToday = completedToday,
                     earningsTodayFormatted = if (earningsTodayFormatted.startsWith("₹")) earningsTodayFormatted else "₹$earningsTodayFormatted",
                     shiftStatus = shiftStatus,
-                    assignedHub = assignedHub
+                    assignedHub = assignedHub,
+                    storeId = storeId
                 )
                 return@withContext Result.success(profile)
             }

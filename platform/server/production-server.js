@@ -1386,6 +1386,45 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required to issue an SSE ticket.' });
       }
+
+      const role = String(authClaims.role || '').toUpperCase();
+      const roles = Array.isArray(authClaims.roles) ? authClaims.roles.map(r => String(r).toUpperCase()) : [];
+      const isSeller = role === 'ROLE_SELLER' || role === 'SELLER' || roles.includes('ROLE_SELLER') || roles.includes('SELLER');
+      const isRider = role === 'ROLE_RIDER' || role === 'RIDER' || roles.includes('ROLE_RIDER') || roles.includes('RIDER');
+
+      if (isSeller) {
+        if (pool && !isLocalMode) {
+          const sRes = await pool.query(
+            `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR user_id = $1) LIMIT 1`,
+            [authClaims.sub]
+          );
+          if (sRes.rows.length === 0 || sRes.rows[0].status !== 'ACTIVE') {
+            return sendJson(res, 403, { error: 'SELLER_DEACTIVATED', message: 'Seller account is inactive or revoked.' });
+          }
+          if (!sRes.rows[0].store_id) {
+            return sendJson(res, 403, { error: 'NO_ASSIGNED_STORE', message: 'Seller is not assigned to any active store.' });
+          }
+          authClaims.storeId = sRes.rows[0].store_id;
+        } else {
+          const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+          if (!authorizedStoreId) {
+            return sendJson(res, 403, { error: 'NO_ASSIGNED_STORE', message: 'Seller is not assigned to any active store.' });
+          }
+          authClaims.storeId = authorizedStoreId;
+        }
+      } else if (isRider) {
+        if (pool && !isLocalMode) {
+          const rRes = await pool.query(
+            `SELECT id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+            [authClaims.sub]
+          );
+          if (rRes.rows.length === 0 || rRes.rows[0].status !== 'ACTIVE') {
+            return sendJson(res, 403, { error: 'RIDER_DEACTIVATED', message: 'Rider account is inactive or revoked.' });
+          }
+          authClaims.storeId = rRes.rows[0].store_id;
+        }
+      }
+
       const ticket = getOrCreateSseTicket(authClaims);
       return sendJson(res, 200, {
         success: true,
@@ -1502,10 +1541,31 @@ const server = http.createServer(async (req, res) => {
           const rCheck = await pool.query('SELECT id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1)', [authClaims.sub]);
           if (rCheck.rows.length === 0 || rCheck.rows[0].status !== 'ACTIVE') {
             if (expiryTimer) clearTimeout(expiryTimer);
-            try { res.end(); } catch (_) {}
+            try {
+              res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'RIDER_DEACTIVATED', message: 'Rider account is inactive or revoked.' })}\n\n`);
+              res.end();
+            } catch (_) {}
             return;
           }
           riderStoreId = rCheck.rows[0].store_id;
+
+          const riderRecheckTimer = setInterval(async () => {
+            try {
+              const currentRCheck = await pool.query(
+                `SELECT id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+                [authClaims.sub]
+              );
+              if (currentRCheck.rows.length === 0 || currentRCheck.rows[0].status !== 'ACTIVE' || currentRCheck.rows[0].store_id !== riderStoreId) {
+                clearInterval(riderRecheckTimer);
+                try {
+                  res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'ACCESS_REVOKED', message: 'Rider access revoked or store changed.' })}\n\n`);
+                  res.end();
+                } catch (_) {}
+              }
+            } catch (_) {}
+          }, 10000);
+          res.on('close', () => clearInterval(riderRecheckTimer));
+          res.on('finish', () => clearInterval(riderRecheckTimer));
         }
         sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res, lastEventId);
         if (riderStoreId) {
@@ -1513,9 +1573,60 @@ const server = http.createServer(async (req, res) => {
           sseBroadcasterInstance.subscribe(`riders_store_${riderStoreId}`, res, lastEventId);
         }
       } else if (isSellerCaller) {
-        if (authClaims.storeId) {
-          sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res, lastEventId);
-          sseBroadcasterInstance.subscribe(`store_${authClaims.storeId}`, res, lastEventId);
+        let sellerStoreId = null;
+        if (pool && !isLocalMode) {
+          const sCheck = await pool.query(
+            `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR user_id = $1) LIMIT 1`,
+            [authClaims.sub]
+          );
+          if (sCheck.rows.length === 0 || sCheck.rows[0].status !== 'ACTIVE') {
+            if (expiryTimer) clearTimeout(expiryTimer);
+            try {
+              res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'SELLER_DEACTIVATED', message: 'Seller account is inactive or revoked.' })}\n\n`);
+              res.end();
+            } catch (_) {}
+            return;
+          }
+          if (!sCheck.rows[0].store_id) {
+            if (expiryTimer) clearTimeout(expiryTimer);
+            try {
+              res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'NO_ASSIGNED_STORE', message: 'Seller is not assigned to any active store.' })}\n\n`);
+              res.end();
+            } catch (_) {}
+            return;
+          }
+          sellerStoreId = sCheck.rows[0].store_id;
+
+          const sellerRecheckTimer = setInterval(async () => {
+            try {
+              const currentCheck = await pool.query(
+                `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR user_id = $1) LIMIT 1`,
+                [authClaims.sub]
+              );
+              if (currentCheck.rows.length === 0 || currentCheck.rows[0].status !== 'ACTIVE' || currentCheck.rows[0].store_id !== sellerStoreId) {
+                clearInterval(sellerRecheckTimer);
+                try {
+                  res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'ACCESS_REVOKED', message: 'Seller access revoked or store changed.' })}\n\n`);
+                  res.end();
+                } catch (_) {}
+              }
+            } catch (_) {}
+          }, 10000);
+          res.on('close', () => clearInterval(sellerRecheckTimer));
+          res.on('finish', () => clearInterval(sellerRecheckTimer));
+        } else {
+          sellerStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+          if (!sellerStoreId) {
+            if (expiryTimer) clearTimeout(expiryTimer);
+            try { res.end(); } catch (_) {}
+            return;
+          }
+        }
+
+        if (sellerStoreId) {
+          sseBroadcasterInstance.subscribe(`seller_${sellerStoreId}`, res, lastEventId);
+          sseBroadcasterInstance.subscribe(`store_${sellerStoreId}`, res, lastEventId);
+          sseBroadcasterInstance.subscribe(`seller_store_${sellerStoreId}`, res, lastEventId);
         }
       } else {
         sseBroadcasterInstance.subscribe(`customer_${authClaims.sub}`, res, lastEventId);
@@ -3763,9 +3874,26 @@ const server = http.createServer(async (req, res) => {
       const customerId = authClaims.sub;
       const body = await parseJsonBody(req);
       const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
+      const patientName = (body.patientName || body.patient_name || '').trim();
+      const attachments = Array.isArray(body.attachments) ? body.attachments : (body.attachmentUrl ? [body.attachmentUrl] : []);
+
+      if (!patientName) {
+        return sendJson(res, 400, { error: 'MISSING_PATIENT_NAME', message: 'Patient name is strictly required.' });
+      }
+      if (attachments.length === 0) {
+        return sendJson(res, 400, { error: 'MISSING_ATTACHMENTS', message: 'At least one prescription attachment is required.' });
+      }
+
+      const payloadFingerprint = idempotencyKey ? crypto.createHash('sha256').update(JSON.stringify({
+        customerId,
+        patientName,
+        attachments: attachments.map(a => typeof a === 'string' ? a.trim() : a)
+      })).digest('hex') : null;
+
       if (idempotencyKey && pool) {
         await pool.query(`
           ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);
           CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency
             ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
         `).catch(() => {});
@@ -3775,6 +3903,12 @@ const server = http.createServer(async (req, res) => {
         );
         if (existingRxRes.rows.length > 0) {
           const row = existingRxRes.rows[0];
+          if (row.request_payload_hash && payloadFingerprint && row.request_payload_hash !== payloadFingerprint) {
+            return sendJson(res, 409, {
+              error: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              message: 'Prescription idempotency key reused with different payload'
+            });
+          }
           return sendJson(res, 200, {
             id: row.id,
             customerId: row.customer_id,
@@ -3784,15 +3918,6 @@ const server = http.createServer(async (req, res) => {
             createdAt: row.created_at
           });
         }
-      }
-      const patientName = (body.patientName || body.patient_name || '').trim();
-      const attachments = Array.isArray(body.attachments) ? body.attachments : (body.attachmentUrl ? [body.attachmentUrl] : []);
-
-      if (!patientName) {
-        return sendJson(res, 400, { error: 'MISSING_PATIENT_NAME', message: 'Patient name is strictly required.' });
-      }
-      if (attachments.length === 0) {
-        return sendJson(res, 400, { error: 'MISSING_ATTACHMENTS', message: 'At least one prescription attachment is required.' });
       }
 
       // Restrict to single attachment and enforce 100-prescription quota per customer
@@ -3841,11 +3966,13 @@ const server = http.createServer(async (req, res) => {
             [customerId, safePhone]
           );
         } catch (_) {}
+        await pool.query('ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);').catch(() => {});
         let row;
         try {
           const insertRes = await pool.query(
-            `INSERT INTO prescriptions (id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no, attachments, note, status, idempotency_key, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING', $10, NOW(), NOW())
+            `INSERT INTO prescriptions (id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no, attachments, note, status, idempotency_key, request_payload_hash, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING', $10, $11, NOW(), NOW())
+             ON CONFLICT (customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
              RETURNING *`,
             [
               rxId,
@@ -3857,10 +3984,44 @@ const server = http.createServer(async (req, res) => {
               body.doctorRegistrationNo || body.doctor_registration_no || null,
               JSON.stringify(finalAttachments),
               body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null),
-              idempotencyKey || null
+              idempotencyKey || null,
+              payloadFingerprint
             ]
           );
-          row = insertRes.rows[0];
+          if (insertRes.rows.length > 0) {
+            row = insertRes.rows[0];
+            return sendJson(res, 201, {
+              id: row.id,
+              customerId: row.customer_id,
+              patientName: row.patient_name,
+              status: row.status,
+              attachments: resolvePrescriptionAttachments(row.attachments),
+              createdAt: row.created_at
+            });
+          }
+          if (idempotencyKey) {
+            const existingRxRes = await pool.query(
+              `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
+              [customerId, idempotencyKey]
+            );
+            if (existingRxRes.rows.length > 0) {
+              row = existingRxRes.rows[0];
+              if (row.request_payload_hash && payloadFingerprint && row.request_payload_hash !== payloadFingerprint) {
+                return sendJson(res, 409, {
+                  error: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+                  message: 'Prescription idempotency key reused with different payload'
+                });
+              }
+              return sendJson(res, 200, {
+                id: row.id,
+                customerId: row.customer_id,
+                patientName: row.patient_name,
+                status: row.status,
+                attachments: resolvePrescriptionAttachments(row.attachments),
+                createdAt: row.created_at
+              });
+            }
+          }
         } catch (insertErr) {
           if (idempotencyKey && (insertErr.code === '23505' || String(insertErr.message).includes('unq_prescriptions_customer_idempotency') || String(insertErr.message).includes('duplicate key'))) {
             const existingRxRes = await pool.query(
@@ -3869,6 +4030,12 @@ const server = http.createServer(async (req, res) => {
             );
             if (existingRxRes.rows.length > 0) {
               row = existingRxRes.rows[0];
+              if (row.request_payload_hash && payloadFingerprint && row.request_payload_hash !== payloadFingerprint) {
+                return sendJson(res, 409, {
+                  error: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+                  message: 'Prescription idempotency key reused with different payload'
+                });
+              }
               return sendJson(res, 200, {
                 id: row.id,
                 customerId: row.customer_id,
@@ -3890,27 +4057,38 @@ const server = http.createServer(async (req, res) => {
           createdAt: row.created_at
         });
       } else if (appRepositories && appRepositories.prescriptionRepo) {
-        const created = await appRepositories.prescriptionRepo.createPrescription({
-          id: rxId,
-          customerId,
-          patientName,
-          age: body.age ? Number(body.age) : null,
-          gender: body.gender || null,
-          doctorName: body.doctorName || body.doctor_name || null,
-          doctorRegistrationNo: body.doctorRegistrationNo || body.doctor_registration_no || null,
-          attachments: finalAttachments,
-          note: body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null),
-          idempotencyKey: idempotencyKey || null,
-          status: 'PENDING'
-        });
-        return sendJson(res, 201, {
-          id: created.id,
-          customerId: created.customerId,
-          patientName: created.patientName,
-          status: created.status,
-          attachments: resolvePrescriptionAttachments(created.attachments),
-          createdAt: created.createdAt || created.created_at || new Date().toISOString()
-        });
+        try {
+          const created = await appRepositories.prescriptionRepo.createPrescription({
+            id: rxId,
+            customerId,
+            patientName,
+            age: body.age ? Number(body.age) : null,
+            gender: body.gender || null,
+            doctorName: body.doctorName || body.doctor_name || null,
+            doctorRegistrationNo: body.doctorRegistrationNo || body.doctor_registration_no || null,
+            attachments: finalAttachments,
+            note: body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null),
+            idempotencyKey: idempotencyKey || null,
+            requestPayloadHash: payloadFingerprint,
+            status: 'PENDING'
+          });
+          return sendJson(res, 201, {
+            id: created.id,
+            customerId: created.customerId,
+            patientName: created.patientName,
+            status: created.status,
+            attachments: resolvePrescriptionAttachments(created.attachments),
+            createdAt: created.createdAt || created.created_at || new Date().toISOString()
+          });
+        } catch (rxRepoErr) {
+          if (rxRepoErr.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+            return sendJson(res, 409, {
+              error: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              message: rxRepoErr.message
+            });
+          }
+          throw rxRepoErr;
+        }
       }
     }
 
@@ -4136,8 +4314,15 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 400, { error: 'INVALID_QUANTITY', message: 'Quantity must be a positive integer between 1 and 1000.' });
         }
       }
-      const rawItems = await appRepositories.cartRepo.addItem(customerId, body, idempotencyKey);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+      try {
+        const rawItems = await appRepositories.cartRepo.addItem(customerId, body, idempotencyKey);
+        return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+      } catch (err) {
+        if (err.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+          return sendJson(res, 409, { error: 'IDEMPOTENCY_PAYLOAD_MISMATCH', message: err.message });
+        }
+        throw err;
+      }
     }
 
     const cartUpdateMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items\/([^/]+)$/);
@@ -6116,7 +6301,7 @@ const server = http.createServer(async (req, res) => {
           const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
           if (!isAdmin) {
             const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
-            if (!authorizedStoreId || (order.store_id && order.store_id !== authorizedStoreId)) {
+            if (!authorizedStoreId || !order.store_id || order.store_id !== authorizedStoreId) {
               await client.query('ROLLBACK');
               return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are only authorized to verify payments for orders in your assigned store.' });
             }
@@ -6573,19 +6758,9 @@ const server = http.createServer(async (req, res) => {
             }
 
             const targetStoreId = session.store_id || authorizedStoreId;
-            const storeChannel = targetStoreId ? `riders_store_${targetStoreId}` : 'riders_broadcast';
-
-            if (sseBroadcasterInstance) {
+            if (targetStoreId && sseBroadcasterInstance) {
+              const storeChannel = `riders_store_${targetStoreId}`;
               sseBroadcasterInstance.broadcast(storeChannel, 'NEW_OFFER_AVAILABLE', {
-                offerId: activeOfferId || String(orderId),
-                orderId,
-                deliveryId: delId,
-                eventId: newEvtId,
-                notificationId: newNotifId,
-                storeId: targetStoreId,
-                broadcast: true
-              });
-              sseBroadcasterInstance.broadcast('riders_broadcast', 'NEW_OFFER_AVAILABLE', {
                 offerId: activeOfferId || String(orderId),
                 orderId,
                 deliveryId: delId,
@@ -6790,9 +6965,12 @@ const server = http.createServer(async (req, res) => {
             await client.query('ROLLBACK');
             return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot collect COD for a cancelled order.' });
           }
-          if (authorizedStoreId && ord.store_id && ord.store_id !== authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
-            await client.query('ROLLBACK');
-            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
+          const isAdmin = authClaims.role?.includes('ADMIN') || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.sub === 'admin';
+          if (!isAdmin) {
+            if (!authorizedStoreId || !ord.store_id || ord.store_id !== authorizedStoreId) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
+            }
           }
           if (!ord.is_cod) {
             await client.query('ROLLBACK');
@@ -6840,6 +7018,20 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: e.message });
         } finally {
           client.release();
+        }
+      }
+
+      if (!pool || isLocalMode) {
+        if (appRepositories && appRepositories.orderRepo) {
+          const ord = await appRepositories.orderRepo.getOrderById(orderId);
+          if (!ord) return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+          const ordStoreId = ord.store_id || ord.storeId;
+          const isAdmin = authClaims.role?.includes('ADMIN') || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.sub === 'admin';
+          if (!isAdmin) {
+            if (!authorizedStoreId || !ordStoreId || ordStoreId !== authorizedStoreId) {
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
+            }
+          }
         }
       }
 
@@ -8311,44 +8503,126 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
+
+      const role = String(authClaims.role || '').toUpperCase();
+      const roles = Array.isArray(authClaims.roles) ? authClaims.roles.map(r => String(r).toUpperCase()) : [];
+      const isRiderRole = role === 'ROLE_RIDER' || role === 'RIDER' || roles.includes('ROLE_RIDER') || roles.includes('RIDER') || authClaims.scope?.includes('rider');
+      const isAdminRole = role === 'ROLE_ADMIN' || role === 'ADMIN' || roles.includes('ROLE_ADMIN') || roles.includes('ADMIN');
+
+      if (!isRiderRole && !isAdminRole) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only active registered riders can view rider notifications.' });
+      }
+
+      let riderStoreId = null;
+      if (pool && !isLocalMode) {
+        if (!isAdminRole) {
+          const rRes = await pool.query(
+            `SELECT id, store_id, status FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+            [authClaims.sub]
+          );
+          if (rRes.rows.length === 0 || rRes.rows[0].status !== 'ACTIVE') {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider account is required.' });
+          }
+          riderStoreId = rRes.rows[0].store_id;
+        }
+      }
+
       let notifs = [];
       if (pool && !isLocalMode) {
         try {
-          const nRes = await pool.query(
-            `SELECT rn.id as "notificationId",
-                    rn.notification_id as "id",
-                    rn.category,
-                    rn.rider_id as "riderId",
-                    rn.title,
-                    rn.body,
-                    rn.status,
-                    rn.metadata,
-                    COALESCE(rn.metadata->>'orderId', rn.metadata->>'order_id') as "orderId",
-                    COALESCE(rn.metadata->>'deliveryId', rn.metadata->>'delivery_id') as "deliveryId",
-                    COALESCE(rn.metadata->>'offerId', rn.metadata->>'offer_id') as "offerId",
-                    COALESCE(rn.metadata->>'deepLink', rn.metadata->>'deep_link') as "deepLink",
-                    rn.created_at as "createdAt",
-                    rn.read_at as "readAt"
-             FROM rider_notifications rn
-             WHERE rn.rider_id = $1 OR rn.rider_id = 'all' OR rn.rider_id = 'broadcast'
-             ORDER BY rn.created_at DESC LIMIT 50`,
-            [authClaims.sub]
-          );
+          let query;
+          let params;
+          if (isAdminRole) {
+            query = `SELECT rn.id as "notificationId",
+                            rn.notification_id as "id",
+                            rn.category,
+                            rn.rider_id as "riderId",
+                            rn.title,
+                            rn.body,
+                            rn.status,
+                            rn.metadata,
+                            COALESCE(rn.metadata->>'orderId', rn.metadata->>'order_id') as "orderId",
+                            COALESCE(rn.metadata->>'deliveryId', rn.metadata->>'delivery_id') as "deliveryId",
+                            COALESCE(rn.metadata->>'offerId', rn.metadata->>'offer_id') as "offerId",
+                            COALESCE(rn.metadata->>'deepLink', rn.metadata->>'deep_link') as "deepLink",
+                            rn.created_at as "createdAt",
+                            rn.read_at as "readAt"
+                     FROM rider_notifications rn
+                     ORDER BY rn.created_at DESC LIMIT 50`;
+            params = [];
+          } else {
+            query = `SELECT rn.id as "notificationId",
+                            rn.notification_id as "id",
+                            rn.category,
+                            rn.rider_id as "riderId",
+                            rn.title,
+                            rn.body,
+                            rn.status,
+                            rn.metadata,
+                            COALESCE(rn.metadata->>'orderId', rn.metadata->>'order_id') as "orderId",
+                            COALESCE(rn.metadata->>'deliveryId', rn.metadata->>'delivery_id') as "deliveryId",
+                            COALESCE(rn.metadata->>'offerId', rn.metadata->>'offer_id') as "offerId",
+                            COALESCE(rn.metadata->>'deepLink', rn.metadata->>'deep_link') as "deepLink",
+                            rn.created_at as "createdAt",
+                            rn.read_at as "readAt"
+                     FROM rider_notifications rn
+                     WHERE rn.rider_id = $1
+                        OR (rn.rider_id IN ('all', 'broadcast') AND $2::text IS NOT NULL AND (rn.metadata->>'storeId' = $2 OR rn.metadata->>'store_id' = $2))
+                     ORDER BY rn.created_at DESC LIMIT 50`;
+            params = [authClaims.sub, riderStoreId];
+          }
+          const nRes = await pool.query(query, params);
           notifs = nRes.rows;
         } catch (err) {
-          try {
-            const fallback = await pool.query(
-              `SELECT id as "notificationId", notification_id as "id", category, rider_id as "riderId",
-                      title, body, status, metadata,
-                      created_at as "createdAt", read_at as "readAt"
-               FROM rider_notifications WHERE rider_id = $1 OR rider_id = 'all' OR rider_id = 'broadcast' ORDER BY created_at DESC LIMIT 50`,
-              [authClaims.sub]
-            );
-            notifs = fallback.rows;
-          } catch {}
+          console.error('[ProductionServer] notifications query error:', err.message);
         }
+      } else if (appRepositories && appRepositories.notificationRepo && appRepositories.notificationRepo.db) {
+        const allList = appRepositories.notificationRepo.db.riderNotifications || [];
+        notifs = allList.filter(n => {
+          if (n.riderId === authClaims.sub) return true;
+          if (['all', 'broadcast'].includes(n.riderId)) {
+            const notifStore = n.storeId || (n.metadata && (n.metadata.storeId || n.metadata.store_id));
+            return riderStoreId && notifStore === riderStoreId;
+          }
+          return false;
+        });
       }
-      return sendJson(res, 200, { ok: true, count: notifs.length, notifications: notifs });
+
+      // Whitelist sanitize metadata and actionPayload for zero PII exposure
+      const sanitizedNotifs = notifs.map(n => {
+        let meta = typeof n.metadata === 'string' ? (() => { try { return JSON.parse(n.metadata); } catch (_) { return {}; } })() : (n.metadata || {});
+        if (meta.actionPayload) {
+          const p = meta.actionPayload;
+          const dropAddr = p.dropAddress || p.customerAddress || 'Drop Area';
+          meta = {
+            ...meta,
+            actionPayload: {
+              id: p.id || p.offerId || p.offer_id,
+              offerId: p.offerId || p.offer_id || p.id,
+              orderId: p.orderId || p.order_id,
+              deliveryId: p.deliveryId || p.delivery_id,
+              storeId: p.storeId || p.store_id || null,
+              merchantName: p.merchantName || p.merchant_name || 'Store',
+              merchantAddress: p.merchantAddress || p.merchant_address || '',
+              dropAddress: dropAddr,
+              customerAddress: dropAddr,
+              customerLocality: dropAddr,
+              totalDistanceKm: p.totalDistanceKm || p.total_distance_km || 1.5,
+              estimatedDurationMins: p.estimatedDurationMins || p.estimated_duration_mins || 10,
+              earningsAmount: p.earningsAmount || p.earnings_amount || 40,
+              currency: p.currency || 'INR',
+              status: p.status || 'OFFERED',
+              expiresAt: p.expiresAt || p.offerExpiresAt || null
+            }
+          };
+        }
+        return {
+          ...n,
+          metadata: meta
+        };
+      });
+
+      return sendJson(res, 200, { ok: true, count: sanitizedNotifs.length, notifications: sanitizedNotifs });
     }
 
     // POST /api/v1/delivery/rider/notifications/:id/read

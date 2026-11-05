@@ -99,7 +99,8 @@ data class RiderProfile(
     val earningsTodayFormatted: String? = null,
     val shiftStatus: String? = null,
     val assignedHub: String? = null,
-    val tier: String? = null
+    val tier: String? = null,
+    val storeId: String? = null
 )
 
 sealed class ActiveOfferResult {

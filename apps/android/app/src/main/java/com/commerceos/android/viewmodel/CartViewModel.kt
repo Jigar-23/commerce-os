@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.commerceos.android.data.local.CartDao
 import com.commerceos.android.data.local.CartItemEntity
+import com.commerceos.android.data.local.LocalSaveForLaterStore
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.network.AppError
@@ -1126,18 +1127,6 @@ class CartViewModel(
                 val previousSaved = saveForLaterItems
                 val remainingSaved = previousSaved.filterNot { it.sku == sku }
 
-                // Remove from local saved items first so failure fails closed before server mutation
-                val persisted = appContext?.let { ctx ->
-                    com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, remainingSaved)
-                } ?: true
-
-                if (!persisted) {
-                    val errMsg = "Could not update saved items storage."
-                    errorMessage = errMsg
-                    _addEvents.trySend(CartAddEvent.Failure(errMsg))
-                    return@withLock
-                }
-
                 val prodSellingPrice = targetItem.unitPrice.toDouble().coerceAtLeast(1.0)
                 val prodPrice = targetItem.mrp.toDouble().coerceAtLeast(prodSellingPrice)
                 val prod = CommerceProduct(
@@ -1160,18 +1149,30 @@ class CartViewModel(
                 )
 
                 val moveMapKey = "${targetCustomerId}:${sku}"
-                val moveKey = moveBackKeys.getOrPut(moveMapKey) {
-                    "move_back_${targetCustomerId}_${targetItem.sku}_${targetItem.quantity}_${java.util.UUID.randomUUID()}"
-                }
-                val previousCartItem = cartItems.find { it.sku == sku }
-                val previousQuantityInCart = previousCartItem?.quantity ?: 0
-                val expectedQuantity = previousQuantityInCart + targetItem.quantity
+                val moveKey = appContext?.let { LocalSaveForLaterStore.getPendingMoveKey(it, targetCustomerId, sku) }
+                    ?: moveBackKeys[moveMapKey]
+                    ?: "move_back_${targetCustomerId}_${targetItem.sku}_${targetItem.quantity}_${java.util.UUID.randomUUID()}".also { generatedKey ->
+                        appContext?.let { ctx ->
+                            LocalSaveForLaterStore.setPendingMoveKey(ctx, targetCustomerId, sku, generatedKey)
+                        }
+                        moveBackKeys[moveMapKey] = generatedKey
+                    }
 
                 if (targetCustomerId.isNotBlank()) {
                     val updated = repository.addCartItem(targetCustomerId, targetItem, moveKey)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (updated) {
                         is ApiResult.Success -> {
+                            val persisted = appContext?.let { ctx ->
+                                LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, remainingSaved)
+                            } ?: true
+                            if (!persisted) {
+                                errorMessage = "Could not update saved items storage."
+                                return@withLock
+                            }
+                            appContext?.let { ctx ->
+                                LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
+                            }
                             moveBackKeys.remove(moveMapKey)
                             val backendItems = sanitizeCartItems(updated.data.items ?: (cartItems + targetItem))
                             cartItems = backendItems
@@ -1186,53 +1187,44 @@ class CartViewModel(
                             if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                         }
                         is ApiResult.Failure -> {
-                            // On ambiguous transport/network or gateway failure, reconcile against server cart before rolling back
                             val isAmbiguous = updated.error.isAmbiguousMutationFailure()
-                            val serverCommitted = if (isAmbiguous) {
-                                when (val check = repository.fetchBackendCart(targetCustomerId)) {
-                                    is ApiResult.Success -> {
-                                        val items = check.data.items ?: emptyList()
-                                        val serverItem = items.find { it.sku == sku }
-                                        val serverQty = serverItem?.quantity ?: 0
-                                        if (serverQty >= expectedQuantity) {
-                                            cartItems = sanitizeCartItems(items)
-                                            totals = check.data
-                                            true
-                                        } else false
+                            if (isAmbiguous) {
+                                // Reconcile against that operation's authoritative result by retrying with the same durable idempotency key
+                                val reconciled = repository.addCartItem(targetCustomerId, targetItem, moveKey)
+                                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                                if (reconciled is ApiResult.Success) {
+                                    val persisted = appContext?.let { ctx ->
+                                        LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, remainingSaved)
+                                    } ?: true
+                                    if (persisted) {
+                                        saveForLaterItems = remainingSaved
                                     }
-                                    is ApiResult.Failure -> null
+                                    appContext?.let { ctx ->
+                                        LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
+                                    }
+                                    moveBackKeys.remove(moveMapKey)
+                                    val backendItems = sanitizeCartItems(reconciled.data.items ?: (cartItems + targetItem))
+                                    cartItems = backendItems
+                                    totals = reconciled.data
+                                    errorMessage = null
+                                    _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
+                                    syncLocalCartCache(targetCustomerId, backendItems)
+                                    return@withLock
+                                } else if (reconciled is ApiResult.Failure && reconciled.error.isAmbiguousMutationFailure()) {
+                                    // Still ambiguous: preserve saved items and keep durable move key intact for retry
+                                    val errMsg = updated.error.message.ifBlank { "Network timeout while moving item back to cart. Your item is preserved in Saved for Later." }
+                                    errorMessage = errMsg
+                                    _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                                    return@withLock
                                 }
-                            } else false
-
-                            if (serverCommitted == true) {
-                                // Server committed the add! Do not restore to saved items
-                                moveBackKeys.remove(moveMapKey)
-                                saveForLaterItems = remainingSaved
-                                errorMessage = null
-                                _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
-                                syncLocalCartCache(targetCustomerId, cartItems)
-                                return@withLock
-                            } else if (serverCommitted == null) {
-                                // Network unreachable: rollback and preserve item in saved items (retain moveKey for retry)
-                                appContext?.let { ctx ->
-                                    com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
-                                }
-                                saveForLaterItems = previousSaved
-                                val errMsg = "Network timeout while moving item back to cart. Your item is preserved in Saved for Later."
-                                errorMessage = errMsg
-                                _addEvents.trySend(CartAddEvent.Failure(errMsg))
-                                return@withLock
                             }
 
-                            // Compensate by rolling back local saved items (retain moveKey for retry)
-                            val rollbackPersisted = appContext?.let { ctx ->
-                                com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
-                            } ?: true
-                            val errMsg = if (!rollbackPersisted) {
-                                "Could not move item to cart, and restoring saved items failed. Please refresh."
-                            } else {
-                                updated.error.message.ifBlank { "Could not move item back to cart." }
+                            // Definitive failure: clear pending key, item remains safely in saved items
+                            appContext?.let { ctx ->
+                                LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
                             }
+                            moveBackKeys.remove(moveMapKey)
+                            val errMsg = updated.error.message.ifBlank { "Could not move item back to cart." }
                             errorMessage = errMsg
                             _addEvents.trySend(CartAddEvent.Failure(errMsg))
                             return@withLock
@@ -1257,18 +1249,18 @@ class CartViewModel(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Exception) {
-                            val rollbackPersisted = appContext?.let { ctx ->
-                                com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
-                            } ?: true
-                            val errMsg = if (!rollbackPersisted) {
-                                "Could not restore item to the offline cart, and restoring saved items failed."
-                            } else {
-                                "Could not restore item to the offline cart."
-                            }
+                            val errMsg = "Could not restore item to the offline cart."
                             errorMessage = errMsg
                             _addEvents.trySend(CartAddEvent.Failure(errMsg))
                             return@withLock
                         }
+                    }
+                    val persisted = appContext?.let { ctx ->
+                        LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, remainingSaved)
+                    } ?: true
+                    if (!persisted) {
+                        errorMessage = "Could not update saved items storage."
+                        return@withLock
                     }
                     cartItems = newCartItems
                     saveForLaterItems = remainingSaved
