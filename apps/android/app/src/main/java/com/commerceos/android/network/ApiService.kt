@@ -120,7 +120,8 @@ interface CartApi {
     @POST("/api/v1/cart/{customerId}/items")
     suspend fun addItem(
         @Path("customerId") customerId: String,
-        @Body request: CartItem
+        @Body request: CartItem,
+        @Header("Idempotency-Key") idempotencyKey: String? = null
     ): CartResponse
 
     @DELETE("/api/v1/cart/{customerId}/items/{sku}")
@@ -248,7 +249,10 @@ interface CustomerApi {
 
 interface PrescriptionApi {
     @POST("/api/v1/prescriptions")
-    suspend fun upload(@Body request: UploadPrescriptionRequest): Prescription
+    suspend fun upload(
+        @Body request: UploadPrescriptionRequest,
+        @Header("Idempotency-Key") idempotencyKey: String? = null
+    ): Prescription
 
     @GET("/api/v1/prescriptions/{id}")
     suspend fun getById(@Path("id") id: String): Prescription

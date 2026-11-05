@@ -3729,6 +3729,24 @@ const server = http.createServer(async (req, res) => {
       }
       const customerId = authClaims.sub;
       const body = await parseJsonBody(req);
+      const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
+      if (idempotencyKey && pool) {
+        const existingRxRes = await pool.query(
+          `SELECT * FROM prescriptions WHERE customer_id = $1 AND note LIKE $2 LIMIT 1`,
+          [customerId, `%[idemp:${idempotencyKey}]%`]
+        );
+        if (existingRxRes.rows.length > 0) {
+          const row = existingRxRes.rows[0];
+          return sendJson(res, 200, {
+            id: row.id,
+            customerId: row.customer_id,
+            patientName: row.patient_name,
+            status: row.status,
+            attachments: resolvePrescriptionAttachments(row.attachments),
+            createdAt: row.created_at
+          });
+        }
+      }
       const patientName = (body.patientName || body.patient_name || '').trim();
       const attachments = Array.isArray(body.attachments) ? body.attachments : (body.attachmentUrl ? [body.attachmentUrl] : []);
 
@@ -3787,7 +3805,7 @@ const server = http.createServer(async (req, res) => {
           body.doctorName || body.doctor_name || null,
           body.doctorRegistrationNo || body.doctor_registration_no || null,
           JSON.stringify(finalAttachments),
-          body.note || null
+          body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null)
         ]
       );
       const row = insertRes.rows[0];
@@ -4007,6 +4025,14 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const body = await parseJsonBody(req);
+      const idempotencyKey = req.headers['idempotency-key'] || body?.idempotencyKey || body?.idempotency_key || null;
+      if (idempotencyKey) {
+        global._cartAddIdempotency = global._cartAddIdempotency || new Set();
+        if (global._cartAddIdempotency.has(`${customerId}:${idempotencyKey}`)) {
+          const rawItems = await appRepositories.cartRepo.getCart(customerId);
+          return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+        }
+      }
       if (!body || !body.sku) {
         return sendJson(res, 400, { error: 'INVALID_CART_ITEM', message: 'sku is mandatory for adding to cart.' });
       }
@@ -4017,6 +4043,10 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const rawItems = await appRepositories.cartRepo.addItem(customerId, body);
+      if (idempotencyKey) {
+        global._cartAddIdempotency = global._cartAddIdempotency || new Set();
+        global._cartAddIdempotency.add(`${customerId}:${idempotencyKey}`);
+      }
       return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
 
@@ -4088,10 +4118,16 @@ const server = http.createServer(async (req, res) => {
       }
       const customerId = custProfileMatch[1];
       const clean10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = clean10.length === 10 && callerPhone10.length === 10 && callerPhone10 === clean10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this customer profile.' });
       }
 
@@ -4171,10 +4207,16 @@ const server = http.createServer(async (req, res) => {
       }
       const customerId = addrListMatch[1];
       const clean10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = clean10.length === 10 && callerPhone10.length === 10 && callerPhone10 === clean10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
+      const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this customer address book.' });
       }
 
@@ -5543,22 +5585,71 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const feedbackMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/(?:feedback|rating)$/);
     if (feedbackMatch && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required to submit order feedback.' });
+      }
+
       const orderId = feedbackMatch[1];
       const body = await parseJsonBody(req);
-      const rating = Number(body.rating || 5);
-      const comment = body.comment || body.feedback || '';
+      const rawRating = body.rating;
+      const comment = body.comment !== undefined ? body.comment : (body.feedback !== undefined ? body.feedback : '');
+
+      const rating = Number(rawRating);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        return sendJson(res, 400, {
+          error: 'INVALID_RATING',
+          message: 'Rating must be an integer between 1 and 5.'
+        });
+      }
+
+      if (typeof comment !== 'string' || comment.length > 500) {
+        return sendJson(res, 400, {
+          error: 'INVALID_COMMENT',
+          message: 'Comment must be a string of at most 500 characters.'
+        });
+      }
+
+      let order = null;
+      if (pool) {
+        const ordRes = await pool.query(
+          `SELECT id, order_id, customer_id, status FROM orders WHERE (id = $1 OR order_id = $1) LIMIT 1`,
+          [orderId]
+        );
+        if (ordRes.rows.length > 0) order = ordRes.rows[0];
+      } else if (appRepositories?.orderRepo) {
+        order = await appRepositories.orderRepo.getOrderById(orderId);
+      }
+
+      if (!order) {
+        return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: `Order '${orderId}' not found.` });
+      }
+
+      const isOwner = (order.customer_id && order.customer_id === authClaims.sub) || (order.customerId && order.customerId === authClaims.sub);
+      const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isOwner && !isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to submit feedback for this order.' });
+      }
+
+      const orderStatus = order.status || order.orderStatus;
+      if (orderStatus !== 'DELIVERED') {
+        return sendJson(res, 409, {
+          error: 'ORDER_NOT_DELIVERED',
+          message: `Feedback can only be submitted for delivered orders (current status: '${orderStatus}').`
+        });
+      }
 
       if (pool) {
         try {
           await pool.query(
-            `UPDATE orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{feedback}', $1::jsonb) WHERE (id = $2 OR order_id = $2)`,
-            [JSON.stringify({ rating, comment, submittedAt: new Date().toISOString() }), orderId]
+            `UPDATE orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{feedback}', $1::jsonb), updated_at = NOW() WHERE (id = $2 OR order_id = $2)`,
+            [JSON.stringify({ rating, comment, submittedBy: authClaims.sub, submittedAt: new Date().toISOString() }), orderId]
           );
         } catch (_err) {
           // Schema metadata column is optional
         }
       }
-      return sendJson(res, 200, { ok: true, message: 'Feedback recorded', rating, comment });
+      return sendJson(res, 200, { ok: true, message: 'Feedback recorded successfully.', rating, comment });
     }
 
 
@@ -5710,10 +5801,40 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT required.' });
       }
-      if (!hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER'])) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only authorized administrators and sellers can view refund audits.' });
-      }
+
       const targetOrderId = refundOrderMatch[1];
+      const isAdminRole = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      const isSellerRole = hasRole(authClaims, ['ROLE_SELLER', 'SELLER']);
+
+      let order = null;
+      if (pool) {
+        const ordRes = await pool.query(
+          `SELECT id, order_id, customer_id, store_id FROM orders WHERE (order_id = $1 OR id = $1) LIMIT 1`,
+          [targetOrderId]
+        );
+        if (ordRes.rows.length > 0) order = ordRes.rows[0];
+      } else if (appRepositories?.orderRepo) {
+        order = await appRepositories.orderRepo.getOrderById(targetOrderId);
+      }
+
+      if (!order && !isAdminRole) {
+        return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: `Order '${targetOrderId}' not found.` });
+      }
+
+      if (!isAdminRole) {
+        if (isSellerRole) {
+          const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+          if (!authorizedStoreId || (order && order.store_id !== authorizedStoreId)) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Cross-store refund audit disclosure is forbidden.' });
+          }
+        } else {
+          const isOwner = order && ((order.customer_id && order.customer_id === authClaims.sub) || (order.customerId && order.customerId === authClaims.sub));
+          if (!isOwner) {
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view refund records for this order.' });
+          }
+        }
+      }
+
       if (pool) {
         const resList = await pool.query(
           `SELECT * FROM payment_refunds WHERE order_id = $1 ORDER BY created_at DESC`,
@@ -6036,7 +6157,9 @@ const server = http.createServer(async (req, res) => {
         try {
           await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
           const sessRes = await client.query(
-            `SELECT ds.id, ds.delivery_id, ds.order_id, ds.rider_id, ds.state, o.total_amount, o.store_id, o.status as order_status
+            `SELECT ds.id, ds.delivery_id, ds.order_id, ds.rider_id, ds.state, ds.is_cod,
+                    o.total_amount, o.store_id, o.status as order_status, o.payment_status as order_payment_status,
+                    o.is_cod as order_is_cod, o.payment_method
              FROM delivery_sessions ds
              JOIN orders o ON (o.order_id = ds.order_id OR o.id = ds.order_id)
              WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)
@@ -6051,6 +6174,23 @@ const server = http.createServer(async (req, res) => {
           if (!session.rider_id || (session.rider_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN')) {
             await client.query('ROLLBACK');
             return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned active rider can record doorstep UPI.' });
+          }
+
+          const isCodOrder = Boolean(session.order_is_cod ?? session.is_cod ?? (String(session.payment_method || '').toUpperCase() === 'COD'));
+          if (!isCodOrder) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, {
+              error: 'PREPAID_ORDER_DOORSTEP_UPI_PROHIBITED',
+              message: 'Doorstep UPI payment collection is strictly prohibited for prepaid orders.'
+            });
+          }
+
+          if (session.order_payment_status === 'PAID') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'ORDER_ALREADY_PAID',
+              message: 'This order has already been marked as paid.'
+            });
           }
           if (['CANCELLED', 'REJECTED'].includes(session.order_status) || session.state === 'CANCELLED') {
             await client.query('ROLLBACK');
@@ -7668,14 +7808,70 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
+
+      const isRiderCaller = authClaims.role?.includes('RIDER') || authClaims.roles?.includes('ROLE_RIDER') || authClaims.scope?.includes('rider');
+      const isAdminCaller = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isRiderCaller && !isAdminCaller) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider or administrator account is required to query delivery offers.' });
+      }
+
       const offerId = singleOfferMatch[1];
       const riderId = authClaims.riderId || authClaims.sub;
+
+      let riderStoreId = null;
+      if (isRiderCaller && !isAdminCaller && pool && !isLocalMode) {
+        try {
+          const rdrCheck = await pool.query(
+            `SELECT id, rider_id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+            [riderId]
+          );
+          if (rdrCheck.rows.length > 0) {
+            if (rdrCheck.rows[0].status !== 'ACTIVE') {
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Rider account is suspended or inactive.' });
+            }
+            riderStoreId = rdrCheck.rows[0].store_id;
+          }
+        } catch (_) {}
+      }
+
       const offer = await appRepositories.offerRepo.findOfferById(offerId);
       if (!offer) return sendJson(res, 404, { error: 'NOT_FOUND', message: 'Offer not found.' });
+
       const assignedRider = offer.rider_id || offer.riderId;
-      if (assignedRider && assignedRider !== riderId && assignedRider !== 'all' && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view this offer.' });
+      const cleanAssigned = String(assignedRider || '').toLowerCase();
+      const isPoolOffer = !assignedRider || ['all', 'broadcast', 'pool', 'unassigned', 'open'].includes(cleanAssigned) || Boolean(offer.is_broadcast || offer.broadcast);
+      const isDirectlyAssigned = assignedRider && (assignedRider === riderId);
+
+      // Verify authorization: must be admin, or assigned rider, or if pool/broadcast offer, store must match if rider has store
+      if (!isAdminCaller && !isDirectlyAssigned) {
+        if (!isPoolOffer) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view this offer.' });
+        }
+        const offerStoreId = offer.store_id || offer.storeId || offer.order_store_id;
+        if (riderStoreId && offerStoreId && riderStoreId !== offerStoreId) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view offers from other stores.' });
+        }
       }
+
+      const isAssignedToCaller = isDirectlyAssigned && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(offer.status);
+
+      // Sanitize response: redact customer PII if caller is not assigned or admin
+      if (!isAssignedToCaller && !isAdminCaller) {
+        const rawAddr = offer.customerAddress || offer.deliveryAddress || '';
+        const coarseLocality = (typeof rawAddr === 'string' && rawAddr.includes(','))
+          ? rawAddr.split(',').slice(-2).join(',').trim()
+          : (rawAddr || 'Delivery Locality');
+        return sendJson(res, 200, {
+          ...offer,
+          customerName: 'Customer',
+          customerPhone: '',
+          customerAddress: coarseLocality,
+          deliveryAddress: coarseLocality,
+          customerLat: null,
+          customerLng: null
+        });
+      }
+
       return sendJson(res, 200, offer);
     }
 
@@ -7695,14 +7891,15 @@ const server = http.createServer(async (req, res) => {
             rider_id: r.rider_id || r.id || authClaims.sub,
             full_name: r.full_name || r.name || authClaims.name || '',
             phone: r.phone || authClaims.phone || '',
-            vehicle_number: r.vehicle_number || r.vehicleNumber || authClaims.vehicle || ''
+            vehicle_number: r.vehicle_number || r.vehicleNumber || authClaims.vehicle || '',
+            store_id: r.store_id || r.storeId || null
           };
         }
       }
       if (!authorizedRider && pool && !isLocalMode) {
         try {
           const riderRes = await pool.query(
-            `SELECT rider_id, full_name, phone, vehicle_number, status FROM riders WHERE (rider_id = $1 OR id = $1)`,
+            `SELECT rider_id, full_name, phone, vehicle_number, status, store_id FROM riders WHERE (rider_id = $1 OR id = $1)`,
             [authClaims.sub]
           );
           if (riderRes.rows.length > 0 && riderRes.rows[0].status === 'ACTIVE') {
@@ -7729,7 +7926,8 @@ const server = http.createServer(async (req, res) => {
       const result = await appRepositories.offerRepo.acceptOfferTransactionally(offerId, authorizedRider.rider_id, {
         realName,
         realPhone,
-        realVehicle
+        realVehicle,
+        storeId: authorizedRider.store_id
       });
 
       if (result.ok) {
@@ -8818,7 +9016,9 @@ const server = http.createServer(async (req, res) => {
           const transitionResult = await appRepositories.deliveryRepo.transitionStateTransactionally(
             currentSession.delivery_id || deliveryId,
             'CANCELLED',
-            authClaims.sub
+            authClaims.sub,
+            {},
+            client
           );
 
           if (!transitionResult || !transitionResult.ok) {

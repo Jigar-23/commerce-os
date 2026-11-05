@@ -61,14 +61,25 @@ public class CartController {
      * All prices, MRP, brand, packSize, and Rx/cold-chain flags are strictly resolved
      * from the authoritative Catalog Service.
      */
+    private static final java.util.Set<String> processedIdempotencyKeys = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
     @PostMapping("/{customerId}/items")
     public ResponseEntity<?> addItem(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @PathVariable String customerId,
             @RequestBody AddCartItemRequest request
     ) {
         if (!isAuthorizedCustomerOrAdmin(authHeader, customerId)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("FORBIDDEN: Cart mutation requires authenticated customer ownership.");
+        }
+
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            String key = customerId + ":" + idempotencyKey.trim();
+            if (processedIdempotencyKeys.contains(key)) {
+                return getCart(authHeader, customerId);
+            }
+            processedIdempotencyKeys.add(key);
         }
 
         if (request.getSku() == null || request.getSku().isBlank()) {

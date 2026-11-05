@@ -198,12 +198,14 @@ class PrescriptionViewModel(
             errorMessage = null
             try {
                 val lightweightAttachments = encodeAttachments(attachments)
+                val stableIdempotencyKey = computeUploadIdempotencyKey(safeCustomerId, patientName, lightweightAttachments)
                 when (val result = repository.uploadPrescription(
                     UploadPrescriptionRequest(
                         customerId = safeCustomerId,
                         patientName = patientName.ifBlank { "Patient" },
                         attachments = lightweightAttachments,
-                        note = "prescription_document_upload"
+                        note = "prescription_document_upload",
+                        idempotencyKey = stableIdempotencyKey
                     )
                 )) {
                     is ApiResult.Success -> {
@@ -250,6 +252,26 @@ class PrescriptionViewModel(
                 }
             }
         }
+    }
+
+    private fun computeUploadIdempotencyKey(
+        customerId: String,
+        patientName: String,
+        attachments: List<String>
+    ): String {
+        val canonical = buildString {
+            append(customerId.trim())
+            append("|")
+            append(patientName.trim())
+            append("|")
+            attachments.forEach {
+                append(it.hashCode())
+                append(";")
+            }
+        }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray(Charsets.UTF_8))
+        return "rx_idemp_" + digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }.take(32)
     }
 
     fun reset() {

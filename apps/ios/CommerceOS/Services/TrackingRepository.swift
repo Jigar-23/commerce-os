@@ -464,6 +464,15 @@ public class TrackingRepository: ObservableObject {
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: req)
                     guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
+                        if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 401 || httpRes.statusCode == 403 {
+                            print("[TrackingRepository] SSE stream unauthorized (HTTP \(httpRes.statusCode)). Halting reconnect loop.")
+                            await MainActor.run {
+                                self.streamError = "Session expired. Please log in again."
+                                self.isStreamReconnecting = false
+                                NotificationCenter.default.post(name: APIClient.sessionExpiredNotification, object: nil)
+                            }
+                            break
+                        }
                         let delay = self.calculateBackoffDelay(attempt: retryAttempt)
                         retryAttempt += 1
                         await MainActor.run {
@@ -481,6 +490,15 @@ public class TrackingRepository: ObservableObject {
 
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
+                        if line.contains("token_expired") {
+                            print("[TrackingRepository] SSE received token_expired event. Halting reconnect loop.")
+                            await MainActor.run {
+                                self.streamError = "Session expired. Please log in again."
+                                self.isStreamReconnecting = false
+                                NotificationCenter.default.post(name: APIClient.sessionExpiredNotification, object: nil)
+                            }
+                            break
+                        }
                         if line.hasPrefix("id:") {
                             let idStr = String(line.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
                             if !idStr.isEmpty {

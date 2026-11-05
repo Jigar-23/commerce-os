@@ -9,6 +9,7 @@ import com.commerceos.android.data.local.CartDao
 import com.commerceos.android.data.local.CartItemEntity
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
+import com.commerceos.android.network.AppError
 import com.commerceos.android.repository.AppRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -56,11 +57,20 @@ class CartViewModel(
     }
 
     override suspend fun awaitMutationsIdle(): List<CartItem> {
-        cartMutex.withLock {
-            accountSyncJob?.join()
-            reorderAllJob?.join()
-            sanitizationCleanupJob?.join()
-            return cartItems.toList()
+        // Join all pending mutation and loading jobs OUTSIDE the mutex to prevent deadlock
+        while (true) {
+            val syncJob = accountSyncJob
+            val reorderJob = reorderAllJob
+            val cleanupJob = sanitizationCleanupJob
+            val loadJob = cartLoadJob
+            val activeJobs = listOfNotNull(syncJob, reorderJob, cleanupJob, loadJob).filter { it.isActive }
+            if (activeJobs.isEmpty()) break
+            activeJobs.forEach { it.join() }
+        }
+
+        // Capture settled cart state under mutex
+        return cartMutex.withLock {
+            cartItems.toList()
         }
     }
 
@@ -288,31 +298,21 @@ class CartViewModel(
                     try {
                         val guestItems = cartDao.getCartItems(LOCAL_OFFLINE_CART_KEY)
                         if (guestItems.isNotEmpty()) {
-                            // Reconcile against current server cart to prevent double-incrementing on replay
-                            val serverCart = when (val res = repository.fetchBackendCart(targetId)) {
-                                is ApiResult.Success -> res.data.items ?: emptyList()
-                                is ApiResult.Failure -> emptyList()
+                            // 1. Fetch current backend cart; ABORT and retain guest rows if fetch fails
+                            val serverCartResult = repository.fetchBackendCart(targetId)
+                            if (serverCartResult !is ApiResult.Success) {
+                                if (generation == customerGeneration && customerId.trim() == targetId) {
+                                    errorMessage = "Could not sync offline cart. Will retry when connected."
+                                }
+                                return@withLock
                             }
-                            val serverMap = serverCart.associateBy { it.sku }
 
                             for (guestItem in guestItems) {
                                 if (generation != customerGeneration || customerId.trim() != targetId) return@withLock
-                                val existingOnServer = serverMap[guestItem.sku]
-                                val success = when {
-                                    existingOnServer != null && existingOnServer.quantity >= guestItem.quantity -> {
-                                        // Already present with sufficient quantity on server
-                                        true
-                                    }
-                                    existingOnServer != null && existingOnServer.quantity < guestItem.quantity -> {
-                                        // Update to target quantity
-                                        repository.updateCartQuantity(targetId, guestItem.sku, guestItem.quantity) is ApiResult.Success
-                                    }
-                                    else -> {
-                                        repository.addCartItem(targetId, guestItem.toCartItem()) is ApiResult.Success
-                                    }
-                                }
-
-                                if (success) {
+                                // Stable idempotency key for additive merge
+                                val syncKey = "guest_sync_${targetId}_${guestItem.sku}_${guestItem.quantity}_${guestItem.updatedAt}"
+                                val addRes = repository.addCartItem(targetId, guestItem.toCartItem(), idempotencyKey = syncKey)
+                                if (addRes is ApiResult.Success) {
                                     val deleted = deleteLocalCartItem(LOCAL_OFFLINE_CART_KEY, guestItem.sku)
                                     if (!deleted && generation == customerGeneration) {
                                         errorMessage = "Could not update offline cart cache."
@@ -1018,6 +1018,35 @@ class CartViewModel(
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (result) {
                         is ApiResult.Failure -> {
+                            // On ambiguous transport/network failure, reconcile against server cart before rolling back
+                            val isAmbiguous = result.error is AppError.Network || result.error is AppError.Unknown
+                            val serverCommitted = if (isAmbiguous) {
+                                when (val check = repository.fetchBackendCart(targetCustomerId)) {
+                                    is ApiResult.Success -> {
+                                        val items = check.data.items ?: emptyList()
+                                        if (items.none { it.sku == sku }) {
+                                            cartItems = sanitizeCartItems(items)
+                                            totals = check.data
+                                            true
+                                        } else false
+                                    }
+                                    is ApiResult.Failure -> null
+                                }
+                            } else false
+
+                            if (serverCommitted == true) {
+                                deleteLocalCartItem(targetCustomerId, sku)
+                                saveForLaterItems = newSaved
+                                errorMessage = null
+                                syncCouponDiscount()
+                                return@withLock
+                            } else if (serverCommitted == null) {
+                                errorMessage = "Network timeout while moving item. Your item is preserved in Saved for Later."
+                                saveForLaterItems = newSaved
+                                syncCouponDiscount()
+                                return@withLock
+                            }
+
                             // Rollback saved items store if backend removal failed
                             val rollbackPersisted = appContext?.let { ctx ->
                                 com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
@@ -1139,6 +1168,31 @@ class CartViewModel(
                             if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                         }
                         is ApiResult.Failure -> {
+                            // On ambiguous transport/network failure, reconcile against server cart before rolling back
+                            val isAmbiguous = updated.error is AppError.Network || updated.error is AppError.Unknown
+                            val serverCommitted = if (isAmbiguous) {
+                                when (val check = repository.fetchBackendCart(targetCustomerId)) {
+                                    is ApiResult.Success -> {
+                                        val items = check.data.items ?: emptyList()
+                                        if (items.any { it.sku == sku }) {
+                                            cartItems = sanitizeCartItems(items)
+                                            totals = check.data
+                                            true
+                                        } else false
+                                    }
+                                    is ApiResult.Failure -> null
+                                }
+                            } else false
+
+                            if (serverCommitted == true) {
+                                // Server committed the add! Do not restore to saved items
+                                saveForLaterItems = remainingSaved
+                                errorMessage = null
+                                _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
+                                syncLocalCartCache(targetCustomerId, cartItems)
+                                return@withLock
+                            }
+
                             // Compensate by rolling back local saved items
                             val rollbackPersisted = appContext?.let { ctx ->
                                 com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)

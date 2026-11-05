@@ -358,7 +358,8 @@ data class UploadPrescriptionRequest(
     val customerId: String,
     val patientName: String,
     val attachments: List<String>,
-    val note: String = ""
+    val note: String = "",
+    val idempotencyKey: String? = null
 )
 
 data class VerifyPrescriptionRequest(

@@ -128,7 +128,14 @@ open class AppRepository {
         withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.getCart(customerId) } }
 
     open suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> =
-        withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.addItem(customerId, item) } }
+        addCartItem(customerId, item, null)
+
+    open suspend fun addCartItem(
+        customerId: String,
+        item: CartItem,
+        idempotencyKey: String?
+    ): ApiResult<CartResponse> =
+        withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.addItem(customerId, item, idempotencyKey) } }
 
     open suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.removeItem(customerId, sku) } }
@@ -243,7 +250,7 @@ open class AppRepository {
         withContext(Dispatchers.IO) { Api.run { NetworkClient.customerApi.setDefaultAddress(customerId, addressId) } }
 
     open suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> =
-        withContext(Dispatchers.IO) { Api.run { NetworkClient.prescriptionApi.upload(request) } }
+        withContext(Dispatchers.IO) { Api.run { NetworkClient.prescriptionApi.upload(request, request.idempotencyKey) } }
 
     open suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.prescriptionApi.getCustomerPrescriptions(customerId) } }

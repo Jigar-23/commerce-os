@@ -2157,7 +2157,8 @@ class TransactionalOfferRepository {
               ds.merchant_name, ds.merchant_address, ds.merchant_lat, ds.merchant_lng,
               ds.customer_name, ds.customer_phone, ds.customer_address, ds.customer_lat, ds.customer_lng,
               ds.is_cod, ds.cod_amount,
-              ord.total_amount AS order_total, ord.items AS order_items, ord.status AS order_status
+              ord.total_amount AS order_total, ord.items AS order_items, ord.status AS order_status,
+              ord.store_id AS order_store_id
        FROM offers o
        LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
        LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
@@ -2177,6 +2178,9 @@ class TransactionalOfferRepository {
       deliveryId: r.delivery_id,
       orderId: r.order_id,
       riderId: r.rider_id,
+      storeId: r.store_id || r.order_store_id,
+      store_id: r.store_id || r.order_store_id,
+      order_store_id: r.order_store_id,
       status: r.status,
       orderStatus: orderStatus,
       earningsAmount: Number(r.earnings_amount || r.total_earnings || 0),
@@ -2471,7 +2475,7 @@ class TransactionalOfferRepository {
 
       // Verify associated order is not cancelled or rejected
       const assocOrderRes = await client.query(
-        `SELECT id, status FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+        `SELECT id, status, store_id FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
         [session.order_id]
       );
       if (assocOrderRes.rows.length > 0 && ['CANCELLED', 'REJECTED'].includes(assocOrderRes.rows[0].status)) {
@@ -2481,6 +2485,19 @@ class TransactionalOfferRepository {
           httpStatus: 409,
           error: 'ORDER_CANCELLED',
           message: 'The associated order has been cancelled by customer or merchant.'
+        };
+      }
+
+      // Multi-tenant check: ensure rider's assigned store matches offer/order store
+      const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
+      const orderStoreId = session.store_id || (assocOrderRes.rows.length > 0 ? assocOrderRes.rows[0].store_id : null) || offer.store_id || null;
+      if (riderStoreId && orderStoreId && riderStoreId !== orderStoreId) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 403,
+          error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
+          message: 'Riders can only accept offers from their assigned fulfillment store.'
         };
       }
 
@@ -2702,6 +2719,17 @@ class LocalDevelopmentOfferRepository {
       return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'You are not the assigned rider for this offer.' };
     } else if (isPoolOffer) {
       offer.riderId = riderId;
+    }
+
+    const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
+    const orderStoreId = offer.store_id || offer.storeId || session?.store_id || session?.storeId || null;
+    if (riderStoreId && orderStoreId && riderStoreId !== orderStoreId) {
+      return {
+        ok: false,
+        httpStatus: 403,
+        error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
+        message: 'Riders can only accept offers from their assigned fulfillment store.'
+      };
     }
 
     const now = Date.now();
@@ -3017,28 +3045,31 @@ class TransactionalDeliveryRepository {
     return this.deliverWithOtpTransactionally(deliveryId, riderId, submittedOtp);
   }
 
-  async transitionStateTransactionally(deliveryId, newState, riderId, metadata = {}) {
-    if (!this.pool) return null;
-    const client = await this.pool.connect();
+  async transitionStateTransactionally(deliveryId, newState, riderId, metadata = {}, existingClient = null) {
+    if (!this.pool && !existingClient) return null;
+    const shouldManageTx = !existingClient;
+    const client = existingClient || (await this.pool.connect());
     try {
-      await client.query('BEGIN');
+      if (shouldManageTx) {
+        await client.query('BEGIN');
+      }
       const sessionRes = await client.query(
         `SELECT * FROM delivery_sessions WHERE (delivery_id = $1 OR order_id = $1) FOR UPDATE`,
         [deliveryId]
       );
       const session = sessionRes.rows[0];
       if (!session) {
-        await client.query('ROLLBACK');
+        if (shouldManageTx) await client.query('ROLLBACK');
         return { ok: false, httpStatus: 404, error: 'SESSION_NOT_FOUND' };
       }
       if (riderId && (!session.rider_id || session.rider_id !== riderId)) {
-        await client.query('ROLLBACK');
+        if (shouldManageTx) await client.query('ROLLBACK');
         return { ok: false, httpStatus: 403, error: 'RIDER_MISMATCH', message: 'Only the assigned rider can transition delivery state.' };
       }
 
       // Idempotency: same state transition is a no-op
       if (session.state === newState) {
-        await client.query('COMMIT');
+        if (shouldManageTx) await client.query('COMMIT');
         return { ok: true, session, isIdempotent: true };
       }
 
@@ -3065,7 +3096,7 @@ class TransactionalDeliveryRepository {
 
       const allowedTransitions = VALID_DELIVERY_TRANSITIONS[session.state] || [];
       if (!allowedTransitions.includes(newState)) {
-        await client.query('ROLLBACK');
+        if (shouldManageTx) await client.query('ROLLBACK');
         return {
           ok: false,
           httpStatus: 409,
@@ -3075,7 +3106,7 @@ class TransactionalDeliveryRepository {
       }
 
       if (newState === 'DELIVERED' && !metadata.otpVerified) {
-        await client.query('ROLLBACK');
+        if (shouldManageTx) await client.query('ROLLBACK');
         return {
           ok: false,
           httpStatus: 400,
@@ -3104,13 +3135,13 @@ class TransactionalDeliveryRepository {
         ['DELIVERY_SESSION', session.delivery_id, 'DELIVERY_STATE_CHANGED', JSON.stringify({ deliveryId: session.delivery_id, state: newState, riderId })]
       );
 
-      await client.query('COMMIT');
+      if (shouldManageTx) await client.query('COMMIT');
       return { ok: true, session: { ...session, state: newState } };
     } catch (err) {
-      await client.query('ROLLBACK');
+      if (shouldManageTx) await client.query('ROLLBACK');
       throw err;
     } finally {
-      client.release();
+      if (shouldManageTx) client.release();
     }
   }
 
