@@ -200,4 +200,36 @@ class OfferPayloadValidatorTest {
         assertEquals(28.5355, offer.customerLat, 0.0001)
         assertEquals(77.2410, offer.customerLng, 0.0001)
     }
+
+    @Test
+    fun testParseAndValidate_acceptedStatus_supportsSnakeCaseCoordinateKeys() {
+        val json = JSONObject("""
+            {
+                "offerId": "off_accepted_snake",
+                "deliveryId": "del_accepted_snake",
+                "orderId": "ord_accepted_snake",
+                "riderId": "rdr_assigned_1",
+                "status": "ACCEPTED",
+                "customerName": "Jane Smith",
+                "customerAddress": "B-204, Royal Palms, South Delhi, New Delhi",
+                "locality": "South Delhi",
+                "customer_lat": 28.5355,
+                "customer_lng": 77.2410,
+                "merchant_lat": 28.5200,
+                "merchant_lng": 77.2300,
+                "is_cod": true,
+                "payment_method": "POD",
+                "codAmount": 280.0,
+                "merchant_name": "Delhi Pharmacy",
+                "merchant_address": "South Delhi Hub"
+            }
+        """.trimIndent())
+        val offer = OfferPayloadValidator.parseAndValidate(json, authenticatedRiderId = "rdr_assigned_1")
+        assertNotNull("Accepted JSON offer with snake_case coordinates should parse successfully", offer)
+        assertTrue("ACCEPTED status must be treated as accepted", offer!!.isAccepted)
+        assertEquals(28.5355, offer.customerLat, 0.0001)
+        assertEquals(77.2410, offer.customerLng, 0.0001)
+        assertEquals(28.5200, offer.merchantLat, 0.0001)
+        assertEquals(77.2300, offer.merchantLng, 0.0001)
+    }
 }
