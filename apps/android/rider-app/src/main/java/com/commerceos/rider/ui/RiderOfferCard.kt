@@ -359,16 +359,22 @@ fun RiderOfferCard(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    val hasValidMerchant = com.commerceos.rider.model.OfferPayloadValidator.isValidLat(offer.merchantLat) &&
+                        com.commerceos.rider.model.OfferPayloadValidator.isValidLng(offer.merchantLng)
                     Button(
-                        onClick = { onAccept(offer.offerId) },
+                        onClick = { if (hasValidMerchant) onAccept(offer.offerId) },
+                        enabled = hasValidMerchant,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasValidMerchant) RiderColors.Primary else Color(0xFF64748B),
+                            disabledContainerColor = Color(0xFF334155)
+                        )
                     ) {
                         Text(
-                            text = "ACCEPT DELIVERY",
+                            text = if (hasValidMerchant) "ACCEPT DELIVERY" else "LOCATION UNAVAILABLE",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp

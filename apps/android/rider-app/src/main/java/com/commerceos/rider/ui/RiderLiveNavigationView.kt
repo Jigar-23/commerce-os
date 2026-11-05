@@ -90,6 +90,10 @@ fun RiderLiveNavigationView(
 
     // Fetch authoritative OSRM road route geometry for Phase 1 (Rider -> Store) or Phase 2 (Store/Rider -> Customer)
     LaunchedEffect(riderLat, riderLng, targetLat, targetLng, isPhase1) {
+        if (!com.commerceos.rider.model.OfferPayloadValidator.isValidLat(targetLat) ||
+            !com.commerceos.rider.model.OfferPayloadValidator.isValidLng(targetLng)) {
+            return@LaunchedEffect
+        }
         val effectiveLat = riderLat ?: cachedRiderLat
         val effectiveLng = riderLng ?: cachedRiderLng
         val originLat = effectiveLat ?: (if (isPhase1) (merchantLat - 0.008) else merchantLat)

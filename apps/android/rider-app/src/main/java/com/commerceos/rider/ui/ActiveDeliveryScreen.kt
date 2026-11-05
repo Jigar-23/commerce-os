@@ -128,6 +128,10 @@ fun ActiveDeliveryScreen(
 
     // Authoritative OSRM road route fetching
     LaunchedEffect(riderLat, riderLng, targetLat, targetLng, isPhase1) {
+        if (!com.commerceos.rider.model.OfferPayloadValidator.isValidLat(targetLat) ||
+            !com.commerceos.rider.model.OfferPayloadValidator.isValidLng(targetLng)) {
+            return@LaunchedEffect
+        }
         val effectiveLat = riderLat ?: cachedRiderLat
         val effectiveLng = riderLng ?: cachedRiderLng
         val originLat = effectiveLat ?: (if (isPhase1) (merchantLat - 0.008) else merchantLat)

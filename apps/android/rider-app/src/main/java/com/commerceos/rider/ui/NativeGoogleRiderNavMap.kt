@@ -9,6 +9,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -95,14 +96,66 @@ fun NativeGoogleRiderNavMap(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val storeLatLng = remember(merchantLat, merchantLng) {
-        LatLng(if (merchantLat != 0.0) merchantLat else 28.191944, if (merchantLng != 0.0) merchantLng else 76.608042)
+    val isValidStore = com.commerceos.rider.model.OfferPayloadValidator.isValidLat(merchantLat) &&
+        com.commerceos.rider.model.OfferPayloadValidator.isValidLng(merchantLng)
+    val isValidCustomer = com.commerceos.rider.model.OfferPayloadValidator.isValidLat(customerLat) &&
+        com.commerceos.rider.model.OfferPayloadValidator.isValidLng(customerLng)
+
+    // Navigation requires authoritative merchant coordinates for Phase 1,
+    // and both authoritative merchant and customer coordinates for Phase 2.
+    val hasRequiredCoordinates = if (isPhase1) isValidStore else (isValidStore && isValidCustomer)
+
+    if (!hasRequiredCoordinates) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color(0xFF0F172A)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LocationOn,
+                    contentDescription = "Location Unavailable",
+                    tint = Color(0xFFEF4444),
+                    modifier = Modifier.size(44.dp)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Location unavailable",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (!isValidStore) {
+                        "Waiting for authoritative merchant coordinates. Navigation disabled."
+                    } else {
+                        "Waiting for authoritative customer delivery coordinates. Navigation disabled."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF94A3B8),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        }
+        return
     }
-    val customerLatLng = remember(customerLat, customerLng) {
-        LatLng(if (customerLat != 0.0) customerLat else 28.191944, if (customerLng != 0.0) customerLng else 76.608042)
+
+    val storeLatLng = remember(merchantLat, merchantLng) {
+        LatLng(merchantLat, merchantLng)
+    }
+    val customerLatLng = remember(customerLat, customerLng, isValidCustomer) {
+        if (isValidCustomer) LatLng(customerLat, customerLng) else null
     }
     val riderLatLng = remember(riderLat, riderLng) {
-        if (riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0) {
+        if (riderLat != null && riderLng != null &&
+            com.commerceos.rider.model.OfferPayloadValidator.isValidLat(riderLat) &&
+            com.commerceos.rider.model.OfferPayloadValidator.isValidLng(riderLng)) {
             LatLng(riderLat, riderLng)
         } else null
     }
@@ -163,7 +216,7 @@ fun NativeGoogleRiderNavMap(
         }
     }
 
-    val polylinePoints = remember(waypoints, merchantLat, merchantLng, customerLat, customerLng, riderLatLng, isPhase1) {
+    val polylinePoints = remember(waypoints, merchantLat, merchantLng, customerLat, customerLng, riderLatLng, isPhase1, isValidCustomer) {
         if (waypoints.size >= 2) {
             waypoints.map { LatLng(it.lat, it.lng) }
         } else {
@@ -175,7 +228,7 @@ fun NativeGoogleRiderNavMap(
             }
             if (isPhase1) {
                 list.add(storeLatLng)
-            } else {
+            } else if (customerLatLng != null) {
                 list.add(customerLatLng)
             }
             list
@@ -183,11 +236,15 @@ fun NativeGoogleRiderNavMap(
     }
 
     val storeMarkerState = rememberMarkerState(key = "rider_store_pos", position = storeLatLng)
-    val customerMarkerState = rememberMarkerState(key = "rider_cust_pos", position = customerLatLng)
+    val customerMarkerState = rememberMarkerState(key = "rider_cust_pos", position = customerLatLng ?: storeLatLng)
     val riderMarkerState = rememberMarkerState(key = "rider_live_pos", position = riderLatLng ?: storeLatLng)
 
     LaunchedEffect(storeLatLng) { storeMarkerState.position = storeLatLng }
-    LaunchedEffect(customerLatLng) { customerMarkerState.position = customerLatLng }
+    LaunchedEffect(customerLatLng) {
+        if (customerLatLng != null) {
+            customerMarkerState.position = customerLatLng
+        }
+    }
     LaunchedEffect(riderLatLng) {
         if (riderLatLng != null) {
             riderMarkerState.position = riderLatLng
@@ -221,13 +278,15 @@ fun NativeGoogleRiderNavMap(
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
             )
 
-            // 2. Customer Destination
-            Marker(
-                state = customerMarkerState,
-                icon = customerMarkerBitmap,
-                title = "Home / Customer Doorstep",
-                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
-            )
+            // 2. Customer Destination (only rendered when authoritative customer coordinates are available)
+            if (customerLatLng != null) {
+                Marker(
+                    state = customerMarkerState,
+                    icon = customerMarkerBitmap,
+                    title = "Home / Customer Doorstep",
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.90f)
+                )
+            }
 
             // 3. Signature Active Route Polyline
             if (polylinePoints.size >= 2) {
@@ -259,7 +318,7 @@ fun NativeGoogleRiderNavMap(
             onClick = {
                 coroutineScope.launch {
                     try {
-                        val target = riderLatLng ?: storeLatLng
+                        val target = riderLatLng ?: (if (isPhase1) storeLatLng else (customerLatLng ?: storeLatLng))
                         cameraPositionState.animate(
                             update = CameraUpdateFactory.newLatLngZoom(target, 17.5f),
                             durationMs = 600

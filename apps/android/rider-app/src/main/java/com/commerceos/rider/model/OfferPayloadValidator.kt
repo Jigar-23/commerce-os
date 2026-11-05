@@ -12,10 +12,10 @@ object OfferPayloadValidator {
 
     private const val TAG = "OfferValidator"
 
-    private fun isValidLat(lat: Double?): Boolean =
+    fun isValidLat(lat: Double?): Boolean =
         lat != null && lat.isFinite() && !lat.isNaN() && lat != 0.0 && lat >= -90.0 && lat <= 90.0
 
-    private fun isValidLng(lng: Double?): Boolean =
+    fun isValidLng(lng: Double?): Boolean =
         lng != null && lng.isFinite() && !lng.isNaN() && lng != 0.0 && lng >= -180.0 && lng <= 180.0
 
     private fun isValidPositiveNumber(n: Double?): Boolean =
@@ -129,8 +129,15 @@ object OfferPayloadValidator {
                 ?: json.optString("store_address").takeIf { it.isNotBlank() }
                 ?: "Merchant Hub"
 
-            val merchantLat = json.optDoubleOrNull("merchantLat") ?: json.optDoubleOrNull("merchant_lat") ?: json.optDoubleOrNull("storeLat") ?: 0.0
-            val merchantLng = json.optDoubleOrNull("merchantLng") ?: json.optDoubleOrNull("merchant_lng") ?: json.optDoubleOrNull("storeLng") ?: 0.0
+            val hasMerchantLat = json.has("merchantLat") || json.has("merchant_lat") || json.has("storeLat") || json.has("store_lat")
+            val rawMerchantLat = json.optDoubleOrNull("merchantLat") ?: json.optDoubleOrNull("merchant_lat") ?: json.optDoubleOrNull("storeLat") ?: json.optDoubleOrNull("store_lat")
+            val rawMerchantLng = json.optDoubleOrNull("merchantLng") ?: json.optDoubleOrNull("merchant_lng") ?: json.optDoubleOrNull("storeLng") ?: json.optDoubleOrNull("store_lng")
+
+            if (hasMerchantLat && (!isValidLat(rawMerchantLat) || !isValidLng(rawMerchantLng))) {
+                return logReject("Missing or invalid merchant coordinates (merchantLat=$rawMerchantLat, merchantLng=$rawMerchantLng)")
+            }
+            val merchantLat = rawMerchantLat?.takeIf { isValidLat(it) } ?: 0.0
+            val merchantLng = rawMerchantLng?.takeIf { isValidLng(it) } ?: 0.0
 
             val offerStatus = json.optString("status", "CREATED")
             val isAccepted = isPostAcceptanceOfferStatus(offerStatus)
@@ -145,17 +152,37 @@ object OfferPayloadValidator {
                 ?: json.optString("delivery_address").takeIf { it.isNotBlank() }
                 ?: "Delivery Address"
 
-            val rawCustomerLat = json.optDoubleOrNull("customerLat") ?: json.optDoubleOrNull("customer_lat") ?: json.optDoubleOrNull("destLat") ?: 0.0
-            val rawCustomerLng = json.optDoubleOrNull("customerLng") ?: json.optDoubleOrNull("destLng") ?: 0.0
+            val rawCustomerLat = json.optDoubleOrNull("customerLat")
+                ?: json.optDoubleOrNull("customer_lat")
+                ?: json.optDoubleOrNull("destLat")
+                ?: json.optDoubleOrNull("dest_lat")
+            val rawCustomerLng = json.optDoubleOrNull("customerLng")
+                ?: json.optDoubleOrNull("destLng")
+                ?: json.optDoubleOrNull("dest_lng")
 
             val localityHint = json.optString("locality").takeIf { it.isNotBlank() }
                 ?: json.optString("dropLocality").takeIf { it.isNotBlank() }
                 ?: json.optString("customerLocality").takeIf { it.isNotBlank() }
 
-            val customerName = if (isAccepted) rawCustomerName else "Customer"
-            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
-            val customerLat = if (isAccepted) rawCustomerLat else 0.0
-            val customerLng = if (isAccepted) rawCustomerLng else 0.0
+            val customerName: String
+            val customerAddress: String
+            val customerLat: Double
+            val customerLng: Double
+
+            if (isAccepted) {
+                if (!isValidLat(rawCustomerLat) || !isValidLng(rawCustomerLng)) {
+                    return logReject("Missing or invalid customer coordinates for accepted offer (customerLat=$rawCustomerLat, customerLng=$rawCustomerLng)")
+                }
+                customerName = rawCustomerName
+                customerAddress = rawCustomerAddress
+                customerLat = rawCustomerLat!!
+                customerLng = rawCustomerLng!!
+            } else {
+                customerName = "Customer"
+                customerAddress = extractCoarseLocality(rawCustomerAddress, localityHint)
+                customerLat = 0.0
+                customerLng = 0.0
+            }
 
             val isCodRaw = if (json.has("isCod")) json.optBoolean("isCod") else if (json.has("is_cod")) json.optBoolean("is_cod") else null
             if (isCodRaw != true) {
@@ -319,8 +346,15 @@ object OfferPayloadValidator {
                 ?: data["merchant_address"]?.takeIf { it.isNotBlank() }
                 ?: "Merchant Hub"
 
-            val merchantLat = data["merchantLat"]?.toDoubleOrNull() ?: 0.0
-            val merchantLng = data["merchantLng"]?.toDoubleOrNull() ?: 0.0
+            val hasMerchantLat = data.containsKey("merchantLat") || data.containsKey("merchant_lat") || data.containsKey("storeLat") || data.containsKey("store_lat")
+            val rawMerchantLat = (data["merchantLat"] ?: data["merchant_lat"] ?: data["storeLat"] ?: data["store_lat"])?.toDoubleOrNull()
+            val rawMerchantLng = (data["merchantLng"] ?: data["merchant_lng"] ?: data["storeLng"] ?: data["store_lng"])?.toDoubleOrNull()
+
+            if (hasMerchantLat && (!isValidLat(rawMerchantLat) || !isValidLng(rawMerchantLng))) {
+                return logReject("Missing or invalid merchant coordinates in FCM data (merchantLat=$rawMerchantLat, merchantLng=$rawMerchantLng)")
+            }
+            val merchantLat = rawMerchantLat?.takeIf { isValidLat(it) } ?: 0.0
+            val merchantLng = rawMerchantLng?.takeIf { isValidLng(it) } ?: 0.0
 
             val offerStatus = data["status"] ?: "CREATED"
             val isAccepted = isPostAcceptanceOfferStatus(offerStatus)
@@ -332,17 +366,32 @@ object OfferPayloadValidator {
                 ?: data["deliveryAddress"]?.takeIf { it.isNotBlank() }
                 ?: "Delivery Address"
 
-            val rawCustomerLat = data["customerLat"]?.toDoubleOrNull() ?: 0.0
-            val rawCustomerLng = data["customerLng"]?.toDoubleOrNull() ?: 0.0
+            val rawCustomerLat = (data["customerLat"] ?: data["customer_lat"] ?: data["destLat"] ?: data["dest_lat"])?.toDoubleOrNull()
+            val rawCustomerLng = (data["customerLng"] ?: data["customer_lng"] ?: data["destLng"] ?: data["dest_lng"])?.toDoubleOrNull()
 
             val localityHint = data["locality"]?.takeIf { it.isNotBlank() }
                 ?: data["dropLocality"]?.takeIf { it.isNotBlank() }
                 ?: data["customerLocality"]?.takeIf { it.isNotBlank() }
 
-            val customerName = if (isAccepted) rawCustomerName else "Customer"
-            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
-            val customerLat = if (isAccepted) rawCustomerLat else 0.0
-            val customerLng = if (isAccepted) rawCustomerLng else 0.0
+            val customerName: String
+            val customerAddress: String
+            val customerLat: Double
+            val customerLng: Double
+
+            if (isAccepted) {
+                if (!isValidLat(rawCustomerLat) || !isValidLng(rawCustomerLng)) {
+                    return logReject("Missing or invalid customer coordinates for accepted offer in FCM data (customerLat=$rawCustomerLat, customerLng=$rawCustomerLng)")
+                }
+                customerName = rawCustomerName
+                customerAddress = rawCustomerAddress
+                customerLat = rawCustomerLat!!
+                customerLng = rawCustomerLng!!
+            } else {
+                customerName = "Customer"
+                customerAddress = extractCoarseLocality(rawCustomerAddress, localityHint)
+                customerLat = 0.0
+                customerLng = 0.0
+            }
 
             val isCodRaw = (data["isCod"] ?: data["is_cod"])?.trim()
             if (isCodRaw == null || !isCodRaw.equals("true", ignoreCase = true)) {

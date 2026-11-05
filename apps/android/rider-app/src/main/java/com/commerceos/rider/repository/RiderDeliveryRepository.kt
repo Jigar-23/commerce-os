@@ -408,6 +408,9 @@ class RiderDeliveryRepository(
     }
 
     suspend fun acceptOffer(offerId: String, fallbackOffer: ServerOffer? = null): Result<ServerDeliverySession> = withContext(Dispatchers.IO) {
+        if (fallbackOffer != null && (!com.commerceos.rider.model.OfferPayloadValidator.isValidLat(fallbackOffer.merchantLat) || !com.commerceos.rider.model.OfferPayloadValidator.isValidLng(fallbackOffer.merchantLng))) {
+            return@withContext Result.failure(Exception("Cannot accept offer: valid merchant coordinates are required before accepting any offer"))
+        }
         try {
             val urlsToTry = mutableListOf<String>()
             val primary = baseUrlProvider().trimEnd('/')
@@ -1060,10 +1063,10 @@ class RiderDeliveryRepository(
         val deliveryId = json.optStringFirst("deliveryId", "delivery_id", "id").ifEmpty { "del_active" }
         val orderId = json.optStringFirst("orderId", "order_id").ifEmpty { "ord_active" }
 
-        val cLat = json.optDoubleOrNull("customerLat", "customer_lat", "destLat", "dest_lat")?.takeIf { !it.isNaN() && it != 0.0 }
-        val cLng = json.optDoubleOrNull("customerLng", "customer_lng", "destLng", "dest_lng")?.takeIf { !it.isNaN() && it != 0.0 }
-        val mLat = json.optDoubleOrNull("merchantLat", "merchant_lat", "storeLat", "store_lat")?.takeIf { !it.isNaN() && it != 0.0 }
-        val mLng = json.optDoubleOrNull("merchantLng", "merchant_lng", "storeLng", "store_lng")?.takeIf { !it.isNaN() && it != 0.0 }
+        val cLat = json.optDoubleOrNull("customerLat", "customer_lat", "destLat", "dest_lat")?.takeIf { com.commerceos.rider.model.OfferPayloadValidator.isValidLat(it) }
+        val cLng = json.optDoubleOrNull("customerLng", "customer_lng", "destLng", "dest_lng")?.takeIf { com.commerceos.rider.model.OfferPayloadValidator.isValidLng(it) }
+        val mLat = json.optDoubleOrNull("merchantLat", "merchant_lat", "storeLat", "store_lat")?.takeIf { com.commerceos.rider.model.OfferPayloadValidator.isValidLat(it) }
+        val mLng = json.optDoubleOrNull("merchantLng", "merchant_lng", "storeLng", "store_lng")?.takeIf { com.commerceos.rider.model.OfferPayloadValidator.isValidLng(it) }
         val isCod = json.optBoolean("isCod", json.optBoolean("is_cod", false))
 
         return ServerDeliverySession(
