@@ -2678,4 +2678,71 @@ class KodexAuditBatch1RegressionTest {
         assertEquals(1, cleanedCount)
         assertFalse(testFile.exists())
     }
+
+    @Test
+    fun testLocalPrescriptionManager_draft_refusesOverwriteOnDecryptError() {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = object : com.commerceos.android.session.SecureCredentialStore(null) {
+            val data = mutableMapOf<String, String>()
+            var failDecrypt = false
+            override fun save(alias: String, value: String): Boolean {
+                data[alias] = value
+                return true
+            }
+            override fun read(alias: String): String? = data[alias]
+            override fun readWithResult(alias: String): com.commerceos.android.session.SecureCredentialStore.SecureReadResult {
+                if (failDecrypt) {
+                    return com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError(
+                        java.security.GeneralSecurityException("Keystore key corrupted")
+                    )
+                }
+                val v = data[alias]
+                return if (v != null) com.commerceos.android.session.SecureCredentialStore.SecureReadResult.Success(v) else com.commerceos.android.session.SecureCredentialStore.SecureReadResult.NotFound
+            }
+            override fun clear(alias: String): Boolean {
+                data.remove(alias)
+                return true
+            }
+            override fun deleteKeyAndValue(alias: String): Boolean {
+                data.remove(alias)
+                return true
+            }
+        }
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        // Normal save and get
+        val draft1 = com.commerceos.android.data.local.LocalPrescriptionManager.PrescriptionDraft(
+            patientName = "Original Patient",
+            attachmentPath = "/path/to/rx.jpg",
+            attachmentName = "rx.jpg"
+        )
+        val save1 = com.commerceos.android.data.local.LocalPrescriptionManager.saveDraft(fakeContext, "cust_draft_1", draft1)
+        assertTrue(save1)
+
+        val res1 = com.commerceos.android.data.local.LocalPrescriptionManager.getDraftWithResult(fakeContext, "cust_draft_1")
+        assertTrue(res1 is com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.Found)
+        assertEquals("Original Patient", (res1 as com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.Found).draft.patientName)
+
+        // Simulate DecryptError
+        fakeSecureStore.failDecrypt = true
+
+        val resError = com.commerceos.android.data.local.LocalPrescriptionManager.getDraftWithResult(fakeContext, "cust_draft_1")
+        assertTrue(resError is com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.StorageError)
+
+        // Attempting to save an empty/replacement draft must be refused
+        val draftReplacement = com.commerceos.android.data.local.LocalPrescriptionManager.PrescriptionDraft(
+            patientName = "",
+            attachmentPath = null,
+            attachmentName = null
+        )
+        val saveBlocked = com.commerceos.android.data.local.LocalPrescriptionManager.saveDraft(fakeContext, "cust_draft_1", draftReplacement)
+        assertFalse("saveDraft must refuse overwrite on DecryptError", saveBlocked)
+
+        // Verify existing ciphertext was not replaced
+        fakeSecureStore.failDecrypt = false
+        val resRecovered = com.commerceos.android.data.local.LocalPrescriptionManager.getDraftWithResult(fakeContext, "cust_draft_1")
+        assertTrue(resRecovered is com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.Found)
+        assertEquals("Original Patient", (resRecovered as com.commerceos.android.data.local.LocalPrescriptionManager.DraftResult.Found).draft.patientName)
+    }
 }

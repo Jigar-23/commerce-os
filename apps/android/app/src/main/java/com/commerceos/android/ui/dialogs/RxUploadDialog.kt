@@ -51,6 +51,7 @@ fun RxUploadDialog(
     var cameraError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
     var uploadError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
     var draftError by rememberSaveable(customerId) { mutableStateOf<String?>(null) }
+    var hasDraftStorageError by rememberSaveable(customerId) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
@@ -63,24 +64,37 @@ fun RxUploadDialog(
         cameraError = null
         uploadError = null
         draftError = null
-        val draft = kotlinx.coroutines.withContext(Dispatchers.IO) {
-            LocalPrescriptionManager.getDraft(context, customerId)
+        hasDraftStorageError = false
+        val draftResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            LocalPrescriptionManager.getDraftWithResult(context, customerId)
         }
-        if (draft != null) {
-            if (draft.patientName.isNotBlank()) {
-                patientName = draft.patientName
-            }
-            if (!draft.attachmentPath.isNullOrBlank()) {
-                val file = File(draft.attachmentPath)
-                if (file.exists() && file.length() > 0) {
-                    attachment = draft.attachmentPath
-                    attachmentName = draft.attachmentName ?: file.name
+        when (draftResult) {
+            is LocalPrescriptionManager.DraftResult.Found -> {
+                val draft = draftResult.draft
+                if (draft.patientName.isNotBlank()) {
+                    patientName = draft.patientName
+                }
+                if (!draft.attachmentPath.isNullOrBlank()) {
+                    val file = File(draft.attachmentPath)
+                    if (file.exists() && file.length() > 0) {
+                        attachment = draft.attachmentPath
+                        attachmentName = draft.attachmentName ?: file.name
+                    }
                 }
             }
+            is LocalPrescriptionManager.DraftResult.StorageError -> {
+                hasDraftStorageError = true
+                draftError = "Secure storage error: saved draft could not be decrypted. Editing is disabled to protect saved prescription data."
+            }
+            is LocalPrescriptionManager.DraftResult.None -> Unit
         }
     }
 
     fun persistDraftDebounced(name: String, path: String?, fileName: String?, debounceMs: Long = 300L) {
+        if (hasDraftStorageError) {
+            draftError = "Cannot save draft: existing encrypted draft is unreadable. Overwrite prevented."
+            return
+        }
         draftJob?.cancel()
         val appContext = context.applicationContext
         draftJob = coroutineScope.launch(Dispatchers.IO) {
@@ -180,6 +194,13 @@ fun RxUploadDialog(
         if (busy || isDismissing) return
         isDismissing = true
         draftJob?.cancel()
+        if (hasDraftStorageError) {
+            try {
+                tempCameraFile?.delete()
+            } catch (_: Exception) {}
+            onDismiss()
+            return
+        }
         val appContext = context.applicationContext
         coroutineScope.launch {
             val ok = withContext(Dispatchers.IO) {
@@ -276,7 +297,9 @@ fun RxUploadDialog(
                             )
                             IconButton(
                                 onClick = {
-                                    draftError = null
+                                    if (!hasDraftStorageError) {
+                                        draftError = null
+                                    }
                                     cameraError = null
                                 },
                                 modifier = Modifier.size(24.dp)
@@ -303,8 +326,10 @@ fun RxUploadDialog(
                 OutlinedTextField(
                     value = patientName,
                     onValueChange = {
-                        patientName = it
-                        persistDraftDebounced(it, attachment, attachmentName, 300L)
+                        if (!hasDraftStorageError) {
+                            patientName = it
+                            persistDraftDebounced(it, attachment, attachmentName, 300L)
+                        }
                     },
                     placeholder = { Text("e.g. Self, Family Member", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
                     modifier = Modifier.fillMaxWidth(),
@@ -314,7 +339,7 @@ fun RxUploadDialog(
                         unfocusedBorderColor = Color(0xFFE2E8F0)
                     ),
                     singleLine = true,
-                    enabled = !busy
+                    enabled = !busy && !hasDraftStorageError
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -340,7 +365,7 @@ fun RxUploadDialog(
                             border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable(enabled = !busy) { launchCameraFlow() }
+                                .clickable(enabled = !busy && !hasDraftStorageError) { launchCameraFlow() }
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
@@ -384,7 +409,7 @@ fun RxUploadDialog(
                             border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable(enabled = !busy) { pickGalleryImage.launch("image/*") }
+                                .clickable(enabled = !busy && !hasDraftStorageError) { pickGalleryImage.launch("image/*") }
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),

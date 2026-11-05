@@ -676,10 +676,48 @@ object LocalPrescriptionManager {
         return "rx_draft_$safeId"
     }
 
+    sealed interface DraftResult {
+        data class Found(val draft: PrescriptionDraft) : DraftResult
+        object None : DraftResult
+        data class StorageError(val cause: Throwable) : DraftResult
+    }
+
+    fun getDraftWithResult(context: Context, customerId: String): DraftResult {
+        return try {
+            val key = customerDraftKey(customerId)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            when (val res = secureStore.readWithResult(key)) {
+                is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.Success -> {
+                    val draft = gson.fromJson(res.value, PrescriptionDraft::class.java)
+                    if (draft != null) DraftResult.Found(draft) else DraftResult.None
+                }
+                is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError -> {
+                    Log.e(TAG, "Decryption error reading draft for key=$key", res.cause)
+                    DraftResult.StorageError(res.cause)
+                }
+                is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.NotFound -> DraftResult.None
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read prescription draft", e)
+            DraftResult.StorageError(e)
+        }
+    }
+
+    fun getDraftWithResult(context: Context): DraftResult {
+        return getDraftWithResult(context, "default_user")
+    }
+
     fun saveDraft(context: Context, customerId: String, draft: PrescriptionDraft): Boolean {
         return try {
             val key = customerDraftKey(customerId)
             val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            when (secureStore.readWithResult(key)) {
+                is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError -> {
+                    Log.e(TAG, "Existing prescription draft ciphertext could not be decrypted; refusing overwrite to prevent data loss")
+                    return false
+                }
+                else -> Unit
+            }
             secureStore.save(key, gson.toJson(draft))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to persist prescription draft", e)
@@ -692,14 +730,10 @@ object LocalPrescriptionManager {
     }
 
     fun getDraft(context: Context, customerId: String): PrescriptionDraft? {
-        return try {
-            val key = customerDraftKey(customerId)
-            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
-            val json = secureStore.read(key) ?: return null
-            gson.fromJson(json, PrescriptionDraft::class.java)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to read prescription draft", e)
-            null
+        return when (val res = getDraftWithResult(context, customerId)) {
+            is DraftResult.Found -> res.draft
+            is DraftResult.None -> null
+            is DraftResult.StorageError -> throw IllegalStateException("Failed to decrypt prescription draft", res.cause)
         }
     }
 
