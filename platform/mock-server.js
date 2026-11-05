@@ -546,31 +546,53 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 }
 
 function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  const isDetailedSegment = (segment) => {
+    const s = String(segment || '').trim();
+    if (!s) return true;
+    // House / building / unit keyword indicators
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\b/i.test(s)) {
+      return true;
+    }
+    // Numbered unit indicators e.g. B-204, 204-B, A-12, #104, 404, 12/4, 102B
+    if (/^[#a-z]?[-/ ]?\d+[a-z\d]*$/i.test(s) || /^\d+[-/ ][a-z\d]+$/i.test(s)) {
+      return true;
+    }
+    return false;
+  };
+
+  const candidates = [];
   if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
-    if (loc && typeof loc === 'string' && loc.trim()) {
-      return loc.trim();
+    if (deliveryAddrObj.locality) candidates.push(deliveryAddrObj.locality);
+    if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
+    if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
+  }
+  if (typeof rawAddr === 'string' && rawAddr.trim()) {
+    const trimmed = rawAddr.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.locality) candidates.push(obj.locality);
+        if (obj.area) candidates.push(obj.area);
+        if (obj.city) candidates.push(obj.city);
+      } catch (_) {}
+    } else {
+      candidates.push(trimmed);
     }
   }
-  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
-  const trimmed = rawAddr.trim();
-  if (trimmed.startsWith('{')) {
-    try {
-      const obj = JSON.parse(trimmed);
-      return obj.locality || obj.area || obj.city || 'Delivery Area';
-    } catch (_) {}
+
+  const validTokens = [];
+  for (const cand of candidates) {
+    if (typeof cand !== 'string') continue;
+    const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
+    for (const p of parts) {
+      if (!isDetailedSegment(p) && !validTokens.includes(p)) {
+        validTokens.push(p);
+      }
+    }
   }
-  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
-  if (parts.length === 0) return 'Delivery Area';
 
-  const nonDetailedParts = parts.filter(p => {
-    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
-    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
-    return true;
-  });
-
-  if (nonDetailedParts.length > 0) {
-    return nonDetailedParts.slice(-2).join(', ');
+  if (validTokens.length > 0) {
+    return validTokens.slice(-2).join(', ');
   }
   return 'Delivery Area';
 }
@@ -6948,17 +6970,50 @@ async function handleRequest(port, req, res) {
         if (!authClaims || (!authClaims.sub && !authClaims.subject)) {
           return json(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is strictly required to access active offers.' });
         }
+
+        const role = String(authClaims.role || '').toUpperCase();
+        const roles = Array.isArray(authClaims.roles) ? authClaims.roles.map(r => String(r).toUpperCase()) : [];
+        const isRiderRole = role === 'ROLE_RIDER' || role === 'RIDER' || roles.includes('ROLE_RIDER') || roles.includes('RIDER') || authClaims.scope?.includes('rider');
+        const isAdminRole = role === 'ROLE_ADMIN' || role === 'ADMIN' || roles.includes('ROLE_ADMIN') || roles.includes('ADMIN');
+
+        if (!isRiderRole && !isAdminRole) {
+          return json(res, 403, { error: 'FORBIDDEN', message: 'Only active registered riders can view active offers.' });
+        }
+
         const riderId = authClaims.sub || authClaims.subject;
-        const riderStoreId = authClaims.storeId || authClaims.store_id || null;
+        let riderStoreId = authClaims.storeId || authClaims.store_id || null;
         const now = Date.now();
+
+        if (productionPgPool && !isAdminRole) {
+          try {
+            const rdrCheck = await productionPgPool.query(
+              `SELECT id, rider_id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+              [riderId]
+            );
+            if (rdrCheck.rows.length === 0 || rdrCheck.rows[0].status !== 'ACTIVE') {
+              return json(res, 403, { error: 'FORBIDDEN', message: 'Active rider account is required.' });
+            }
+            riderStoreId = rdrCheck.rows[0].store_id;
+          } catch (_) {}
+        } else if (db.riders && !isAdminRole) {
+          const riderAccount = Array.isArray(db.riders)
+            ? db.riders.find((r) => r.id === riderId || r.riderId === riderId)
+            : db.riders[riderId];
+          if (riderAccount) {
+            if (riderAccount.status && riderAccount.status !== 'ACTIVE' && riderAccount.status !== 'ONLINE') {
+              return json(res, 403, { error: 'FORBIDDEN', message: 'Active rider account is required.' });
+            }
+            riderStoreId = riderAccount.storeId || riderAccount.store_id || riderStoreId;
+          }
+        }
 
         if (productionPgPool) {
           try {
-            let offRes = await productionPgPool.query(
+            const offRes = await productionPgPool.query(
               `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
                FROM offers o
                JOIN orders ord ON ord.order_id = o.order_id
-               WHERE (o.rider_id = $1 OR (o.is_broadcast = TRUE AND ($2::text IS NULL OR ord.store_id = $2)) OR o.rider_id = 'all' OR o.rider_id = 'broadcast')
+               WHERE (o.rider_id = $1 OR ((o.is_broadcast = TRUE OR o.rider_id = 'all' OR o.rider_id = 'broadcast') AND ord.store_id = $2 AND $2::text IS NOT NULL))
                  AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
                  AND (ord.seller_approval_status = 'ACCEPTED' OR ord.seller_approval_status = 'AUTO_ACCEPTED')
                  AND ord.status IN ('SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED')
@@ -6966,20 +7021,6 @@ async function handleRequest(port, req, res) {
                ORDER BY o.created_at DESC LIMIT 5`,
               [riderId, riderStoreId]
             );
-            if (offRes.rows.length === 0 && riderStoreId) {
-              offRes = await productionPgPool.query(
-                `SELECT o.*, ord.status AS order_status, ord.delivery_address, ord.items, ord.total_amount
-                 FROM offers o
-                 JOIN orders ord ON ord.order_id = o.order_id
-                 WHERE (o.rider_id = $1 OR (o.is_broadcast = TRUE AND ord.store_id = $2) OR o.rider_id = 'all' OR o.rider_id = 'broadcast')
-                   AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
-                   AND (ord.seller_approval_status = 'ACCEPTED' OR ord.seller_approval_status = 'AUTO_ACCEPTED')
-                   AND ord.status IN ('SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED')
-                   AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
-                 ORDER BY o.created_at DESC LIMIT 5`,
-                [riderId, riderStoreId]
-              );
-            }
             if (offRes.rows.length > 0) {
               const mappedList = offRes.rows.map(o => {
                 const addr = (typeof o.delivery_address === 'string' ? JSON.parse(o.delivery_address) : o.delivery_address) || {};
@@ -7052,7 +7093,7 @@ async function handleRequest(port, req, res) {
 
         if (appRepositories && appRepositories.offerRepo) {
           try {
-            const dbOffers = await appRepositories.offerRepo.getActiveOffersForRider(riderId);
+            const dbOffers = await appRepositories.offerRepo.getActiveOffersForRider(riderId, riderStoreId);
             if (dbOffers && dbOffers.length > 0) {
               const o = dbOffers[0];
               const expMs = Number(o.offer_expires_at || o.offerExpiresAt) || (now + 1800000);
@@ -7112,7 +7153,11 @@ async function handleRequest(port, req, res) {
             const ord = findOrder(o.orderId);
             const isApproved = !ord || ord.sellerApprovalStatus === 'ACCEPTED' || ord.sellerApprovalStatus === 'AUTO_ACCEPTED';
             const isValidStatus = !ord || ['SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED'].includes(ord.status || ord.orderStatus);
-            return (o.riderId === riderId || !o.riderId || o.broadcast === true) &&
+            const isAssigned = o.riderId === riderId;
+            const offerStore = (ord && ord.storeId) || o.storeId;
+            const isStoreBroadcast = (o.broadcast === true || !o.riderId || o.riderId === 'broadcast' || o.riderId === 'all') &&
+                                     Boolean(riderStoreId) && Boolean(offerStore) && String(offerStore) === String(riderStoreId);
+            return (isAssigned || isStoreBroadcast) &&
                    ['CREATED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED'].includes(o.status) &&
                    (!o.offerExpiresAt || o.offerExpiresAt > now) &&
                    isApproved && isValidStatus;

@@ -77,31 +77,53 @@ class DeliveryOtpService {
 }
 
 function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  const isDetailedSegment = (segment) => {
+    const s = String(segment || '').trim();
+    if (!s) return true;
+    // House / building / unit keyword indicators
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\b/i.test(s)) {
+      return true;
+    }
+    // Numbered unit indicators e.g. B-204, 204-B, A-12, #104, 404, 12/4, 102B
+    if (/^[#a-z]?[-/ ]?\d+[a-z\d]*$/i.test(s) || /^\d+[-/ ][a-z\d]+$/i.test(s)) {
+      return true;
+    }
+    return false;
+  };
+
+  const candidates = [];
   if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
-    if (loc && typeof loc === 'string' && loc.trim()) {
-      return loc.trim();
+    if (deliveryAddrObj.locality) candidates.push(deliveryAddrObj.locality);
+    if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
+    if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
+  }
+  if (typeof rawAddr === 'string' && rawAddr.trim()) {
+    const trimmed = rawAddr.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.locality) candidates.push(obj.locality);
+        if (obj.area) candidates.push(obj.area);
+        if (obj.city) candidates.push(obj.city);
+      } catch (_) {}
+    } else {
+      candidates.push(trimmed);
     }
   }
-  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
-  const trimmed = rawAddr.trim();
-  if (trimmed.startsWith('{')) {
-    try {
-      const obj = JSON.parse(trimmed);
-      return obj.locality || obj.area || obj.city || 'Delivery Area';
-    } catch (_) {}
+
+  const validTokens = [];
+  for (const cand of candidates) {
+    if (typeof cand !== 'string') continue;
+    const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
+    for (const p of parts) {
+      if (!isDetailedSegment(p) && !validTokens.includes(p)) {
+        validTokens.push(p);
+      }
+    }
   }
-  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
-  if (parts.length === 0) return 'Delivery Area';
 
-  const nonDetailedParts = parts.filter(p => {
-    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
-    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
-    return true;
-  });
-
-  if (nonDetailedParts.length > 0) {
-    return nonDetailedParts.slice(-2).join(', ');
+  if (validTokens.length > 0) {
+    return validTokens.slice(-2).join(', ');
   }
   return 'Delivery Area';
 }
@@ -2304,8 +2326,17 @@ class TransactionalOfferRepository {
     };
   }
 
-  async getActiveOffersForRider(riderId) {
+  async getActiveOffersForRider(riderId, storeId = null) {
     if (!this.pool || !riderId) return [];
+    let riderStoreId = storeId;
+    if (!riderStoreId) {
+      try {
+        const rdr = await this.pool.query('SELECT store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1', [riderId]);
+        if (rdr.rows.length > 0) {
+          riderStoreId = rdr.rows[0].store_id;
+        }
+      } catch (_) {}
+    }
     let res = await this.pool.query(
       `SELECT o.*,
               ds.merchant_name, ds.merchant_address, ds.merchant_lat, ds.merchant_lng,
@@ -2315,15 +2346,15 @@ class TransactionalOfferRepository {
        FROM offers o
        LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
        LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
-       WHERE (o.rider_id = $1 OR o.rider_id IS NULL OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE)
+       WHERE (o.rider_id = $1 OR ((o.rider_id IS NULL OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE) AND $2::text IS NOT NULL AND (ord.store_id = $2 OR ds.store_id = $2)))
          AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
          AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000) OR o.created_at >= NOW() - INTERVAL '60 minutes')
        ORDER BY o.created_at DESC`,
-      [riderId]
+      [riderId, riderStoreId]
     );
 
-    // Resilient Fallback: If no direct offer exists specifically for $riderId, check for any active pending dispatch offer in the system
-    if (res.rows.length === 0) {
+    // Resilient Fallback: If no direct offer exists specifically for $riderId, check for any active pending dispatch offer in the rider's store
+    if (res.rows.length === 0 && riderStoreId) {
       const fallbackRes = await this.pool.query(
         `SELECT o.*,
                 ds.merchant_name, ds.merchant_address, ds.merchant_lat, ds.merchant_lng,
@@ -2333,7 +2364,8 @@ class TransactionalOfferRepository {
          FROM offers o
          LEFT JOIN delivery_sessions ds ON (ds.delivery_id = o.delivery_id OR ds.order_id = o.order_id)
          LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
-         WHERE o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
+         WHERE (o.rider_id = $1 OR ((o.rider_id IS NULL OR o.rider_id = 'all' OR o.rider_id = 'broadcast' OR o.is_broadcast = TRUE) AND (ord.store_id = $2 OR ds.store_id = $2)))
+           AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DISPLAYED')
            AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000) OR o.created_at >= NOW() - INTERVAL '60 minutes')
            AND NOT EXISTS (
              SELECT 1 FROM delivery_sessions active_ds
@@ -2342,13 +2374,15 @@ class TransactionalOfferRepository {
            )
          ORDER BY o.created_at DESC
          LIMIT 1`,
-        [riderId]
+        [riderId, riderStoreId]
       );
       if (fallbackRes.rows.length > 0) {
         res = fallbackRes;
       }
     }
     return res.rows.map(r => {
+      const isAssigned = (r.rider_id === riderId);
+      const coarseLocality = extractCoarseLocality(r.customer_address || '');
       const items = typeof r.order_items === 'string' ? JSON.parse(r.order_items) : (r.order_items || []);
       const orderStatus = (r.order_status && r.order_status !== 'PLACED' && r.order_status !== 'PENDING') ? r.order_status : 'READY_FOR_PICKUP';
       return {
@@ -2372,11 +2406,11 @@ class TransactionalOfferRepository {
         merchantAddress: r.merchant_address || '',
         merchantLat: Number(r.merchant_lat) || 0.0,
         merchantLng: Number(r.merchant_lng) || 0.0,
-        customerName: r.customer_name || '',
-        customerPhone: r.customer_phone || '',
-        customerAddress: r.customer_address || '',
-        customerLat: Number(r.customer_lat) || 0.0,
-        customerLng: Number(r.customer_lng) || 0.0,
+        customerName: isAssigned ? (r.customer_name || 'Customer') : 'Customer',
+        customerPhone: isAssigned ? (r.customer_phone || '') : '',
+        customerAddress: isAssigned ? (r.customer_address || '') : coarseLocality,
+        customerLat: isAssigned ? (Number(r.customer_lat) || null) : null,
+        customerLng: isAssigned ? (Number(r.customer_lng) || null) : null,
         isCod: Boolean(r.is_cod),
         codAmount: Number(r.cod_amount || 0),
         orderTotal: Number(r.order_total || 0),
@@ -8423,5 +8457,6 @@ module.exports = {
   OutboxProcessor,
   createProductionRepositories,
   createLocalDevelopmentRepositories,
-  initApplicationRepositories
+  initApplicationRepositories,
+  extractCoarseLocality
 };

@@ -112,8 +112,18 @@ class RiderSessionManager private constructor(context: Context) {
 
     fun reconcileStoreTopic(newStoreId: String?, isOnline: Boolean) {
         val oldStore = getStoreId().trim()
-        val newStore = newStoreId?.trim() ?: ""
-        if (newStore.isNotBlank() && newStore != oldStore) {
+        val newStore = if (newStoreId.equals("null", ignoreCase = true)) "" else (newStoreId?.trim() ?: "")
+
+        if (newStore.isBlank()) {
+            // Rider is unassigned or store assignment was removed: clear saved store and unsubscribe
+            saveStoreId("")
+            if (oldStore.isNotBlank()) {
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
+                } catch (_: Exception) {}
+            }
+        } else if (newStore != oldStore) {
+            // Store changed to a new store
             saveStoreId(newStore)
             if (oldStore.isNotBlank()) {
                 try {
@@ -125,9 +135,16 @@ class RiderSessionManager private constructor(context: Context) {
                     com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
                 } catch (_: Exception) {}
             }
-        } else if (newStore.isNotBlank()) {
+        } else {
+            // Store confirmed unchanged
             saveStoreId(newStore)
+            if (isOnline) {
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
+                } catch (_: Exception) {}
+            }
         }
+
         try {
             com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
         } catch (_: Exception) {}

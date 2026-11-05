@@ -42,31 +42,53 @@ function normalizeApnsToken(rawToken) {
 }
 
 function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  const isDetailedSegment = (segment) => {
+    const s = String(segment || '').trim();
+    if (!s) return true;
+    // House / building / unit keyword indicators
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\b/i.test(s)) {
+      return true;
+    }
+    // Numbered unit indicators e.g. B-204, 204-B, A-12, #104, 404, 12/4, 102B
+    if (/^[#a-z]?[-/ ]?\d+[a-z\d]*$/i.test(s) || /^\d+[-/ ][a-z\d]+$/i.test(s)) {
+      return true;
+    }
+    return false;
+  };
+
+  const candidates = [];
   if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
-    if (loc && typeof loc === 'string' && loc.trim()) {
-      return loc.trim();
+    if (deliveryAddrObj.locality) candidates.push(deliveryAddrObj.locality);
+    if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
+    if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
+  }
+  if (typeof rawAddr === 'string' && rawAddr.trim()) {
+    const trimmed = rawAddr.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.locality) candidates.push(obj.locality);
+        if (obj.area) candidates.push(obj.area);
+        if (obj.city) candidates.push(obj.city);
+      } catch (_) {}
+    } else {
+      candidates.push(trimmed);
     }
   }
-  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
-  const trimmed = rawAddr.trim();
-  if (trimmed.startsWith('{')) {
-    try {
-      const obj = JSON.parse(trimmed);
-      return obj.locality || obj.area || obj.city || 'Delivery Area';
-    } catch (_) {}
+
+  const validTokens = [];
+  for (const cand of candidates) {
+    if (typeof cand !== 'string') continue;
+    const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
+    for (const p of parts) {
+      if (!isDetailedSegment(p) && !validTokens.includes(p)) {
+        validTokens.push(p);
+      }
+    }
   }
-  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
-  if (parts.length === 0) return 'Delivery Area';
 
-  const nonDetailedParts = parts.filter(p => {
-    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
-    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
-    return true;
-  });
-
-  if (nonDetailedParts.length > 0) {
-    return nonDetailedParts.slice(-2).join(', ');
+  if (validTokens.length > 0) {
+    return validTokens.slice(-2).join(', ');
   }
   return 'Delivery Area';
 }
@@ -602,5 +624,6 @@ module.exports = {
   ApnsDispatcher,
   ApnsDeliveryResult,
   normalizeApnsToken,
+  extractCoarseLocality,
   APNS_MAX_PAYLOAD_BYTES
 };
