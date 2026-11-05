@@ -7,5 +7,4 @@ interface CartMutationGate {
     fun lockMutations()
     fun unlockMutations()
     suspend fun awaitMutationsIdle(): List<CartItem>
-    fun getSettledCartItems(): List<CartItem> = emptyList()
 }

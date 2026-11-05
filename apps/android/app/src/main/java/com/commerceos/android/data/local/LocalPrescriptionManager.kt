@@ -31,6 +31,13 @@ object LocalPrescriptionManager {
         return customerId.replace(Regex("[^a-zA-Z0-9_]"), "_").ifBlank { "default_user" }
     }
 
+    private fun customerStorageKey(customerId: String): String {
+        val exactRaw = customerId.trim().ifBlank { "default_user" }
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = md.digest(exactRaw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        return KEY_PREFIX + hash
+    }
+
     fun getPrescriptionsDir(context: Context): File {
         val dir = File(context.filesDir, PRESCRIPTIONS_DIR)
         if (!dir.exists()) {
@@ -121,9 +128,9 @@ object LocalPrescriptionManager {
      * Enforces customer partition boundary so records from other accounts are never leaked.
      */
     fun getAllPrescriptions(context: Context, customerId: String = ""): List<Prescription> {
-        val safeId = sanitizeCustomerId(customerId)
-        if (safeId.isBlank()) return emptyList()
-        return getPrescriptions(context, safeId)
+        val exactRaw = customerId.trim()
+        if (exactRaw.isBlank()) return emptyList()
+        return getPrescriptions(context, exactRaw)
     }
 
     /**
@@ -131,30 +138,74 @@ object LocalPrescriptionManager {
      */
     fun getPrescriptions(context: Context, customerId: String): List<Prescription> {
         return try {
-            val safeId = sanitizeCustomerId(customerId)
-            if (safeId.isBlank()) return emptyList()
+            val exactRaw = customerId.trim()
+            if (exactRaw.isBlank()) return emptyList()
 
-            // Try reading encrypted storage first via SecureCredentialStore
+            val storageKey = customerStorageKey(exactRaw)
             val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
-            val json = secureStore.read(KEY_PREFIX + safeId)
-                ?: run {
-                    // Fallback / migration from legacy plaintext prefs
-                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    prefs.getString(KEY_PREFIX + safeId, null)?.also { legacyJson ->
-                        val migrated = secureStore.save(KEY_PREFIX + safeId, legacyJson)
-                        if (migrated) {
-                            prefs.edit().remove(KEY_PREFIX + safeId).commit()
+            val type = object : TypeToken<List<Prescription>>() {}.type
+
+            var json = secureStore.read(storageKey)
+
+            if (json == null) {
+                // Check old sanitized encrypted key for migration with exact-ID check
+                val oldSafeId = sanitizeCustomerId(exactRaw)
+                val oldKey = KEY_PREFIX + oldSafeId
+                if (oldKey != storageKey) {
+                    val oldJson = secureStore.read(oldKey)
+                    if (oldJson != null) {
+                        val oldList: List<Prescription> = gson.fromJson(oldJson, type) ?: emptyList()
+                        val exactMatches = oldList.filter { it.customerId == exactRaw }
+                        val remaining = oldList.filterNot { it.customerId == exactRaw }
+                        if (exactMatches.isNotEmpty()) {
+                            val migratedJson = gson.toJson(exactMatches, type)
+                            if (secureStore.save(storageKey, migratedJson)) {
+                                if (remaining.isEmpty()) {
+                                    secureStore.deleteKeyAndValue(oldKey)
+                                } else {
+                                    secureStore.save(oldKey, gson.toJson(remaining, type))
+                                }
+                                json = migratedJson
+                            }
                         }
                     }
                 }
+            }
+
+            if (json == null) {
+                // Check legacy plaintext prefs for migration with exact-ID check
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val oldSafeId = sanitizeCustomerId(exactRaw)
+                val legacyPrefKey = KEY_PREFIX + oldSafeId
+                val legacyJson = prefs.getString(legacyPrefKey, null)
+                if (legacyJson != null) {
+                    val legacyList: List<Prescription> = gson.fromJson(legacyJson, type) ?: emptyList()
+                    val exactMatches = legacyList.filter { it.customerId == exactRaw }
+                    val remaining = legacyList.filterNot { it.customerId == exactRaw }
+                    if (exactMatches.isNotEmpty()) {
+                        val migratedJson = gson.toJson(exactMatches, type)
+                        val saved = secureStore.save(storageKey, migratedJson)
+                        if (saved) {
+                            if (remaining.isEmpty()) {
+                                prefs.edit().remove(legacyPrefKey).commit()
+                            } else {
+                                prefs.edit().putString(legacyPrefKey, gson.toJson(remaining, type)).commit()
+                            }
+                            json = migratedJson
+                        } else {
+                            // Fail closed: never return plaintext fallback if secure store save fails
+                            json = null
+                        }
+                    }
+                }
+            }
 
             if (json.isNullOrBlank()) {
                 return emptyList()
             }
-            val type = object : TypeToken<List<Prescription>>() {}.type
             val list: List<Prescription> = gson.fromJson(json, type) ?: emptyList()
             list.filter { rx ->
-                (rx.customerId == customerId || rx.customerId == safeId) && run {
+                rx.customerId == exactRaw && run {
                     val firstAtt = rx.attachments.firstOrNull()
                     if (firstAtt != null && (firstAtt.startsWith("/") || firstAtt.startsWith("file:"))) {
                         val path = firstAtt.removePrefix("file://")
@@ -176,9 +227,10 @@ object LocalPrescriptionManager {
      */
     fun savePrescription(context: Context, rx: Prescription): Boolean {
         return try {
-            val safeId = sanitizeCustomerId(rx.customerId)
-            if (safeId.isBlank()) return false
-            val existing = getPrescriptions(context, rx.customerId).toMutableList()
+            val exactRaw = rx.customerId.trim()
+            if (exactRaw.isBlank()) return false
+            val storageKey = customerStorageKey(exactRaw)
+            val existing = getPrescriptions(context, exactRaw).toMutableList()
             existing.removeAll { it.id == rx.id }
             existing.add(0, rx) // Most recent first
             val type = object : TypeToken<List<Prescription>>() {}.type
@@ -186,12 +238,23 @@ object LocalPrescriptionManager {
 
             // Persist to Keystore-backed AES-GCM encrypted store
             val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
-            val saved = secureStore.save(KEY_PREFIX + safeId, json)
+            val saved = secureStore.save(storageKey, json)
 
             if (saved) {
                 // Clear any old unencrypted preference only after verified encrypted save
+                val oldSafeId = sanitizeCustomerId(exactRaw)
+                val legacyPrefKey = KEY_PREFIX + oldSafeId
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().remove(KEY_PREFIX + safeId).commit()
+                val legacyJson = prefs.getString(legacyPrefKey, null)
+                if (legacyJson != null) {
+                    val legacyList: List<Prescription> = gson.fromJson(legacyJson, type) ?: emptyList()
+                    val remaining = legacyList.filterNot { it.customerId == exactRaw }
+                    if (remaining.isEmpty()) {
+                        prefs.edit().remove(legacyPrefKey).commit()
+                    } else {
+                        prefs.edit().putString(legacyPrefKey, gson.toJson(remaining, type)).commit()
+                    }
+                }
                 true
             } else {
                 Log.e(TAG, "Failed to securely save prescription")
@@ -206,44 +269,43 @@ object LocalPrescriptionManager {
     /**
      * Removes a prescription and its associated local file from device storage.
      */
-    fun deletePrescription(context: Context, customerId: String, rxId: String) {
-        try {
-            val safeId = sanitizeCustomerId(customerId)
-            val existing = getPrescriptions(context, customerId).toMutableList()
-            val target = existing.firstOrNull { it.id == rxId }
-            if (target != null) {
+    fun deletePrescription(context: Context, customerId: String, rxId: String): Boolean {
+        return try {
+            val exactRaw = customerId.trim()
+            if (exactRaw.isBlank()) return false
+            val storageKey = customerStorageKey(exactRaw)
+            val existing = getPrescriptions(context, exactRaw).toMutableList()
+            val target = existing.firstOrNull { it.id == rxId } ?: return false
+
+            existing.removeAll { it.id == rxId }
+            val type = object : TypeToken<List<Prescription>>() {}.type
+            val json = gson.toJson(existing, type)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            val saved = secureStore.save(storageKey, json)
+
+            if (saved) {
+                // Only delete attachment files AFTER metadata save succeeds
+                // Constrain file deletion to the prescriptions directory
+                val rxDirCanonical = getPrescriptionsDir(context).canonicalPath
                 target.attachments.forEach { path ->
                     val cleanPath = path.removePrefix("file://")
                     if (cleanPath.startsWith("/")) {
-                        try { File(cleanPath).delete() } catch (_: Exception) {}
+                        try {
+                            val file = File(cleanPath).canonicalFile
+                            if (file.canonicalPath.startsWith(rxDirCanonical + File.separator)) {
+                                file.delete()
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
-                existing.removeAll { it.id == rxId }
-                val type = object : TypeToken<List<Prescription>>() {}.type
-                val json = gson.toJson(existing, type)
-                val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
-                secureStore.save(KEY_PREFIX + safeId, json)
+                true
+            } else {
+                Log.e(TAG, "Failed to update prescription metadata during deletion")
+                false
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete prescription locally", e)
+            false
         }
-    }
-
-    private fun scaleDownBitmap(src: Bitmap, maxDim: Int): Bitmap {
-        val width = src.width
-        val height = src.height
-        if (width <= maxDim && height <= maxDim) return src
-
-        val ratio = width.toFloat() / height.toFloat()
-        val newWidth: Int
-        val newHeight: Int
-        if (width > height) {
-            newWidth = maxDim
-            newHeight = (maxDim / ratio).roundToInt().coerceAtLeast(1)
-        } else {
-            newHeight = maxDim
-            newWidth = (maxDim * ratio).roundToInt().coerceAtLeast(1)
-        }
-        return Bitmap.createScaledBitmap(src, newWidth, newHeight, true)
     }
 }
