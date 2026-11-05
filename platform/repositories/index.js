@@ -5354,6 +5354,20 @@ class TransactionalDeviceTokenRepository {
     );
     return res.rows[0] || null;
   }
+
+  async getActiveIosTokensForStore(storeId) {
+    if (!this.pool || !storeId) return [];
+    const query = `
+      SELECT rdt.rider_id, rdt.token, rdt.platform
+      FROM rider_device_tokens rdt
+      JOIN riders r ON (r.id = rdt.rider_id OR r.rider_id = rdt.rider_id)
+      WHERE r.store_id = $1
+        AND r.status = 'ACTIVE'
+        AND (UPPER(rdt.platform) = 'IOS' OR rdt.token ~ '^[0-9a-fA-F]{64}$')
+    `;
+    const res = await this.pool.query(query, [storeId]);
+    return res.rows;
+  }
 }
 
 class LocalDevelopmentDeviceTokenRepository {
@@ -5379,6 +5393,21 @@ class LocalDevelopmentDeviceTokenRepository {
 
   async getTokenByRider(riderId) {
     return (this.db.riderTokens || {})[riderId] || null;
+  }
+
+  async getActiveIosTokensForStore(storeId) {
+    const list = this.db.riderTokens || {};
+    const riders = this.db.riders || {};
+    const tokens = [];
+    for (const [rId, rec] of Object.entries(list)) {
+      const r = riders[rId];
+      const tok = typeof rec === 'string' ? rec : (rec.token || rec.deviceToken || rec.fcmToken);
+      const plat = (typeof rec === 'object' && rec.platform) ? rec.platform : 'ANDROID';
+      if (r && r.storeId === storeId && r.status === 'ACTIVE' && (String(plat).toUpperCase() === 'IOS' || /^[0-9a-fA-F]{64}$/.test(tok || ''))) {
+        tokens.push({ rider_id: rId, token: tok, platform: plat });
+      }
+    }
+    return tokens;
   }
 }
 
@@ -7337,7 +7366,42 @@ class ProductionNotificationService {
       }
     }
 
-    if (!apnsOk && this.fcmSender) {
+    // Broadcast APNs fanout for store broadcast offers (delivers to all active iOS riders assigned to this store)
+    if (isBroadcast && offerStoreId && this.apnsDispatcher) {
+      try {
+        let iosTokens = [];
+        if (this.deviceTokenRepo && typeof this.deviceTokenRepo.getActiveIosTokensForStore === 'function') {
+          iosTokens = await this.deviceTokenRepo.getActiveIosTokensForStore(offerStoreId);
+        } else if (this.deviceTokenRepo && this.deviceTokenRepo.pool) {
+          const res = await this.deviceTokenRepo.pool.query(
+            `SELECT rdt.rider_id, rdt.token, rdt.platform
+             FROM rider_device_tokens rdt
+             JOIN riders r ON (r.id = rdt.rider_id OR r.rider_id = rdt.rider_id)
+             WHERE r.store_id = $1 AND r.status = 'ACTIVE' AND (UPPER(rdt.platform) = 'IOS' OR rdt.token ~ '^[0-9a-fA-F]{64}$');`,
+            [offerStoreId]
+          );
+          iosTokens = res.rows;
+        }
+
+        if (iosTokens && iosTokens.length > 0) {
+          const apnsPayload = this.apnsDispatcher.createRiderOfferPayload ? this.apnsDispatcher.createRiderOfferPayload(sanitizedBroadcastOffer) : sanitizedBroadcastOffer;
+          for (const item of iosTokens) {
+            if (item.token) {
+              try {
+                await this.apnsDispatcher.send(item.token, apnsPayload, { topic: this.apnsDispatcher.riderTopic });
+                apnsOk = true;
+              } catch (dispatchErr) {
+                console.warn(`[ProductionNotificationService] APNs store broadcast delivery failed for rider ${item.rider_id}:`, dispatchErr.message);
+              }
+            }
+          }
+        }
+      } catch (apnsStoreErr) {
+        console.error('[ProductionNotificationService] APNs broadcast store fanout error:', apnsStoreErr.message);
+      }
+    }
+
+    if (this.fcmSender) {
       const fcmPayload = {
         notificationId: notifId,
         offerId: String(offer.offerId || offer.offer_id || ''),

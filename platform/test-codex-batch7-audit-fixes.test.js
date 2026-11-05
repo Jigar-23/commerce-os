@@ -303,6 +303,85 @@ async function runBatch7Tests() {
   assert.ok(mockServerCode.includes('Bearer JWT is strictly required to access active offers'), 'MockServer active-offers must enforce Bearer JWT');
   console.log('  ✅ 3.3 PASS: MockServer requires JWT and contains zero hardcoded rider fallbacks.\n');
 
+  // -------------------------------------------------------------
+  // Test 4: iOS Store-Topic APNs Broadcast Fanout Verification
+  // -------------------------------------------------------------
+  console.log('[Test 4] iOS Store Broadcast: Native APNs Fanout to Store fleet');
+
+  const { TransactionalDeviceTokenRepository } = require('./repositories/index');
+  const iosTokenRepo = new TransactionalDeviceTokenRepository(pool);
+
+  const testIosRiderId = `rdr_ios_fanout_${Date.now()}`;
+  const testIosToken = 'a'.repeat(64); // 64-character hex device token
+  const testIosPhone = '+9198' + Date.now().toString().slice(-8);
+
+  if (pool) {
+    await pool.query(`
+      INSERT INTO riders (id, rider_id, store_id, full_name, phone, status, vehicle_number)
+      VALUES ($1, $1, $2, 'iOS Fleet Rider', $3, 'ACTIVE', 'DL01IOS111')
+      ON CONFLICT (id) DO NOTHING
+    `, [testIosRiderId, testStoreA, testIosPhone]);
+
+    await pool.query(`
+      INSERT INTO rider_device_tokens (rider_id, token, platform, app_version, updated_at)
+      VALUES ($1, $2, 'IOS', '1.0.0', NOW())
+      ON CONFLICT (rider_id) DO UPDATE SET token = EXCLUDED.token, platform = 'IOS', updated_at = NOW()
+    `, [testIosRiderId, testIosToken]);
+
+    const storeIosTokens = await iosTokenRepo.getActiveIosTokensForStore(testStoreA);
+    const foundIos = storeIosTokens.find(t => t.rider_id === testIosRiderId);
+    assert.ok(foundIos, 'getActiveIosTokensForStore must find registered iOS rider for Store A');
+    assert.strictEqual(foundIos.token, testIosToken);
+
+    // Verify cross-store isolation for iOS APNs tokens
+    const otherStoreTokens = await iosTokenRepo.getActiveIosTokensForStore('str_nonexistent_store');
+    assert.strictEqual(otherStoreTokens.length, 0, 'No iOS tokens should be returned for unmatched store');
+    console.log('  ✅ 4.1 PASS: getActiveIosTokensForStore accurately scopes active iOS tokens to assigned store.');
+
+    // Verify APNs broadcast fanout in ProductionNotificationService
+    const dispatchedTokens = [];
+    const mockApnsDispatcher = {
+      riderTopic: 'com.commerceos.rider',
+      createRiderOfferPayload: (off) => ({ aps: { alert: off.title || 'New Offer' }, offerId: off.offerId }),
+      send: async (tok, payload) => {
+        dispatchedTokens.push(tok);
+        return { delivered: true };
+      }
+    };
+
+    const mockNotifRepo = { 
+      createNotification: async () => {}, 
+      updateDeliveryOutcome: async () => {} 
+    };
+    const mockOfferRepo = { findOfferById: async () => null };
+
+    const prodNotifService = new ProductionNotificationService(
+      mockNotifRepo,
+      mockOfferRepo,
+      null,
+      iosTokenRepo,
+      null, // fcmSender
+      null, // sseBroadcaster
+      null,
+      false, // isProduction (false for unit test with mock transport)
+      mockApnsDispatcher
+    );
+
+    const testBroadcastOffer = {
+      id: `off_broadcast_${Date.now()}`,
+      offerId: `off_broadcast_${Date.now()}`,
+      storeId: testStoreA,
+      store_id: testStoreA,
+      riderId: 'broadcast',
+      customerAddress: 'Flat 12, Example Street, South Delhi',
+      earningsAmount: 60
+    };
+
+    await prodNotifService.dispatchOfferNotification(testBroadcastOffer, 'broadcast');
+    assert.ok(dispatchedTokens.includes(testIosToken), 'Broadcast offer must fan out via APNs to active iOS rider in Store A');
+    console.log('  ✅ 4.2 PASS: Broadcast offer fanned out via APNs to store iOS fleet tokens.\n');
+  }
+
   console.log('================================================================');
   console.log('🎉 ALL CODEX BATCH 7 REMAINING FINDINGS VERIFIED & PASSED!');
   console.log('================================================================\n');

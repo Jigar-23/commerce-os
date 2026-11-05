@@ -41,6 +41,36 @@ function normalizeApnsToken(rawToken) {
   return clean;
 }
 
+function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
+  if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
+    const loc = deliveryAddrObj.locality || deliveryAddrObj.area || deliveryAddrObj.city;
+    if (loc && typeof loc === 'string' && loc.trim()) {
+      return loc.trim();
+    }
+  }
+  if (!rawAddr || typeof rawAddr !== 'string') return 'Delivery Area';
+  const trimmed = rawAddr.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const obj = JSON.parse(trimmed);
+      return obj.locality || obj.area || obj.city || 'Delivery Area';
+    } catch (_) {}
+  }
+  const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return 'Delivery Area';
+
+  const nonDetailedParts = parts.filter(p => {
+    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite)\b/i.test(p)) return false;
+    if (/^\d+[a-z]?(\/|-)?\d*$/i.test(p)) return false;
+    return true;
+  });
+
+  if (nonDetailedParts.length > 0) {
+    return nonDetailedParts.slice(-2).join(', ');
+  }
+  return 'Delivery Area';
+}
+
 /**
  * Fluent builder for native Apple Push Notification (APNs) JSON payloads
  */
@@ -464,7 +494,7 @@ class ApnsDispatcher {
     const duration = offer.estimatedDurationMins || offer.estimated_duration_mins || 10;
     const mName = offer.merchantName || offer.merchant_name || 'Commerce OS Store';
     const cAddr = offer.customerAddress || offer.customer_address || '';
-    const dropShort = cAddr ? cAddr.split(',')[0].trim() : 'Customer location';
+    const dropShort = offer.customerLocality || extractCoarseLocality(cAddr, offer.deliveryAddress);
 
     return new ApnsPayloadBuilder()
       .setTitle(`🚨 NEW DELIVERY · ₹${earnings}`)
