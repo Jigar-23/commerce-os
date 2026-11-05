@@ -251,7 +251,7 @@ object LocalPrescriptionManager {
             if (exactRaw.isBlank()) return false
             val storageKey = customerStorageKey(exactRaw)
             val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
-            when (val check = secureStore.readWithResult(storageKey)) {
+            when (secureStore.readWithResult(storageKey)) {
                 is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError -> {
                     Log.e(TAG, "Decryption error for storageKey=$storageKey; preserving existing ciphertext to prevent data loss")
                     return false
@@ -407,6 +407,9 @@ object LocalPrescriptionManager {
             for (attempt in 1..3) {
                 committed = prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, remaining).commit()
                 if (committed) break
+            }
+            if (!committed) {
+                Log.w(TAG, "Failed to commit remaining pending orphan files after cleanup attempts")
             }
             cleanedCount
         } catch (e: Exception) {

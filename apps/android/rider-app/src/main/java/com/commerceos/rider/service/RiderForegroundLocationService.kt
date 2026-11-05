@@ -17,6 +17,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.commerceos.rider.model.RiderLocationUpdate
@@ -47,6 +48,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
     private var lastDispatchedTime: Long = 0L
 
     companion object {
+        private const val TAG = "RiderLocationService"
         private const val CHANNEL_ID = "rider_location_channel"
         private const val NOTIFICATION_ID = 1001
 
@@ -389,6 +391,9 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 }
             }
         }
+        if (isStationaryHeartbeat) {
+            Log.d(TAG, "Dispatching stationary presence heartbeat for rider=$activeRiderId")
+        }
 
         lastDispatchedLat = location.latitude
         lastDispatchedLng = location.longitude
@@ -543,9 +548,9 @@ class RiderForegroundLocationService : Service(), LocationListener {
                         val responseStr = retryConn.inputStream.bufferedReader().use { it.readText() }
                         val respJson = JSONObject(responseStr)
                         val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
-                        val accepted = respJson.optBoolean("accepted", false)
-                        val isDuplicate = respJson.optBoolean("duplicate", false)
-                        if (ackSeq >= nextUpdate.sequenceNumber || isDuplicate) {
+                        val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
+                        val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
+                        if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
                             _lastServerAckSeq.value = ackSeq
                             _lastServerAckTimestamp.value = System.currentTimeMillis()
                             _isStale.value = false
@@ -561,11 +566,11 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val respJson = JSONObject(responseStr)
                 val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
-                val accepted = respJson.optBoolean("accepted", false)
-                val isDuplicate = respJson.optBoolean("duplicate", false)
+                val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
+                val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
 
                 // Atomic Dequeue upon explicit sequence ACK
-                if (ackSeq >= nextUpdate.sequenceNumber || isDuplicate) {
+                if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
                     _lastServerAckSeq.value = ackSeq
                     _lastServerAckTimestamp.value = System.currentTimeMillis()
                     _isStale.value = false
