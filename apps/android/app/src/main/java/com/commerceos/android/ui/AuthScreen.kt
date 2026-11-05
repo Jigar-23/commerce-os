@@ -51,11 +51,10 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
     fun dispatchGooglePhoneAuth() {
         val currentPhone = viewModel.uiState.phone
-        android.util.Log.i("CommerceOSAuth", "dispatchGooglePhoneAuth clicked! currentPhone='$currentPhone'")
+        android.util.Log.i("CommerceOSAuth", "dispatchGooglePhoneAuth triggered")
         val cleanDigits = currentPhone.replace(Regex("[^0-9]"), "").let {
             if (it.length > 10) it.takeLast(10) else it
         }
-        android.util.Log.i("CommerceOSAuth", "cleanDigits='$cleanDigits', length=${cleanDigits.length}")
         if (cleanDigits.length != 10) {
             viewModel.setError("Please enter a valid 10-digit mobile number")
             return
@@ -71,7 +70,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                android.util.Log.i("CommerceOSAuth", "onVerificationCompleted: code=${credential.smsCode}")
+                android.util.Log.i("CommerceOSAuth", "onVerificationCompleted")
                 val code = credential.smsCode
                 if (!code.isNullOrBlank()) {
                     viewModel.onOtpChange(code)
@@ -100,10 +99,10 @@ fun AuthScreen(viewModel: AuthViewModel) {
             }
 
             override fun onCodeSent(verificationId: String, token: PhoneAuthProvider.ForceResendingToken) {
-                android.util.Log.i("CommerceOSAuth", "onCodeSent: verificationId=$verificationId")
+                android.util.Log.i("CommerceOSAuth", "onCodeSent")
                 resendingToken = token
                 viewModel.setGoogleVerification(verificationId)
-                Toast.makeText(context, "Google SMS dispatched to $formatted", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Google SMS dispatched", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -116,7 +115,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
         resendingToken?.let { optionsBuilder.setForceResendingToken(it) }
 
         try {
-            android.util.Log.i("CommerceOSAuth", "Triggering PhoneAuthProvider.verifyPhoneNumber for $formatted...")
+            android.util.Log.i("CommerceOSAuth", "Triggering PhoneAuthProvider.verifyPhoneNumber...")
             PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
         } catch (e: Exception) {
             android.util.Log.e("CommerceOSAuth", "PhoneAuthProvider exception: ${e.message}", e)
@@ -127,7 +126,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
     fun submitOtpVerification() {
         val enteredCode = viewModel.uiState.otpCode.trim()
         val googleVerId = viewModel.uiState.googleVerificationId
-        android.util.Log.i("CommerceOSAuth", "submitOtpVerification: code='$enteredCode', googleVerId=$googleVerId")
+        android.util.Log.i("CommerceOSAuth", "submitOtpVerification triggered")
 
         if (googleVerId != null && enteredCode.length == 6) {
             viewModel.setLoading(true)

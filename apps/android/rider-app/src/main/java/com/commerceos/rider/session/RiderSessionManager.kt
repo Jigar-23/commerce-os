@@ -1,6 +1,7 @@
 package com.commerceos.rider.session
 
 import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -9,8 +10,9 @@ import java.net.URL
 
 class RiderSessionManager private constructor(context: Context) {
 
-    private val secureStore = RiderSecureCredentialStore(context.applicationContext)
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val secureStore = RiderSecureCredentialStore(appContext)
+    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getAuthToken(): String {
         return secureStore.read(KEY_AUTH_TOKEN) ?: ""
@@ -93,23 +95,103 @@ class RiderSessionManager private constructor(context: Context) {
         return getAuthToken().isNotBlank() && getRiderId().isNotBlank()
     }
 
-    fun clearSession(context: Context? = null) {
-        val currentStore = getStoreId().trim()
-        scope.launch {
-            topicMutex.withLock {
-                if (currentStore.isNotBlank()) {
-                    try {
-                        com.google.android.gms.tasks.Tasks.await(
-                            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$currentStore")
-                        )
-                    } catch (_: Exception) {}
-                }
+    private fun getTopicRetryPrefs(): SharedPreferences {
+        return appContext.getSharedPreferences(TOPIC_RETRY_PREFS, Context.MODE_PRIVATE)
+    }
+
+    suspend fun retryPendingUnsubscriptions() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val retryPrefs = getTopicRetryPrefs()
+        val pending = retryPrefs.getStringSet(KEY_PENDING_UNSUB_SET, emptySet<String>())?.toMutableSet() ?: return@withContext
+        if (pending.isEmpty()) return@withContext
+
+        val succeeded = mutableSetOf<String>()
+        for (topic in pending) {
+            try {
+                com.google.android.gms.tasks.Tasks.await(
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic(topic),
+                    3000,
+                    java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+                succeeded.add(topic)
+            } catch (_: Exception) {}
+        }
+        if (succeeded.isNotEmpty()) {
+            pending.removeAll(succeeded)
+            retryPrefs.edit().putStringSet(KEY_PENDING_UNSUB_SET, pending).commit()
+        }
+    }
+
+    suspend fun coordinateLogout(context: Context? = null) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        // Invalidate any pending reconciliation
+        reconciliationGeneration++
+
+        topicMutex.withLock {
+            val currentStore = getStoreId().trim()
+            val topicsToUnsub = mutableSetOf<String>()
+            if (currentStore.isNotBlank()) {
+                topicsToUnsub.add("riders_store_$currentStore")
+            }
+            topicsToUnsub.add("riders_broadcast")
+
+            // Persist durable unsubscription records into dedicated prefs that survive credentials wipe
+            val retryPrefs = getTopicRetryPrefs()
+            val existing = retryPrefs.getStringSet(KEY_PENDING_UNSUB_SET, emptySet<String>())?.toMutableSet() ?: mutableSetOf<String>()
+            existing.addAll(topicsToUnsub)
+            retryPrefs.edit().putStringSet(KEY_PENDING_UNSUB_SET, existing).commit()
+
+            // Best-effort unsubscription with timeout
+            val succeeded = mutableSetOf<String>()
+            for (topic in existing) {
                 try {
                     com.google.android.gms.tasks.Tasks.await(
-                        com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                        com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic(topic),
+                        3000,
+                        java.util.concurrent.TimeUnit.MILLISECONDS
                     )
+                    succeeded.add(topic)
                 } catch (_: Exception) {}
             }
+            if (succeeded.isNotEmpty()) {
+                existing.removeAll(succeeded)
+                retryPrefs.edit().putStringSet(KEY_PENDING_UNSUB_SET, existing).commit()
+            }
+
+            saveShiftOnline(false)
+            secureStore.deleteKeyAndValue(KEY_AUTH_TOKEN)
+            secureStore.deleteKeyAndValue(KEY_REFRESH_TOKEN)
+            saveRiderId("")
+            saveStoreId("")
+            prefs.edit().clear().commit()
+            context?.let { ctx ->
+                try {
+                    val notifManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    notifManager.cancelAll()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun queuePendingUnsubscription(topic: String) {
+        if (topic.isBlank()) return
+        try {
+            val retryPrefs = getTopicRetryPrefs()
+            val existing = retryPrefs.getStringSet(KEY_PENDING_UNSUB_SET, emptySet<String>())?.toMutableSet() ?: mutableSetOf<String>()
+            existing.add(topic)
+            retryPrefs.edit().putStringSet(KEY_PENDING_UNSUB_SET, existing).commit()
+        } catch (_: Exception) {}
+    }
+
+    fun clearSession(context: Context? = null) {
+        val storeId = getStoreId().trim()
+        if (storeId.isNotBlank()) {
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$storeId")
+            } catch (_: Exception) {}
+        }
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                coordinateLogout(context)
+            } catch (_: Exception) {}
         }
         saveShiftOnline(false)
         secureStore.deleteKeyAndValue(KEY_AUTH_TOKEN)
@@ -117,66 +199,98 @@ class RiderSessionManager private constructor(context: Context) {
         saveRiderId("")
         saveStoreId("")
         prefs.edit().clear().commit()
-        context?.let { ctx ->
+    }
+
+    suspend fun coordinateTopicSubscription(newStoreId: String?, isOnline: Boolean) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        topicMutex.withLock {
             try {
-                val notifManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-                notifManager.cancelAll()
+                retryPendingUnsubscriptions()
+            } catch (_: Exception) {}
+            val gen = ++reconciliationGeneration
+            val newStore = if (newStoreId == null || newStoreId.equals("null", ignoreCase = true)) "" else newStoreId.trim()
+            val targetStore = newStore
+            val oldStore = getStoreId().trim()
+
+            if (newStore.isBlank()) {
+                if (oldStore.isNotBlank()) {
+                    var unsubOk = false
+                    for (attempt in 1..3) {
+                        try {
+                            com.google.android.gms.tasks.Tasks.await(
+                                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore"),
+                                3000,
+                                java.util.concurrent.TimeUnit.MILLISECONDS
+                            )
+                            unsubOk = true
+                            break
+                        } catch (e: Exception) {
+                            android.util.Log.w("RiderSessionManager", "Failed to unsubscribe: ${e.message}")
+                        }
+                    }
+                    if (!unsubOk) {
+                        queuePendingUnsubscription("riders_store_$oldStore")
+                    }
+                }
+                saveStoreId("")
+                return@withLock
+            }
+
+            if (oldStore.isNotBlank() && (oldStore != targetStore || !isOnline)) {
+                var unsubOk = false
+                for (attempt in 1..3) {
+                    try {
+                        com.google.android.gms.tasks.Tasks.await(
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore"),
+                            3000,
+                            java.util.concurrent.TimeUnit.MILLISECONDS
+                        )
+                        unsubOk = true
+                        break
+                    } catch (e: Exception) {
+                        android.util.Log.w("RiderSessionManager", "Failed to unsubscribe from old store topic: ${e.message}")
+                    }
+                }
+                if (!unsubOk) {
+                    queuePendingUnsubscription("riders_store_$oldStore")
+                    if (oldStore != targetStore) {
+                        android.util.Log.e("RiderSessionManager", "Aborting new store subscription because old store unsubscribe failed")
+                        return@withLock
+                    }
+                }
+            }
+
+            if (gen != reconciliationGeneration) return@withLock
+
+            saveStoreId(targetStore)
+
+            if (targetStore.isNotBlank() && isOnline && isLoggedIn()) {
+                for (attempt in 1..3) {
+                    try {
+                        com.google.android.gms.tasks.Tasks.await(
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$targetStore"),
+                            3000,
+                            java.util.concurrent.TimeUnit.MILLISECONDS
+                        )
+                        break
+                    } catch (e: Exception) {
+                        android.util.Log.w("RiderSessionManager", "Failed to subscribe to store topic: ${e.message}")
+                    }
+                }
+            }
+
+            try {
+                com.google.android.gms.tasks.Tasks.await(
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast"),
+                    2000,
+                    java.util.concurrent.TimeUnit.MILLISECONDS
+                )
             } catch (_: Exception) {}
         }
     }
 
     fun reconcileStoreTopic(newStoreId: String?, isOnline: Boolean) {
-        val newStore = if (newStoreId == null || newStoreId.equals("null", ignoreCase = true)) "" else newStoreId.trim()
-        val targetStore = newStore
         scope.launch {
-            topicMutex.withLock {
-                val gen = ++reconciliationGeneration
-                val oldStore = getStoreId().trim()
-
-                if (newStore.isBlank()) {
-                    if (oldStore.isNotBlank()) {
-                        try {
-                            com.google.android.gms.tasks.Tasks.await(
-                                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
-                            )
-                        } catch (e: Exception) {
-                            android.util.Log.w("RiderSessionManager", "Failed to unsubscribe: ${e.message}")
-                        }
-                    }
-                    saveStoreId("")
-                    return@withLock
-                }
-
-                if (oldStore.isNotBlank() && (oldStore != targetStore || !isOnline)) {
-                    try {
-                        com.google.android.gms.tasks.Tasks.await(
-                            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
-                        )
-                    } catch (e: Exception) {
-                        android.util.Log.w("RiderSessionManager", "Failed to unsubscribe from old store topic: ${e.message}")
-                    }
-                }
-
-                if (gen != reconciliationGeneration) return@withLock
-
-                saveStoreId(targetStore)
-
-                if (targetStore.isNotBlank() && isOnline && isLoggedIn()) {
-                    try {
-                        com.google.android.gms.tasks.Tasks.await(
-                            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$targetStore")
-                        )
-                    } catch (e: Exception) {
-                        android.util.Log.w("RiderSessionManager", "Failed to subscribe to store topic: ${e.message}")
-                    }
-                }
-
-                try {
-                    com.google.android.gms.tasks.Tasks.await(
-                        com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
-                    )
-                } catch (_: Exception) {}
-            }
+            coordinateTopicSubscription(newStoreId, isOnline)
         }
     }
 
@@ -249,6 +363,9 @@ class RiderSessionManager private constructor(context: Context) {
         private const val KEY_IS_ONLINE = "rider_shift_is_online"
         private const val KEY_PENDING_OFFER_ID = "rider_pending_intent_offer_id"
         private const val KEY_ACTIVE_DELIVERY_ID = "rider_active_delivery_id"
+        private const val KEY_PENDING_UNSUB_TOPICS = "rider_pending_unsub_topics"
+        private const val TOPIC_RETRY_PREFS = "rider_durable_topic_cleanup_prefs"
+        private const val KEY_PENDING_UNSUB_SET = "pending_unsub_topics_set"
 
         @Volatile
         private var INSTANCE: RiderSessionManager? = null

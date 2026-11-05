@@ -67,7 +67,6 @@ class AuthViewModel(private val authUseCase: AuthUseCase) : ViewModel() {
             else if (it.length > 10) it.take(10)
             else it
         }
-        android.util.Log.i("CommerceOSAuth", "onPhoneChange: input='$value' -> digits='$digits'")
         uiState = uiState.copy(phone = digits, errorMessage = null)
     }
 

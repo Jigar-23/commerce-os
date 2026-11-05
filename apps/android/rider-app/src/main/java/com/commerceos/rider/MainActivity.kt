@@ -20,15 +20,34 @@ class MainActivity : ComponentActivity() {
 
     private var pendingIntentOfferId by mutableStateOf<String?>(null)
 
+    private fun hasLocationPermission(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
     private val backgroundPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ ->
-        startLocationService()
+        if (hasLocationPermission()) {
+            startLocationService()
+        }
     }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
+    ) { perms ->
+        val fineGranted = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+        if (!fineGranted && !coarseGranted) {
+            android.util.Log.w("MainActivity", "Foreground location permission denied by rider")
+            com.commerceos.rider.util.RiderNotificationManager.showLocationSyncRequiredNotification(applicationContext)
+            return@registerForActivityResult
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val bgGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
             if (!bgGranted) {
@@ -55,7 +74,9 @@ class MainActivity : ComponentActivity() {
 
         requestRequiredPermissions()
         checkBatteryOptimization()
-        startLocationService()
+        if (hasLocationPermission()) {
+            startLocationService()
+        }
         initFirebaseMessagingToken()
         checkIntentOfferAck(intent)
 
@@ -90,6 +111,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startLocationService() {
+        if (!hasLocationPermission()) {
+            android.util.Log.w("MainActivity", "Location service not started: location permission not granted.")
+            com.commerceos.rider.util.RiderNotificationManager.showLocationSyncRequiredNotification(applicationContext)
+            return
+        }
         val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
         if (!sessionMgr.isLoggedIn() || (!sessionMgr.isShiftOnline() && sessionMgr.getActiveDeliveryId().isBlank())) {
             android.util.Log.d("MainActivity", "Location service not started: rider offline and no active delivery.")
@@ -104,6 +130,7 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            com.commerceos.rider.util.RiderNotificationManager.showLocationSyncRequiredNotification(applicationContext)
         }
     }
 
@@ -155,28 +182,9 @@ class MainActivity : ComponentActivity() {
 
             val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
 
-            // Strictly enforce store-scoped server-authorized routing: purge global broadcast subscription
-            try {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
-            } catch (_: Exception) {}
-
             val assignedStoreId = sessionMgr.getStoreId()
-            if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline() && assignedStoreId.isNotBlank()) {
-                val storeTopic = "riders_store_$assignedStoreId"
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic(storeTopic)
-                    .addOnCompleteListener { subTask ->
-                        if (subTask.isSuccessful) {
-                            android.util.Log.d("MainActivity", "Successfully subscribed to authorized store topic: $storeTopic")
-                        } else {
-                            android.util.Log.w("MainActivity", "Failed to subscribe to store topic $storeTopic: ${subTask.exception?.message}")
-                        }
-                    }
-            } else if (assignedStoreId.isNotBlank()) {
-                try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStoreId")
-                    val notifManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-                    notifManager?.cancelAll()
-                } catch (_: Exception) {}
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                sessionMgr.coordinateTopicSubscription(assignedStoreId, sessionMgr.isShiftOnline())
             }
 
             com.google.firebase.messaging.FirebaseMessaging.getInstance().token

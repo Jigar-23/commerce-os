@@ -18,9 +18,23 @@ object LocalSaveForLaterStore {
     private const val PENDING_REORDER_ITEM_PREFIX = "pending_reorder_item_key_"
     private const val PENDING_REORDER_BATCH_PREFIX = "pending_reorder_batch_"
     private const val UNCERTAIN_MOVES_KEY_PREFIX = "uncertain_moves_"
+    private const val PENDING_CART_MUTATIONS_PREFIX = "pending_cart_mutations_"
     private val gson = Gson()
 
     internal var secureStoreProvider: ((Context) -> SecureCredentialStore)? = null
+
+    enum class CartOpType { ADD, UPDATE_QTY, REMOVE }
+
+    data class PendingCartMutation(
+        val opId: String,
+        val type: CartOpType,
+        val customerId: String,
+        val sku: String,
+        val quantity: Int = 1,
+        val item: CartItem? = null,
+        val idempotencyKey: String,
+        val createdAt: Long = System.currentTimeMillis()
+    )
 
     data class ReorderBatchRecord(
         val batchId: String,
@@ -73,10 +87,10 @@ object LocalSaveForLaterStore {
                                 val list: List<CartItem> = gson.fromJson(legacyJson, type) ?: emptyList()
                                 StorageResult.Success(list)
                             } else {
-                                StorageResult.NotFound
+                                StorageResult.DecryptError(IllegalStateException("Could not clean legacy plaintext cart items"))
                             }
                         } else {
-                            StorageResult.NotFound
+                            StorageResult.DecryptError(IllegalStateException("Could not migrate legacy cart items to encrypted store"))
                         }
                     } else {
                         StorageResult.NotFound
@@ -84,7 +98,7 @@ object LocalSaveForLaterStore {
                 }
             }
         } catch (e: Exception) {
-            StorageResult.NotFound
+            StorageResult.DecryptError(e)
         }
     }
 
@@ -170,18 +184,32 @@ object LocalSaveForLaterStore {
 
     data class PendingAddRecord(val key: String, val item: CartItem? = null)
 
-    fun getPendingAddKey(context: Context, customerId: String, sku: String): String? {
+    fun getPendingAddRecord(context: Context, customerId: String, sku: String): StorageResult<PendingAddRecord> {
         return try {
             val safeId = customerId.trim().ifBlank { "guest" }
             val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
-            val stored = secureStore.read(PENDING_ADD_PREFIX + "${safeId}_$sku") ?: return null
-            if (stored.startsWith("{") && stored.contains("\"key\"")) {
-                gson.fromJson(stored, PendingAddRecord::class.java)?.key
-            } else {
-                stored
+            when (val res = secureStore.readWithResult(PENDING_ADD_PREFIX + "${safeId}_$sku")) {
+                is SecureCredentialStore.SecureReadResult.Success -> {
+                    val stored = res.value
+                    val record = if (stored.startsWith("{") && stored.contains("\"key\"")) {
+                        gson.fromJson(stored, PendingAddRecord::class.java)
+                    } else {
+                        PendingAddRecord(stored, null)
+                    }
+                    if (record != null) StorageResult.Success(record) else StorageResult.NotFound
+                }
+                is SecureCredentialStore.SecureReadResult.NotFound -> StorageResult.NotFound
+                is SecureCredentialStore.SecureReadResult.DecryptError -> StorageResult.DecryptError(res.cause)
             }
-        } catch (_: Exception) {
-            null
+        } catch (e: Exception) {
+            StorageResult.DecryptError(e)
+        }
+    }
+
+    fun getPendingAddKey(context: Context, customerId: String, sku: String): String? {
+        return when (val res = getPendingAddRecord(context, customerId, sku)) {
+            is StorageResult.Success -> res.data.key
+            else -> null
         }
     }
 
@@ -267,15 +295,28 @@ object LocalSaveForLaterStore {
         }
     }
 
-    fun getUncertainMoveSkus(context: Context, customerId: String): Set<String> {
+    fun getUncertainMoveSkusWithResult(context: Context, customerId: String): StorageResult<Set<String>> {
         return try {
             val safeId = customerId.trim().ifBlank { "guest" }
             val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
-            val json = secureStore.read(UNCERTAIN_MOVES_KEY_PREFIX + safeId) ?: return emptySet()
-            val type = object : TypeToken<Set<String>>() {}.type
-            gson.fromJson<Set<String>>(json, type) ?: emptySet()
-        } catch (_: Exception) {
-            emptySet()
+            when (val res = secureStore.readWithResult(UNCERTAIN_MOVES_KEY_PREFIX + safeId)) {
+                is SecureCredentialStore.SecureReadResult.Success -> {
+                    val type = object : TypeToken<Set<String>>() {}.type
+                    val set: Set<String> = gson.fromJson(res.value, type) ?: emptySet()
+                    StorageResult.Success(set)
+                }
+                is SecureCredentialStore.SecureReadResult.NotFound -> StorageResult.NotFound
+                is SecureCredentialStore.SecureReadResult.DecryptError -> StorageResult.DecryptError(res.cause)
+            }
+        } catch (e: Exception) {
+            StorageResult.DecryptError(e)
+        }
+    }
+
+    fun getUncertainMoveSkus(context: Context, customerId: String): Set<String> {
+        return when (val res = getUncertainMoveSkusWithResult(context, customerId)) {
+            is StorageResult.Success -> res.data
+            else -> emptySet()
         }
     }
 
@@ -305,5 +346,74 @@ object LocalSaveForLaterStore {
         val existing = getUncertainMoveSkus(context, customerId).toMutableSet()
         existing.remove(sku)
         return setUncertainMoveSkus(context, customerId, existing)
+    }
+
+    private val mutationJournalLock = Any()
+
+    fun getPendingCartMutationsWithResult(context: Context, customerId: String): StorageResult<List<PendingCartMutation>> {
+        return try {
+            val safeId = customerId.trim().ifBlank { "guest" }
+            val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+            when (val res = secureStore.readWithResult(PENDING_CART_MUTATIONS_PREFIX + safeId)) {
+                is SecureCredentialStore.SecureReadResult.Success -> {
+                    val type = object : TypeToken<List<PendingCartMutation>>() {}.type
+                    val list: List<PendingCartMutation>? = gson.fromJson(res.value, type)
+                    StorageResult.Success(list ?: emptyList())
+                }
+                is SecureCredentialStore.SecureReadResult.NotFound -> StorageResult.NotFound
+                is SecureCredentialStore.SecureReadResult.DecryptError -> StorageResult.DecryptError(res.cause)
+            }
+        } catch (e: Exception) {
+            StorageResult.DecryptError(e)
+        }
+    }
+
+    fun getPendingCartMutations(context: Context, customerId: String): List<PendingCartMutation> {
+        return when (val res = getPendingCartMutationsWithResult(context, customerId)) {
+            is StorageResult.Success -> res.data
+            else -> emptyList()
+        }
+    }
+
+    fun savePendingCartMutation(context: Context, customerId: String, mutation: PendingCartMutation): Boolean {
+        return synchronized(mutationJournalLock) {
+            try {
+                val safeId = customerId.trim().ifBlank { "guest" }
+                val existing = when (val res = getPendingCartMutationsWithResult(context, customerId)) {
+                    is StorageResult.Success -> res.data.toMutableList()
+                    is StorageResult.NotFound -> mutableListOf()
+                    is StorageResult.DecryptError -> return@synchronized false
+                }
+                existing.removeAll { it.opId == mutation.opId || (it.type == mutation.type && it.sku == mutation.sku) }
+                existing.add(mutation)
+                val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+                secureStore.save(PENDING_CART_MUTATIONS_PREFIX + safeId, gson.toJson(existing))
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    fun removePendingCartMutation(context: Context, customerId: String, opId: String): Boolean {
+        return synchronized(mutationJournalLock) {
+            try {
+                val safeId = customerId.trim().ifBlank { "guest" }
+                val existing = when (val res = getPendingCartMutationsWithResult(context, customerId)) {
+                    is StorageResult.Success -> res.data.toMutableList()
+                    is StorageResult.NotFound -> return@synchronized true
+                    is StorageResult.DecryptError -> return@synchronized false
+                }
+                val removed = existing.removeAll { it.opId == opId }
+                if (!removed) return@synchronized true
+                val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+                if (existing.isEmpty()) {
+                    secureStore.clear(PENDING_CART_MUTATIONS_PREFIX + safeId)
+                } else {
+                    secureStore.save(PENDING_CART_MUTATIONS_PREFIX + safeId, gson.toJson(existing))
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 }

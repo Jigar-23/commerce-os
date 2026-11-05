@@ -84,7 +84,7 @@ data class CheckoutUiState(
             addressValid
 
     val pricingValid: Boolean
-        get() = itemsSubtotal > BigDecimal.ZERO && grandTotal >= BigDecimal.ZERO
+        get() = itemsSubtotal > BigDecimal.ZERO && grandTotal > BigDecimal.ZERO
 
     val prescriptionValid: Boolean
         get() = if (items.any { it.prescriptionRequired }) {
@@ -142,10 +142,16 @@ class CheckoutViewModel(
         }
         return withContext(ioDispatcher) {
             val prefs = currentContext.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE)
-            val committed = prefs.edit()
-                .putString("idempotency_key", key)
-                .putString("payload_fingerprint", fingerprint)
-                .commit()
+            val editor = prefs.edit()
+            if (key == null) {
+                editor.remove("idempotency_key")
+                    .remove("payload_fingerprint")
+            } else {
+                editor.putString("idempotency_key", key)
+                    .putString("payload_fingerprint", fingerprint)
+                    .putBoolean("pending_rotation", false)
+            }
+            val committed = editor.commit()
             if (committed) {
                 checkoutIdempotencyKey = key
                 lastPayloadFingerprint = fingerprint
@@ -154,8 +160,26 @@ class CheckoutViewModel(
         }
     }
 
+    private suspend fun recordPendingKeyRotation(lastOrderId: String? = null): Boolean {
+        val currentContext = context ?: return true
+        return withContext(ioDispatcher) {
+            val prefs = currentContext.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("pending_rotation", true)
+                .putString("last_completed_order_id", lastOrderId)
+                .remove("idempotency_key")
+                .remove("payload_fingerprint")
+                .commit()
+        }
+    }
+
     private fun loadPersistedIdempotency() {
         val prefs = context?.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE) ?: return
+        if (prefs.getBoolean("pending_rotation", false)) {
+            checkoutIdempotencyKey = null
+            lastPayloadFingerprint = null
+            return
+        }
         val savedKey = prefs.getString("idempotency_key", null)
         val savedFingerprint = prefs.getString("payload_fingerprint", null)
         if (!savedKey.isNullOrBlank() && !savedFingerprint.isNullOrBlank()) {
@@ -400,17 +424,25 @@ class CheckoutViewModel(
                     is ApiResult.Success -> {
                         val cartDto = backendQuote.data
                         val serverItems = cartDto.items
-                        if (!serverItems.isNullOrEmpty()) {
+                        if (serverItems == null) {
+                            failCheckout("CART_SYNC_ERROR", "Server returned incomplete cart quote: missing items")
+                            return@launch
+                        }
+                        if (serverItems.isNotEmpty()) {
                             authoritativeItems = serverItems
-                        } else if (serverItems != null && (cartDto.itemsSubtotal != null || cartDto.grandTotal != null)) {
+                        } else if (cartDto.itemsSubtotal != null || cartDto.grandTotal != null || cartDto.customerId.isNotBlank()) {
                             authoritativeItems = emptyList()
                         }
                         if (authoritativeItems.isEmpty()) {
                             failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
                             return@launch
                         }
+                        if (serverItems.isNotEmpty() && (cartDto.itemsSubtotal == null || cartDto.grandTotal == null)) {
+                            failCheckout("CART_SYNC_ERROR", "Server returned incomplete cart quote: missing subtotal or grandTotal")
+                            return@launch
+                        }
                         val serverSubtotal = cartDto.itemsSubtotal ?: itemsSubtotal(authoritativeItems)
-                        val serverDiscount = cartDto.discount ?: currentDiscount
+                        val serverDiscount = cartDto.discount ?: BigDecimal.ZERO
                         authoritativeSubtotal = serverSubtotal
                         authoritativeDiscount = serverDiscount.min(authoritativeSubtotal)
                         authoritativeDeliveryFee = cartDto.expressDeliveryFee ?: uiState.deliveryFee
@@ -456,15 +488,63 @@ class CheckoutViewModel(
                         }
                         val deliveryFee = BigDecimal.valueOf(srvResult.data.deliveryFee)
                         val coldChainFee = BigDecimal.valueOf(srvResult.data.coldChainFee)
+
+                        // Refresh server quote after serviceability to check quote against final serviceability rates
+                        val refreshedQuote = repository.fetchBackendCart(customerIdSnapshot)
+                        val finalGrandTotal = if (refreshedQuote is ApiResult.Success) {
+                            if (refreshedQuote.data.grandTotal != null) {
+                                refreshedQuote.data.grandTotal
+                            } else if (refreshedQuote.data.items?.isNotEmpty() == true) {
+                                failCheckout("CART_SYNC_ERROR", "Server returned incomplete quote after serviceability check")
+                                return@launch
+                            } else {
+                                authoritativeSubtotal
+                                    .add(deliveryFee)
+                                    .add(coldChainFee)
+                                    .subtract(authoritativeDiscount)
+                                    .coerceAtLeast(BigDecimal.ZERO)
+                            }
+                        } else {
+                            failCheckout("CART_SYNC_ERROR", "Failed to refresh cart quote after serviceability check")
+                            return@launch
+                        }
+
+                        val refreshedItems = refreshedQuote.data.items
+                        if (refreshedItems != null && refreshedItems.isNotEmpty()) {
+                            val authSig = authoritativeItems.map { "${it.sku.trim()}:${it.quantity}:${it.unitPrice}:${it.prescriptionRequired}:${it.coldChain}" }.sorted()
+                            val refSig = refreshedItems.map { "${it.sku.trim()}:${it.quantity}:${it.unitPrice}:${it.prescriptionRequired}:${it.coldChain}" }.sorted()
+                            if (authSig != refSig) {
+                                uiState = uiState.copy(
+                                    items = refreshedItems,
+                                    serviceability = ServiceabilityState.Success(address.id, srvResult.data),
+                                    deliveryFee = deliveryFee,
+                                    coldChainFee = coldChainFee,
+                                    grandTotal = finalGrandTotal,
+                                    isProcessing = false,
+                                    errorMessage = "Cart contents updated. Please review and confirm your order."
+                                )
+                                return@launch
+                            }
+                        }
+
+                        // If quote changed after serviceability check, return to review screen for explicit confirmation
+                        if (authoritativeGrandTotal > BigDecimal.ZERO && finalGrandTotal.compareTo(authoritativeGrandTotal) != 0) {
+                            uiState = uiState.copy(
+                                serviceability = ServiceabilityState.Success(address.id, srvResult.data),
+                                deliveryFee = deliveryFee,
+                                coldChainFee = coldChainFee,
+                                grandTotal = finalGrandTotal,
+                                isProcessing = false,
+                                errorMessage = "Order total updated from ₹$authoritativeGrandTotal to ₹$finalGrandTotal. Please review and confirm your order."
+                            )
+                            return@launch
+                        }
+
                         uiState = uiState.copy(
                             serviceability = ServiceabilityState.Success(address.id, srvResult.data),
                             deliveryFee = deliveryFee,
                             coldChainFee = coldChainFee,
-                            grandTotal = authoritativeSubtotal
-                                .add(deliveryFee)
-                                .add(coldChainFee)
-                                .subtract(authoritativeDiscount)
-                                .coerceAtLeast(BigDecimal.ZERO)
+                            grandTotal = finalGrandTotal
                         )
                     }
                     is ApiResult.Failure -> {
@@ -563,7 +643,10 @@ class CheckoutViewModel(
                 when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
                     is ApiResult.Success -> {
                         uiState = freshSnapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
-                        persistIdempotency(null, null)
+                        val cleared = persistIdempotency(null, null)
+                        if (!cleared) {
+                            recordPendingKeyRotation(result.data.id)
+                        }
                         _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
                     }
                     is ApiResult.Failure -> {

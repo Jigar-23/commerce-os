@@ -86,6 +86,7 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start RiderForegroundLocationService on FCM ping", e)
+                com.commerceos.rider.util.RiderNotificationManager.showLocationSyncRequiredNotification(applicationContext)
             } finally {
                 if (wakeLock?.isHeld == true) {
                     try { wakeLock.release() } catch (_: Exception) {}

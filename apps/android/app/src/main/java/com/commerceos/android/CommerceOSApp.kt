@@ -238,6 +238,7 @@ fun CommerceOSApp(
 
     LaunchedEffect(cartViewModel, checkoutViewModel) {
         checkoutViewModel.setMutationGate(cartViewModel)
+        cartViewModel.registerNetworkMonitoring()
     }
 
     LaunchedEffect(Unit) {
@@ -347,14 +348,33 @@ fun CommerceOSApp(
             }
         )
     } else if (isLocationLockinVisible) {
-        val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
-        val locality = addressViewModel.activeLocationHeaderLabel
-            ?: activeAddr?.city?.takeIf { it.isNotBlank() }
-            ?: activeAddr?.tag?.takeIf { it.isNotBlank() }
-            ?: "Rewari"
+        val confirmedAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull { it.isDefault }
+        val isConfirmed = confirmedAddr != null &&
+            confirmedAddr.id.isNotBlank() &&
+            confirmedAddr.city.isNotBlank() &&
+            confirmedAddr.addressLine.isNotBlank() &&
+            (confirmedAddr.latitude ?: 0.0) != 0.0 &&
+            (confirmedAddr.longitude ?: 0.0) != 0.0
+        val locality = if (isConfirmed) {
+            addressViewModel.activeLocationHeaderLabel
+                ?: confirmedAddr?.city?.takeIf { it.isNotBlank() }
+                ?: confirmedAddr?.tag?.takeIf { it.isNotBlank() }
+                ?: "Delivery Location"
+        } else {
+            "Select Delivery Location"
+        }
+        val serverEta = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
+            ?.takeIf { it.addressId == confirmedAddr?.id }
+            ?.response?.etaLabel
         com.commerceos.android.ui.splash.LocationLockinScreen(
             locality = locality,
-            onDismiss = { isLocationLockinVisible = false }
+            isConfirmed = isConfirmed,
+            etaLabel = serverEta,
+            onDismiss = { isLocationLockinVisible = false },
+            onSelectLocation = {
+                isLocationLockinVisible = false
+                currentScreen = Screen.AddressSelection()
+            }
         )
     } else {
         val isCategoryScreen = currentScreen is Screen.Categories
@@ -490,7 +510,7 @@ fun CommerceOSApp(
                     bottom = padding.calculateBottomPadding()
                 )
         ) {
-            val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+            val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull { it.isDefault }
             val currentHomeContext = activeAddr?.let { addr ->
                 val serviceability = (checkoutViewModel.uiState.serviceability as? ServiceabilityState.Success)
                 val status = when {
@@ -760,6 +780,9 @@ fun CommerceOSApp(
                             currentSelected.id.isNotBlank() &&
                             !currentSelected.id.startsWith("temp_gps_") &&
                             !currentSelected.tag.equals("Current Location", ignoreCase = true) &&
+                            currentSelected.addressLine.isNotBlank() &&
+                            currentSelected.city.isNotBlank() &&
+                            currentSelected.postalCode.isNotBlank() &&
                             (currentSelected.latitude ?: 0.0) != 0.0 &&
                             (currentSelected.longitude ?: 0.0) != 0.0
 
@@ -810,22 +833,22 @@ fun CommerceOSApp(
                             }
                         },
                         onSavedSuccessfully = {
-                            val saved = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                            val saved = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull { it.isDefault }
                             if (saved != null) {
                                 addressViewModel.select(saved)
-                            }
-                            if (isFromCheckout) {
-                                if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
-                                    checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
-                                }
-                                if (saved != null) checkoutViewModel.selectAddress(saved)
-                                if (backStack.lastOrNull() is Screen.PaymentGateway) {
-                                    goBack()
+                                if (isFromCheckout) {
+                                    if (checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) {
+                                        checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
+                                    }
+                                    checkoutViewModel.selectAddress(saved)
+                                    if (backStack.lastOrNull() is Screen.PaymentGateway) {
+                                        goBack()
+                                    } else {
+                                        navigate(Screen.PaymentGateway)
+                                    }
                                 } else {
-                                    navigate(Screen.PaymentGateway)
+                                    navigateRoot(Screen.Home)
                                 }
-                            } else {
-                                navigateRoot(Screen.Home)
                             }
                         }
                     )
@@ -1035,12 +1058,19 @@ fun CommerceOSApp(
 
             if (showRxUploadDialog) {
                 RxUploadDialog(
+                    customerId = authenticatedCustomerId,
                     onDismiss = { showRxUploadDialog = false },
-                    onUpload = { patientName, attachments ->
-                        prescriptionViewModel.upload(authenticatedCustomerId, patientName, attachments) { uploadedRx ->
-                            checkoutViewModel.attachPrescription(uploadedRx.id)
-                        }
-                        showRxUploadDialog = false
+                    onUpload = { patientName, attachments, onResult ->
+                        prescriptionViewModel.upload(
+                            customerId = authenticatedCustomerId,
+                            patientName = patientName,
+                            attachments = attachments,
+                            onError = { err -> onResult(false, err) },
+                            onUploaded = { uploadedRx ->
+                                checkoutViewModel.attachPrescription(uploadedRx.id)
+                                onResult(true, null)
+                            }
+                        )
                     }
                 )
             }

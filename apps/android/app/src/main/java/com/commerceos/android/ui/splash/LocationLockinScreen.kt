@@ -68,8 +68,11 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun LocationLockinScreen(
-    locality: String = "Rewari",
-    onDismiss: () -> Unit
+    locality: String = "Select Delivery Location",
+    isConfirmed: Boolean = false,
+    etaLabel: String? = null,
+    onDismiss: () -> Unit,
+    onSelectLocation: (() -> Unit)? = null
 ) {
     var isLockedIn by remember { mutableStateOf(false) }
 
@@ -99,20 +102,22 @@ fun LocationLockinScreen(
         )
     }
 
-    // Step 1 -> Step 2 -> Transition to Home
-    LaunchedEffect(Unit) {
+    // Step 1 -> Step 2 -> Transition to Home (only auto-dismiss if location is confirmed)
+    LaunchedEffect(isConfirmed) {
         delay(600) // Phase 1: searching location
-        isLockedIn = true
-        spotlightScale.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(350, easing = FastOutSlowInEasing)
-        )
-        arrowRotate.animateTo(
-            targetValue = -45f,
-            animationSpec = tween(300, easing = FastOutSlowInEasing)
-        )
-        delay(650) // Phase 2: display "Delivering to [Locality]"
-        onDismiss()
+        if (isConfirmed) {
+            isLockedIn = true
+            spotlightScale.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
+            )
+            arrowRotate.animateTo(
+                targetValue = -45f,
+                animationSpec = tween(300, easing = FastOutSlowInEasing)
+            )
+            delay(650) // Phase 2: display "Delivering to [Locality]"
+            onDismiss()
+        }
     }
 
     Box(
@@ -122,7 +127,13 @@ fun LocationLockinScreen(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { onDismiss() } // 1-tap skip for impatient power users
+            ) {
+                if (isConfirmed) {
+                    onDismiss()
+                } else {
+                    onSelectLocation?.invoke() ?: onDismiss()
+                }
+            } // 1-tap skip for impatient power users or address selection
     ) {
         // 1. STYLIZED PROCEDURAL MAP BACKGROUND (Tata 1mg Signature)
         ProceduralVectorMap(
@@ -226,7 +237,7 @@ fun LocationLockinScreen(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = "Delivering to",
+                            text = if (isConfirmed) "Delivering to" else "Location unconfirmed",
                             fontSize = 14.sp,
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.SemiBold,
@@ -234,7 +245,7 @@ fun LocationLockinScreen(
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            text = locality.ifBlank { "Rewari" },
+                            text = locality.ifBlank { "Select Location" },
                             fontSize = 24.sp,
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.ExtraBold,
@@ -242,29 +253,47 @@ fun LocationLockinScreen(
                             letterSpacing = (-0.5).sp,
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            color = Color(0xFFE8F5E9),
-                            shape = RoundedCornerShape(16.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                        if (isConfirmed && !etaLabel.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Surface(
+                                color = Color(0xFFE8F5E9),
+                                shape = RoundedCornerShape(16.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0))
                             ) {
-                                Icon(
-                                    Icons.Default.Bolt,
-                                    contentDescription = null,
-                                    tint = Color(0xFF0C831F),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Bolt,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0C831F),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (etaLabel.contains("DELIVERY", ignoreCase = true)) etaLabel.uppercase() else "${etaLabel.uppercase()} DELIVERY",
+                                        fontSize = 11.sp,
+                                        fontFamily = PlusJakartaSans,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF096818)
+                                    )
+                                }
+                            }
+                        } else if (!isConfirmed) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                modifier = Modifier.clickable { onSelectLocation?.invoke() ?: onDismiss() },
+                                color = Color(0xFF0C831F),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
                                 Text(
-                                    text = "10 MINS DELIVERY",
-                                    fontSize = 11.sp,
-                                    fontFamily = PlusJakartaSans,
+                                    text = "Select Delivery Address",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    color = Color.White,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF096818)
+                                    fontFamily = PlusJakartaSans
                                 )
                             }
                         }

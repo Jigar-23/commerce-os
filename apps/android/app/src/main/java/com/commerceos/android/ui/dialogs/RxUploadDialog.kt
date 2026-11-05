@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,20 +32,71 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.commerceos.android.data.local.LocalPrescriptionManager
 import com.commerceos.android.ui.theme.PlusJakartaSans
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
 fun RxUploadDialog(
+    customerId: String = "",
     onDismiss: () -> Unit,
-    onUpload: (patientName: String, attachments: List<String>) -> Unit
+    onUpload: (patientName: String, attachments: List<String>, onResult: (Boolean, String?) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
-    var patientName by remember { mutableStateOf("") }
-    var attachment by remember { mutableStateOf<String?>(null) }
-    var attachmentName by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    var patientName by rememberSaveable { mutableStateOf("") }
+    var attachment by rememberSaveable { mutableStateOf<String?>(null) }
+    var attachmentName by rememberSaveable { mutableStateOf<String?>(null) }
+    var cameraError by rememberSaveable { mutableStateOf<String?>(null) }
+    var uploadError by rememberSaveable { mutableStateOf<String?>(null) }
+    var draftError by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
+    var draftJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    LaunchedEffect(customerId) {
+        if (attachment == null && patientName.isEmpty()) {
+            val draft = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                LocalPrescriptionManager.getDraft(context, customerId)
+            }
+            if (draft != null) {
+                if (draft.patientName.isNotBlank()) {
+                    patientName = draft.patientName
+                }
+                if (!draft.attachmentPath.isNullOrBlank()) {
+                    val file = File(draft.attachmentPath)
+                    if (file.exists() && file.length() > 0) {
+                        attachment = draft.attachmentPath
+                        attachmentName = draft.attachmentName ?: file.name
+                    }
+                }
+            }
+        }
+    }
+
+    fun persistDraftDebounced(name: String, path: String?, fileName: String?, debounceMs: Long = 300L) {
+        draftJob?.cancel()
+        val appContext = context.applicationContext
+        draftJob = coroutineScope.launch(Dispatchers.IO) {
+            if (debounceMs > 0) {
+                kotlinx.coroutines.delay(debounceMs)
+            }
+            val ok = LocalPrescriptionManager.saveDraft(
+                appContext,
+                customerId,
+                LocalPrescriptionManager.PrescriptionDraft(
+                    patientName = name,
+                    attachmentPath = path,
+                    attachmentName = fileName
+                )
+            )
+            withContext(Dispatchers.Main) {
+                draftError = if (!ok) "Failed to save draft securely" else null
+            }
+        }
+    }
 
     val takeCameraPhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && tempCameraFile != null) {
@@ -52,8 +104,18 @@ fun RxUploadDialog(
             if (permanentFile != null) {
                 attachment = permanentFile.absolutePath
                 attachmentName = permanentFile.name
+                cameraError = null
+                persistDraftDebounced(patientName, permanentFile.absolutePath, permanentFile.name, 0L)
+            } else {
+                cameraError = "Failed to securely save captured photo"
             }
+        } else if (!success) {
+            cameraError = "Photo capture cancelled"
         }
+        try {
+            tempCameraFile?.delete()
+        } catch (_: Exception) {}
+        tempCameraFile = null
     }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -61,17 +123,30 @@ fun RxUploadDialog(
             try {
                 val (file, uri) = LocalPrescriptionManager.createCameraImageFile(context)
                 tempCameraFile = file
+                cameraError = null
                 takeCameraPhoto.launch(uri)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                cameraError = "Could not initialize camera: ${e.localizedMessage ?: "Storage error"}"
+            }
+        } else {
+            cameraError = "Camera permission is required to capture prescriptions"
         }
     }
 
     val pickGalleryImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
-            val file = LocalPrescriptionManager.savePrescriptionUri(context, uri)
-            if (file != null) {
-                attachment = file.absolutePath
-                attachmentName = file.name
+            coroutineScope.launch(Dispatchers.IO) {
+                val file = LocalPrescriptionManager.savePrescriptionUriAsync(context, uri)
+                withContext(Dispatchers.Main) {
+                    if (file != null) {
+                        attachment = file.absolutePath
+                        attachmentName = file.name
+                        cameraError = null
+                        persistDraftDebounced(patientName, file.absolutePath, file.name, 0L)
+                    } else {
+                        cameraError = "Selected image exceeds 5 MiB or could not be encrypted"
+                    }
+                }
             }
         }
     }
@@ -85,15 +160,38 @@ fun RxUploadDialog(
             try {
                 val (file, uri) = LocalPrescriptionManager.createCameraImageFile(context)
                 tempCameraFile = file
+                cameraError = null
                 takeCameraPhoto.launch(uri)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                cameraError = "Could not initialize camera: ${e.localizedMessage ?: "Storage error"}"
+            }
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
+    fun handleDismiss() {
+        draftJob?.cancel()
+        val appContext = context.applicationContext
+        coroutineScope.launch(Dispatchers.IO) {
+            LocalPrescriptionManager.saveDraft(
+                appContext,
+                customerId,
+                LocalPrescriptionManager.PrescriptionDraft(
+                    patientName = patientName,
+                    attachmentPath = attachment,
+                    attachmentName = attachmentName
+                )
+            )
+        }
+        try {
+            tempCameraFile?.delete()
+        } catch (_: Exception) {}
+        onDismiss()
+    }
+
     Dialog(
-        onDismissRequest = { if (!busy) onDismiss() },
+        onDismissRequest = { if (!busy) handleDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -132,11 +230,45 @@ fun RxUploadDialog(
                         )
                     }
                     IconButton(
-                        onClick = onDismiss,
+                        onClick = { handleDismiss() },
                         enabled = !busy,
                         modifier = Modifier.size(34.dp)
                     ) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                val activeBannerErr = draftError ?: cameraError
+                if (activeBannerErr != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = Color(0xFFFEF2F2),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = activeBannerErr,
+                                fontSize = 11.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                color = Color(0xFFB91C1C),
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    draftError = null
+                                    cameraError = null
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear error", tint = Color(0xFFB91C1C), modifier = Modifier.size(16.dp))
+                            }
+                        }
                     }
                 }
 
@@ -155,7 +287,10 @@ fun RxUploadDialog(
                 Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = patientName,
-                    onValueChange = { patientName = it },
+                    onValueChange = {
+                        patientName = it
+                        persistDraftDebounced(it, attachment, attachmentName, 300L)
+                    },
                     placeholder = { Text("e.g. Self, Family Member", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -310,7 +445,17 @@ fun RxUploadDialog(
                                 )
                             }
                             IconButton(
-                                onClick = { attachment = null; attachmentName = null },
+                                onClick = {
+                                    val oldPath = attachment
+                                    attachment = null
+                                    attachmentName = null
+                                    persistDraftDebounced(patientName, null, null, 0L)
+                                    if (oldPath != null) {
+                                        try {
+                                            File(oldPath).delete()
+                                        } catch (_: Exception) {}
+                                    }
+                                },
                                 enabled = !busy,
                                 modifier = Modifier.size(32.dp)
                             ) {
@@ -325,6 +470,17 @@ fun RxUploadDialog(
                     }
                 }
 
+                if (uploadError != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = uploadError!!,
+                        color = Color(0xFFDC2626),
+                        fontSize = 12.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Action Button
@@ -332,7 +488,18 @@ fun RxUploadDialog(
                     onClick = {
                         if (attachment == null || busy) return@Button
                         busy = true
-                        onUpload(patientName.trim(), listOfNotNull(attachment))
+                        uploadError = null
+                        onUpload(patientName.trim(), listOfNotNull(attachment)) { success, errorMsg ->
+                            busy = false
+                            if (success) {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    LocalPrescriptionManager.clearDraft(context, customerId)
+                                }
+                                onDismiss()
+                            } else {
+                                uploadError = errorMsg ?: "Upload failed. Please retry."
+                            }
+                        }
                     },
                     enabled = !busy && attachment != null,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E675E)),

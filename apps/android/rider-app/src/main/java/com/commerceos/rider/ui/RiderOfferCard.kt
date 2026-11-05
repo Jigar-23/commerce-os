@@ -42,7 +42,7 @@ fun RiderOfferCard(
             val km = (roadMeters / 1000.0)
             (Math.round(km * 10.0) / 10.0).coerceAtLeast(0.3)
         } else {
-            offer.pickupDistanceKm?.takeIf { it > 0.0 } ?: 0.8
+            offer.pickupDistanceKm?.takeIf { it > 0.0 } ?: 0.0
         }
     }
 
@@ -54,12 +54,15 @@ fun RiderOfferCard(
             val km = (roadMeters / 1000.0)
             (Math.round(km * 10.0) / 10.0).coerceAtLeast(0.5)
         } else {
-            offer.deliveryDistanceKm.takeIf { it > 0.0 } ?: 1.5
+            offer.deliveryDistanceKm.takeIf { it > 0.0 } ?: 0.0
         }
     }
 
+    val hasPickupLeg = pickupDistKm > 0.0
+    val hasDropLeg = dropDistKm > 0.0
     val totalTripKm = if (offer.totalDistanceKm > 0.0) offer.totalDistanceKm else Math.round((pickupDistKm + dropDistKm) * 10.0) / 10.0
-    val totalTripMins = if (offer.estimatedDurationMins > 0) offer.estimatedDurationMins else maxOf(6, Math.round(totalTripKm * 3.5 + 4).toInt())
+    val totalTripMins = if (offer.estimatedDurationMins > 0) offer.estimatedDurationMins else if (totalTripKm > 0.0) maxOf(6, Math.round(totalTripKm * 3.5 + 4).toInt()) else 0
+    val isApproximateRoute = !hasPickupLeg || !hasDropLeg || offer.totalDistanceKm <= 0.0
 
     Card(
         shape = RoundedCornerShape(22.dp),
@@ -150,16 +153,20 @@ fun RiderOfferCard(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "$totalItemCount item(s) • ${if (offer.isCod) "Collect COD" else "Zero Cash to Collect"}",
+                                text = "$totalItemCount item(s) • Collect COD",
                                 fontSize = 12.sp,
-                                color = if (offer.isCod) RiderColors.WarningText else RiderColors.PrimarySoftText,
+                                color = RiderColors.WarningText,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
 
                         Text(
-                            text = if (cartVal > 0.0) "₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}" else "₹0",
-                            fontSize = 28.sp,
+                            text = if (cartVal > 0.0) {
+                                "₹${if (cartVal % 1.0 == 0.0) cartVal.toInt() else "%.2f".format(cartVal)}"
+                            } else {
+                                "Amount pending"
+                            },
+                            fontSize = if (cartVal <= 0.0) 18.sp else 28.sp,
                             fontWeight = FontWeight.Black,
                             color = RiderColors.TextPrimary
                         )
@@ -179,12 +186,18 @@ fun RiderOfferCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Estimated Trip Route",
+                            text = if (isApproximateRoute) "Approximate Route" else "Estimated Trip Route",
                             fontSize = 12.sp,
                             color = RiderColors.TextMuted
                         )
                         Text(
-                            text = "${String.format(java.util.Locale.US, "%.1f", totalTripKm)} km • ~$totalTripMins min",
+                            text = if (totalTripKm > 0.0 && totalTripMins > 0) {
+                                "${if (isApproximateRoute) "~" else ""}${String.format(java.util.Locale.US, "%.1f", totalTripKm)} km • ~$totalTripMins min"
+                            } else if (totalTripKm > 0.0) {
+                                "~${String.format(java.util.Locale.US, "%.1f", totalTripKm)} km"
+                            } else {
+                                "Route pending dispatch"
+                            },
                             color = RiderColors.Primary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -206,7 +219,11 @@ fun RiderOfferCard(
                         Column {
                             Text("PICKUP HUB", color = RiderColors.AccentBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                text = "${offer.merchantName} (${String.format(java.util.Locale.US, "%.1f", pickupDistKm)} km away)",
+                                text = if (hasPickupLeg && pickupDistKm > 0.0) {
+                                    "${offer.merchantName} (${String.format(java.util.Locale.US, "%.1f", pickupDistKm)} km away)"
+                                } else {
+                                    offer.merchantName
+                                },
                                 color = RiderColors.TextPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -216,7 +233,11 @@ fun RiderOfferCard(
                         Column {
                             Text("CUSTOMER DROP", color = RiderColors.Primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                text = "${offer.customerAddress} (${String.format(java.util.Locale.US, "%.1f", dropDistKm)} km)",
+                                text = if (hasDropLeg && dropDistKm > 0.0) {
+                                    "${offer.customerAddress} (${String.format(java.util.Locale.US, "%.1f", dropDistKm)} km)"
+                                } else {
+                                    offer.customerAddress
+                                },
                                 color = RiderColors.TextPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -226,8 +247,8 @@ fun RiderOfferCard(
                     }
                 }
 
-                // Itemized Package Preview
-                if (offer.items.isNotEmpty()) {
+                // Itemized Package Preview: reveal item names only after acceptance for privacy
+                if (offer.isAccepted && offer.items.isNotEmpty()) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = RiderColors.SurfaceSubtle,
@@ -264,11 +285,40 @@ fun RiderOfferCard(
                             }
                         }
                     }
+                } else if (!offer.isAccepted) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = RiderColors.SurfaceSubtle,
+                        border = BorderStroke(1.dp, RiderColors.Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "PACKAGE CONTENTS ($totalItemCount)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RiderColors.TextMuted,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "Details sealed until acceptance",
+                                fontSize = 11.sp,
+                                color = RiderColors.TextSecondary,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                    }
                 }
 
                 // COD Notice
                 val effectiveCod = (if (offer.codAmount != null && offer.codAmount > 0.0) offer.codAmount else offer.orderTotal) ?: 0.0
-                if (offer.isCod && effectiveCod > 0.0) {
+                if (offer.isCod) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = RiderColors.WarningSoft,
@@ -276,7 +326,11 @@ fun RiderOfferCard(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "💵 Cash on Delivery: Collect ₹${effectiveCod.toInt()} from customer",
+                            text = if (effectiveCod > 0.0) {
+                                "💵 Cash on Delivery: Collect ₹${effectiveCod.toInt()} from customer"
+                            } else {
+                                "💵 Cash on Delivery: Collect order total from customer"
+                            },
                             color = RiderColors.WarningText,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,

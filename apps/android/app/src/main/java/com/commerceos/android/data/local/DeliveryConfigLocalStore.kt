@@ -3,6 +3,7 @@ package com.commerceos.android.data.local
 import android.content.Context
 import com.commerceos.android.network.DeliveryConfigResponse
 import com.commerceos.android.network.NetworkClient
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.math.BigDecimal
@@ -68,15 +69,17 @@ object DeliveryConfigLocalStore {
         cachedFee = BigDecimal.valueOf(config.standardDeliveryFee).setScale(2, java.math.RoundingMode.HALF_UP)
     }
 
-    suspend fun syncIfStale(context: Context, force: Boolean = false) {
+    suspend fun syncIfStale(context: Context, force: Boolean = false, dispatcher: CoroutineDispatcher = Dispatchers.IO) {
         if (!force && !shouldRefresh(context)) return
-        withContext(Dispatchers.IO) {
-            try {
-                val resp = NetworkClient.promotionsApi.getDeliveryConfig()
-                saveConfig(context, resp)
-            } catch (_: Exception) {
-                // Keep local cache offline
+        try {
+            withContext(dispatcher) {
+                try {
+                    val resp = NetworkClient.promotionsApi.getDeliveryConfig()
+                    saveConfig(context, resp)
+                } catch (_: Exception) {
+                    // Keep local cache offline
+                }
             }
-        }
+        } catch (_: Exception) {}
     }
 }

@@ -1,8 +1,11 @@
 package com.commerceos.rider.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -124,7 +127,6 @@ fun RiderMainScreen(
 
     val lastLocation by RiderForegroundLocationService.lastLocation.collectAsState()
     val isStale by RiderForegroundLocationService.isStale.collectAsState()
-    val isNetworkAvailable by RiderForegroundLocationService.isNetworkAvailable.collectAsState()
 
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -136,6 +138,47 @@ fun RiderMainScreen(
     }
 
     var isShiftUpdating by remember { mutableStateOf(false) }
+
+    fun executeShiftToggle(nextStatus: Boolean) {
+        if (isShiftUpdating) return
+        if (nextStatus) {
+            val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!fine && !coarse) {
+                Toast.makeText(context, "Location permission is required to go online.", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        isShiftUpdating = true
+        scope.launch {
+            try {
+                val res = repository.updateShiftStatus(nextStatus)
+                res.onSuccess {
+                    isOnline = nextStatus
+                    sessionManager.saveShiftOnline(nextStatus)
+                    val authoritativeStoreId = liveProfile?.storeId ?: sessionManager.getStoreId()
+                    sessionManager.reconcileStoreTopic(authoritativeStoreId, nextStatus)
+                    if (nextStatus) {
+                        try {
+                            val svcIntent = Intent(context, RiderForegroundLocationService::class.java)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                context.startForegroundService(svcIntent)
+                            } else {
+                                context.startService(svcIntent)
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    liveProfile = liveProfile?.copy(shiftStatus = if (nextStatus) "ONLINE_AVAILABLE" else "OFFLINE")
+                }.onFailure {
+                    Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error updating shift: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                isShiftUpdating = false
+            }
+        }
+    }
 
     // 1. Fetch Authoritative Rider Profile & Register Cached FCM Token
     LaunchedEffect(Unit) {
@@ -161,11 +204,11 @@ fun RiderMainScreen(
                         sessionManager.reconcileStoreTopic(it.storeId, savedDuty)
                         isOnline = savedDuty
                     }.onFailure {
-                        sessionManager.clearSession()
+                        sessionManager.coordinateLogout(context)
                         onLogout()
                     }
                 } else {
-                    sessionManager.clearSession()
+                    sessionManager.coordinateLogout(context)
                     onLogout()
                 }
             } else if (liveProfile == null) {
@@ -316,11 +359,12 @@ fun RiderMainScreen(
         }
     }
 
-    // Foreground Location Service Toggle
-    val currentOnlineState = isOnline
-    LaunchedEffect(currentOnlineState) {
+    // Foreground Location Service Toggle: remain tracking while online OR actively delivering
+    val hasActiveDelivery = session != null && session?.deliveryId.isNullOrBlank().not() && session?.state !in listOf("CANCELLED", "DECLINED", "DELIVERED")
+    val shouldTrack = isOnline || hasActiveDelivery
+    LaunchedEffect(shouldTrack) {
         val intent = Intent(context, RiderForegroundLocationService::class.java)
-        if (currentOnlineState) {
+        if (shouldTrack) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -437,31 +481,7 @@ fun RiderMainScreen(
                                 modifier = Modifier
                                     .padding(end = 12.dp)
                                     .clickable(enabled = !isShiftUpdating) {
-                                        val nextStatus = !isOnline
-                                        isShiftUpdating = true
-                                        scope.launch {
-                                            val res = repository.updateShiftStatus(nextStatus)
-                                            res.onSuccess {
-                                                isOnline = nextStatus
-                                                sessionManager.saveShiftOnline(nextStatus)
-                                                val authoritativeStoreId = liveProfile?.storeId ?: sessionManager.getStoreId()
-                                                sessionManager.reconcileStoreTopic(authoritativeStoreId, nextStatus)
-                                                if (nextStatus) {
-                                                    try {
-                                                        val svcIntent = android.content.Intent(context, com.commerceos.rider.service.RiderForegroundLocationService::class.java)
-                                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                                            context.startForegroundService(svcIntent)
-                                                        } else {
-                                                            context.startService(svcIntent)
-                                                        }
-                                                    } catch (_: Exception) {}
-                                                }
-                                                liveProfile = liveProfile?.copy(shiftStatus = if (nextStatus) "ONLINE_AVAILABLE" else "OFFLINE")
-                                            }.onFailure {
-                                                Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
-                                            }
-                                            isShiftUpdating = false
-                                        }
+                                        executeShiftToggle(!isOnline)
                                     }
                             ) {
                                 Row(
@@ -1092,24 +1112,13 @@ fun RiderMainScreen(
 
                                     if (!isOnline) {
                                         Button(
-                                            onClick = {
-                                                isShiftUpdating = true
-                                                scope.launch {
-                                                    val res = repository.updateShiftStatus(true)
-                                                    res.onSuccess {
-                                                        isOnline = true
-                                                        liveProfile = liveProfile?.copy(shiftStatus = "ONLINE_AVAILABLE")
-                                                    }.onFailure {
-                                                        Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    isShiftUpdating = false
-                                                }
-                                            },
+                                            onClick = { executeShiftToggle(true) },
+                                            enabled = !isShiftUpdating,
                                             colors = ButtonDefaults.buttonColors(containerColor = RiderColors.Primary),
                                             shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.fillMaxWidth().height(48.dp)
                                         ) {
-                                            Text("GO ON DUTY", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                                            Text(if (isShiftUpdating) "UPDATING..." else "GO ON DUTY", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
                                         }
                                     }
 
@@ -1307,80 +1316,21 @@ fun RiderMainScreen(
                                     }
                                 }
 
-                                // 3. Fallback pop-up for order/job notification so rider ALWAYS gets a pop-up dialog directly in Alerts
+                                // 3. Fallback check for order/job notification: display authoritative trip if found, otherwise alert that details are unavailable
                                 if (notif.category == "ORDER" || notif.category == "ORDERS" || notif.type.contains("ORDER", ignoreCase = true) || !notif.orderId.isNullOrBlank() || !notif.deliveryId.isNullOrBlank()) {
                                     val orderIdFromTitle = Regex("""#([A-Za-z0-9_-]+)""").find(notif.title)?.groupValues?.get(1)
-                                    val cleanOrderId = notif.orderId ?: notif.deliveryId ?: orderIdFromTitle?.let { "ord_$it" } ?: ("ORD-" + notif.notificationId.takeLast(6).uppercase())
-                                    val cleanDeliveryId = notif.deliveryId ?: notif.orderId ?: ("DEL-" + notif.notificationId.takeLast(6).uppercase())
+                                    val cleanOrderId = notif.orderId ?: notif.deliveryId ?: orderIdFromTitle?.let { "ord_$it" } ?: ""
 
                                     // Check if existing session in trips matches cleanOrderId or orderIdFromTitle
                                     val existingSession = completedSessionsList.find { it.orderId.contains(cleanOrderId, ignoreCase = true) || (orderIdFromTitle != null && it.orderId.contains(orderIdFromTitle, ignoreCase = true)) }
-                                        ?: (if (session?.orderId?.contains(cleanOrderId, ignoreCase = true) == true) session else null)
+                                        ?: (if (cleanOrderId.isNotBlank() && session?.orderId?.contains(cleanOrderId, ignoreCase = true) == true) session else null)
 
                                     if (existingSession != null) {
                                         selectedOrderForDetail = existingSession
                                         return@launch
                                     }
 
-                                    // Extract bill amount properly (never match hex characters in order hash!)
-                                    val extractedAmount = Regex("""(?:Bill|Payout|Total|₹|Rs\.?)\s*:?\s*[₹Rs\.]*\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
-                                        .find(notif.body + " " + notif.title)?.groupValues?.get(1)?.toDoubleOrNull()
-                                        ?: 32.0
-
-                                    val storeFromNotif = when {
-                                        notif.body.contains("Pickup:", ignoreCase = true) -> notif.body.substringAfter("Pickup:").substringBefore("•").substringBefore("(").substringBefore("\n").trim()
-                                        notif.body.contains("from ", ignoreCase = true) -> notif.body.substringAfter("from ").substringBefore("•").substringBefore(" to").trim()
-                                        else -> "Rewari Central Hub (STORE_REWARI_01)"
-                                    }
-                                    val dropFromNotif = when {
-                                        notif.body.contains("Drop:", ignoreCase = true) -> notif.body.substringAfter("Drop:").substringBefore("\n").substringBefore("•").trim()
-                                        notif.body.contains("to ", ignoreCase = true) -> notif.body.substringAfter("to ").trim()
-                                        else -> "Customer Delivery Address, Rewari Sector 4"
-                                    }
-
-                                    val isCodOrder = notif.body.contains("COD", ignoreCase = true) || notif.title.contains("COD", ignoreCase = true)
-
-                                    val fallbackItem = com.commerceos.rider.model.RiderOrderItem(
-                                        name = "Medical Essentials Package",
-                                        quantity = 1,
-                                        price = extractedAmount,
-                                        sku = cleanOrderId
-                                    )
-
-                                    val fallbackSession = ServerDeliverySession(
-                                        deliveryId = cleanDeliveryId,
-                                        orderId = cleanOrderId,
-                                        riderId = liveProfile?.riderId ?: "rider-self",
-                                        riderName = liveProfile?.name ?: "Delivery Partner",
-                                        riderPhone = liveProfile?.phone ?: "",
-                                        riderVehicle = liveProfile?.vehicleNumber ?: "Electric Scooter",
-                                        customerId = "cust-order",
-                                        customerName = "Customer",
-                                        customerPhone = "+91 98179 16180",
-                                        customerAddress = dropFromNotif,
-                                        customerLat = null,
-                                        customerLng = null,
-                                        merchantName = storeFromNotif,
-                                        merchantAddress = "Rewari Central Hub (STORE_REWARI_01)",
-                                        merchantLat = null,
-                                        merchantLng = null,
-                                        merchantPhone = "+91 1800 123 4567",
-                                        payoutFormatted = null,
-                                        distanceKm = 2.4,
-                                        estimatedTimeMins = 12,
-                                        state = if (notif.title.contains("delivered", ignoreCase = true) || notif.body.contains("delivered", ignoreCase = true)) "DELIVERED" else "ACTIVE",
-                                        otpAttemptsLeft = 3,
-                                        otpVerified = true,
-                                        isCod = isCodOrder,
-                                        codAmount = if (isCodOrder) extractedAmount else null,
-                                        codCollectedAmount = null,
-                                        codReconciled = false,
-                                        orderTotal = extractedAmount,
-                                        items = listOf(fallbackItem),
-                                        telemetry = null,
-                                        history = emptyList()
-                                    )
-                                    selectedOrderForDetail = fallbackSession
+                                    Toast.makeText(context, "Order details currently unavailable. Please check your network connection.", Toast.LENGTH_SHORT).show()
                                     return@launch
                                 }
 
@@ -1402,29 +1352,14 @@ fun RiderMainScreen(
                 3 -> RiderProfileView(
                     profile = liveProfile,
                     isOnline = isOnline,
+                    isShiftUpdating = isShiftUpdating,
                     onToggleShift = { newStatus ->
-                        scope.launch {
-                            val res = repository.updateShiftStatus(newStatus)
-                            res.onSuccess {
-                                isOnline = newStatus
-                                sessionManager.saveShiftOnline(newStatus)
-                                val assignedStore = sessionManager.getStoreId().trim()
-                                sessionManager.reconcileStoreTopic(assignedStore, newStatus)
-                                liveProfile = liveProfile?.copy(shiftStatus = if (newStatus) "ONLINE_AVAILABLE" else "OFFLINE")
-                            }.onFailure {
-                                Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        executeShiftToggle(newStatus)
                     },
                     onLogout = {
                         scope.launch {
-                            val assignedStore = sessionManager.getStoreId().trim()
-                            if (assignedStore.isNotBlank()) {
-                                try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStore") } catch (_: Exception) {}
-                            }
-                            try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
                             try { repository.logoutDeviceToken() } catch (_: Exception) {}
-                            sessionManager.clearSession(context)
+                            sessionManager.coordinateLogout(context)
                             isOnline = false
                             onLogout()
                         }
@@ -1513,11 +1448,11 @@ fun RiderMainScreen(
                 scope.launch {
                     actionLoading = true
                     showCancelDeliveryDialog = false
-                    session = null
-                    activeOffer = null
-                    RiderForegroundLocationService.clearDeliverySession()
                     val res = repository.cancelDelivery(currentSession.deliveryId, reason, note)
                     res.onSuccess {
+                        session = null
+                        activeOffer = null
+                        RiderForegroundLocationService.clearDeliverySession(currentSession.deliveryId)
                         Toast.makeText(context, "Delivery cancelled", Toast.LENGTH_SHORT).show()
                     }.onFailure { err ->
                         Toast.makeText(context, err.message ?: "Cancellation failed", Toast.LENGTH_LONG).show()

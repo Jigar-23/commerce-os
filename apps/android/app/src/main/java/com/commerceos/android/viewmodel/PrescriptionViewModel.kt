@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.commerceos.android.data.local.LocalPrescriptionManager
+import com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.repository.AppRepository
@@ -73,16 +74,32 @@ class PrescriptionViewModel(
         loadJob = viewModelScope.launch {
             isLoading = true
             try {
-                val local = localPrescriptionsOverride?.invoke(id) ?: if (appContext != null) {
-                    LocalPrescriptionManager.getPrescriptions(appContext, id)
-                        .filter { it.customerId == id }
+                val localResult = if (localPrescriptionsOverride != null) {
+                    StorageResult.Success(localPrescriptionsOverride!!.invoke(id))
+                } else if (appContext != null) {
+                    LocalPrescriptionManager.getPrescriptionsWithResult(appContext!!, id)
                 } else {
-                    emptyList()
+                    StorageResult.Success(emptyList())
                 }
 
                 if (generation != loadGeneration) return@launch
-                prescriptions = local
-                errorMessage = null
+                val local = when (localResult) {
+                    is StorageResult.Success -> {
+                        val filtered = localResult.data.filter { it.customerId == id }
+                        prescriptions = filtered
+                        errorMessage = null
+                        filtered
+                    }
+                    is StorageResult.DecryptError -> {
+                        errorMessage = "Storage error: could not read encrypted local prescriptions. Please retry."
+                        prescriptions
+                    }
+                    is StorageResult.NotFound -> {
+                        prescriptions = emptyList()
+                        errorMessage = null
+                        emptyList()
+                    }
+                }
 
                 when (val result = repository.getCustomerPrescriptions(id)) {
                     is ApiResult.Success -> {
@@ -136,9 +153,10 @@ class PrescriptionViewModel(
     }
 
     private fun readBoundedBytes(file: File, maxBytes: Int = 5 * 1024 * 1024): ByteArray {
+        require(file.exists()) { "Prescription image could not be read." }
+        require(file.length() <= maxBytes.toLong()) { "Prescription image must be 5 MiB or smaller." }
         val bytes = LocalPrescriptionManager.readAttachmentBytes(appContext, file)
         require(bytes.isNotEmpty()) { "Prescription image could not be read." }
-        require(bytes.size <= maxBytes) { "Prescription image must be 5 MiB or smaller." }
         return bytes
     }
 
@@ -186,15 +204,20 @@ class PrescriptionViewModel(
         patientName: String,
         attachments: List<String>,
         operationKey: String? = null,
+        onError: ((String) -> Unit)? = null,
         onUploaded: ((Prescription) -> Unit)? = null
     ) {
         val safeCustomerId = customerId.trim()
         if (safeCustomerId.isBlank()) {
-            errorMessage = "Sign in to upload prescriptions"
+            val err = "Sign in to upload prescriptions"
+            errorMessage = err
+            onError?.invoke(err)
             return
         }
         if (attachments.isEmpty()) {
-            errorMessage = "Attach at least one prescription image"
+            val err = "Attach at least one prescription image"
+            errorMessage = err
+            onError?.invoke(err)
             return
         }
         if (isUploading && activeCustomerId == safeCustomerId) {
@@ -219,7 +242,15 @@ class PrescriptionViewModel(
             try {
                 val lightweightAttachments = encodeAttachments(attachments)
                 val uploadFingerprint = computeUploadFingerprint(safeCustomerId, patientName, lightweightAttachments)
-                val persistedUpload = appContext?.let { LocalPrescriptionManager.getPendingUpload(it, safeCustomerId) }
+                val pendingResult = appContext?.let { LocalPrescriptionManager.getPendingUploadWithResult(it, safeCustomerId) }
+                if (pendingResult is LocalPrescriptionManager.PendingUploadResult.StorageError) {
+                    val err = "Storage error: could not read pending prescription upload state. Please retry."
+                    errorMessage = err
+                    onError?.invoke(err)
+                    isUploading = false
+                    return@launch
+                }
+                val persistedUpload = (pendingResult as? LocalPrescriptionManager.PendingUploadResult.Found)?.record
                 val stableIdempotencyKey = operationKey
                     ?: if (currentUploadKey != null && currentUploadFingerprint == uploadFingerprint) {
                         currentUploadKey!!
@@ -255,7 +286,11 @@ class PrescriptionViewModel(
                             currentUploadKey = null
                             currentUploadFingerprint = null
                             appContext?.let { ctx ->
-                                LocalPrescriptionManager.clearPendingUpload(ctx, safeCustomerId)
+                                val cleared = LocalPrescriptionManager.clearPendingUpload(ctx, safeCustomerId)
+                                if (!cleared) {
+                                    android.util.Log.w("PrescriptionViewModel", "Warning: could not clear pending upload record from disk")
+                                }
+                                LocalPrescriptionManager.clearDraft(ctx, safeCustomerId)
                             }
                             val serverRx = if (result.data.attachments.isNotEmpty()) result.data else result.data.copy(attachments = attachments)
                             prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
@@ -292,7 +327,9 @@ class PrescriptionViewModel(
                     }
                     is ApiResult.Failure -> {
                         if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
-                            errorMessage = result.error.message.ifBlank { "Failed to upload prescription. Please try again." }
+                            val err = result.error.message.ifBlank { "Failed to upload prescription. Please try again." }
+                            errorMessage = err
+                            onError?.invoke(err)
                         }
                     }
                 }
@@ -300,7 +337,9 @@ class PrescriptionViewModel(
                 throw e
             } catch (e: Exception) {
                 if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
-                    errorMessage = "Could not upload prescription: ${e.message}"
+                    val err = "Could not upload prescription: ${e.message}"
+                    errorMessage = err
+                    onError?.invoke(err)
                 }
             } finally {
                 if (requestGeneration == uploadGeneration) {

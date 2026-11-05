@@ -23,30 +23,24 @@ object OfferPayloadValidator {
 
     fun extractCoarseLocality(rawAddress: String?, localityCandidate: String? = null): String {
         if (!localityCandidate.isNullOrBlank()) {
-            return sanitizeLocalityString(localityCandidate)
+            val candidate = localityCandidate.trim()
+            if (!candidate.contains(",") && candidate.length in 3..40 && !candidate.matches(Regex(".*\\d{3,}.*"))) {
+                val isPersonName = candidate.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
+                if (!isPersonName) return candidate
+            }
+            val parts = candidate.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            val filtered = parts.filterNot { part ->
+                part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
+                part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
+                part.matches(Regex("^#?\\d+.*")) ||
+                part.matches(Regex(".*\\b(street|road|st|rd|lane|ave|avenue|dr|drive|gali|marg)\\b.*", RegexOption.IGNORE_CASE)) ||
+                part.matches(Regex("^[A-Z][a-z]+\\s+[A-Z][a-z]+$"))
+            }
+            if (filtered.isNotEmpty()) {
+                return filtered.last()
+            }
         }
-        if (rawAddress.isNullOrBlank()) return "Customer Area"
-        val parts = rawAddress.split(",").map { it.trim() }.filter { it.isNotBlank() }
-        val filtered = parts.filterNot { part ->
-            part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
-            part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
-            part.matches(Regex("^#?\\d+.*"))
-        }
-        return if (filtered.isNotEmpty()) {
-            filtered.takeLast(2).joinToString(", ")
-        } else {
-            "Customer Area"
-        }
-    }
-
-    private fun sanitizeLocalityString(candidate: String): String {
-        val parts = candidate.split(",").map { it.trim() }.filter { it.isNotBlank() }
-        val filtered = parts.filterNot { part ->
-            part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
-            part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
-            part.matches(Regex("^#?\\d+.*"))
-        }
-        return if (filtered.isNotEmpty()) filtered.joinToString(", ") else "Customer Area"
+        return "Customer Delivery Area"
     }
 
     /**
@@ -119,19 +113,31 @@ object OfferPayloadValidator {
                 ?: json.optString("customerLocality").takeIf { it.isNotBlank() }
 
             val customerName = if (isAccepted) rawCustomerName else "Customer"
-            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
+            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(null, localityHint)
             val customerLat = if (isAccepted) rawCustomerLat else 0.0
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
-            val isCod = json.optBoolean("isCod", json.optBoolean("is_cod", false))
-            val codAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount") ?: 0.0
-
-            val orderTotal = json.optDoubleOrNull("orderTotal")
+            val isCodRaw = if (json.has("isCod")) json.optBoolean("isCod") else if (json.has("is_cod")) json.optBoolean("is_cod") else null
+            val isCod = isCodRaw ?: true
+            if (!isCod) {
+                Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces COD / Pay on Delivery.")
+                return null
+            }
+            val parsedCodAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount")
+            val parsedOrderTotal = json.optDoubleOrNull("orderTotal")
                 ?: json.optDoubleOrNull("order_total")
                 ?: json.optDoubleOrNull("totalAmount")
                 ?: json.optDoubleOrNull("total_amount")
                 ?: json.optDoubleOrNull("cartValue")
-                ?: (if (isCod && codAmount > 0.0) codAmount else null)
+
+            val codAmount = (parsedCodAmount?.takeIf { it > 0.0 })
+                ?: (parsedOrderTotal?.takeIf { it > 0.0 })
+            if (codAmount == null || codAmount <= 0.0) {
+                Log.w(TAG, "Rejecting offer $offerId: positive COD amount is required in COD deployment.")
+                return null
+            }
+
+            val orderTotal = parsedOrderTotal ?: codAmount
 
             val earningsAmount = (json.optDoubleOrNull("earningsAmount")
                 ?: json.optDoubleOrNull("earnings_amount")
@@ -140,30 +146,34 @@ object OfferPayloadValidator {
                 ?: json.optDoubleOrNull("earnings")
                 ?: json.optDoubleOrNull("estimatedEarnings")
                 ?: json.optDoubleOrNull("estimated_earnings")
-                ?: (orderTotal?.times(0.15)?.coerceAtLeast(35.0))
-                ?: 35.0)
+                ?: 0.0)
 
             val itemsList = mutableListOf<RiderOrderItem>()
-            val itemsArray = json.optJSONArray("items")
-            if (itemsArray != null) {
-                for (i in 0 until itemsArray.length()) {
-                    val itObj = itemsArray.optJSONObject(i)
-                    if (itObj != null) {
-                        val name = itObj.optString("name").takeIf { it.isNotBlank() } ?: itObj.optString("productName").takeIf { it.isNotBlank() } ?: "Item"
-                        val qty = itObj.optInt("quantity", 1)
-                        val price = itObj.optDouble("price", itObj.optDouble("unitPrice", 0.0))
-                        val sku = itObj.optString("sku", "")
-                        itemsList.add(RiderOrderItem(name = name, quantity = qty, price = price, sku = sku))
+            if (isAccepted) {
+                val itemsArray = json.optJSONArray("items")
+                if (itemsArray != null) {
+                    for (i in 0 until itemsArray.length()) {
+                        val itObj = itemsArray.optJSONObject(i)
+                        if (itObj != null) {
+                            val name = itObj.optString("name").takeIf { it.isNotBlank() } ?: itObj.optString("productName").takeIf { it.isNotBlank() } ?: "Item"
+                            val qty = itObj.optInt("quantity", 1)
+                            val price = itObj.optDouble("price", itObj.optDouble("unitPrice", 0.0))
+                            val sku = itObj.optString("sku", "")
+                            itemsList.add(RiderOrderItem(name = name, quantity = qty, price = price, sku = sku))
+                        }
                     }
                 }
             }
 
-            val deliveryDistanceKm = json.optDoubleOrNull("deliveryDistanceKm") ?: json.optDoubleOrNull("delivery_distance_km") ?: 1.5
-            val pickupDistanceKm = json.optDoubleOrNull("pickupDistanceKm") ?: json.optDoubleOrNull("pickup_distance_km") ?: 0.5
-            val totalDistanceKm = json.optDoubleOrNull("totalDistanceKm") ?: (pickupDistanceKm + deliveryDistanceKm)
+            val rawDelivery = json.optDoubleOrNull("deliveryDistanceKm") ?: json.optDoubleOrNull("delivery_distance_km")
+            val rawPickup = json.optDoubleOrNull("pickupDistanceKm") ?: json.optDoubleOrNull("pickup_distance_km")
+            val rawTotalDist = json.optDoubleOrNull("totalDistanceKm")
+            val totalDistanceKm = rawTotalDist ?: (if (rawDelivery != null && rawPickup != null) rawDelivery + rawPickup else rawDelivery ?: 0.0)
+            val deliveryDistanceKm = rawDelivery ?: totalDistanceKm
+            val pickupDistanceKm = rawPickup
             val estimatedDurationMins = json.optInt("estimatedDurationMins", 0).takeIf { it > 0 }
                 ?: json.optInt("estimated_duration_mins", 0).takeIf { it > 0 }
-                ?: 15
+                ?: 0
 
             val expiresAt = if (json.has("offerExpiresAt") && !json.isNull("offerExpiresAt")) json.getLong("offerExpiresAt")
                 else if (json.has("expiresAt") && !json.isNull("expiresAt")) json.getLong("expiresAt")
@@ -273,32 +283,45 @@ object OfferPayloadValidator {
                 ?: data["customerLocality"]?.takeIf { it.isNotBlank() }
 
             val customerName = if (isAccepted) rawCustomerName else "Customer"
-            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
+            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(null, localityHint)
             val customerLat = if (isAccepted) rawCustomerLat else 0.0
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
             val isCodRaw = data["isCod"] ?: data["is_cod"]
             val isCod = if (isCodRaw != null) isCodRaw.toBoolean() else true
-            val codAmount = data["codAmount"]?.toDoubleOrNull() ?: data["cod_amount"]?.toDoubleOrNull() ?: 0.0
-
-            val orderTotal = data["orderTotal"]?.toDoubleOrNull()
+            if (!isCod) {
+                Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces COD / Pay on Delivery.")
+                return null
+            }
+            val parsedCodAmount = data["codAmount"]?.toDoubleOrNull() ?: data["cod_amount"]?.toDoubleOrNull()
+            val parsedOrderTotal = data["orderTotal"]?.toDoubleOrNull()
                 ?: data["order_total"]?.toDoubleOrNull()
                 ?: data["totalAmount"]?.toDoubleOrNull()
                 ?: data["total_amount"]?.toDoubleOrNull()
                 ?: data["cartValue"]?.toDoubleOrNull()
-                ?: (if (isCod && codAmount > 0.0) codAmount else null)
+            val codAmount = (parsedCodAmount?.takeIf { it > 0.0 })
+                ?: (parsedOrderTotal?.takeIf { it > 0.0 })
+            if (codAmount == null || codAmount <= 0.0) {
+                Log.w(TAG, "Rejecting offer $offerId: positive COD amount is required in COD deployment.")
+                return null
+            }
+
+            val orderTotal = parsedOrderTotal ?: codAmount
 
             val earningsAmount = data["earningsAmount"]?.toDoubleOrNull()
                 ?: data["totalEarnings"]?.toDoubleOrNull()
                 ?: data["payout"]?.toDoubleOrNull()
                 ?: data["estimatedEarnings"]?.toDoubleOrNull()
-                ?: (orderTotal?.times(0.15)?.coerceAtLeast(35.0))
-                ?: 35.0
+                ?: 0.0
 
-            val totalDistanceKm = data["totalDistanceKm"]?.toDoubleOrNull() ?: data["total_distance_km"]?.toDoubleOrNull() ?: 2.0
-            val estimatedDurationMins = data["estimatedDurationMins"]?.toIntOrNull() ?: data["estimated_duration_mins"]?.toIntOrNull() ?: 15
-            val deliveryDistanceKm = data["deliveryDistanceKm"]?.toDoubleOrNull() ?: totalDistanceKm
-            val pickupDistanceKm = data["pickupDistanceKm"]?.toDoubleOrNull() ?: 0.5
+            val rawTotalDist = data["totalDistanceKm"]?.toDoubleOrNull() ?: data["total_distance_km"]?.toDoubleOrNull()
+            val rawDuration = data["estimatedDurationMins"]?.toIntOrNull() ?: data["estimated_duration_mins"]?.toIntOrNull()
+            val rawPickup = data["pickupDistanceKm"]?.toDoubleOrNull()
+            val rawDelivery = data["deliveryDistanceKm"]?.toDoubleOrNull()
+            val totalDistanceKm = rawTotalDist ?: (if (rawDelivery != null && rawPickup != null) rawDelivery + rawPickup else 0.0)
+            val estimatedDurationMins = rawDuration ?: 0
+            val deliveryDistanceKm = rawDelivery ?: totalDistanceKm
+            val pickupDistanceKm = rawPickup
 
             val expiresAt = data["expiresAt"]?.toLongOrNull()
                 ?: data["offerExpiresAt"]?.toLongOrNull()

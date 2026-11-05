@@ -10,9 +10,11 @@ import com.commerceos.android.location.*
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.repository.AppRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 class AddressViewModel(
     private val repository: AppRepository,
@@ -67,7 +69,7 @@ class AddressViewModel(
 
     val activeLocationHeaderLabel: String
         get() {
-            val addr = selectedAddress ?: addresses.firstOrNull()
+            val addr = selectedAddress ?: addresses.firstOrNull { it.isDefault }
             if (addr != null && addr.addressLine.isNotBlank()) {
                 if (addr.id.startsWith("temp_gps_") || addr.tag.equals("Current Location", ignoreCase = true)) {
                     val place = liveGpsPlace
@@ -131,37 +133,21 @@ class AddressViewModel(
     }
 
     private fun matchProximityOrFallbackPinpoint(geoPoint: GeoPoint) {
-        // Check if any saved address is within a 50-meter radius of the current GPS pinpoint
-        val matchingSaved = addresses
-            .mapNotNull { addr ->
-                val aLat = addr.latitude
-                val aLng = addr.longitude
-                if (aLat != null && aLng != null && aLat != 0.0 && aLng != 0.0) {
-                    val distMeters = RealTimeEtaEngine.calculateDistanceKm(geoPoint.latitude, geoPoint.longitude, aLat, aLng) * 1000.0
-                    if (distMeters <= 50.0) addr to distMeters else null
-                } else null
-            }
-            .minByOrNull { it.second }
-            ?.first
+        // Keep existing manually selected saved address if present
+        val current = selectedAddress
+        if (current != null && !current.id.startsWith("temp_gps_") && !current.tag.equals("Current Location", ignoreCase = true)) {
+            return
+        }
+        val place = liveGpsPlace
+        val fullArea = cleanAddressSegments(
+            place?.subLocality,
+            place?.locality,
+            place?.city
+        ).ifBlank { cleanAddressSegments(place?.formattedAddress).ifBlank { "Current Location" } }
 
-        if (matchingSaved != null) {
-            selectedAddress = matchingSaved
-        } else {
-            // Keep existing manually selected saved address if present
-            val current = selectedAddress
-            if (current != null && !current.id.startsWith("temp_gps_") && !current.tag.equals("Current Location", ignoreCase = true)) {
-                return
-            }
-            val place = liveGpsPlace
-            val fullArea = cleanAddressSegments(
-                place?.subLocality,
-                place?.locality,
-                place?.city
-            ).ifBlank { cleanAddressSegments(place?.formattedAddress).ifBlank { "Current Location" } }
-
-            selectedAddress = ApiAddress(
-                id = "temp_gps_${System.currentTimeMillis()}",
-                tag = "Current Location",
+        selectedAddress = ApiAddress(
+            id = "temp_gps_${System.currentTimeMillis()}",
+            tag = "Current Location",
                 addressType = "OTHER",
                 addressLine = fullArea,
                 city = place?.city ?: "",
@@ -171,7 +157,6 @@ class AddressViewModel(
                 longitude = geoPoint.longitude,
                 isDefault = false
             )
-        }
     }
 
     fun useCurrentGpsLocationAndMatchSaved(onCompleted: () -> Unit = {}) {
@@ -339,6 +324,7 @@ class AddressViewModel(
                 is ApiResult.Success -> {
                     if (gen != requestGeneration || customerId.trim() != targetId) return@launch
                     addresses = result.data
+                    serverConfirmedAddresses = result.data
                     val live = liveGpsLocation
                     if (live != null) {
                         matchProximityOrFallbackPinpoint(live)
@@ -346,6 +332,7 @@ class AddressViewModel(
                         val currentId = selectedAddress?.id
                         selectedAddress = result.data.firstOrNull { it.id == currentId }
                             ?: result.data.firstOrNull { it.isDefault }
+                        serverConfirmedSelectedAddress = selectedAddress
                         useCurrentGpsLocationAndMatchSaved()
                     }
                     errorMessage = if (result.data.isEmpty()) "No saved addresses yet" else null
@@ -841,48 +828,13 @@ class AddressViewModel(
     fun deleteAddress(addressId: String) {
         val previousAddresses = addresses
         val previousSelected = selectedAddress
-        val target = addresses.find { it.id == addressId }
-        val wasDefault = target?.isDefault == true
 
-        // 1. Optimistic Local State Update (Instant 0ms UI update)
+        // 1. Optimistic Local State Update
         val remaining = addresses.filter { it.id != addressId }
-        if (wasDefault && remaining.isNotEmpty()) {
-            val newDefault = remaining.first().copy(isDefault = true)
-            addresses = listOf(newDefault) + remaining.drop(1).map { it.copy(isDefault = false) }
-            selectedAddress = newDefault
-        } else {
-            addresses = remaining
-            if (selectedAddress?.id == addressId) {
-                selectedAddress = remaining.firstOrNull()
-            }
-        }
-
-        // Fallback to Live GPS location immediately if no saved address remains
-        if (selectedAddress == null) {
-            val live = liveGpsLocation
-            val place = liveGpsPlace
-            if (live != null) {
-                val fullArea = cleanAddressSegments(
-                    place?.subLocality,
-                    place?.locality,
-                    place?.city
-                ).ifBlank { cleanAddressSegments(place?.formattedAddress).ifBlank { "Current Location" } }
-
-                selectedAddress = ApiAddress(
-                    id = "temp_gps_${System.currentTimeMillis()}",
-                    tag = "Current Location",
-                    addressType = "OTHER",
-                    addressLine = fullArea,
-                    city = place?.city ?: "",
-                    state = place?.state ?: "",
-                    postalCode = place?.postalCode ?: "",
-                    latitude = live.latitude,
-                    longitude = live.longitude,
-                    isDefault = false
-                )
-            } else {
-                useCurrentGpsLocationPinpoint()
-            }
+        addresses = remaining
+        if (selectedAddress?.id == addressId) {
+            // Require explicit confirmation or use server-confirmed default only; do NOT arbitrarily pick remaining.first()
+            selectedAddress = remaining.firstOrNull { it.isDefault }
         }
 
         // 2. Server Synchronization
@@ -896,13 +848,8 @@ class AddressViewModel(
             }
             when (val result = repository.deleteAddress(targetCustId, addressId)) {
                 is ApiResult.Success -> {
-                    // If the deleted address was default and there is a new default, sync with server
-                    if (wasDefault && remaining.isNotEmpty()) {
-                        val newDefaultId = addresses.firstOrNull()?.id
-                        if (!newDefaultId.isNullOrBlank()) {
-                            repository.setDefaultAddress(targetCustId, newDefaultId)
-                        }
-                    }
+                    // Do not arbitrarily promote remaining address to default on server.
+                    // Server remains authoritative; if no default remains, customer explicitly chooses.
                 }
                 is ApiResult.Failure -> {
                     // If the address was already deleted or not found on server (404), do not rollback
@@ -920,11 +867,18 @@ class AddressViewModel(
 
     private var defaultAddressJob: Job? = null
     private var defaultAddressGeneration: Long = 0L
+    private val defaultAddressMutex = kotlinx.coroutines.sync.Mutex()
+    private var serverConfirmedAddresses: List<ApiAddress>? = null
+    private var serverConfirmedSelectedAddress: ApiAddress? = null
 
     fun setDefaultAddress(addressId: String) {
         val currentGen = ++defaultAddressGeneration
-        val previousAddresses = addresses
-        val previousSelected = selectedAddress
+
+        // Anchor rollback to the last server-confirmed state
+        if (serverConfirmedAddresses == null) {
+            serverConfirmedAddresses = addresses
+            serverConfirmedSelectedAddress = selectedAddress
+        }
 
         // Optimistic UI update
         addresses = addresses.map { it.copy(isDefault = it.id == addressId) }
@@ -933,20 +887,39 @@ class AddressViewModel(
             selectedAddress = target
         }
 
-        defaultAddressJob?.cancel()
         defaultAddressJob = viewModelScope.launch {
-            when (val result = repository.setDefaultAddress(customerId, addressId)) {
-                is ApiResult.Success -> {
-                    if (currentGen == defaultAddressGeneration) {
-                        addresses = addresses.map { it.copy(isDefault = it.id == addressId) }
-                        selectedAddress = result.data
+            defaultAddressMutex.withLock {
+                val rollbackAddresses = serverConfirmedAddresses ?: addresses
+                val rollbackSelected = serverConfirmedSelectedAddress ?: selectedAddress
+                try {
+                    when (val result = repository.setDefaultAddress(customerId, addressId)) {
+                        is ApiResult.Success -> {
+                            if (currentGen == defaultAddressGeneration) {
+                                val confirmedList = addresses.map { it.copy(isDefault = it.id == addressId) }
+                                addresses = confirmedList
+                                selectedAddress = result.data
+                                serverConfirmedAddresses = confirmedList
+                                serverConfirmedSelectedAddress = result.data
+                            }
+                        }
+                        is ApiResult.Failure -> {
+                            if (currentGen == defaultAddressGeneration) {
+                                addresses = rollbackAddresses
+                                selectedAddress = rollbackSelected
+                                errorMessage = "Failed to set default address: ${result.error.message}"
+                                // Reconcile with server to recover authoritative state
+                                init(customerId, force = true)
+                            }
+                        }
                     }
-                }
-                is ApiResult.Failure -> {
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
                     if (currentGen == defaultAddressGeneration) {
-                        addresses = previousAddresses
-                        selectedAddress = previousSelected
-                        errorMessage = "Failed to set default address: ${result.error.message}"
+                        addresses = rollbackAddresses
+                        selectedAddress = rollbackSelected
+                        errorMessage = "Failed to set default address"
+                        init(customerId, force = true)
                     }
                 }
             }
@@ -957,6 +930,8 @@ class AddressViewModel(
         customerId = ""
         addresses = emptyList()
         selectedAddress = null
+        serverConfirmedAddresses = null
+        serverConfirmedSelectedAddress = null
         profile = null
         isLoading = false
         errorMessage = null

@@ -30,6 +30,7 @@ import com.commerceos.rider.theme.RiderColors
 fun RiderProfileView(
     profile: RiderProfile?,
     isOnline: Boolean,
+    isShiftUpdating: Boolean = false,
     onToggleShift: (Boolean) -> Unit,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
@@ -260,6 +261,7 @@ fun RiderProfileView(
                 Switch(
                     checked = isOnline,
                     onCheckedChange = onToggleShift,
+                    enabled = !isShiftUpdating,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = RiderColors.Primary,

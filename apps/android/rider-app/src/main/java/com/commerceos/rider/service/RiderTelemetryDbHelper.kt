@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
 import com.commerceos.rider.model.RiderLocationUpdate
 
 /**
@@ -11,11 +12,14 @@ import com.commerceos.rider.model.RiderLocationUpdate
  * Provides atomic transaction-backed enqueue and dequeue operations per delivery.
  * Replaces SharedPreferences JSON storage to prevent data loss and high GC overhead.
  */
-class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+
+    private val secureStore by lazy { com.commerceos.rider.session.RiderSecureCredentialStore(context) }
 
     companion object {
+        private const val TAG = "RiderTelemetryDbHelper"
         private const val DATABASE_NAME = "commerce_rider_telemetry.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
 
         const val TABLE_NAME = "telemetry_queue"
         const val COLUMN_DELIVERY_ID = "delivery_id"
@@ -24,6 +28,7 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
         const val COLUMN_TIMESTAMP = "timestamp"
         const val COLUMN_LATITUDE = "latitude"
         const val COLUMN_LONGITUDE = "longitude"
+        const val COLUMN_ENCRYPTED_COORDINATES = "encrypted_coordinates"
         const val COLUMN_SPEED_KMH = "speed_kmh"
         const val COLUMN_HEADING = "heading"
         const val COLUMN_ACCURACY_METERS = "accuracy_meters"
@@ -31,6 +36,7 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
         const val COLUMN_IS_CRITICAL = "is_critical"
 
         private const val MAX_QUEUE_SIZE = 10000
+        private const val RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000L // 24 hours
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -40,8 +46,9 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
                 $COLUMN_SEQUENCE_NUMBER INTEGER NOT NULL,
                 $COLUMN_RIDER_ID TEXT NOT NULL,
                 $COLUMN_TIMESTAMP INTEGER NOT NULL,
-                $COLUMN_LATITUDE REAL NOT NULL,
-                $COLUMN_LONGITUDE REAL NOT NULL,
+                $COLUMN_LATITUDE REAL DEFAULT 0.0,
+                $COLUMN_LONGITUDE REAL DEFAULT 0.0,
+                $COLUMN_ENCRYPTED_COORDINATES TEXT,
                 $COLUMN_SPEED_KMH REAL NOT NULL,
                 $COLUMN_HEADING REAL NOT NULL,
                 $COLUMN_ACCURACY_METERS REAL NOT NULL,
@@ -56,10 +63,63 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // Versioned schema upgrades preserving queued rider telemetry rows
         if (oldVersion < 2) {
+            db.beginTransaction()
             try {
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_EVENT_TYPE TEXT DEFAULT 'TELEMETRY_UPDATED'")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_IS_CRITICAL INTEGER DEFAULT 0")
-            } catch (_: Exception) {}
+                val cursor = db.rawQuery("PRAGMA table_info($TABLE_NAME)", null)
+                val existingCols = mutableSetOf<String>()
+                cursor.use {
+                    while (it.moveToNext()) {
+                        existingCols.add(it.getString(1))
+                    }
+                }
+                if (COLUMN_EVENT_TYPE !in existingCols) {
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_EVENT_TYPE TEXT DEFAULT 'TELEMETRY_UPDATED'")
+                }
+                if (COLUMN_IS_CRITICAL !in existingCols) {
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_IS_CRITICAL INTEGER DEFAULT 0")
+                }
+                if (COLUMN_ENCRYPTED_COORDINATES !in existingCols) {
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_ENCRYPTED_COORDINATES TEXT")
+                }
+
+                // Migrate existing plaintext coordinates to encrypted_coordinates, then zero plaintext columns
+                val readCursor = db.rawQuery(
+                    "SELECT rowid, $COLUMN_LATITUDE, $COLUMN_LONGITUDE FROM $TABLE_NAME WHERE ($COLUMN_LATITUDE != 0.0 OR $COLUMN_LONGITUDE != 0.0) AND $COLUMN_ENCRYPTED_COORDINATES IS NULL",
+                    null
+                )
+                val pendingUpdates = mutableListOf<Triple<Long, Double, Double>>()
+                readCursor.use { c ->
+                    while (c.moveToNext()) {
+                        pendingUpdates.add(Triple(c.getLong(0), c.getDouble(1), c.getDouble(2)))
+                    }
+                }
+                for ((rowid, lat, lng) in pendingUpdates) {
+                    val encrypted = secureStore.encrypt("$lat,$lng")
+                    if (encrypted == null) {
+                        throw IllegalStateException("Encryption failed during telemetry database migration; aborting migration to prevent data loss")
+                    }
+                    val cv = ContentValues().apply {
+                        put(COLUMN_ENCRYPTED_COORDINATES, encrypted)
+                        put(COLUMN_LATITUDE, 0.0)
+                        put(COLUMN_LONGITUDE, 0.0)
+                    }
+                    db.update(TABLE_NAME, cv, "rowid = ?", arrayOf(rowid.toString()))
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        }
+    }
+
+    @Synchronized
+    fun pruneExpiredTelemetry(): Int {
+        return try {
+            val db = writableDatabase
+            val cutoff = System.currentTimeMillis() - RETENTION_PERIOD_MS
+            db.delete(TABLE_NAME, "$COLUMN_TIMESTAMP < ?", arrayOf(cutoff.toString()))
+        } catch (_: Exception) {
+            0
         }
     }
 
@@ -75,6 +135,10 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
         val db = writableDatabase
         db.beginTransaction()
         try {
+            // Prune expired records older than 24 hours
+            val cutoff = System.currentTimeMillis() - RETENTION_PERIOD_MS
+            db.delete(TABLE_NAME, "$COLUMN_TIMESTAMP < ?", arrayOf(cutoff.toString()))
+
             val currentCount = getQueueSize()
             if (currentCount >= MAX_QUEUE_SIZE) {
                 db.execSQL("""
@@ -87,13 +151,20 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
                 """.trimIndent())
             }
 
+            val encryptedCoords = secureStore.encrypt("${update.latitude},${update.longitude}")
+            if (encryptedCoords == null) {
+                Log.e(TAG, "Encryption failed for rider telemetry coordinates; failing closed to prevent plaintext exposure")
+                return false
+            }
+
             val values = ContentValues().apply {
                 put(COLUMN_DELIVERY_ID, update.deliveryId)
                 put(COLUMN_SEQUENCE_NUMBER, update.sequenceNumber)
                 put(COLUMN_RIDER_ID, update.riderId)
                 put(COLUMN_TIMESTAMP, update.timestamp)
-                put(COLUMN_LATITUDE, update.latitude)
-                put(COLUMN_LONGITUDE, update.longitude)
+                put(COLUMN_ENCRYPTED_COORDINATES, encryptedCoords)
+                put(COLUMN_LATITUDE, 0.0)
+                put(COLUMN_LONGITUDE, 0.0)
                 put(COLUMN_SPEED_KMH, update.speedKmh)
                 put(COLUMN_HEADING, update.heading)
                 put(COLUMN_ACCURACY_METERS, update.accuracyMeters)
@@ -135,12 +206,28 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
 
         cursor.use {
             if (it.moveToFirst()) {
+                val encIdx = it.getColumnIndex(COLUMN_ENCRYPTED_COORDINATES)
+                val encCoords = if (encIdx >= 0 && !it.isNull(encIdx)) it.getString(encIdx) else null
+                var lat = it.getDouble(it.getColumnIndexOrThrow(COLUMN_LATITUDE))
+                var lng = it.getDouble(it.getColumnIndexOrThrow(COLUMN_LONGITUDE))
+                if (!encCoords.isNullOrBlank()) {
+                    val decrypted = secureStore.decrypt(encCoords)
+                    if (decrypted != null && decrypted.contains(",")) {
+                        val parts = decrypted.split(",")
+                        val parsedLat = parts.getOrNull(0)?.toDoubleOrNull()
+                        val parsedLng = parts.getOrNull(1)?.toDoubleOrNull()
+                        if (parsedLat != null && parsedLng != null) {
+                            lat = parsedLat
+                            lng = parsedLng
+                        }
+                    }
+                }
                 return RiderLocationUpdate(
                     deliveryId = it.getString(it.getColumnIndexOrThrow(COLUMN_DELIVERY_ID)),
                     sequenceNumber = it.getLong(it.getColumnIndexOrThrow(COLUMN_SEQUENCE_NUMBER)),
                     riderId = it.getString(it.getColumnIndexOrThrow(COLUMN_RIDER_ID)),
-                    latitude = it.getDouble(it.getColumnIndexOrThrow(COLUMN_LATITUDE)),
-                    longitude = it.getDouble(it.getColumnIndexOrThrow(COLUMN_LONGITUDE)),
+                    latitude = lat,
+                    longitude = lng,
                     speedKmh = it.getFloat(it.getColumnIndexOrThrow(COLUMN_SPEED_KMH)),
                     heading = it.getFloat(it.getColumnIndexOrThrow(COLUMN_HEADING)),
                     accuracyMeters = it.getFloat(it.getColumnIndexOrThrow(COLUMN_ACCURACY_METERS)),

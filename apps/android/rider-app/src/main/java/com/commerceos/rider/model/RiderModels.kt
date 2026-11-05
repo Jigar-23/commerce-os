@@ -152,6 +152,8 @@ data class ServerOffer(
 ) {
     val remainingSeconds: Int
         get() = maxOf(0, ((offerExpiresAt - serverTime) / 1000).toInt())
+    val isAccepted: Boolean
+        get() = status.equals("ACCEPTED", ignoreCase = true) || status.equals("ASSIGNED", ignoreCase = true)
 }
 
 data class RiderNotificationItem(

@@ -22,6 +22,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.commerceos.rider.model.RiderLocationUpdate
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +48,8 @@ class RiderForegroundLocationService : Service(), LocationListener {
     private var locationWakeLock: android.os.PowerManager.WakeLock? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastDispatchedTime: Long = 0L
+    private var lastPresencePostTime: Long = 0L
+    private val telemetryTransmissionMutex = Mutex()
 
     companion object {
         private const val TAG = "RiderLocationService"
@@ -79,6 +83,8 @@ class RiderForegroundLocationService : Service(), LocationListener {
         private var activeRiderId = ""
         private var apiBaseUrl = System.getProperty("BASE_URL") ?: ""
         private var authToken = ""
+        @Volatile
+        private var activeInstance: RiderForegroundLocationService? = null
 
         fun updateDeliverySession(deliveryId: String, riderId: String, baseUrl: String = "", token: String = "") {
             activeDeliveryId = deliveryId
@@ -91,6 +97,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     currentSequenceNumber = maxSeq
                 }
             }
+            activeInstance?.reconfigureLocationTracking()
         }
 
         fun clearDeliverySession(deliveryIdToPurge: String? = null) {
@@ -99,6 +106,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 staticDbHelper?.purgeDelivery(toPurge)
             }
             activeDeliveryId = ""
+            activeInstance?.reconfigureLocationTracking()
         }
 
         fun getOfflineQueueCount(): Int {
@@ -108,6 +116,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         createNotificationChannel()
         val notification = buildNotification("Rider GPS Active • High Precision Telemetry")
         try {
@@ -131,13 +140,6 @@ class RiderForegroundLocationService : Service(), LocationListener {
         dbHelper = RiderTelemetryDbHelper(applicationContext)
         staticDbHelper = dbHelper
 
-        registerNetworkMonitoring()
-        requestLocationUpdates()
-
-        serviceScope.launch {
-            replayOfflineQueueLoop()
-        }
-
         val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
         val savedDelivery = sessionMgr.getActiveDeliveryId()
         if (savedDelivery.isNotBlank()) {
@@ -148,8 +150,23 @@ class RiderForegroundLocationService : Service(), LocationListener {
             }
         }
 
+        registerNetworkMonitoring()
+        requestLocationUpdates()
+
+        serviceScope.launch {
+            replayOfflineQueueLoop()
+        }
+
         serviceScope.launch {
             listenRiderSseLoop()
+        }
+
+        serviceScope.launch {
+            presenceProcessingLoop()
+        }
+
+        serviceScope.launch {
+            stationaryHeartbeatLoop()
         }
     }
 
@@ -214,6 +231,111 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 // Ignore stream reconnect errors
             }
             delay(5000L) // Reconnect backoff if connection drops
+        }
+    }
+
+    private data class PresenceUpdate(
+        val latitude: Double,
+        val longitude: Double,
+        val speedKmh: Float,
+        val heading: Float?,
+        val accuracy: Float,
+        val isOnline: Boolean,
+        val sequenceNumber: Long,
+        val timestamp: Long
+    )
+
+    private val presenceChannel = kotlinx.coroutines.channels.Channel<PresenceUpdate>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private var isCurrentlyStationary = false
+
+    private fun reconfigureAdaptiveSampling(stationary: Boolean) {
+        if (isCurrentlyStationary == stationary) return
+        isCurrentlyStationary = stationary
+        reconfigureLocationTracking()
+    }
+
+    private suspend fun presenceProcessingLoop() {
+        for (update in presenceChannel) {
+            try {
+                val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+                val isShiftOnline = sessionMgr.isShiftOnline()
+                if (!isShiftOnline && activeDeliveryId.isBlank()) {
+                    continue
+                }
+
+                val baseUrl = sessionMgr.getBaseUrl()
+                val token = sessionMgr.getAuthToken()
+                if (baseUrl.isNotBlank() && token.isNotBlank()) {
+                    if (activeDeliveryId.isNotBlank()) {
+                        transmitHeadTelemetry()
+                        val minActivePresenceInterval = 10000L
+                        if (update.timestamp - lastPresencePostTime < minActivePresenceInterval) {
+                            continue
+                        }
+                        lastPresencePostTime = update.timestamp
+                    } else {
+                        if (update.timestamp - lastPresencePostTime < 30000L) {
+                            continue
+                        }
+                        lastPresencePostTime = update.timestamp
+                    }
+
+                    val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Authorization", "Bearer $token")
+                    conn.doOutput = true
+                    conn.connectTimeout = 3000
+                    conn.readTimeout = 3000
+
+                    val body = JSONObject().apply {
+                        put("latitude", update.latitude)
+                        put("longitude", update.longitude)
+                        put("speedKmh", update.speedKmh)
+                        if (update.heading != null) {
+                            put("heading", update.heading)
+                        }
+                        put("accuracyMeters", update.accuracy)
+                        put("isOnline", isShiftOnline)
+                        put("sequenceNumber", update.sequenceNumber)
+                        put("timestamp", update.timestamp)
+                    }
+                    conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    conn.responseCode
+                    conn.disconnect()
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private suspend fun stationaryHeartbeatLoop() {
+        while (serviceScope.isActive) {
+            delay(15000L)
+            if (activeDeliveryId.isNotBlank() && isCurrentlyStationary) {
+                val lastLoc = _lastLocation.value
+                if (lastLoc != null) {
+                    currentSequenceNumber++
+                    val update = lastLoc.copy(
+                        sequenceNumber = currentSequenceNumber,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    dbHelper?.enqueue(update)
+                    _lastLocation.value = update
+                    presenceChannel.trySend(
+                        PresenceUpdate(
+                            latitude = update.latitude,
+                            longitude = update.longitude,
+                            speedKmh = 0.0f,
+                            heading = update.heading,
+                            accuracy = update.accuracyMeters,
+                            isOnline = true,
+                            sequenceNumber = currentSequenceNumber,
+                            timestamp = update.timestamp
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -297,6 +419,13 @@ class RiderForegroundLocationService : Service(), LocationListener {
         }
     }
 
+    fun reconfigureLocationTracking() {
+        try {
+            locationManager?.removeUpdates(this)
+        } catch (_: Exception) {}
+        requestLocationUpdates()
+    }
+
     private fun requestLocationUpdates() {
         try {
             val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
@@ -316,25 +445,67 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 onLocationChanged(best)
             }
 
-            val minTimeMs = if (activeDeliveryId.isNotBlank()) 3000L else 10000L
-            val minDistanceM = if (activeDeliveryId.isNotBlank()) 3.0f else 10.0f
+            val isActiveDelivery = activeDeliveryId.isNotBlank()
+            val minTimeMs: Long
+            val minDistanceM: Float
+            if (isActiveDelivery) {
+                if (isCurrentlyStationary) {
+                    minTimeMs = 10000L // 10s backoff while stationary
+                    minDistanceM = 15.0f
+                } else {
+                    minTimeMs = 5000L  // 5s adaptive sampling while in motion
+                    minDistanceM = 8.0f
+                }
+            } else {
+                minTimeMs = 30000L     // 30s low-power idle
+                minDistanceM = 25.0f
+            }
             val mainLooper = android.os.Looper.getMainLooper()
-            if (isGpsEnabled) {
-                locationManager?.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    minTimeMs,
-                    minDistanceM,
-                    this,
-                    mainLooper
-                )
-            } else if (isNetEnabled) {
-                locationManager?.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    minTimeMs,
-                    minDistanceM,
-                    this,
-                    mainLooper
-                )
+
+            if (isActiveDelivery) {
+                if (isGpsEnabled) {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        this,
+                        mainLooper
+                    )
+                } else if (isNetEnabled) {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        this,
+                        mainLooper
+                    )
+                }
+            } else {
+                if (isNetEnabled) {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        this,
+                        mainLooper
+                    )
+                } else if (isGpsEnabled) {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        this,
+                        mainLooper
+                    )
+                } else if (isPassiveEnabled) {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.PASSIVE_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        this,
+                        mainLooper
+                    )
+                }
             }
         } catch (e: SecurityException) {
             _isStale.value = true
@@ -373,8 +544,21 @@ class RiderForegroundLocationService : Service(), LocationListener {
             return
         }
 
-        // Anti-jitter & Movement Sampling: 3.0m threshold & 15s stationary heartbeat
         val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0.0f
+
+        // Adaptive movement tracking
+        if (lastDispatchedLat != 0.0 && lastDispatchedLng != 0.0) {
+            val distResults = FloatArray(1)
+            Location.distanceBetween(lastDispatchedLat, lastDispatchedLng, location.latitude, location.longitude, distResults)
+            val moved = distResults[0]
+            if (speedKmh < 1.0f && moved < 3.0f) {
+                reconfigureAdaptiveSampling(true)
+            } else if (speedKmh >= 1.5f || moved >= 5.0f) {
+                reconfigureAdaptiveSampling(false)
+            }
+        }
+
+        // Anti-jitter & Movement Sampling: 3.0m threshold & 15s stationary heartbeat
         var isStationaryHeartbeat = false
         if (lastDispatchedLat != 0.0 && lastDispatchedLng != 0.0 && speedKmh < 1.5f) {
             val distResults = FloatArray(1)
@@ -421,50 +605,22 @@ class RiderForegroundLocationService : Service(), LocationListener {
             _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
         }
 
-        // Transmit real-time telemetry and presence to server immediately
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
-                val isShiftOnline = sessionMgr.isShiftOnline()
-                // Shift Offline Guard: strictly avoid transmitting coordinates or reporting online if shift is offline and no active delivery
-                if (!isShiftOnline && activeDeliveryId.isBlank()) {
-                    return@launch
-                }
+        // Conflated sequential presence pipeline ensures monotonic ordering without race conditions
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+        val isShiftOnline = sessionMgr.isShiftOnline()
 
-                val baseUrl = sessionMgr.getBaseUrl()
-                val token = sessionMgr.getAuthToken()
-                if (baseUrl.isNotBlank() && token.isNotBlank()) {
-                    if (activeDeliveryId.isNotBlank()) {
-                        transmitHeadTelemetry()
-                    }
-
-                    val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
-                    val conn = url.openConnection() as java.net.HttpURLConnection
-                    conn.requestMethod = "POST"
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.setRequestProperty("Authorization", "Bearer $token")
-                    conn.doOutput = true
-                    conn.connectTimeout = 2000
-                    conn.readTimeout = 2000
-
-                    val body = JSONObject().apply {
-                        put("latitude", location.latitude)
-                        put("longitude", location.longitude)
-                        put("speedKmh", if (location.hasSpeed()) location.speed * 3.6f else 0.0f)
-                        if (location.hasBearing()) {
-                            put("heading", location.bearing)
-                        }
-                        put("accuracyMeters", accuracy)
-                        put("isOnline", isShiftOnline)
-                    }
-                    conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                    conn.responseCode // execute
-                    conn.disconnect()
-                }
-            } catch (e: Exception) {
-                // Ignore transient network errors
-            }
-        }
+        presenceChannel.trySend(
+            PresenceUpdate(
+                latitude = location.latitude,
+                longitude = location.longitude,
+                speedKmh = speedKmh,
+                heading = headingValue,
+                accuracy = accuracy,
+                isOnline = isShiftOnline,
+                sequenceNumber = currentSequenceNumber,
+                timestamp = now
+            )
+        )
     }
 
     private suspend fun replayOfflineQueueLoop() {
@@ -490,111 +646,114 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
 
 
-    private suspend fun transmitHeadTelemetry(): Boolean = withContext(Dispatchers.IO) {
-        if (activeDeliveryId.isBlank()) {
-            return@withContext true
-        }
-        dbHelper?.purgeInactiveDeliveries(activeDeliveryId)
-        val nextUpdate = dbHelper?.peekHead(activeDeliveryId) ?: return@withContext true
-        val targetDeliveryId = nextUpdate.deliveryId.ifBlank { activeDeliveryId }
-        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
-        val baseUrl = sessionMgr.getBaseUrl()
-        val token = sessionMgr.getAuthToken()
+    private suspend fun transmitHeadTelemetry(): Boolean = telemetryTransmissionMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (activeDeliveryId.isBlank()) {
+                return@withContext true
+            }
+            dbHelper?.purgeInactiveDeliveries(activeDeliveryId)
+            val nextUpdate = dbHelper?.peekHead(activeDeliveryId) ?: return@withContext true
+            val targetDeliveryId = nextUpdate.deliveryId.ifBlank { activeDeliveryId }
+            val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+            val baseUrl = sessionMgr.getBaseUrl()
+            val token = sessionMgr.getAuthToken()
 
-        if (baseUrl.isBlank() || targetDeliveryId.isBlank() || token.isBlank()) {
-            return@withContext false
-        }
-
-        try {
-            val url = URL("${baseUrl.trimEnd('/')}/api/v1/delivery/$targetDeliveryId/telemetry")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer $token")
-            conn.doOutput = true
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-
-            val jsonBody = JSONObject().apply {
-                put("deliveryId", targetDeliveryId)
-                put("sequenceNumber", nextUpdate.sequenceNumber)
-                put("riderId", nextUpdate.riderId)
-                put("latitude", nextUpdate.latitude)
-                put("longitude", nextUpdate.longitude)
-                put("speedKmh", nextUpdate.speedKmh)
-                put("heading", nextUpdate.heading)
-                put("accuracyMeters", nextUpdate.accuracyMeters)
-                put("timestamp", nextUpdate.timestamp)
+            if (baseUrl.isBlank() || targetDeliveryId.isBlank() || token.isBlank()) {
+                return@withContext false
             }
 
-            conn.outputStream.use { os ->
-                os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
-            }
+            try {
+                val url = URL("${baseUrl.trimEnd('/')}/api/v1/delivery/$targetDeliveryId/telemetry")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.doOutput = true
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
 
-            if (conn.responseCode == 401) {
-                // Token expired; attempt token refresh and retry
-                if (sessionMgr.refreshAccessToken()) {
-                    val newToken = sessionMgr.getAuthToken()
-                    val retryConn = url.openConnection() as HttpURLConnection
-                    retryConn.requestMethod = "POST"
-                    retryConn.setRequestProperty("Content-Type", "application/json")
-                    retryConn.setRequestProperty("Authorization", "Bearer $newToken")
-                    retryConn.doOutput = true
-                    retryConn.connectTimeout = 3000
-                    retryConn.readTimeout = 3000
-                    retryConn.outputStream.use { os ->
-                        os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
-                    }
-                    if (retryConn.responseCode in 200..299) {
-                        val responseStr = retryConn.inputStream.bufferedReader().use { it.readText() }
-                        val respJson = JSONObject(responseStr)
-                        val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
-                        val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
-                        val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
-                        if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
-                            _lastServerAckSeq.value = ackSeq
-                            _lastServerAckTimestamp.value = System.currentTimeMillis()
-                            _isStale.value = false
-                            dbHelper?.dequeueUpToSequence(targetDeliveryId, nextUpdate.sequenceNumber)
-                            _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
-                            return@withContext true
+                val jsonBody = JSONObject().apply {
+                    put("deliveryId", targetDeliveryId)
+                    put("sequenceNumber", nextUpdate.sequenceNumber)
+                    put("riderId", nextUpdate.riderId)
+                    put("latitude", nextUpdate.latitude)
+                    put("longitude", nextUpdate.longitude)
+                    put("speedKmh", nextUpdate.speedKmh)
+                    put("heading", nextUpdate.heading)
+                    put("accuracyMeters", nextUpdate.accuracyMeters)
+                    put("timestamp", nextUpdate.timestamp)
+                }
+
+                conn.outputStream.use { os ->
+                    os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+                }
+
+                if (conn.responseCode == 401) {
+                    // Token expired; attempt token refresh and retry
+                    if (sessionMgr.refreshAccessToken()) {
+                        val newToken = sessionMgr.getAuthToken()
+                        val retryConn = url.openConnection() as HttpURLConnection
+                        retryConn.requestMethod = "POST"
+                        retryConn.setRequestProperty("Content-Type", "application/json")
+                        retryConn.setRequestProperty("Authorization", "Bearer $newToken")
+                        retryConn.doOutput = true
+                        retryConn.connectTimeout = 3000
+                        retryConn.readTimeout = 3000
+                        retryConn.outputStream.use { os ->
+                            os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+                        }
+                        if (retryConn.responseCode in 200..299) {
+                            val responseStr = retryConn.inputStream.bufferedReader().use { it.readText() }
+                            val respJson = JSONObject(responseStr)
+                            val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
+                            val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
+                            val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
+                            if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
+                                _lastServerAckSeq.value = ackSeq
+                                _lastServerAckTimestamp.value = System.currentTimeMillis()
+                                _isStale.value = false
+                                dbHelper?.dequeueUpToSequence(targetDeliveryId, nextUpdate.sequenceNumber)
+                                _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
+                                return@withContext true
+                            }
                         }
                     }
                 }
-            }
 
-            if (conn.responseCode in 200..299) {
-                val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val respJson = JSONObject(responseStr)
-                val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
-                val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
-                val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
+                if (conn.responseCode in 200..299) {
+                    val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
+                    val respJson = JSONObject(responseStr)
+                    val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
+                    val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
+                    val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
 
-                // Atomic Dequeue upon explicit sequence ACK
-                if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
-                    _lastServerAckSeq.value = ackSeq
-                    _lastServerAckTimestamp.value = System.currentTimeMillis()
-                    _isStale.value = false
-                    
-                    dbHelper?.dequeueUpToSequence(targetDeliveryId, nextUpdate.sequenceNumber)
-                    _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
-                    return@withContext true
+                    // Atomic Dequeue upon explicit sequence ACK
+                    if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
+                        _lastServerAckSeq.value = ackSeq
+                        _lastServerAckTimestamp.value = System.currentTimeMillis()
+                        _isStale.value = false
+
+                        dbHelper?.dequeueUpToSequence(targetDeliveryId, nextUpdate.sequenceNumber)
+                        _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
+                        return@withContext true
+                    }
                 }
+                _isStale.value = true
+                return@withContext false
+            } catch (e: Exception) {
+                _isStale.value = true
+                return@withContext false
             }
-            _isStale.value = true
-            return@withContext false
-        } catch (e: Exception) {
-            _isStale.value = true
-            return@withContext false
         }
     }
-
-
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
+        if (activeInstance == this) {
+            activeInstance = null
+        }
         releaseWakeLock()
         locationManager?.removeUpdates(this)
         networkCallback?.let {

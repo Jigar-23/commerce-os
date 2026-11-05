@@ -46,6 +46,33 @@ class RiderSecureCredentialStore(context: Context) {
         }
     }
 
+    fun encrypt(value: String, keyAlias: String = "telemetry_gps_encryption_key"): String? {
+        return try {
+            val key = getOrCreateKey(keyAlias)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+            val payload = cipher.iv + ciphertext
+            Base64.encodeToString(payload, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun decrypt(encrypted: String, keyAlias: String = "telemetry_gps_encryption_key"): String? {
+        return try {
+            val payload = Base64.decode(encrypted, Base64.NO_WRAP)
+            val iv = payload.copyOfRange(0, IV_LENGTH)
+            val ciphertext = payload.copyOfRange(IV_LENGTH, payload.size)
+            val key = getOrCreateKey(keyAlias)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+            String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun clear(alias: String) {
         prefs.edit().remove(alias).apply()
     }

@@ -173,8 +173,10 @@ object RiderNotificationManager {
             )
 
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val earningsText = "₹${offer.earningsAmount.toInt()}"
+            val earningsText = if (offer.earningsAmount > 0.0) "₹${offer.earningsAmount.toInt()}" else "Earnings pending"
             val orderTag = if (offer.orderId.isNotBlank()) " #${offer.orderId}" else ""
+            val distText = if (offer.totalDistanceKm > 0.0) "${offer.totalDistanceKm} km" else "Distance unavailable"
+            val etaText = if (offer.estimatedDurationMins > 0) "~${offer.estimatedDurationMins} min" else "ETA pending"
 
             val publicNotification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(com.commerceos.rider.R.drawable.ic_rider_notification_small)
@@ -187,10 +189,10 @@ object RiderNotificationManager {
                 .setSmallIcon(com.commerceos.rider.R.drawable.ic_rider_notification_small)
                 .setColor(0xFF0E675E.toInt())
                 .setContentTitle("🚀 ORDER$orderTag · $earningsText")
-                .setContentText("${offer.totalDistanceKm} km • ~${offer.estimatedDurationMins} min | ${offer.merchantName}")
+                .setContentText("$distText • $etaText | ${offer.merchantName}")
                 .setStyle(
                     NotificationCompat.BigTextStyle()
-                        .bigText("Order$orderTag • ~${offer.estimatedDurationMins} min\nPickup: ${offer.merchantName}\nDrop: ${offer.customerAddress}\nTap to accept")
+                        .bigText("Order$orderTag • $etaText\nPickup: ${offer.merchantName}\nDrop: ${offer.customerAddress}\nTap to accept")
                 )
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
