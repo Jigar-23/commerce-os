@@ -684,43 +684,80 @@ class CartViewModel(
 
     private var retryJob: Job? = null
 
-    fun retryPendingMutations(dispatcher: CoroutineDispatcher = ioDispatcher, maxBackoffAttempts: Int = 3) {
+    fun retryPendingMutations(
+        dispatcher: CoroutineDispatcher = ioDispatcher,
+        maxBackoffAttempts: Int = 3
+    ) {
         val targetId = customerId.trim()
         if (targetId.isBlank()) return
+
         retryJob?.cancel()
+        hasPendingSync = true
         retryJob = viewModelScope.launch(dispatcher) {
             var attempt = 0
             var delayMs = 2000L
+
             while (isActive && attempt < maxBackoffAttempts) {
                 attempt++
-                val replaySuccess = cartMutex.withLock {
+
+                val synchronized = cartMutex.withLock {
                     isSyncingMutations = true
                     try {
-                        val success = replayPendingMutations(targetId)
-                        val check = repository.fetchBackendCart(targetId)
-                        val checkSuccess = check is ApiResult.Success
-                        if (check is ApiResult.Success) {
-                            val rawItems = check.data.items
-                            if (rawItems == null) {
-                                errorMessage = "Server returned incomplete cart response (missing items)."
-                            } else {
-                                val backendItems = sanitizeCartItems(rawItems)
-                                cartItems = backendItems
-                                totals = check.data
-                                errorMessage = null
-                                syncLocalCartCache(targetId, backendItems)
+                        val mutationsReplayed = replayPendingMutations(targetId)
+                        val refresh = repository.fetchBackendCart(targetId)
+
+                        var validServerSnapshot = false
+                        var localCacheWritten = false
+
+                        when (refresh) {
+                            is ApiResult.Success -> {
+                                val rawItems = refresh.data.items
+                                if (rawItems == null) {
+                                    errorMessage = "Server returned incomplete cart response (missing items)."
+                                } else {
+                                    validServerSnapshot = true
+                                    val backendItems = sanitizeCartItems(rawItems)
+                                    cartItems = backendItems
+                                    totals = refresh.data
+                                    localCacheWritten = syncLocalCartCache(targetId, backendItems)
+                                    errorMessage = if (localCacheWritten) {
+                                        null
+                                    } else {
+                                        "Could not update offline cart cache."
+                                    }
+                                }
                             }
-                        } else if (check is ApiResult.Failure) {
-                            errorMessage = check.error.message.ifBlank { "Failed to refresh cart from server." }
+
+                            is ApiResult.Failure -> {
+                                errorMessage = refresh.error.message
+                                    .ifBlank { "Failed to refresh cart from server." }
+                            }
                         }
-                        val remRes = appContext?.let { LocalSaveForLaterStore.getPendingCartMutationsWithResult(it, targetId) }
-                        hasPendingSync = (remRes is StorageResult.Success && remRes.data.isNotEmpty()) || !success || !checkSuccess
-                        success && checkSuccess
+
+                        val pendingResult = appContext?.let {
+                            LocalSaveForLaterStore.getPendingCartMutationsWithResult(it, targetId)
+                        }
+                        val outboxEmpty = when (pendingResult) {
+                            null, is StorageResult.NotFound -> true
+                            is StorageResult.Success -> pendingResult.data.isEmpty()
+                            is StorageResult.DecryptError -> false
+                        }
+
+                        val attemptSynchronized =
+                            mutationsReplayed &&
+                                validServerSnapshot &&
+                                localCacheWritten &&
+                                outboxEmpty
+
+                        hasPendingSync = !attemptSynchronized
+                        attemptSynchronized
                     } finally {
                         isSyncingMutations = false
                     }
                 }
-                if (replaySuccess || !hasPendingSync) break
+
+                if (synchronized) break
+
                 if (attempt < maxBackoffAttempts) {
                     delay(delayMs)
                     delayMs = (delayMs * 2).coerceAtMost(8000L)
@@ -919,37 +956,7 @@ class CartViewModel(
                 }
 
                 val opMapKey = "${targetCustomerId}:${item.sku}:${item.quantity}"
-                val isTestHarness = try {
-                    Class.forName("org.junit.Test")
-                    true
-                } catch (_: Throwable) {
-                    false
-                }
-                var existingPendingKey: String? = operationKey
-                if (isTestHarness && existingPendingKey == null) {
-                    existingPendingKey = pendingAddKeys[opMapKey]
-                    val currentCtx = appContext
-                    if (existingPendingKey == null && currentCtx != null) {
-                        when (val res = LocalSaveForLaterStore.getPendingAddRecord(currentCtx, targetCustomerId, item.sku)) {
-                            is StorageResult.Success -> {
-                                val record = res.data
-                                if (record.item == null || (record.item.sku == item.sku && record.item.quantity == item.quantity)) {
-                                    existingPendingKey = record.key
-                                }
-                            }
-                            is StorageResult.DecryptError -> {
-                                cartItems = previousCartItems
-                                totals = previousTotals
-                                errorMessage = "Secure storage read fault: could not verify pending cart mutation. Please retry."
-                                _addEvents.trySend(CartAddEvent.Failure("Storage decrypt error"))
-                                return@withLock
-                            }
-                            is StorageResult.NotFound -> {}
-                        }
-                    }
-                }
-
-                val opKey = existingPendingKey ?: run {
+                val opKey = operationKey ?: run {
                     val newKey = "add_${targetCustomerId}_${item.sku}_${UUID.randomUUID()}"
                     val saved = appContext?.let { ctx ->
                         LocalSaveForLaterStore.setPendingAddKey(ctx, targetCustomerId, item.sku, newKey, item)

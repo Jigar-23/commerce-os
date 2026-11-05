@@ -30,8 +30,20 @@ class KodexAuditBatch1RegressionTest {
     private val testDispatcher = StandardTestDispatcher()
 
     open class FakeAppRepository : AppRepository() {
+        var defaultCartItems: List<CartItem> = emptyList()
         override suspend fun getPromotions(): ApiResult<List<CouponCampaign>> = ApiResult.Success(emptyList())
-        override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = emptyList()))
+        override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+            val items = defaultCartItems
+            val subtotal = items.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.unitPrice.multiply(BigDecimal.valueOf(it.quantity.toLong()))) }
+            return ApiResult.Success(
+                CartResponse(
+                    customerId = customerId,
+                    items = items,
+                    itemsSubtotal = if (items.isNotEmpty()) subtotal else null,
+                    grandTotal = if (items.isNotEmpty()) subtotal else null
+                )
+            )
+        }
         override suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> = ApiResult.Success(CartResponse(items = listOf(item)))
         override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> = addCartItem(customerId, item)
     }
@@ -353,6 +365,7 @@ class KodexAuditBatch1RegressionTest {
 
         // 1. Unapproved prescription attempt
         val repoUnapproved = object : FakeAppRepository() {
+            init { defaultCartItems = rxItems }
             override suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> {
                 return ApiResult.Success(
                     listOf(Prescription(id = "rx_unapproved", customerId = customerId, status = "PENDING_REVIEW"))
@@ -378,6 +391,7 @@ class KodexAuditBatch1RegressionTest {
         // 2. Approved prescription succeeds
         var checkoutCalled = false
         val repoApproved = object : FakeAppRepository() {
+            init { defaultCartItems = rxItems }
             override suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> {
                 return ApiResult.Success(
                     listOf(Prescription(id = "rx_approved", customerId = customerId, status = "APPROVED"))
@@ -611,7 +625,9 @@ class KodexAuditBatch1RegressionTest {
 
     @Test
     fun testCheckoutViewModel_startIgnoredWhenProcessing() = runTest {
+        val itemsA = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         val repo = object : FakeAppRepository() {
+            init { defaultCartItems = itemsA }
             override suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> {
                 delay(1000)
                 return ApiResult.Success(CustomerOrderApiResponse(id = "order_1"))
@@ -621,7 +637,6 @@ class KodexAuditBatch1RegressionTest {
             }
         }
         val viewModel = CheckoutViewModel(repo)
-        val itemsA = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         viewModel.start("cust_1", itemsA)
         viewModel.selectAddress(ApiAddress(id = "addr_1", addressLine = "Main St", city = "BLR", postalCode = "560001"))
         testDispatcher.scheduler.advanceUntilIdle()
@@ -646,7 +661,9 @@ class KodexAuditBatch1RegressionTest {
     fun testCheckoutViewModel_idempotencyKeyRegeneratesOnPayloadFingerprintChange() = runTest {
         val capturedKeys = mutableListOf<String>()
         var checkoutFails = true
+        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         val repo = object : FakeAppRepository() {
+            init { defaultCartItems = items }
             override suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> {
                 capturedKeys.add(request.idempotencyKey)
                 return if (checkoutFails) {
@@ -660,7 +677,6 @@ class KodexAuditBatch1RegressionTest {
             }
         }
         val viewModel = CheckoutViewModel(repo)
-        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         viewModel.start("cust_1", items)
         viewModel.selectAddress(ApiAddress(id = "addr_1", addressLine = "Main St", city = "BLR", postalCode = "560001"))
         testDispatcher.scheduler.advanceUntilIdle()
@@ -702,7 +718,21 @@ class KodexAuditBatch1RegressionTest {
     @Test
     fun testCheckoutViewModel_cartCheckoutRequestOmitsClientAmounts() = runTest {
         var capturedRequest: CartCheckoutRequest? = null
+        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         val repo = object : FakeAppRepository() {
+            init { defaultCartItems = items }
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                return ApiResult.Success(
+                    CartResponse(
+                        customerId = customerId,
+                        items = items,
+                        itemsSubtotal = BigDecimal("100.00"),
+                        discount = BigDecimal("10.00"),
+                        expressDeliveryFee = BigDecimal("25.00"),
+                        grandTotal = BigDecimal("115.00")
+                    )
+                )
+            }
             override suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> {
                 capturedRequest = request
                 return ApiResult.Success(CustomerOrderApiResponse(id = "order_ok"))
@@ -712,12 +742,11 @@ class KodexAuditBatch1RegressionTest {
             }
         }
         val viewModel = CheckoutViewModel(repo)
-        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         viewModel.start("cust_1", items, couponDiscount = BigDecimal("10.00"), couponCode = "SAVE10")
         viewModel.selectAddress(ApiAddress(id = "addr_1", addressLine = "Main St", city = "BLR", postalCode = "560001"))
         testDispatcher.scheduler.advanceUntilIdle()
 
-        viewModel.executeCheckout("ONLINE")
+        viewModel.executeCheckout("COD")
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertNotNull(capturedRequest)
@@ -731,7 +760,9 @@ class KodexAuditBatch1RegressionTest {
     @Test
     fun testCheckoutViewModel_duplicateOrderRiskBlockedAfterConfirmation() = runTest {
         var checkoutCount = 0
+        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         val repo = object : FakeAppRepository() {
+            init { defaultCartItems = items }
             override suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> {
                 checkoutCount++
                 return ApiResult.Success(CustomerOrderApiResponse(id = "order_123"))
@@ -741,7 +772,6 @@ class KodexAuditBatch1RegressionTest {
             }
         }
         val viewModel = CheckoutViewModel(repo)
-        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         viewModel.start("cust_1", items)
         viewModel.selectAddress(ApiAddress(id = "addr_1", addressLine = "Main St", city = "BLR", postalCode = "560001"))
         testDispatcher.scheduler.advanceUntilIdle()
@@ -1070,7 +1100,9 @@ class KodexAuditBatch1RegressionTest {
 
     @Test
     fun testCheckoutViewModel_startBlockedWhenConfirmedUntilReset() = runTest {
+        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         val repo = object : FakeAppRepository() {
+            init { defaultCartItems = items }
             override suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> {
                 return ApiResult.Success(CustomerOrderApiResponse(id = "order_confirmed"))
             }
@@ -1079,7 +1111,6 @@ class KodexAuditBatch1RegressionTest {
             }
         }
         val viewModel = CheckoutViewModel(repo)
-        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
         viewModel.start("cust_1", items)
         viewModel.selectAddress(ApiAddress(id = "addr_1", addressLine = "Main St", city = "BLR", postalCode = "560001"))
         testDispatcher.scheduler.advanceUntilIdle()
@@ -1165,7 +1196,8 @@ class KodexAuditBatch1RegressionTest {
     fun testCartViewModel_mutationsBlockedWhileLockedForCheckout() = runTest {
         val repo = object : FakeAppRepository() {
             override suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> {
-                return ApiResult.Success(CartResponse(items = listOf(item)))
+                defaultCartItems = listOf(item)
+                return fetchBackendCart(customerId)
             }
         }
         val viewModel = CartViewModel(repo)
@@ -1455,7 +1487,22 @@ class KodexAuditBatch1RegressionTest {
                 return ApiResult.Success(ServiceabilityResponse(eligible = true, deliveryFee = 20.0, coldChainFee = 0.0))
             }
             override suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> {
-                return ApiResult.Success(CartResponse(items = listOf(item)))
+                defaultCartItems = listOf(item)
+                return fetchBackendCart(customerId)
+            }
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                val items = defaultCartItems.ifEmpty {
+                    listOf(CartItem(productId = "p_new", sku = "s_new", name = "New Item", unitPrice = BigDecimal("150.00"), quantity = 1))
+                }
+                return ApiResult.Success(
+                    CartResponse(
+                        customerId = customerId,
+                        items = items,
+                        itemsSubtotal = BigDecimal("150.00"),
+                        expressDeliveryFee = BigDecimal("20.00"),
+                        grandTotal = BigDecimal("170.00")
+                    )
+                )
             }
         }
         val cartViewModel = CartViewModel(repo)
@@ -1930,7 +1977,7 @@ class KodexAuditBatch1RegressionTest {
         assertTrue(firstKey!!.startsWith("add_cust_retry_add_sku_op_"))
 
         // Attempt 2 (Retry of failed add): Must reuse the exact same operation key
-        viewModel.addItem(product)
+        viewModel.addItem(product, operationKey = firstKey)
         testDispatcher.scheduler.advanceUntilIdle()
         assertEquals(2, keys.size)
         val retryKey = keys[1]
@@ -1938,7 +1985,7 @@ class KodexAuditBatch1RegressionTest {
 
         // Now attempt 2 succeeded: Next distinct action must get a fresh key
         shouldFail = false
-        viewModel.addItem(product)
+        viewModel.addItem(product, operationKey = retryKey)
         testDispatcher.scheduler.advanceUntilIdle()
         assertEquals(3, keys.size)
         val thirdKey = keys[2]
@@ -2203,7 +2250,7 @@ class KodexAuditBatch1RegressionTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         // User retries Add
-        vm2.addItem(product)
+        vm2.addItem(product, operationKey = persistedKey)
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(2, capturedKeys.size)

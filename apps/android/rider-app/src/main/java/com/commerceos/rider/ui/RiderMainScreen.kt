@@ -1358,8 +1358,22 @@ fun RiderMainScreen(
                     },
                     onLogout = {
                         scope.launch {
-                            try { repository.logoutDeviceToken() } catch (_: Exception) {}
+                            if (hasActiveDelivery) {
+                                errorMessage = "Complete or transfer the active delivery before logging out."
+                                return@launch
+                            }
+
+                            try {
+                                repository.logoutDeviceToken()
+                            } catch (_: Exception) {
+                                // Server token cleanup is best-effort; local logout still proceeds.
+                            }
+
                             sessionManager.coordinateLogout(context)
+                            RiderForegroundLocationService.clearRiderSession()
+                            context.stopService(
+                                Intent(context, RiderForegroundLocationService::class.java)
+                            )
                             isOnline = false
                             onLogout()
                         }

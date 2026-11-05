@@ -395,13 +395,7 @@ class CheckoutViewModel(
 
     fun executeCheckout(paymentMethod: String) {
         val methodUpper = paymentMethod.trim().uppercase()
-        val isTestHarness = try {
-            Class.forName("org.junit.Test")
-            true
-        } catch (_: Throwable) {
-            false
-        }
-        if (methodUpper.isBlank() || (methodUpper !in COD_PAYMENT_ALLOWLIST && !(isTestHarness && methodUpper == "ONLINE"))) {
+        if (methodUpper.isBlank() || methodUpper !in COD_PAYMENT_ALLOWLIST) {
             failCheckout("INVALID_PAYMENT_METHOD", "Only Cash on Delivery (COD) / Pay on Delivery is supported in this deployment.")
             return
         }
@@ -456,9 +450,6 @@ class CheckoutViewModel(
                             authoritativeDeliveryFee = cartDto.expressDeliveryFee ?: uiState.deliveryFee
                             authoritativeColdChainFee = cartDto.coldChainPackagingFee ?: uiState.coldChainFee
                             authoritativeGrandTotal = cartDto.grandTotal
-                        } else if (isTestHarness && currentItems.isNotEmpty() && cartDto.itemsSubtotal == null && cartDto.grandTotal == null) {
-                            // Test stub compatibility: FakeAppRepository in test suite returns empty CartResponse without totals
-                            authoritativeItems = currentItems
                         } else {
                             failCheckout("CART_SYNC_ERROR", "Server returned incomplete cart quote: empty items or missing totals")
                             return@launch
@@ -591,20 +582,6 @@ class CheckoutViewModel(
                                 deliveryFee = finalDeliveryFee,
                                 coldChainFee = finalColdChainFee,
                                 grandTotal = finalGrandTotal
-                            )
-                        } else if (isTestHarness && authoritativeItems.isNotEmpty() && refreshedItems != null && refreshedItems.isEmpty() && finalGrandTotal == null) {
-                            val finalGrandTotalCalculated = authoritativeSubtotal
-                                .add(deliveryFee)
-                                .add(coldChainFee)
-                                .subtract(authoritativeDiscount)
-                                .coerceAtLeast(BigDecimal.ZERO)
-
-                            uiState = uiState.copy(
-                                items = authoritativeItems,
-                                serviceability = ServiceabilityState.Success(address.id, srvResult.data),
-                                deliveryFee = deliveryFee,
-                                coldChainFee = coldChainFee,
-                                grandTotal = finalGrandTotalCalculated
                             )
                         } else {
                             failCheckout("CART_SYNC_ERROR", "Server returned incomplete quote after serviceability check: missing items or grandTotal")

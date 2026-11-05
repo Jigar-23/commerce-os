@@ -109,6 +109,14 @@ class RiderForegroundLocationService : Service(), LocationListener {
             activeInstance?.reconfigureLocationTracking()
         }
 
+        fun clearRiderSession() {
+            activeDeliveryId = ""
+            activeRiderId = ""
+            authToken = ""
+            currentSequenceNumber = 0L
+            activeInstance?.stopSelf()
+        }
+
         fun getOfflineQueueCount(): Int {
             return staticDbHelper?.getQueueSize() ?: 0
         }
