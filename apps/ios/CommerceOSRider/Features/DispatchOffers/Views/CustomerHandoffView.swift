@@ -167,7 +167,7 @@ public struct CustomerHandoffView: View {
                                 codReconciled = true
                             }
                         }) {
-                            Text("CONFIRM CASH COLLECTED")
+                            Text("RECORD CASH RECEIVED (CONFIRM WITH OTP)")
                                 .font(.system(size: 13, weight: .black))
                                 .foregroundColor(.black)
                                 .frame(maxWidth: .infinity)
@@ -185,16 +185,16 @@ public struct CustomerHandoffView: View {
                             .stroke(Color(hex: "F59E0B").opacity(0.6), lineWidth: 1)
                     )
                 } else {
-                    // COD Reconciled State
+                    // COD Recorded State (reconciles with OTP verification on server)
                     HStack(spacing: 12) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 24))
                             .foregroundColor(Color(hex: "34D399"))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("CASH COLLECTED & RECONCILED")
+                            Text("CASH RECORDED (CONFIRMS WITH OTP)")
                                 .font(.system(size: 10, weight: .black))
                                 .foregroundColor(Color(hex: "34D399"))
-                            Text("₹\(enteredCodAmount.isEmpty ? "\(expectedCodAmount)" : enteredCodAmount) received safely")
+                            Text("₹\(enteredCodAmount.isEmpty ? "\(expectedCodAmount)" : enteredCodAmount) collected — reconciles on delivery OTP")
                                 .font(.system(size: 14, weight: .bold))
                                 .foregroundColor(.white)
                         }

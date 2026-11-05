@@ -626,6 +626,38 @@ class ApnsDispatcher {
     });
   }
 
+  /**
+   * Send notification to a registered customer using customer_device_tokens
+   */
+  async sendToCustomer(customerId, payloadBuilder, options = {}) {
+    if (!customerId) return [];
+    let tokens = [];
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          `SELECT token, platform FROM customer_device_tokens WHERE customer_id = $1 ORDER BY updated_at DESC`,
+          [customerId]
+        );
+        tokens = res.rows;
+      } catch (_) {}
+    }
+    const results = [];
+    for (const t of tokens) {
+      if (t.token) {
+        try {
+          const res = await this.send(t.token, payloadBuilder, {
+            topic: options.topic || this.customerTopic || 'io.commerceos.customer',
+            ...options
+          });
+          results.push(res);
+        } catch (err) {
+          results.push({ ok: false, error: err.message });
+        }
+      }
+    }
+    return results;
+  }
+
   getStats() {
     return { ...this.stats };
   }

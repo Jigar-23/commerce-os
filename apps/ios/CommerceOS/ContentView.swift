@@ -373,7 +373,7 @@ struct IOSCheckoutView: View {
     @ObservedObject var orderRepo: OrderRepository
     let onOrderPlaced: () -> Void
 
-    @State private var paymentMethod: String = "UPI_INSTANT"
+    @State private var paymentMethod: String = "COD"
     @State private var addressLine: String = UserDefaults.standard.string(forKey: "saved_address_line") ?? ""
     @State private var city: String = UserDefaults.standard.string(forKey: "saved_city") ?? ""
     @State private var postalCode: String = UserDefaults.standard.string(forKey: "saved_postal_code") ?? ""
@@ -390,7 +390,6 @@ struct IOSCheckoutView: View {
 
             Section(header: Text("Payment Method")) {
                 Picker("Payment", selection: $paymentMethod) {
-                    Text("UPI Instant Pay").tag("UPI_INSTANT")
                     Text("Cash on Delivery (COD)").tag("COD")
                 }
                 .pickerStyle(.segmented)

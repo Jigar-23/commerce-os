@@ -675,7 +675,7 @@ class RiderDeliveryRepository(
 
 
 
-    suspend fun verifyOtp(deliveryId: String, otp: String): Result<Boolean> = withContext(Dispatchers.IO) {
+    suspend fun verifyOtp(deliveryId: String, otp: String, codCollected: Boolean = true, collectedAmount: Double? = null): Result<Boolean> = withContext(Dispatchers.IO) {
         val cleanOtp = otp.trim()
         val urls = getCandidateUrls()
         var lastErr = "Incorrect OTP PIN"
@@ -684,7 +684,14 @@ class RiderDeliveryRepository(
             try {
                 val conn = openCandidateConnection(base, "/api/v1/delivery/$deliveryId/verify-otp", "POST")
                 conn.doOutput = true
-                val body = JSONObject().apply { put("otp", cleanOtp) }
+                val body = JSONObject().apply {
+                    put("otp", cleanOtp)
+                    put("codCollected", codCollected)
+                    if (collectedAmount != null && collectedAmount > 0.0) {
+                        put("collectedAmount", collectedAmount)
+                        put("codAmount", collectedAmount)
+                    }
+                }
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val code = conn.responseCode
                 val responseStr = if (code in 200..299) {

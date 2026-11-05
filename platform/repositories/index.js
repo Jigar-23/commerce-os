@@ -1283,10 +1283,21 @@ class ServiceabilityService {
       return { ok: false, error: 'INVALID_COORDINATES', message: 'Authoritative customer coordinates must be within valid legal ranges: latitude [-90, 90] and longitude [-180, 180].' };
     }
 
-    // 1. Fetch active stores
+    // 1. Fetch active stores with authoritative operational state, hours, and capacity guards
     let allActiveStores = [];
     if (pool) {
-      const res = await pool.query(`SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active FROM stores WHERE is_active = TRUE AND latitude IS NOT NULL AND longitude IS NOT NULL`);
+      const res = await pool.query(
+        `SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active,
+                COALESCE(service_radius_km, 10.0) AS service_radius_km,
+                COALESCE(is_open, TRUE) AS is_open,
+                COALESCE(is_offline, FALSE) AS is_offline,
+                COALESCE(surge_mode, FALSE) AS surge_mode,
+                COALESCE(opening_time_utc, '00:00') AS opening_time_utc,
+                COALESCE(closing_time_utc, '23:59') AS closing_time_utc,
+                COALESCE(max_active_orders, 50) AS max_active_orders
+         FROM stores 
+         WHERE is_active = TRUE AND latitude IS NOT NULL AND longitude IS NOT NULL`
+      );
       allActiveStores = res.rows;
     } else if (storeRepo && typeof storeRepo.getAllActiveStores === 'function') {
       allActiveStores = await storeRepo.getAllActiveStores();
@@ -1296,18 +1307,55 @@ class ServiceabilityService {
       return { ok: false, error: 'NO_ACTIVE_STORES', message: 'No active fulfillment nodes in network.' };
     }
 
-    // 2. Filter to candidate stores within MAX_SERVICEABLE_RADIUS_KM
+    // 2. Filter candidate stores: enforce store-configured radius, open/offline status, operational hours, and capacity
     const isProd = !!pool;
-    const maxRadius = isProd ? 20.0 : 25000.0;
+    const now = new Date();
+    const currentUtcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
     const candidateStores = [];
+
     for (const store of allActiveStores) {
-      const dist = ServiceabilityService.calculateDistanceKm(cLat, cLng, store.latitude, store.longitude);
-      if (dist != null && ServiceabilityService.isServiceable(dist, maxRadius)) {
-        candidateStores.push({
-          ...store,
-          distanceKm: isProd ? dist : Math.min(dist, 2.5)
-        });
+      // 2a. Operational Status Guard (fail-closed if closed or temporarily offline)
+      if (store.is_open === false || store.is_offline === true) {
+        continue;
       }
+
+      // 2b. Authoritative Operating Hours Guard (UTC)
+      if (store.opening_time_utc && store.closing_time_utc) {
+        const [openH, openM] = String(store.opening_time_utc).split(':').map(Number);
+        const [closeH, closeM] = String(store.closing_time_utc).split(':').map(Number);
+        const openMin = (openH || 0) * 60 + (openM || 0);
+        const closeMin = (closeH || 23) * 60 + (closeM || 59);
+        if (closeMin >= openMin && (currentUtcMinutes < openMin || currentUtcMinutes > closeMin)) {
+          continue;
+        }
+      }
+
+      // 2c. Store-Configured Service Radius Enforcement (Finding 8: never rely solely on global 20km)
+      const storeConfiguredRadius = isProd ? Number(store.service_radius_km || 10.0) : 25000.0;
+      const dist = ServiceabilityService.calculateDistanceKm(cLat, cLng, store.latitude, store.longitude);
+      if (dist == null || dist > storeConfiguredRadius) {
+        continue;
+      }
+
+      // 2d. Surge & Active Order Capacity Guard (Finding 7)
+      if (pool && store.max_active_orders) {
+        try {
+          const capRes = await pool.query(
+            `SELECT COUNT(*) FROM orders 
+             WHERE store_id = $1 AND status IN ('PLACED', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'LOOKING_FOR_RIDER', 'OUT_FOR_DELIVERY')`,
+            [store.id]
+          );
+          const activeOrderCount = Number(capRes.rows[0]?.count || 0);
+          if (activeOrderCount >= Number(store.max_active_orders)) {
+            continue;
+          }
+        } catch (_) {}
+      }
+
+      candidateStores.push({
+        ...store,
+        distanceKm: isProd ? dist : Math.min(dist, 2.5)
+      });
     }
 
     if (candidateStores.length === 0) {
@@ -1317,7 +1365,7 @@ class ServiceabilityService {
           distanceKm: 1.8
         });
       } else {
-        return { ok: false, error: 'STORE_NOT_SERVICEABLE', message: 'Delivery location is outside the maximum serviceable radius of any active hub.' };
+        return { ok: false, error: 'STORE_NOT_SERVICEABLE', message: 'Delivery location is outside the maximum serviceable radius or operational capacity of any active hub.' };
       }
     }
 
@@ -1729,13 +1777,25 @@ class TransactionalInventoryRepository {
         [itemStoreId, productId, sku]
       );
       if (lockRes.rows.length === 0) {
-        console.warn(`[InventoryRelease] SKU ${sku} (product ${productId}) not found in inventory during release for store ${itemStoreId}. Skipping.`);
-        continue;
+        return {
+          ok: false,
+          error: 'INVENTORY_ROW_NOT_FOUND',
+          sku,
+          message: `Inventory row not found for store ${itemStoreId}, product ${productId}, SKU ${sku} during release.`
+        };
       }
 
       const row = lockRes.rows[0];
       const currentReserved = Number(row.reserved_count || 0);
-      const newReserved = Math.max(0, currentReserved - qty);
+      if (currentReserved < qty) {
+        return {
+          ok: false,
+          error: 'INVENTORY_RESERVATION_UNDERFLOW',
+          sku,
+          message: `Reserved count (${currentReserved}) is less than release quantity (${qty}) for store ${itemStoreId}, product ${productId}, SKU ${sku}.`
+        };
+      }
+      const newReserved = currentReserved - qty;
       await qClient.query(
         `UPDATE inventory
          SET reserved_count = $1, updated_at = NOW()
@@ -3430,20 +3490,20 @@ class TransactionalDeliveryRepository {
           (options.cashCollected != null ? Number(options.cashCollected) :
           (options.collectedAmount != null ? Number(options.collectedAmount) : null));
 
-        if (!hasAmountParam && options.codCollected) {
-          const existingLedger = await client.query(`SELECT * FROM cod_ledger WHERE order_id = $1`, [order.order_id || order.id]);
-          if (existingLedger.rows.length > 0 && existingLedger.rows[0].reconciled && Number(existingLedger.rows[0].amount_collected) >= expectedCod) {
-            isCodPaid = true;
-          } else {
-            await client.query('ROLLBACK');
-            return {
-              ok: false,
-              httpStatus: 400,
-              error: 'COD_AMOUNT_REQUIRED',
-              message: `Exact cash collection amount of ₹${expectedCod} must be confirmed before delivery completion.`
-            };
-          }
-        } else {
+        // Authoritative verification of locked, reconciled ledger for the assigned rider during OTP completion
+        const existingLedger = await client.query(
+          `SELECT * FROM cod_ledger WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+          [order.order_id || order.id]
+        );
+        const ledgerRow = existingLedger.rows[0];
+        const isReconciledByRider = ledgerRow &&
+          (ledgerRow.status === 'COLLECTED_RECONCILED' || ledgerRow.status === 'COLLECTED' || ledgerRow.reconciled) &&
+          (ledgerRow.collector_id === riderId || session.rider_id === riderId) &&
+          Number(ledgerRow.amount_collected) >= expectedCod;
+
+        if (isReconciledByRider) {
+          isCodPaid = true;
+        } else if (hasAmountParam) {
           if (resolvedAmount == null || isNaN(resolvedAmount) || resolvedAmount <= 0) {
             await client.query('ROLLBACK');
             return {
@@ -3482,10 +3542,18 @@ class TransactionalDeliveryRepository {
                  reconciled = TRUE,
                  collector_id = $3,
                  updated_at = NOW()
-             WHERE order_id = $1`,
+             WHERE (order_id = $1 OR id = $1)`,
             [order.order_id || order.id, resolvedAmount, riderId]
           );
           isCodPaid = true;
+        } else {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 400,
+            error: 'COD_AMOUNT_REQUIRED',
+            message: `Exact cash collection amount of ₹${expectedCod} must be confirmed before delivery completion.`
+          };
         }
       }
 
@@ -3718,7 +3786,7 @@ class TransactionalOrderRepository {
     const authoritativeOrderType = requestedType;
 
     // 5. Authoritative Payment Method & Status Normalization
-    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'UPI_INTENT', 'CARD', 'NET_BANKING'];
+    const ALLOWED_PAYMENT_METHODS = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY'];
     const rawMethod = data.paymentMethod ? String(data.paymentMethod).toUpperCase() : 'COD';
     if (!ALLOWED_PAYMENT_METHODS.includes(rawMethod)) {
       return {
@@ -3726,10 +3794,10 @@ class TransactionalOrderRepository {
         httpStatus: 400,
         error: 'INVALID_PAYMENT_METHOD',
         code: 'PAYMENT_METHOD_NOT_SUPPORTED',
-        message: `Payment method '${data.paymentMethod}' is not supported.`
+        message: `Payment method '${data.paymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
       };
     }
-    const isCod = ['COD', 'CASH_ON_DELIVERY', 'CASH'].includes(rawMethod);
+    const isCod = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY'].includes(rawMethod);
     const requestedMethod = isCod ? 'COD' : rawMethod;
     const authoritativePaymentStatus = isCod ? 'COD_PENDING' : 'PAYMENT_PENDING';
 
@@ -3858,19 +3926,8 @@ class TransactionalOrderRepository {
           );
           addrRes = insAddr;
         } else {
-          // Fallback C: Check if addressId exists in customer_addresses for any customer (demo/seed re-mapping)
-          const anyAddr = await client.query(
-            `SELECT id, address_line, city, postal_code, latitude, longitude, is_default 
-             FROM customer_addresses 
-             WHERE id = $1 LIMIT 1`,
-            [data.addressId]
-          );
-          if (anyAddr.rows.length > 0) {
-            addrRes = anyAddr;
-          } else {
-            await client.query('ROLLBACK');
-            return { ok: false, httpStatus: 404, error: 'ADDRESS_NOT_FOUND', message: 'Delivery address not found for authenticated customer.' };
-          }
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 404, error: 'ADDRESS_NOT_FOUND', message: 'Delivery address not found for authenticated customer.' };
         }
       }
       const resolvedAddress = addrRes.rows[0];
@@ -3881,9 +3938,17 @@ class TransactionalOrderRepository {
         return { ok: false, httpStatus: 400, error: 'INVALID_ADDRESS_COORDINATES', message: 'Authoritative customer address has invalid coordinates.' };
       }
 
-      // 8. Authoritative Store Resolution (from stores table)
+      // 8. Authoritative Store Resolution (from stores table with operational guards)
       const storeRes = await client.query(
-        `SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active, seller_approval_required, service_radius_km FROM stores WHERE id = $1 AND is_active = TRUE`,
+        `SELECT id, store_name, address, latitude, longitude, sla_minutes, is_active, seller_approval_required,
+                COALESCE(service_radius_km, 10.0) AS service_radius_km,
+                COALESCE(is_open, TRUE) AS is_open,
+                COALESCE(is_offline, FALSE) AS is_offline,
+                COALESCE(surge_mode, FALSE) AS surge_mode,
+                COALESCE(opening_time_utc, '00:00') AS opening_time_utc,
+                COALESCE(closing_time_utc, '23:59') AS closing_time_utc,
+                COALESCE(max_active_orders, 50) AS max_active_orders
+         FROM stores WHERE id = $1 AND is_active = TRUE`,
         [targetStoreId]
       );
       if (storeRes.rows.length === 0) {
@@ -3891,6 +3956,41 @@ class TransactionalOrderRepository {
         return { ok: false, httpStatus: 400, error: 'INVALID_STORE', message: `Store ${targetStoreId} is not an active fulfillment node.` };
       }
       const store = storeRes.rows[0];
+
+      // Operational Status Guard (Finding 7)
+      if (store.is_open === false || store.is_offline === true) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 400, error: 'STORE_CLOSED', message: `Store ${store.store_name} is currently closed or offline.` };
+      }
+
+      // Operational Hours Guard (Finding 7)
+      if (store.opening_time_utc && store.closing_time_utc) {
+        const nowUtc = new Date();
+        const currentUtcMinutes = nowUtc.getUTCHours() * 60 + nowUtc.getUTCMinutes();
+        const [openH, openM] = String(store.opening_time_utc).split(':').map(Number);
+        const [closeH, closeM] = String(store.closing_time_utc).split(':').map(Number);
+        const openMin = (openH || 0) * 60 + (openM || 0);
+        const closeMin = (closeH || 23) * 60 + (closeM || 59);
+        if (closeMin >= openMin && (currentUtcMinutes < openMin || currentUtcMinutes > closeMin)) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 400, error: 'STORE_OUTSIDE_OPERATING_HOURS', message: `Store ${store.store_name} is outside operating hours (${store.opening_time_utc} - ${store.closing_time_utc} UTC).` };
+        }
+      }
+
+      // Capacity & Surge Guard (Finding 7)
+      if (store.max_active_orders) {
+        const activeCapRes = await client.query(
+          `SELECT COUNT(*) FROM orders 
+           WHERE store_id = $1 AND status IN ('PLACED', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'LOOKING_FOR_RIDER', 'OUT_FOR_DELIVERY')`,
+          [store.id]
+        );
+        const activeCount = Number(activeCapRes.rows[0]?.count || 0);
+        if (activeCount >= Number(store.max_active_orders)) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 429, error: 'STORE_CAPACITY_EXCEEDED', message: `Store ${store.store_name} has reached maximum fulfillment capacity. Please retry shortly.` };
+        }
+      }
+
       const mLat = Number(store.latitude);
       const mLng = Number(store.longitude);
       if (isNaN(mLat) || isNaN(mLng)) {
@@ -3937,7 +4037,9 @@ class TransactionalOrderRepository {
         const qty = Math.max(1, Number(rawItem.quantity) || 1);
 
         const prodRes = await client.query(
-          `SELECT id, sku, name, brand_name, price, mrp, discounted_price, rx_requirement, is_active
+          `SELECT id, sku, name, brand_name, price, mrp, discounted_price, rx_requirement, is_active,
+                  COALESCE(hsn_code, '3004') AS hsn_code,
+                  COALESCE(gst_rate, 5.0) AS gst_rate
            FROM products 
            WHERE (sku = $1 OR id = $1) AND is_active = TRUE 
            LIMIT 1`,
@@ -3970,6 +4072,8 @@ class TransactionalOrderRepository {
             mrp,
             quantity: qty,
             lineTotal: Math.round(unitPrice * qty * 100) / 100,
+            hsnCode: product.hsn_code || '3004',
+            gstRate: Number(product.gst_rate || 5.0),
             rxRequired: isRxRequired
           });
         }
@@ -4131,6 +4235,7 @@ class TransactionalOrderRepository {
       const hasColdChain = resolvedItemSnapshots.some(it => it.cold_chain_required === true);
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,
+        items: resolvedItemSnapshots,
         distanceKm,
         isCod,
         tip: Math.max(0, Number(data.tip || data.selectedTip || 0)),
@@ -4698,6 +4803,13 @@ class TransactionalOrderRepository {
         await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
         await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]).catch(() => {});
         await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [order.order_id || order.id]).catch(() => {});
+        // Update COD ledger to terminal void status in the same transaction
+        await client.query(
+          `UPDATE cod_ledger 
+           SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [VOIDED: Seller rejected]', updated_at = NOW() 
+           WHERE (order_id = $1 OR id = $1)`,
+          [order.order_id || order.id]
+        ).catch(() => {});
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
            VALUES ($1, $2, $3, $4, 'PENDING')`,
@@ -4962,6 +5074,14 @@ class TransactionalOrderRepository {
         // Cancel pending outbox events so worker doesn't dispatch a cancelled order
         await client.query(
           `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
+          [orderIdVal]
+        ).catch(() => {});
+
+        // Update COD ledger to terminal void status in the same transaction
+        await client.query(
+          `UPDATE cod_ledger 
+           SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [VOIDED: Order cancelled]', updated_at = NOW() 
+           WHERE (order_id = $1 OR id = $1)`,
           [orderIdVal]
         ).catch(() => {});
 
@@ -5265,6 +5385,15 @@ class LocalDevelopmentOrderRepository {
     await this.inventoryRepo.releaseStockTransactionally(order.items || []);
     order.orderStatus = 'CANCELLED';
     order.status = 'CANCELLED';
+    if (this.db.codLedger) {
+      const codEntry = this.db.codLedger.find(c => c.orderId === orderId || c.id === orderId);
+      if (codEntry) {
+        codEntry.status = 'VOID';
+        codEntry.reconciled = true;
+        codEntry.notes = (codEntry.notes || '') + ' [VOIDED: Order cancelled]';
+        codEntry.updatedAt = new Date().toISOString();
+      }
+    }
     this.saveDb();
     return { ok: true, order };
   }
@@ -6491,31 +6620,31 @@ class DispatchService {
         ? await this.presenceRepo.getEligibleOnlineRiders(storeId || store?.id)
         : [];
       if (eligibleRiders.length > 0) {
-        // Quick-Commerce Dispatch Ranking Engine:
-        // 1. Proximity to fulfillment store (40% weight)
-        // 2. Verified tier reliability bonus (15% bonus for PRO_EXPRESS)
-        const scoredRiders = eligibleRiders.map(r => {
+        // Neutral, SLA-optimal Quick-Commerce Dispatch Ranking Engine (Finding 14):
+        // 1. Projected pickup route duration (based on road travel to store)
+        // 2. Active delivery queue load penalty (+4 mins per active delivery)
+        // 3. Stable rider ID lexicographical as deterministic tie-breaker
+        const rankedRiders = eligibleRiders.map(r => {
           const rLat = Number(r.lastKnownLat != null ? r.lastKnownLat : (r.last_known_lat != null ? r.last_known_lat : r.latitude));
           const rLng = Number(r.lastKnownLng != null ? r.lastKnownLng : (r.last_known_lng != null ? r.last_known_lng : r.longitude));
           const distKm = (!isNaN(rLat) && !isNaN(rLng)) ? haversineDistanceKm(rLat, rLng, mLat, mLng) : 99.0;
-          const proximityScore = Math.max(0, 100 - distKm * 15);
-          const tierBonus = r.tier === 'PRO_EXPRESS' ? 15 : (r.tier === 'EXPRESS' ? 10 : 0);
-          const totalScore = proximityScore + tierBonus;
-          return { ...r, totalScore, distKm };
+          const pickupEtaMins = Math.max(2, Math.ceil((distKm / 20) * 60));
+          const activeWorkload = Number(r.activeOrdersCount || r.activeDeliveries || r.active_deliveries || 0);
+          const workloadPenaltyMins = activeWorkload * 4;
+          const projectedPickupEta = pickupEtaMins + workloadPenaltyMins;
+          return { ...r, distKm, pickupEtaMins, activeWorkload, projectedPickupEta };
         });
 
-        scoredRiders.sort((a, b) => {
-          if (b.totalScore !== a.totalScore) {
-            return b.totalScore - a.totalScore;
+        rankedRiders.sort((a, b) => {
+          if (a.projectedPickupEta !== b.projectedPickupEta) {
+            return a.projectedPickupEta - b.projectedPickupEta;
           }
-          const aTime = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
-          const bTime = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0);
-          if (bTime !== aTime) {
-            return bTime - aTime;
+          if (a.activeWorkload !== b.activeWorkload) {
+            return a.activeWorkload - b.activeWorkload;
           }
           return String(a.riderId || a.rider_id || '').localeCompare(String(b.riderId || b.rider_id || ''));
         });
-        selectedRiderId = scoredRiders[0].riderId || scoredRiders[0].rider_id;
+        selectedRiderId = rankedRiders[0].riderId || rankedRiders[0].rider_id;
       }
     }
 
@@ -8459,11 +8588,35 @@ function createProductionRepositories(pool, options = {}) {
         await options.sseBroadcaster(event.aggregate_id || 'global', event.event_type, payload);
         const storeId = payload.storeId || payload.store_id || (payload.order && (payload.order.storeId || payload.order.store_id));
         if (storeId) {
-          await options.sseBroadcaster(`seller_${storeId}`, event.event_type, payload);
-          await options.sseBroadcaster(`store_${storeId}`, event.event_type, payload);
+          // Strict Security Gate (Finding 1): merchant broadcast strictly excludes delivery secret/OTP
+          const { deliveryOtp, delivery_otp, delivery_otp_hash, rawDeliveryPin, ...merchantPayload } = payload;
+          await options.sseBroadcaster(`seller_${storeId}`, event.event_type, merchantPayload);
+          await options.sseBroadcaster(`store_${storeId}`, event.event_type, merchantPayload);
         }
         if (event.aggregate_id) {
           await options.sseBroadcaster(`order_${event.aggregate_id}`, event.event_type, payload);
+        }
+      }
+
+      // Durable Customer Notification Dispatch (Finding 6)
+      const targetCustomerId = payload.customerId || payload.customer_id || (payload.order && (payload.order.customerId || payload.order.customer_id));
+      if (pool && targetCustomerId) {
+        try {
+          const tokRes = await pool.query(
+            `SELECT token, platform FROM customer_device_tokens WHERE customer_id = $1 ORDER BY updated_at DESC`,
+            [targetCustomerId]
+          );
+          for (const row of tokRes.rows) {
+            if (row.token && options.apnsDispatcher) {
+              const custPayload = options.apnsDispatcher.createOrderStatusPayload(
+                { orderId: event.aggregate_id, customerId: targetCustomerId },
+                event.event_type
+              );
+              options.apnsDispatcher.send(row.token, custPayload, { topic: 'io.commerceos.customer' }).catch(() => {});
+            }
+          }
+        } catch (pushErr) {
+          console.warn('[OutboxProcessor] Customer push notification warning:', pushErr.message);
         }
       }
       return { ok: true };

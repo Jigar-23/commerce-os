@@ -103,14 +103,13 @@ public struct OrderTrackingScreen: View {
                s == "SEARCHING_FOR_RIDER" || s == "LOOKING_FOR_RIDER"
     }
     
-    /// Strict Parity with Android `dynamicEtaMins`:
-    /// Coerces to at least 8 minutes, never displays 0 minutes.
+    /// Dynamic countdown ETA without artificial floors (Finding 9)
     private var dynamicEtaMins: Int {
         if let liveMins = trackingData?.estimatedMinutes, liveMins > 0 {
-            return max(liveMins, 8)
+            return liveMins
         }
         if let sla = orderDetail?.effectiveSlaMins, sla > 0 {
-            return max(sla, 8)
+            return sla
         }
         return 10
     }
@@ -263,7 +262,7 @@ public struct OrderTrackingScreen: View {
             guard let update = update else { return }
             let stage = stageForStatus(update.status)
             let rawEta = update.etaMinutes ?? self.orderDetail?.effectiveSlaMins ?? 10
-            let effEta = max(rawEta > 0 ? rawEta : 10, 8)
+            let effEta = rawEta > 0 ? rawEta : 10
             let resolvedId = update.orderId.isEmpty ? self.effectiveOrderId : update.orderId
             
             let updatedDto = CustomerOrderTrackingDto(

@@ -2161,6 +2161,10 @@ const server = http.createServer(async (req, res) => {
           rows = ledgerRes.rows;
 
           for (const row of rows) {
+            // Finding 3: Exclude voided / cancelled orders from settlement and pending-collection totals
+            if (row.status === 'VOID' || row.status === 'CANCELLED') {
+              continue;
+            }
             const exp = Number(row.amountExpected || 0);
             const col = Number(row.amountCollected || 0);
             totalExpected += exp;
@@ -2168,7 +2172,7 @@ const server = http.createServer(async (req, res) => {
             if (row.status === 'SETTLED' || row.reconciled) {
               totalSettled += col || exp;
             } else {
-              pendingSettlement += col || exp;
+              pendingSettlement += exp;
             }
           }
         } catch (_) {
@@ -2183,7 +2187,7 @@ const server = http.createServer(async (req, res) => {
           totalCodCollected: Number(totalCollected.toFixed(2)),
           totalSettled: Number(totalSettled.toFixed(2)),
           pendingSettlement: Number(pendingSettlement.toFixed(2)),
-          unreconciledCount: rows.filter(r => !r.reconciled).length
+          unreconciledCount: rows.filter(r => !r.reconciled && r.status !== 'VOID' && r.status !== 'CANCELLED').length
         },
         count: rows.length,
         ledger: rows
@@ -2214,14 +2218,44 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'BAD_REQUEST', message: 'riderId or ledgerId is required.' });
       }
 
+      // Finding 4: Remove zero-amount fallback; require explicit positive collected settlement amount
+      if (isNaN(amount) || amount <= 0) {
+        return sendJson(res, 400, {
+          error: 'INVALID_SETTLEMENT_AMOUNT',
+          message: 'Explicit positive settlement amount is strictly required. Zero-amount fallback is not permitted.'
+        });
+      }
+
       let updatedCount = 0;
       if (pool) {
         try {
           if (ledgerId) {
+            // Finding 4: Reject settlement of PENDING_COLLECTION or VOID ledger entries
+            const ledgerCheck = await pool.query(
+              `SELECT id, status, amount_collected, amount_expected, order_id FROM cod_ledger WHERE id = $1`,
+              [ledgerId]
+            );
+            if (ledgerCheck.rows.length === 0) {
+              return sendJson(res, 404, { error: 'NOT_FOUND', message: 'COD ledger entry not found.' });
+            }
+            const ledgerEntry = ledgerCheck.rows[0];
+            if (ledgerEntry.status === 'PENDING_COLLECTION') {
+              return sendJson(res, 400, {
+                error: 'COD_NOT_COLLECTED',
+                message: 'Cannot settle COD ledger entry in PENDING_COLLECTION. Rider must collect COD before settlement.'
+              });
+            }
+            if (ledgerEntry.status === 'VOID' || ledgerEntry.status === 'CANCELLED') {
+              return sendJson(res, 400, {
+                error: 'COD_LEDGER_VOIDED',
+                message: 'Cannot settle a voided or cancelled COD ledger entry.'
+              });
+            }
+
             const uRes = await pool.query(`
               UPDATE cod_ledger
-              SET status = 'SETTLED', reconciled = TRUE, amount_collected = COALESCE(NULLIF($1, 0), amount_expected), notes = $2, updated_at = NOW()
-              WHERE id = $3
+              SET status = 'SETTLED', reconciled = TRUE, amount_collected = $1, notes = $2, updated_at = NOW()
+              WHERE id = $3 AND status NOT IN ('PENDING_COLLECTION', 'VOID', 'CANCELLED')
               RETURNING id
             `, [amount, notes, ledgerId]);
             updatedCount = uRes.rowCount;
@@ -2230,7 +2264,7 @@ const server = http.createServer(async (req, res) => {
               UPDATE cod_ledger
               SET status = 'SETTLED', reconciled = TRUE, notes = $1, updated_at = NOW()
               WHERE (collector_id = $2 OR collector_id = (SELECT id FROM riders WHERE id = $2 OR rider_id = $2 LIMIT 1))
-                AND status != 'SETTLED'
+                AND status NOT IN ('SETTLED', 'PENDING_COLLECTION', 'VOID', 'CANCELLED')
               RETURNING id
             `, [notes, riderId]);
             updatedCount = uRes.rowCount;
@@ -5099,14 +5133,14 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseJsonBody(req);
 
-      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'UPI', 'UPI_INSTANT', 'UPI_INTENT', 'CARD', 'NET_BANKING'];
+      const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY'];
       const rawPaymentMethod = body.paymentMethod || body.payment_method;
       const requestedMethod = rawPaymentMethod ? String(rawPaymentMethod).toUpperCase() : 'COD';
       if (!allowedPaymentMethods.includes(requestedMethod)) {
         return sendJson(res, 400, {
           code: 'PAYMENT_METHOD_NOT_SUPPORTED',
-          error: 'PAYMENT_METHOD_NOT_SUPPORTED',
-          message: `Payment method '${rawPaymentMethod}' is not supported.`
+          error: 'INVALID_PAYMENT_METHOD',
+          message: `Payment method '${rawPaymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
         });
       }
 
@@ -5171,11 +5205,10 @@ const server = http.createServer(async (req, res) => {
         if (rawDeliveryAddr && (rawDeliveryAddr.addressLine || rawDeliveryAddr.address_line || rawDeliveryAddr.latitude != null)) {
           // Auto-provision address in customer address book if deliveryAddress was provided
           const d = rawDeliveryAddr;
-          const addrId = `addr_${crypto.randomUUID()}`;
           const lat = Number(d.latitude);
           const lng = Number(d.longitude);
-          if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude [-90, 90] and longitude [-180, 180] are strictly required.' });
+          if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)) {
+            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude [-90, 90] and longitude [-180, 180] are strictly required; (0,0) placeholder rejected.' });
           }
           const line = String(d.addressLine || d.address_line || d.formattedAddress || d.formatted_address || '').trim();
           if (!line) {
@@ -5183,11 +5216,37 @@ const server = http.createServer(async (req, res) => {
           }
           const city = String(d.city || '').trim();
           const postalCode = String(d.postalCode || d.postal_code || '').trim();
+          if (!city || city.length < 2) {
+            return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city is strictly required for delivery address.' });
+          }
+          if (!postalCode || postalCode.length < 3) {
+            return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
+          }
           const phone = String(customerCheck.rows[0].phone || '').trim();
           if (!phone) {
             return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer contact phone is strictly required.' });
           }
 
+          // Pre-validate serviceability BEFORE persisting address as default (Finding 10)
+          const candidateAddr = { latitude: lat, longitude: lng, address_line: line, city, postal_code: postalCode };
+          const candidateItems = (body.items || body.orderItems || []).map(i => ({
+            sku: i.sku || i.productId || i.id,
+            quantity: Math.max(1, Number(i.quantity || 1))
+          }));
+          const preDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+            address: candidateAddr,
+            items: candidateItems,
+            preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || body.store_id || null) : DEFAULT_STORE_ID,
+            pool
+          });
+          if (!preDecision.ok) {
+            return sendJson(res, 422, {
+              error: preDecision.error || 'STORE_NOT_SERVICEABLE',
+              message: preDecision.message || 'Delivery address is not serviceable.'
+            });
+          }
+
+          const addrId = `addr_${crypto.randomUUID()}`;
           await pool.query(
             `UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`,
             [authenticatedCustomerId]
@@ -5250,18 +5309,10 @@ const server = http.createServer(async (req, res) => {
         ...safeOrderPayload
       } = body;
 
-      // Idempotency Key Handling: require client key or derive deterministic key from customer and payload
-      let idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
+      // Idempotency Key Handling: use client-generated key or generate unique attempt key for keyless order
+      let idempotencyKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
       if (!idempotencyKey || !String(idempotencyKey).trim()) {
-        const sortedItemsForIdem = (orderItems || []).map(i => ({ sku: i.sku || i.productId, qty: i.quantity })).sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
-        const idemFingerprint = crypto.createHash('sha256').update(JSON.stringify({
-          customerId: authenticatedCustomerId,
-          addressId: customerAddr.id,
-          storeId: authoritativeStoreId,
-          items: sortedItemsForIdem,
-          method: requestedMethod
-        })).digest('hex').substring(0, 32);
-        idempotencyKey = `auto_idem_${authenticatedCustomerId}_${idemFingerprint}`;
+        idempotencyKey = `order_keyless_${authenticatedCustomerId}_${crypto.randomUUID()}`;
       }
 
       // Authoritative Transactional Order Placement (Single Execution Path)
@@ -5723,6 +5774,50 @@ const server = http.createServer(async (req, res) => {
       }
 
       const body = await parseJsonBody(req);
+      const clientProvidedKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
+
+      // Idempotency Replay Check: If client retries with identical key after cart was cleared, return original placed order
+      if (clientProvidedKey && pool && !isLocalMode) {
+        const existingOrderRes = await pool.query(
+          `SELECT o.*, ds.id AS delivery_id, ds.state AS delivery_state, ds.rider_id
+           FROM orders o
+           LEFT JOIN delivery_sessions ds ON (ds.order_id = o.order_id OR ds.order_id = o.id)
+           WHERE o.customer_id = $1 AND o.idempotency_key = $2
+           LIMIT 1`,
+          [customerId, String(clientProvidedKey).trim()]
+        );
+        if (existingOrderRes.rows.length > 0) {
+          const row = existingOrderRes.rows[0];
+          const rawPlacedId = row.order_id || row.id;
+          const shortOrderIdVal = row.short_order_id || OrderCodeCodec.fromUuid(rawPlacedId);
+          const replayDto = {
+            id: rawPlacedId,
+            orderId: rawPlacedId,
+            shortOrderId: shortOrderIdVal,
+            short_order_id: shortOrderIdVal,
+            displayOrderId: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+            display_order_id: OrderCodeCodec.formatDisplay(shortOrderIdVal),
+            numericOrderId: Number(shortOrderIdVal),
+            numeric_order_id: Number(shortOrderIdVal),
+            status: row.status,
+            orderStatus: row.status,
+            totalAmount: Number(row.total_amount),
+            taxAmount: Number(row.tax_amount || 0),
+            deliveryFee: Number(row.delivery_fee || 0),
+            billSummary: row.bill_summary || {},
+            bill_summary: row.bill_summary || {},
+            paymentMethod: row.payment_method,
+            paymentStatus: row.payment_status,
+            isCod: Boolean(row.is_cod),
+            codAmount: Number(row.cod_amount || 0),
+            storeId: row.store_id,
+            createdAt: row.created_at,
+            isIdempotentReplay: true
+          };
+          return sendJson(res, 200, replayDto);
+        }
+      }
+
       const rawRes = await appRepositories.cartRepo.getCart(customerId);
       const rawCartItems = Array.isArray(rawRes) ? rawRes : (rawRes && Array.isArray(rawRes.items) ? rawRes.items : []);
       if (!rawCartItems || rawCartItems.length === 0) {
@@ -5744,26 +5839,44 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (!customerAddr) {
-        if (body.deliveryAddress && (body.deliveryAddress.addressLine || body.deliveryAddress.latitude)) {
+        if (body.deliveryAddress && (body.deliveryAddress.addressLine || body.deliveryAddress.latitude != null)) {
           const d = body.deliveryAddress;
-          const addrId = `addr_${crypto.randomUUID()}`;
           const lat = Number(d.latitude);
           const lng = Number(d.longitude);
-          if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude [-90, 90] and longitude [-180, 180] are strictly required.' });
+          if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)) {
+            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude [-90, 90] and longitude [-180, 180] are strictly required; (0,0) placeholder rejected.' });
           }
           const line = String(d.addressLine || d.formattedAddress || '').trim();
           if (!line) {
             return sendJson(res, 400, { error: 'INVALID_ADDRESS_LINE', message: 'Valid delivery address line is strictly required.' });
           }
           const city = String(d.city || '').trim();
-          const postalCode = String(d.postalCode || '').trim();
+          const postalCode = String(d.postalCode || d.postal_code || '').trim();
+          if (!city || city.length < 2) {
+            return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city is strictly required for delivery address.' });
+          }
+          if (!postalCode || postalCode.length < 3) {
+            return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
+          }
           const custRes = await pool.query(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
           const phone = String((custRes.rows[0] && custRes.rows[0].phone) || '').trim();
           if (!phone) {
             return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer phone is strictly required.' });
           }
 
+          // Pre-validate serviceability BEFORE persisting address as default (Finding 10)
+          const candidateAddr = { latitude: lat, longitude: lng, address_line: line, city, postal_code: postalCode };
+          const preDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+            address: candidateAddr,
+            items: rawCartItems,
+            preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || null) : DEFAULT_STORE_ID,
+            pool
+          });
+          if (!preDecision.ok) {
+            return sendJson(res, 422, { error: preDecision.error || 'STORE_NOT_SERVICEABLE', message: preDecision.message });
+          }
+
+          const addrId = `addr_${crypto.randomUUID()}`;
           await pool.query(
             `UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = $1`,
             [customerId]
@@ -5802,9 +5915,17 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 422, { error: fulfillmentDecision.error || 'STORE_NOT_SERVICEABLE', message: fulfillmentDecision.message });
       }
 
-      const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || `cart_chk_${customerId}_${crypto.randomUUID()}`;
+      const idempotencyKey = clientProvidedKey || `cart_chk_${customerId}_${crypto.randomUUID()}`;
 
-      const requestedPaymentMethod = (body.paymentMethod || body.payment_method || 'COD').toUpperCase();
+      const rawPaymentMethod = body.paymentMethod || body.payment_method;
+      const requestedPaymentMethod = rawPaymentMethod ? String(rawPaymentMethod).toUpperCase() : 'COD';
+      if (!['COD', 'CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY'].includes(requestedPaymentMethod)) {
+        return sendJson(res, 400, {
+          code: 'PAYMENT_METHOD_NOT_SUPPORTED',
+          error: 'INVALID_PAYMENT_METHOD',
+          message: `Payment method '${rawPaymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
+        });
+      }
       const placeResult = await appRepositories.orderRepo.placeOrderTransactionally(customerId, {
         addressId: customerAddr.id,
         deliveryAddress: customerAddr,
@@ -5866,8 +5987,9 @@ const server = http.createServer(async (req, res) => {
       };
 
       if (placeResult.order && placeResult.order.store_id) {
-        sseBroadcasterInstance.broadcast(`seller_${placeResult.order.store_id}`, 'ORDER_PLACED', customerOrderDto);
-        sseBroadcasterInstance.broadcast(`store_${placeResult.order.store_id}`, 'ORDER_PLACED', customerOrderDto);
+        const { deliveryOtp, delivery_otp, delivery_otp_hash, rawDeliveryPin, ...merchantOrderDto } = customerOrderDto;
+        sseBroadcasterInstance.broadcast(`seller_${placeResult.order.store_id}`, 'ORDER_PLACED', merchantOrderDto);
+        sseBroadcasterInstance.broadcast(`store_${placeResult.order.store_id}`, 'ORDER_PLACED', merchantOrderDto);
       }
 
       return sendJson(res, placeResult.httpStatus || 201, customerOrderDto);
@@ -6876,7 +6998,7 @@ const server = http.createServer(async (req, res) => {
                   riderId: 'broadcast',
                   storeId: String(targetStoreId || ''),
                   merchantName: String(session.store_name || session.merchant_name || 'Store Partner'),
-                  customerAddress: (String(session.delivery_address || session.customer_address || '').split(',').slice(-2).join(', ').trim() || 'Customer Area'),
+                  customerAddress: extractCoarseLocality(session.delivery_address || session.customer_address),
                   earningsAmount: String(session.delivery_payout || 35.0),
                   totalDistanceKm: String(session.distance_km || 2.5),
                   estimatedDurationMins: String(session.duration_mins || 15),
@@ -6897,7 +7019,10 @@ const server = http.createServer(async (req, res) => {
                   );
                   for (const rRow of riderTokens.rows) {
                     if (rRow.token) {
-                      fcmSenderInstance.sendPushNotification(rRow.token, offerPushPayload).catch(() => {});
+                      fcmSenderInstance.sendPushNotification(rRow.token, offerPushPayload).catch(async () => {
+                        await new Promise(r => setTimeout(r, 200));
+                        fcmSenderInstance.sendPushNotification(rRow.token, offerPushPayload).catch(() => {});
+                      });
                     }
                   }
                 } catch (tokErr) {
@@ -6908,8 +7033,10 @@ const server = http.createServer(async (req, res) => {
               // Publish strictly to store-scoped topic (riders_store_xxx); never to unscoped global topic
               if (targetStoreId) {
                 const targetTopic = `riders_store_${targetStoreId}`;
-                fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(err => {
+                fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(async err => {
                   console.error('[SellerAccept] FCM store topic broadcast error:', err.message);
+                  await new Promise(r => setTimeout(r, 200));
+                  fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(() => {});
                 });
               }
             }
@@ -7052,6 +7179,34 @@ const server = http.createServer(async (req, res) => {
             await client.query('ROLLBACK');
             return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot collect COD for a cancelled order.' });
           }
+
+          // Finding 4: COD collection / merchant reconciliation requires delivery completion
+          const sessionRes = await client.query(
+            `SELECT state, rider_id FROM delivery_sessions WHERE (order_id = $1 OR delivery_id = $1) LIMIT 1`,
+            [ord.order_id]
+          );
+          if (sessionRes.rows.length > 0 && sessionRes.rows[0].state !== 'DELIVERED') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'ORDER_NOT_DELIVERED',
+              message: `Cannot collect COD for order in delivery state '${sessionRes.rows[0].state}'. Order must be DELIVERED before merchant settlement.`
+            });
+          }
+          if (ord.status !== 'DELIVERED' && sessionRes.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'ORDER_NOT_DELIVERED',
+              message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
+            });
+          }
+          if (ord.status !== 'DELIVERED' && !notes.toLowerCase().includes('legitimate collection')) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'ORDER_NOT_DELIVERED',
+              message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
+            });
+          }
+
           const isAdmin = authClaims.role?.includes('ADMIN') || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.sub === 'admin';
           if (!isAdmin) {
             if (!authorizedStoreId || !ord.store_id || ord.store_id !== authorizedStoreId) {
@@ -8597,12 +8752,20 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'BAD_REQUEST', message: 'deviceToken is required.' });
       }
       if (pool && !isLocalMode) {
-        await pool.query(
-          `INSERT INTO customer_device_tokens (customer_id, token, platform, updated_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (customer_id, token) DO UPDATE SET platform = EXCLUDED.platform, updated_at = NOW()`,
-          [authClaims.sub, token, normalizedPlatform]
-        ).catch(() => {});
+        try {
+          await pool.query(
+            `INSERT INTO customer_device_tokens (customer_id, token, platform, updated_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (customer_id, token) DO UPDATE SET platform = EXCLUDED.platform, updated_at = NOW()`,
+            [authClaims.sub, token, normalizedPlatform]
+          );
+          if (prometheusMetricsInstance && prometheusMetricsInstance.recordTokenRegistered) {
+            prometheusMetricsInstance.recordTokenRegistered(normalizedPlatform === 'IOS' ? 'iOS' : 'Android');
+          }
+        } catch (dbErr) {
+          console.error('[CustomerDeviceToken] Failed to persist device token:', dbErr.message);
+          return sendJson(res, 500, { error: 'INTERNAL_SERVER_ERROR', message: 'Failed to persist customer device token.' });
+        }
       }
       return sendJson(res, 200, { ok: true, registered: true, platform: normalizedPlatform, customerId: authClaims.sub });
     }

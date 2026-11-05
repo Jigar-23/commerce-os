@@ -721,7 +721,13 @@ fun RiderMainScreen(
                                 scope.launch {
                                     actionLoading = true
                                     errorMessage = null
-                                    val res = repository.verifyOtp(currentSession.deliveryId, enteredOtp.trim())
+                                    val codAmt = enteredCodAmount.toDoubleOrNull() ?: currentSession.codAmount ?: currentSession.orderTotal
+                                    val res = repository.verifyOtp(
+                                        currentSession.deliveryId,
+                                        enteredOtp.trim(),
+                                        codCollected = true,
+                                        collectedAmount = codAmt
+                                    )
                                     if (res.isSuccess) {
                                         val compRes = repository.completeDelivery(currentSession.deliveryId)
                                         compRes.onSuccess {

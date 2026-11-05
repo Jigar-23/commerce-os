@@ -1,7 +1,36 @@
 import SwiftUI
+import UIKit
+import UserNotifications
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        _ = CustomerPushNotificationManager.shared
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        CustomerPushNotificationManager.shared.handleDeviceToken(deviceToken: deviceToken)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        #if DEBUG
+        print("[AppDelegate] Failed to register for remote notifications: \(error.localizedDescription)")
+        #endif
+    }
+}
 
 @main
 struct CommerceOSApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var container = AppContainer.shared
     @State private var isSplashVisible: Bool = true
     @State private var isLocationLockinVisible: Bool = false

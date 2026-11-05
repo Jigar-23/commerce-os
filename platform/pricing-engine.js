@@ -89,6 +89,7 @@ function calculateAuthoritativeEarnings({
 
 function calculateCustomerOrderPricing({
   itemsSubtotal,
+  items = [],
   distanceKm = 1.0,
   isCod = false,
   tip = 0,
@@ -105,10 +106,25 @@ function calculateCustomerOrderPricing({
   const codFee = 0.0;
 
   // Authoritative GST Tax Calculation:
-  // Catalog item prices in quick-commerce pharmacy are tax-inclusive (5% GST for medicines, 18% for delivery & handling).
+  // Catalog item prices in quick-commerce pharmacy are tax-inclusive:
+  // - Per-item medicine rate (CBIC GST rates: 5% or 12% per SKU HSN)
+  // - 18% GST for delivery & handling service fees
   let computedTax = Number(taxAmount || 0);
   if (computedTax <= 0 && subtotal > 0) {
-    const medicineGst = Math.round((subtotal - (subtotal / 1.05)) * 100) / 100;
+    let medicineGst = 0;
+    if (Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        const rate = Number(it.gstRate != null ? it.gstRate : (it.gst_rate != null ? it.gst_rate : 5.0));
+        const lineTotal = Number(it.lineTotal != null ? it.lineTotal : (it.line_total != null ? it.line_total : ((it.unitPrice || it.price || 0) * (it.quantity || 1))));
+        if (lineTotal > 0 && rate > 0) {
+          const lineTax = lineTotal - (lineTotal / (1 + (rate / 100)));
+          medicineGst += lineTax;
+        }
+      }
+      medicineGst = Math.round(medicineGst * 100) / 100;
+    } else {
+      medicineGst = Math.round((subtotal - (subtotal / 1.05)) * 100) / 100;
+    }
     const feeGst = (deliveryFee + handlingFee) > 0 ? Math.round(((deliveryFee + handlingFee) - ((deliveryFee + handlingFee) / 1.18)) * 100) / 100 : 0.0;
     computedTax = Math.round((medicineGst + feeGst) * 100) / 100;
   }
@@ -129,7 +145,7 @@ function calculateCustomerOrderPricing({
       cgst,
       sgst,
       totalTax: tax,
-      gstRatePercent: 5,
+      gstRatePercent: items.length > 0 && items[0].gstRate ? Number(items[0].gstRate) : 5,
       isTaxInclusive: true
     },
     tipAmount,
