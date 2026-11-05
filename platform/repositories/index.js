@@ -8646,9 +8646,19 @@ class OutboxProcessor {
              retry_count = 0,
              last_error = CONCAT('REDRIVEN_BY_OPS: ', COALESCE(oe.last_error, ''))
          FROM orders o
+         LEFT JOIN delivery_sessions ds ON (ds.order_id = o.order_id OR ds.order_id = o.id)
          WHERE oe.status = 'DEAD_LETTER'
            AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
-           AND (oe.aggregate_id = o.order_id OR oe.aggregate_id = o.id)
+           AND (
+             oe.aggregate_id = o.order_id 
+             OR oe.aggregate_id = o.id
+             OR (ds.delivery_id IS NOT NULL AND oe.aggregate_id = ds.delivery_id)
+             OR (oe.payload->>'orderId' = o.order_id OR oe.payload->>'orderId' = o.id)
+             OR (oe.payload->>'order_id' = o.order_id OR oe.payload->>'order_id' = o.id)
+             OR (oe.payload->'deliverySession'->>'orderId' = o.order_id OR oe.payload->'deliverySession'->>'orderId' = o.id)
+             OR (oe.payload->'deliverySession'->>'order_id' = o.order_id OR oe.payload->'deliverySession'->>'order_id' = o.id)
+             OR (ds.delivery_id IS NOT NULL AND (oe.payload->>'deliveryId' = ds.delivery_id OR oe.payload->'deliverySession'->>'deliveryId' = ds.delivery_id))
+           )
            AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED')
            AND oe.created_at >= NOW() - ($1 || ' hours')::INTERVAL
          RETURNING oe.id, oe.aggregate_id`,
@@ -8681,19 +8691,39 @@ class OutboxProcessor {
          FROM orders o
          JOIN delivery_sessions ds ON (ds.order_id = o.order_id OR ds.order_id = o.id)
          WHERE ds.state = 'LOOKING_FOR_RIDER'
-           AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED')
-           AND (o.seller_approval_status = 'ACCEPTED' OR o.status = 'ACCEPTED')
-           AND NOT EXISTS (
-             SELECT 1 FROM outbox_events oe 
-             WHERE (oe.aggregate_id = o.order_id OR oe.aggregate_id = o.id)
-               AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
-               AND oe.status IN ('PENDING', 'PROCESSING')
+           AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED', 'PRESCRIPTION_VERIFICATION_PENDING')
+           AND (
+             o.seller_approval_status IN ('ACCEPTED', 'NOT_REQUIRED')
+             OR o.status IN ('ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED', 'PLACED')
+           )
+           AND (
+             o.is_cod = TRUE 
+             OR o.payment_method = 'COD' 
+             OR o.payment_status IN ('PAID', 'CAPTURED', 'COD_PENDING_COLLECTION', 'COD_PENDING')
            )
            AND NOT EXISTS (
-             SELECT 1 FROM delivery_offers dfo
-             WHERE (dfo.order_id = o.order_id OR dfo.order_id = o.id)
-               AND dfo.status IN ('OFFERED', 'BROADCAST')
-               AND dfo.expires_at > NOW()
+             SELECT 1 FROM outbox_events oe 
+             WHERE (
+               oe.aggregate_id = o.order_id 
+               OR oe.aggregate_id = o.id
+               OR oe.aggregate_id = ds.delivery_id
+               OR oe.payload->>'orderId' = o.order_id 
+               OR oe.payload->>'orderId' = o.id
+               OR oe.payload->>'order_id' = o.order_id 
+               OR oe.payload->>'order_id' = o.id
+               OR oe.payload->'deliverySession'->>'orderId' = o.order_id 
+               OR oe.payload->'deliverySession'->>'orderId' = o.id
+               OR oe.payload->>'deliveryId' = ds.delivery_id
+               OR oe.payload->'deliverySession'->>'deliveryId' = ds.delivery_id
+             )
+             AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
+             AND oe.status IN ('PENDING', 'PROCESSING')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM offers off
+             WHERE (off.delivery_id = ds.delivery_id OR off.order_id = o.order_id OR off.order_id = o.id)
+               AND off.status IN ('CREATED', 'OFFERED', 'BROADCAST', 'ACCEPTED')
+               AND (off.status = 'ACCEPTED' OR off.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000))
            )
            AND ds.created_at <= NOW() - INTERVAL '30 seconds'
          LIMIT 10
@@ -8703,13 +8733,34 @@ class OutboxProcessor {
       if (strandedOrdersRes && strandedOrdersRes.rows) {
         for (const stranded of strandedOrdersRes.rows) {
           const orderId = stranded.order_id || stranded.id;
-          await client.query(
+          const deliveryId = stranded.delivery_id;
+          const payloadJson = JSON.stringify({ orderId, deliveryId, storeId: stranded.store_id, redriven: true });
+
+          // Strict Idempotency Guard: Atomically insert only if no pending/processing dispatch event exists
+          const insertRes = await client.query(
             `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, next_attempt_at, retry_count)
-             VALUES ('order', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', NOW(), 0)`,
-            [orderId, JSON.stringify({ orderId, deliveryId: stranded.delivery_id, storeId: stranded.store_id, redriven: true })]
+             SELECT 'order', $1, 'DISPATCH_REQUESTED', $2::jsonb, 'PENDING', NOW(), 0
+             WHERE NOT EXISTS (
+               SELECT 1 FROM outbox_events oe
+               WHERE (
+                 oe.aggregate_id = $1 
+                 OR oe.aggregate_id = $3
+                 OR oe.payload->>'orderId' = $1 
+                 OR oe.payload->>'order_id' = $1
+                 OR oe.payload->>'deliveryId' = $3
+                 OR oe.payload->'deliverySession'->>'deliveryId' = $3
+               )
+               AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
+               AND oe.status IN ('PENDING', 'PROCESSING')
+             )
+             RETURNING id`,
+            [orderId, payloadJson, deliveryId]
           );
-          redrivenCount++;
-          console.log(`[OutboxProcessor] Re-enqueued stranded accepted order ${orderId} into outbox dispatch.`);
+
+          if (insertRes.rows && insertRes.rows.length > 0) {
+            redrivenCount++;
+            console.log(`[OutboxProcessor] Re-enqueued stranded accepted order ${orderId} into outbox dispatch.`);
+          }
         }
       }
 
