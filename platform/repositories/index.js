@@ -780,29 +780,58 @@ class TransactionalPrescriptionRepository {
 
   async createPrescription(rx) {
     if (!this.pool) return null;
-    const res = await this.pool.query(
-      `INSERT INTO prescriptions (
-        id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no,
-        attachments, note, status, pharmacist_id, license_no, rejection_reason, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
-      RETURNING *`,
-      [
-        rx.id,
-        rx.customerId,
-        rx.patientName,
-        rx.age || null,
-        rx.gender || null,
-        rx.doctorName || null,
-        rx.doctorRegistrationNo || null,
-        JSON.stringify(rx.attachments || []),
-        rx.note || '',
-        rx.status || 'PENDING',
-        rx.pharmacistId || null,
-        rx.licenseNo || null,
-        rx.rejectionReason || null
-      ]
-    );
-    return res.rows[0] || null;
+    const client = await this.pool.connect();
+    try {
+      if (rx.idempotencyKey) {
+        await client.query(`
+          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+          CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency
+            ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        `).catch(() => {});
+        const existing = await client.query(
+          `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
+          [rx.customerId, rx.idempotencyKey]
+        );
+        if (existing.rows.length > 0) {
+          return existing.rows[0];
+        }
+      }
+      const res = await client.query(
+        `INSERT INTO prescriptions (
+          id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no,
+          attachments, note, status, pharmacist_id, license_no, rejection_reason, idempotency_key, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+        ON CONFLICT (customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+        RETURNING *`,
+        [
+          rx.id,
+          rx.customerId,
+          rx.patientName,
+          rx.age || null,
+          rx.gender || null,
+          rx.doctorName || null,
+          rx.doctorRegistrationNo || null,
+          JSON.stringify(rx.attachments || []),
+          rx.note || '',
+          rx.status || 'PENDING',
+          rx.pharmacistId || null,
+          rx.licenseNo || null,
+          rx.rejectionReason || null,
+          rx.idempotencyKey || null
+        ]
+      );
+      if (res.rows.length > 0) return res.rows[0];
+      if (rx.idempotencyKey) {
+        const raceExisting = await client.query(
+          `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
+          [rx.customerId, rx.idempotencyKey]
+        );
+        if (raceExisting.rows.length > 0) return raceExisting.rows[0];
+      }
+      return null;
+    } finally {
+      client.release();
+    }
   }
 
   async getPendingPrescriptions() {
@@ -867,6 +896,12 @@ class LocalDevelopmentPrescriptionRepository {
 
   async createPrescription(rx) {
     this.db.prescriptions = this.db.prescriptions || [];
+    if (rx.idempotencyKey) {
+      const existing = this.db.prescriptions.find(
+        (p) => p.customerId === rx.customerId && (p.idempotencyKey === rx.idempotencyKey || (p.note && p.note.includes(`[idemp:${rx.idempotencyKey}]`)))
+      );
+      if (existing) return existing;
+    }
     this.db.prescriptions.unshift(rx);
     this.saveDb();
     return rx;
@@ -2491,14 +2526,17 @@ class TransactionalOfferRepository {
       // Multi-tenant check: ensure rider's assigned store matches offer/order store
       const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
       const orderStoreId = session.store_id || (assocOrderRes.rows.length > 0 ? assocOrderRes.rows[0].store_id : null) || offer.store_id || null;
-      if (riderStoreId && orderStoreId && riderStoreId !== orderStoreId) {
-        await client.query('ROLLBACK');
-        return {
-          ok: false,
-          httpStatus: 403,
-          error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
-          message: 'Riders can only accept offers from their assigned fulfillment store.'
-        };
+      const isAdminClaim = Boolean(riderProfile?.isAdmin);
+      if (!isAdminClaim) {
+        if (!riderStoreId || !orderStoreId || riderStoreId !== orderStoreId) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 403,
+            error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
+            message: 'Riders must be assigned to an active store and can only accept offers from their assigned fulfillment store.'
+          };
+        }
       }
 
       if (session.rider_id && session.rider_id !== riderId) {
@@ -2723,13 +2761,16 @@ class LocalDevelopmentOfferRepository {
 
     const riderStoreId = riderProfile?.storeId || riderProfile?.store_id || null;
     const orderStoreId = offer.store_id || offer.storeId || session?.store_id || session?.storeId || null;
-    if (riderStoreId && orderStoreId && riderStoreId !== orderStoreId) {
-      return {
-        ok: false,
-        httpStatus: 403,
-        error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
-        message: 'Riders can only accept offers from their assigned fulfillment store.'
-      };
+    const isAdminClaim = Boolean(riderProfile?.isAdmin);
+    if (!isAdminClaim) {
+      if (!riderStoreId || !orderStoreId || riderStoreId !== orderStoreId) {
+        return {
+          ok: false,
+          httpStatus: 403,
+          error: 'CROSS_STORE_OFFER_CLAIM_FORBIDDEN',
+          message: 'Riders must be assigned to an active store and can only accept offers from their assigned fulfillment store.'
+        };
+      }
     }
 
     const now = Date.now();
@@ -6432,7 +6473,7 @@ class TransactionalCartRepository {
     });
   }
 
-  async addItem(customerId, item) {
+  async addItem(customerId, item, idempotencyKey = null) {
     if (!item || !item.sku) {
       throw new Error('INVALID_CART_ITEM_PAYLOAD: SKU is mandatory');
     }
@@ -6440,6 +6481,29 @@ class TransactionalCartRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cart:' + customerId]);
+      const cleanKey = idempotencyKey ? String(idempotencyKey).trim() : null;
+      if (cleanKey) {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS cart_idempotency_keys (
+            customer_id VARCHAR(64) NOT NULL,
+            idempotency_key VARCHAR(128) NOT NULL,
+            response_items JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (customer_id, idempotency_key)
+          )
+        `);
+        const idempCheck = await client.query(
+          `SELECT response_items FROM cart_idempotency_keys WHERE customer_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+          [customerId, cleanKey]
+        );
+        if (idempCheck.rows.length > 0) {
+          await client.query('COMMIT');
+          const raw = idempCheck.rows[0].response_items;
+          return typeof raw === 'string' ? JSON.parse(raw) : (raw || []);
+        }
+      }
+
       const res = await client.query(`SELECT id, items FROM carts WHERE customer_id = $1 FOR UPDATE`, [customerId]);
       let items = [];
       let itemUnitPrice = Number(item.unitPrice || item.discountedPrice || item.price || 0);
@@ -6515,8 +6579,20 @@ class TransactionalCartRepository {
           );
         } catch (_) {}
         await client.query(
-          `INSERT INTO carts (id, customer_id, items, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())`,
+          `INSERT INTO carts (id, customer_id, items, created_at, updated_at)
+           VALUES ($1, $2, $3, NOW(), NOW())
+           ON CONFLICT (customer_id) DO UPDATE SET items = EXCLUDED.items, updated_at = NOW()`,
           ['cart_' + crypto.randomUUID(), customerId, JSON.stringify(items)]
+        );
+      }
+
+      // Record key durably and atomically ONLY upon successful mutation commit
+      if (cleanKey) {
+        await client.query(
+          `INSERT INTO cart_idempotency_keys (customer_id, idempotency_key, response_items, created_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (customer_id, idempotency_key) DO UPDATE SET response_items = EXCLUDED.response_items`,
+          [customerId, cleanKey, JSON.stringify(items)]
         );
       }
       await client.query('COMMIT');
@@ -6585,11 +6661,21 @@ class LocalDevelopmentCartRepository {
     return this.db.carts[customerId] || [];
   }
 
-  async addItem(customerId, item) {
+  async addItem(customerId, item, idempotencyKey = null) {
+    this.db.carts = this.db.carts || {};
+    this.db.cartIdempotency = this.db.cartIdempotency || {};
+
+    const cleanKey = idempotencyKey ? String(idempotencyKey).trim() : null;
+    const compoundKey = cleanKey ? `${customerId}:${cleanKey}` : null;
+
+    if (compoundKey && this.db.cartIdempotency[compoundKey]) {
+      return this.db.carts[customerId] || [];
+    }
+
     if (!item || !item.sku) {
       throw new Error('INVALID_CART_ITEM_PAYLOAD: SKU is mandatory');
     }
-    this.db.carts = this.db.carts || {};
+
     const items = this.db.carts[customerId] || [];
     const existing = items.find(i => i.sku === item.sku);
     if (existing) {
@@ -6598,6 +6684,12 @@ class LocalDevelopmentCartRepository {
       items.push({ ...item, quantity: item.quantity || 1 });
     }
     this.db.carts[customerId] = items;
+
+    if (compoundKey) {
+      this.db.cartIdempotency[compoundKey] = {
+        committedAt: Date.now()
+      };
+    }
     this.saveDb();
     return items;
   }
@@ -6800,7 +6892,7 @@ class TransactionalPaymentRepository {
     }
   }
 
-  async processRefundTransactionally(orderId, refundAmount, reason, idempotencyKey) {
+  async processRefundTransactionally(orderId, refundAmount, reason, idempotencyKey, authorizedStoreId = null) {
     if (!this.pool) return null;
     const client = await this.pool.connect();
     try {
@@ -6815,7 +6907,7 @@ class TransactionalPaymentRepository {
       }
 
       const ordRes = await client.query(
-        `SELECT id, order_id, total_amount, payment_status FROM orders WHERE id = $1 OR order_id = $1 FOR UPDATE`,
+        `SELECT id, order_id, total_amount, payment_status, store_id FROM orders WHERE id = $1 OR order_id = $1 FOR UPDATE`,
         [orderId]
       );
       if (ordRes.rows.length === 0) {
@@ -6826,7 +6918,16 @@ class TransactionalPaymentRepository {
       }
       const order = ordRes.rows[0];
 
-      if (order.payment_status !== 'PAID' && order.payment_status !== 'PARTIALLY_REFUNDED') {
+      // Multi-tenant isolation: fail closed if seller does not own order's store
+      if (authorizedStoreId && order.store_id !== authorizedStoreId) {
+        await client.query('ROLLBACK');
+        const storeMismatchErr = new Error('CROSS_STORE_REFUND_FORBIDDEN');
+        storeMismatchErr.statusCode = 403;
+        storeMismatchErr.message = 'Sellers can only initiate refunds for orders belonging to their authorized store.';
+        throw storeMismatchErr;
+      }
+
+      if (!['PAID', 'PARTIALLY_REFUNDED', 'PARTIALLY_REFUNDED_PENDING'].includes(order.payment_status)) {
         await client.query('ROLLBACK');
         const unpaidErr = new Error('UNPAID_ORDER_REFUND_PROHIBITED');
         unpaidErr.statusCode = 422;
@@ -6947,7 +7048,7 @@ class LocalDevelopmentPaymentRepository {
     return { deduplicated: false, status: 'PROCESSED', event: rec };
   }
 
-  async processRefundTransactionally(orderId, refundAmount, reason, idempotencyKey) {
+  async processRefundTransactionally(orderId, refundAmount, reason, idempotencyKey, authorizedStoreId = null) {
     this.db.paymentRefunds = this.db.paymentRefunds || [];
     const existing = this.db.paymentRefunds.find(r => r.idempotencyKey === idempotencyKey);
     if (existing) {
@@ -6957,6 +7058,13 @@ class LocalDevelopmentPaymentRepository {
     if (!order) {
       const err = new Error('ORDER_NOT_FOUND');
       err.statusCode = 404;
+      throw err;
+    }
+    const orderStore = order.store_id || order.storeId;
+    if (authorizedStoreId && orderStore !== authorizedStoreId) {
+      const err = new Error('CROSS_STORE_REFUND_FORBIDDEN');
+      err.statusCode = 403;
+      err.message = 'Sellers can only initiate refunds for orders belonging to their authorized store.';
       throw err;
     }
     const priorRefunded = this.db.paymentRefunds

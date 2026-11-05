@@ -120,6 +120,14 @@ class RiderSessionManager private constructor(context: Context) {
         prefs.edit().putString(KEY_RIDER_ID, riderId).apply()
     }
 
+    fun getStoreId(): String {
+        return prefs.getString(KEY_STORE_ID, "") ?: ""
+    }
+
+    fun saveStoreId(storeId: String) {
+        prefs.edit().putString(KEY_STORE_ID, storeId).apply()
+    }
+
     fun getCachedDeviceToken(): String {
         return getFcmToken()
     }
@@ -153,6 +161,7 @@ class RiderSessionManager private constructor(context: Context) {
         private const val KEY_BASE_URL = "rider_api_base_url"
         private const val KEY_FCM_TOKEN = "rider_fcm_device_token"
         private const val KEY_RIDER_ID = "rider_authenticated_id"
+        private const val KEY_STORE_ID = "rider_assigned_store_id"
         private const val KEY_IS_ONLINE = "rider_shift_is_online"
         private const val KEY_PENDING_OFFER_ID = "rider_pending_intent_offer_id"
 

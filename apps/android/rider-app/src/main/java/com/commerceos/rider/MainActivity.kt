@@ -138,19 +138,25 @@ class MainActivity : ComponentActivity() {
 
             val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
 
-            // Strictly enforce double-condition gate: ONLY subscribe to broadcast topic if logged in AND shift is online
-            if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline()) {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast")
+            // Strictly enforce store-scoped server-authorized routing: purge global broadcast subscription
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+            } catch (_: Exception) {}
+
+            val assignedStoreId = sessionMgr.getStoreId()
+            if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline() && assignedStoreId.isNotBlank()) {
+                val storeTopic = "riders_store_$assignedStoreId"
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic(storeTopic)
                     .addOnCompleteListener { subTask ->
                         if (subTask.isSuccessful) {
-                            android.util.Log.d("MainActivity", "Successfully subscribed to topic: riders_broadcast")
+                            android.util.Log.d("MainActivity", "Successfully subscribed to authorized store topic: $storeTopic")
                         } else {
-                            android.util.Log.w("MainActivity", "Failed to subscribe to topic riders_broadcast: ${subTask.exception?.message}")
+                            android.util.Log.w("MainActivity", "Failed to subscribe to store topic $storeTopic: ${subTask.exception?.message}")
                         }
                     }
-            } else {
+            } else if (assignedStoreId.isNotBlank()) {
                 try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStoreId")
                     val notifManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
                     notifManager?.cancelAll()
                 } catch (_: Exception) {}

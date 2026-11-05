@@ -44,6 +44,7 @@ class CartViewModel(
     private var reorderAllJob: Job? = null
     private var sanitizationCleanupJob: Job? = null
     private var isInitialized = false
+    private val moveBackKeys = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     override var isLockedForCheckout by mutableStateOf(false)
         private set
@@ -282,6 +283,7 @@ class CartViewModel(
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
         isCouponError = false
+        moveBackKeys.clear()
         errorMessage = null
 
         refreshDeliveryConfigAndPromotions()
@@ -989,6 +991,13 @@ class CartViewModel(
         }
     }
 
+    private fun AppError.isAmbiguousMutationFailure(): Boolean = when (this) {
+        is AppError.Network, is AppError.Unknown -> true
+        is AppError.Server ->
+            httpCode == 408 || httpCode == 425 || httpCode == 429 || httpCode in 500..599
+        else -> false
+    }
+
     fun moveToSaveForLater(sku: String) {
         if (isLockedForCheckout) {
             errorMessage = "Cart cannot be modified while checkout is in progress."
@@ -1018,8 +1027,8 @@ class CartViewModel(
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (result) {
                         is ApiResult.Failure -> {
-                            // On ambiguous transport/network failure, reconcile against server cart before rolling back
-                            val isAmbiguous = result.error is AppError.Network || result.error is AppError.Unknown
+                            // On ambiguous transport/network or gateway failure, reconcile against server cart before rolling back
+                            val isAmbiguous = result.error.isAmbiguousMutationFailure()
                             val serverCommitted = if (isAmbiguous) {
                                 when (val check = repository.fetchBackendCart(targetCustomerId)) {
                                     is ApiResult.Success -> {
@@ -1150,11 +1159,20 @@ class CartViewModel(
                     }
                 )
 
+                val moveMapKey = "${targetCustomerId}:${sku}"
+                val moveKey = moveBackKeys.getOrPut(moveMapKey) {
+                    "move_back_${targetCustomerId}_${targetItem.sku}_${targetItem.quantity}_${java.util.UUID.randomUUID()}"
+                }
+                val previousCartItem = cartItems.find { it.sku == sku }
+                val previousQuantityInCart = previousCartItem?.quantity ?: 0
+                val expectedQuantity = previousQuantityInCart + targetItem.quantity
+
                 if (targetCustomerId.isNotBlank()) {
-                    val updated = repository.addCartItem(targetCustomerId, targetItem)
+                    val updated = repository.addCartItem(targetCustomerId, targetItem, moveKey)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (updated) {
                         is ApiResult.Success -> {
+                            moveBackKeys.remove(moveMapKey)
                             val backendItems = sanitizeCartItems(updated.data.items ?: (cartItems + targetItem))
                             cartItems = backendItems
                             totals = updated.data
@@ -1168,13 +1186,15 @@ class CartViewModel(
                             if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                         }
                         is ApiResult.Failure -> {
-                            // On ambiguous transport/network failure, reconcile against server cart before rolling back
-                            val isAmbiguous = updated.error is AppError.Network || updated.error is AppError.Unknown
+                            // On ambiguous transport/network or gateway failure, reconcile against server cart before rolling back
+                            val isAmbiguous = updated.error.isAmbiguousMutationFailure()
                             val serverCommitted = if (isAmbiguous) {
                                 when (val check = repository.fetchBackendCart(targetCustomerId)) {
                                     is ApiResult.Success -> {
                                         val items = check.data.items ?: emptyList()
-                                        if (items.any { it.sku == sku }) {
+                                        val serverItem = items.find { it.sku == sku }
+                                        val serverQty = serverItem?.quantity ?: 0
+                                        if (serverQty >= expectedQuantity) {
                                             cartItems = sanitizeCartItems(items)
                                             totals = check.data
                                             true
@@ -1186,14 +1206,25 @@ class CartViewModel(
 
                             if (serverCommitted == true) {
                                 // Server committed the add! Do not restore to saved items
+                                moveBackKeys.remove(moveMapKey)
                                 saveForLaterItems = remainingSaved
                                 errorMessage = null
                                 _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
                                 syncLocalCartCache(targetCustomerId, cartItems)
                                 return@withLock
+                            } else if (serverCommitted == null) {
+                                // Network unreachable: rollback and preserve item in saved items (retain moveKey for retry)
+                                appContext?.let { ctx ->
+                                    com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
+                                }
+                                saveForLaterItems = previousSaved
+                                val errMsg = "Network timeout while moving item back to cart. Your item is preserved in Saved for Later."
+                                errorMessage = errMsg
+                                _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                                return@withLock
                             }
 
-                            // Compensate by rolling back local saved items
+                            // Compensate by rolling back local saved items (retain moveKey for retry)
                             val rollbackPersisted = appContext?.let { ctx ->
                                 com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
                             } ?: true
@@ -1347,6 +1378,7 @@ class CartViewModel(
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
         isCouponError = false
+        moveBackKeys.clear()
     }
 
     fun clear() {
@@ -1363,6 +1395,7 @@ class CartViewModel(
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
         isCouponError = false
+        moveBackKeys.clear()
 
         cartDao?.let { dao ->
             viewModelScope.launch {

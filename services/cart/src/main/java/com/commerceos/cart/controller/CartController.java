@@ -25,14 +25,24 @@ public class CartController {
     private final CartItemRepository repository;
     private final CatalogServiceClient catalogClient;
     private final JwtAuthValidator jwtAuthValidator;
+    private final com.commerceos.cart.repository.CartIdempotencyRepository idempotencyRepository;
 
     public CartController(
             CartItemRepository repository,
             CatalogServiceClient catalogClient,
             JwtAuthValidator jwtAuthValidator) {
+        this(repository, catalogClient, jwtAuthValidator, null);
+    }
+
+    public CartController(
+            CartItemRepository repository,
+            CatalogServiceClient catalogClient,
+            JwtAuthValidator jwtAuthValidator,
+            com.commerceos.cart.repository.CartIdempotencyRepository idempotencyRepository) {
         this.repository = repository;
         this.catalogClient = catalogClient;
         this.jwtAuthValidator = jwtAuthValidator;
+        this.idempotencyRepository = idempotencyRepository;
     }
 
     private boolean isAuthorizedCustomerOrAdmin(String authHeader, String targetCustomerId) {
@@ -74,12 +84,19 @@ public class CartController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("FORBIDDEN: Cart mutation requires authenticated customer ownership.");
         }
 
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String key = customerId + ":" + idempotencyKey.trim();
-            if (processedIdempotencyKeys.contains(key)) {
+        String trimmedIdempotencyKey = (idempotencyKey != null && !idempotencyKey.isBlank()) ? idempotencyKey.trim() : null;
+        if (trimmedIdempotencyKey != null) {
+            String memoryKey = customerId + ":" + trimmedIdempotencyKey;
+            boolean alreadyProcessed = false;
+            if (idempotencyRepository != null) {
+                alreadyProcessed = idempotencyRepository.existsByCustomerIdAndIdempotencyKey(customerId, trimmedIdempotencyKey);
+            }
+            if (!alreadyProcessed) {
+                alreadyProcessed = processedIdempotencyKeys.contains(memoryKey);
+            }
+            if (alreadyProcessed) {
                 return getCart(authHeader, customerId);
             }
-            processedIdempotencyKeys.add(key);
         }
 
         if (request.getSku() == null || request.getSku().isBlank()) {
@@ -118,6 +135,24 @@ public class CartController {
                     .image(product.getImage())
                     .build());
         }
+
+        // Atomically record idempotency key ONLY upon successful mutation commit
+        if (trimmedIdempotencyKey != null) {
+            String memoryKey = customerId + ":" + trimmedIdempotencyKey;
+            processedIdempotencyKeys.add(memoryKey);
+            if (idempotencyRepository != null) {
+                try {
+                    idempotencyRepository.save(com.commerceos.cart.domain.CartIdempotencyEntity.builder()
+                            .customerId(customerId)
+                            .idempotencyKey(trimmedIdempotencyKey)
+                            .createdAt(java.time.Instant.now())
+                            .build());
+                } catch (Exception e) {
+                    // Unique constraint on retry is safe and acceptable
+                }
+            }
+        }
+
         return getCart(authHeader, customerId);
     }
 

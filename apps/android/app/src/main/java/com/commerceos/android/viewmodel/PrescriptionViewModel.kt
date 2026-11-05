@@ -41,6 +41,7 @@ class PrescriptionViewModel(
     private var uploadJob: Job? = null
     private var uploadGeneration = 0L
     private var activeCustomerId: String = ""
+    private var activeLogicalUploadKey: String? = null
     internal var localPrescriptionsOverride: ((String) -> List<Prescription>)? = null
 
     fun load(customerId: String) {
@@ -184,6 +185,7 @@ class PrescriptionViewModel(
         }
         if (activeCustomerId != safeCustomerId) {
             activeCustomerId = safeCustomerId
+            activeLogicalUploadKey = null
             loadGeneration++
             loadJob?.cancel()
             prescriptions = emptyList()
@@ -198,7 +200,12 @@ class PrescriptionViewModel(
             errorMessage = null
             try {
                 val lightweightAttachments = encodeAttachments(attachments)
-                val stableIdempotencyKey = computeUploadIdempotencyKey(safeCustomerId, patientName, lightweightAttachments)
+                val stableIdempotencyKey = activeLogicalUploadKey ?: computeUploadIdempotencyKey(
+                    safeCustomerId,
+                    patientName,
+                    lightweightAttachments,
+                    java.util.UUID.randomUUID().toString()
+                ).also { activeLogicalUploadKey = it }
                 when (val result = repository.uploadPrescription(
                     UploadPrescriptionRequest(
                         customerId = safeCustomerId,
@@ -210,6 +217,7 @@ class PrescriptionViewModel(
                 )) {
                     is ApiResult.Success -> {
                         if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
+                            activeLogicalUploadKey = null
                             val serverRx = result.data.copy(attachments = attachments)
                             var localCacheSaved = true
                             if (appContext != null) {
@@ -257,27 +265,30 @@ class PrescriptionViewModel(
     private fun computeUploadIdempotencyKey(
         customerId: String,
         patientName: String,
-        attachments: List<String>
+        attachments: List<String>,
+        logicalSessionId: String
     ): String {
-        val canonical = buildString {
-            append(customerId.trim())
-            append("|")
-            append(patientName.trim())
-            append("|")
-            attachments.forEach {
-                append(it.hashCode())
-                append(";")
-            }
-        }
         val digest = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(canonical.toByteArray(Charsets.UTF_8))
-        return "rx_idemp_" + digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }.take(32)
+        digest.update(logicalSessionId.toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+        digest.update(customerId.trim().toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+        digest.update(patientName.trim().toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+        attachments.forEach { attachment ->
+            val attBytes = attachment.toByteArray(Charsets.UTF_8)
+            val attDigest = java.security.MessageDigest.getInstance("SHA-256").digest(attBytes)
+            digest.update(attDigest)
+        }
+        val finalDigest = digest.digest()
+        return "rx_idemp_" + finalDigest.joinToString("") { "%02x".format(it.toInt() and 0xff) }.take(32)
     }
 
     fun reset() {
         uploadGeneration++
         loadGeneration++
         activeCustomerId = ""
+        activeLogicalUploadKey = null
         loadJob?.cancel()
         uploadJob?.cancel()
         prescriptions = emptyList()

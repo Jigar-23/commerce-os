@@ -218,9 +218,9 @@ async function runRealProductionE2eFlow() {
   );
 
   await pool.query(
-    `INSERT INTO riders (id, rider_id, phone, full_name, vehicle_number, vehicle_type, status, tier)
-     VALUES ('rdr_9123456780', 'rdr_9123456780', '+919123456780', 'Ramesh Rider', 'HR-26-AB-1234', 'TWO_WHEELER', 'ACTIVE', 'PLATINUM')
-     ON CONFLICT (id) DO UPDATE SET phone = '+919123456780', status = 'ACTIVE'`
+    `INSERT INTO riders (id, rider_id, phone, full_name, vehicle_number, vehicle_type, status, tier, store_id)
+     VALUES ('rdr_9123456780', 'rdr_9123456780', '+919123456780', 'Ramesh Rider', 'HR-26-AB-1234', 'TWO_WHEELER', 'ACTIVE', 'PLATINUM', 'store_rewari_hub_01')
+     ON CONFLICT (id) DO UPDATE SET phone = '+919123456780', status = 'ACTIVE', store_id = 'store_rewari_hub_01'`
   );
 
   try {

@@ -237,6 +237,15 @@ CREATE TABLE IF NOT EXISTS carts (
 
 CREATE INDEX IF NOT EXISTS idx_carts_customer ON carts(customer_id);
 
+CREATE TABLE IF NOT EXISTS cart_idempotency_keys (
+    customer_id VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    response_items JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (customer_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_cart_idempotency_created ON cart_idempotency_keys(created_at);
+
 -- -----------------------------------------------------------------------------
 -- 6. PRESCRIPTIONS & PHARMACIST VERIFICATION
 -- -----------------------------------------------------------------------------
@@ -251,6 +260,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     doctor_registration_no VARCHAR(100),
     attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
     note TEXT,
+    idempotency_key VARCHAR(128),
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'APPROVED', 'REJECTED'
     pharmacist_id VARCHAR(64),
     license_no VARCHAR(100),
@@ -262,6 +272,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
 
 CREATE INDEX IF NOT EXISTS idx_prescriptions_customer ON prescriptions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
+CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- 7. ORDERS & LINE ITEMS (TRANSACTIONAL SOURCE OF TRUTH)

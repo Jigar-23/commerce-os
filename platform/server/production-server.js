@@ -1442,7 +1442,13 @@ const server = http.createServer(async (req, res) => {
 
         const isCustomer = targetOrder && (targetOrder.customerId === authClaims.sub || targetOrder.customer_id === authClaims.sub);
         const isRider = targetDelivery && (targetDelivery.riderId === authClaims.sub || targetDelivery.rider_id === authClaims.sub);
-        const isStoreSeller = targetOrder && authClaims.storeId && (targetOrder.storeId === authClaims.storeId || targetOrder.store_id === authClaims.storeId);
+        let isStoreSeller = false;
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+          if (authorizedStoreId && targetOrder && (targetOrder.storeId === authorizedStoreId || targetOrder.store_id === authorizedStoreId)) {
+            isStoreSeller = true;
+          }
+        }
         const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
 
         if (!isCustomer && !isRider && !isStoreSeller && !isAdmin) {
@@ -2963,14 +2969,40 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_TOKEN_TYPE', message: 'The provided token is not a refresh token. Access tokens cannot be used to refresh sessions.' });
       }
 
+      // Revalidate active status, role, and store against database on every refresh
+      let effectiveStoreId = authClaims.storeId || null;
+      let effectiveRole = authClaims.role;
+      let effectiveRoles = authClaims.roles;
+
+      if (pool && hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+        const sRes = await pool.query(
+          `SELECT id, seller_id, store_id, status FROM sellers WHERE id = $1 OR seller_id = $1 LIMIT 1`,
+          [authClaims.sellerId || authClaims.sub]
+        );
+        if (sRes.rows.length === 0 || (sRes.rows[0].status && sRes.rows[0].status !== 'ACTIVE')) {
+          return sendJson(res, 403, { error: 'SELLER_DEACTIVATED', message: 'Seller account is inactive or not found.' });
+        }
+        effectiveStoreId = sRes.rows[0].store_id;
+      } else if (pool && hasRole(authClaims, ['ROLE_RIDER', 'RIDER'])) {
+        const rRes = await pool.query(
+          `SELECT id, rider_id, store_id, status FROM riders WHERE id = $1 OR rider_id = $1 LIMIT 1`,
+          [authClaims.riderId || authClaims.sub]
+        );
+        if (rRes.rows.length === 0 || (rRes.rows[0].status && rRes.rows[0].status !== 'ACTIVE')) {
+          return sendJson(res, 403, { error: 'RIDER_DEACTIVATED', message: 'Rider account is inactive or not found.' });
+        }
+        effectiveStoreId = rRes.rows[0].store_id;
+      }
+
       const newAccessToken = jwt.sign(
         {
           sub: authClaims.sub,
           phone: authClaims.phone,
-          role: authClaims.role,
-          roles: authClaims.roles,
-          storeId: authClaims.storeId,
+          role: effectiveRole,
+          roles: effectiveRoles,
+          storeId: effectiveStoreId,
           sellerId: authClaims.sellerId,
+          riderId: authClaims.riderId,
           type: 'ACCESS_TOKEN'
         },
         JWT_SECRET,
@@ -2986,10 +3018,11 @@ const server = http.createServer(async (req, res) => {
         {
           sub: authClaims.sub,
           phone: authClaims.phone,
-          role: authClaims.role,
-          roles: authClaims.roles,
-          storeId: authClaims.storeId,
+          role: effectiveRole,
+          roles: effectiveRoles,
+          storeId: effectiveStoreId,
           sellerId: authClaims.sellerId,
+          riderId: authClaims.riderId,
           type: 'REFRESH_TOKEN'
         },
         JWT_SECRET,
@@ -3731,9 +3764,14 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
       if (idempotencyKey && pool) {
+        await pool.query(`
+          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+          CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency
+            ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        `).catch(() => {});
         const existingRxRes = await pool.query(
-          `SELECT * FROM prescriptions WHERE customer_id = $1 AND note LIKE $2 LIMIT 1`,
-          [customerId, `%[idemp:${idempotencyKey}]%`]
+          `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
+          [customerId, idempotencyKey]
         );
         if (existingRxRes.rows.length > 0) {
           const row = existingRxRes.rows[0];
@@ -3792,31 +3830,88 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      const insertRes = await pool.query(
-        `INSERT INTO prescriptions (id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no, attachments, note, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING', NOW(), NOW())
-         RETURNING *`,
-        [
-          rxId,
+      if (pool) {
+        try {
+          const digits = customerId.replace(/\D/g, '');
+          const safePhone = digits.length >= 10 ? `+91${digits.slice(-10)}` : `+9199${(digits + '00000000').slice(0, 8)}`;
+          await pool.query(
+            `INSERT INTO customers (id, phone, full_name, created_at, updated_at)
+             VALUES ($1, $2, 'Customer', NOW(), NOW())
+             ON CONFLICT (id) DO NOTHING`,
+            [customerId, safePhone]
+          );
+        } catch (_) {}
+        let row;
+        try {
+          const insertRes = await pool.query(
+            `INSERT INTO prescriptions (id, customer_id, patient_name, age, gender, doctor_name, doctor_registration_no, attachments, note, status, idempotency_key, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING', $10, NOW(), NOW())
+             RETURNING *`,
+            [
+              rxId,
+              customerId,
+              patientName,
+              body.age ? Number(body.age) : null,
+              body.gender || null,
+              body.doctorName || body.doctor_name || null,
+              body.doctorRegistrationNo || body.doctor_registration_no || null,
+              JSON.stringify(finalAttachments),
+              body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null),
+              idempotencyKey || null
+            ]
+          );
+          row = insertRes.rows[0];
+        } catch (insertErr) {
+          if (idempotencyKey && (insertErr.code === '23505' || String(insertErr.message).includes('unq_prescriptions_customer_idempotency') || String(insertErr.message).includes('duplicate key'))) {
+            const existingRxRes = await pool.query(
+              `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
+              [customerId, idempotencyKey]
+            );
+            if (existingRxRes.rows.length > 0) {
+              row = existingRxRes.rows[0];
+              return sendJson(res, 200, {
+                id: row.id,
+                customerId: row.customer_id,
+                patientName: row.patient_name,
+                status: row.status,
+                attachments: resolvePrescriptionAttachments(row.attachments),
+                createdAt: row.created_at
+              });
+            }
+          }
+          throw insertErr;
+        }
+        return sendJson(res, 201, {
+          id: row.id,
+          customerId: row.customer_id,
+          patientName: row.patient_name,
+          status: row.status,
+          attachments: resolvePrescriptionAttachments(row.attachments),
+          createdAt: row.created_at
+        });
+      } else if (appRepositories && appRepositories.prescriptionRepo) {
+        const created = await appRepositories.prescriptionRepo.createPrescription({
+          id: rxId,
           customerId,
           patientName,
-          body.age ? Number(body.age) : null,
-          body.gender || null,
-          body.doctorName || body.doctor_name || null,
-          body.doctorRegistrationNo || body.doctor_registration_no || null,
-          JSON.stringify(finalAttachments),
-          body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null)
-        ]
-      );
-      const row = insertRes.rows[0];
-      return sendJson(res, 201, {
-        id: row.id,
-        customerId: row.customer_id,
-        patientName: row.patient_name,
-        status: row.status,
-        attachments: resolvePrescriptionAttachments(row.attachments),
-        createdAt: row.created_at
-      });
+          age: body.age ? Number(body.age) : null,
+          gender: body.gender || null,
+          doctorName: body.doctorName || body.doctor_name || null,
+          doctorRegistrationNo: body.doctorRegistrationNo || body.doctor_registration_no || null,
+          attachments: finalAttachments,
+          note: body.note ? (idempotencyKey ? `${body.note} [idemp:${idempotencyKey}]` : body.note) : (idempotencyKey ? `[idemp:${idempotencyKey}]` : null),
+          idempotencyKey: idempotencyKey || null,
+          status: 'PENDING'
+        });
+        return sendJson(res, 201, {
+          id: created.id,
+          customerId: created.customerId,
+          patientName: created.patientName,
+          status: created.status,
+          attachments: resolvePrescriptionAttachments(created.attachments),
+          createdAt: created.createdAt || created.created_at || new Date().toISOString()
+        });
+      }
     }
 
     const rxCustMatch = pathname.match(/^\/api\/v1\/prescriptions\/customer\/([^/]+)$/) || pathname.match(/^\/api\/v1\/customers\/([^/]+)\/prescriptions$/);
@@ -3996,18 +4091,31 @@ const server = http.createServer(async (req, res) => {
       };
     }
 
+    function authorizeCartAccess(req, res, customerId) {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required to access or modify cart.' });
+        return null;
+      }
+      const clean10 = customerId.replace(/\D/g, '').slice(-10);
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = clean10.length === 10 && callerPhone10.length === 10 && callerPhone10 === clean10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
+      const isAuthorized = isOwner || hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN']);
+      if (!isAuthorized) {
+        sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access or modify this cart.' });
+        return null;
+      }
+      return authClaims;
+    }
+
     const cartGetMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)$/);
     if (cartGetMatch && method === 'GET') {
       const customerId = cartGetMatch[1];
-      const authClaims = verifyAndDecodeJwt(req);
-      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
-        const clean10 = customerId.replace(/\D/g, '').slice(-10);
-        const isOwner = authClaims.sub === customerId ||
-          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-        if (!isOwner) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to access this cart.' });
-        }
-      }
+      const authClaims = authorizeCartAccess(req, res, customerId);
+      if (!authClaims) return;
       const rawItems = await appRepositories.cartRepo.getCart(customerId);
       return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
@@ -4015,24 +4123,10 @@ const server = http.createServer(async (req, res) => {
     const cartAddMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items$/);
     if (cartAddMatch && method === 'POST') {
       const customerId = cartAddMatch[1];
-      const authClaims = verifyAndDecodeJwt(req);
-      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
-        const clean10 = customerId.replace(/\D/g, '').slice(-10);
-        const isOwner = authClaims.sub === customerId ||
-          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-        if (!isOwner) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify this cart.' });
-        }
-      }
+      const authClaims = authorizeCartAccess(req, res, customerId);
+      if (!authClaims) return;
       const body = await parseJsonBody(req);
       const idempotencyKey = req.headers['idempotency-key'] || body?.idempotencyKey || body?.idempotency_key || null;
-      if (idempotencyKey) {
-        global._cartAddIdempotency = global._cartAddIdempotency || new Set();
-        if (global._cartAddIdempotency.has(`${customerId}:${idempotencyKey}`)) {
-          const rawItems = await appRepositories.cartRepo.getCart(customerId);
-          return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
-        }
-      }
       if (!body || !body.sku) {
         return sendJson(res, 400, { error: 'INVALID_CART_ITEM', message: 'sku is mandatory for adding to cart.' });
       }
@@ -4042,11 +4136,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 400, { error: 'INVALID_QUANTITY', message: 'Quantity must be a positive integer between 1 and 1000.' });
         }
       }
-      const rawItems = await appRepositories.cartRepo.addItem(customerId, body);
-      if (idempotencyKey) {
-        global._cartAddIdempotency = global._cartAddIdempotency || new Set();
-        global._cartAddIdempotency.add(`${customerId}:${idempotencyKey}`);
-      }
+      const rawItems = await appRepositories.cartRepo.addItem(customerId, body, idempotencyKey);
       return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
     }
 
@@ -4054,15 +4144,8 @@ const server = http.createServer(async (req, res) => {
     if (cartUpdateMatch && method === 'PATCH') {
       const customerId = cartUpdateMatch[1];
       const sku = cartUpdateMatch[2];
-      const authClaims = verifyAndDecodeJwt(req);
-      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
-        const clean10 = customerId.replace(/\D/g, '').slice(-10);
-        const isOwner = authClaims.sub === customerId ||
-          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-        if (!isOwner) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify this cart.' });
-        }
-      }
+      const authClaims = authorizeCartAccess(req, res, customerId);
+      if (!authClaims) return;
       const body = await parseJsonBody(req);
       const quantity = Number(body.quantity);
       if (isNaN(quantity) || !Number.isInteger(quantity) || quantity < 0 || quantity > 1000) {
@@ -4076,15 +4159,8 @@ const server = http.createServer(async (req, res) => {
     if (cartUpdateMatch && method === 'DELETE') {
       const customerId = cartUpdateMatch[1];
       const sku = cartUpdateMatch[2];
-      const authClaims = verifyAndDecodeJwt(req);
-      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
-        const clean10 = customerId.replace(/\D/g, '').slice(-10);
-        const isOwner = authClaims.sub === customerId ||
-          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-        if (!isOwner) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify this cart.' });
-        }
-      }
+      const authClaims = authorizeCartAccess(req, res, customerId);
+      if (!authClaims) return;
 
       const rawItems = await appRepositories.cartRepo.removeItem(customerId, sku);
       return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
@@ -4092,15 +4168,8 @@ const server = http.createServer(async (req, res) => {
 
     if (cartGetMatch && method === 'DELETE') {
       const customerId = cartGetMatch[1];
-      const authClaims = verifyAndDecodeJwt(req);
-      if (authClaims && authClaims.sub && !hasRole(authClaims, ['ADMIN', 'ROLE_ADMIN'])) {
-        const clean10 = customerId.replace(/\D/g, '').slice(-10);
-        const isOwner = authClaims.sub === customerId ||
-          (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
-        if (!isOwner) {
-          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to clear this cart.' });
-        }
-      }
+      const authClaims = authorizeCartAccess(req, res, customerId);
+      if (!authClaims) return;
       await appRepositories.cartRepo.clearCart(customerId);
       return sendJson(res, 200, formatCartResponseDto(customerId, []));
     }
@@ -5136,8 +5205,8 @@ const server = http.createServer(async (req, res) => {
       const orderStoreId = order.store_id || order.storeId;
       const isOwner = orderCustomerId === authClaims.sub;
       const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
-      let isSeller = authClaims.storeId === orderStoreId || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER') && authClaims.storeId === orderStoreId);
-      if (!isSeller && (authClaims.role === 'ROLE_SELLER' || (authClaims.roles && authClaims.roles.includes('ROLE_SELLER')))) {
+      let isSeller = false;
+      if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
         const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
         if (authorizedStoreId && authorizedStoreId === orderStoreId) {
           isSeller = true;
@@ -5781,19 +5850,22 @@ const server = http.createServer(async (req, res) => {
         authClaims.sub === 'admin' ||
         (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
 
-      if (!isAdmin && pool) {
-        try {
-          const ordCheck = await pool.query(
-            `SELECT customer_id FROM orders WHERE (id = $1 OR order_id = $1) LIMIT 1`,
-            [orderId]
-          );
-          if (ordCheck.rows.length > 0) {
-            const owner = ordCheck.rows[0].customer_id;
-            if (owner && owner !== authClaims.sub && owner !== authClaims.customerId) {
-              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You can only request refunds for your own orders.' });
-            }
+      let authorizedStoreId = null;
+      if (!isAdmin) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+          if (!authorizedStoreId) {
+            return sendJson(res, 403, {
+              error: 'FORBIDDEN',
+              message: 'Seller account is inactive or not authorized to process refunds.'
+            });
           }
-        } catch (_) {}
+        } else {
+          return sendJson(res, 403, {
+            error: 'FORBIDDEN',
+            message: 'Only authorized administrators and sellers can initiate refunds.'
+          });
+        }
       }
 
       try {
@@ -5801,7 +5873,8 @@ const server = http.createServer(async (req, res) => {
           orderId,
           numAmount,
           reason,
-          idempotencyKey
+          idempotencyKey,
+          authorizedStoreId
         );
         return sendJson(res, 200, {
           ok: true,
@@ -5811,11 +5884,20 @@ const server = http.createServer(async (req, res) => {
         if (err.message === 'ORDER_NOT_FOUND' || err.statusCode === 404) {
           return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: `Order '${orderId}' not found.` });
         }
+        if (err.message === 'CROSS_STORE_REFUND_FORBIDDEN' || err.statusCode === 403) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: err.message || 'Sellers can only initiate refunds for orders belonging to their authorized store.' });
+        }
         if (err.message === 'EXCEEDS_CAPTURED_AMOUNT' || err.statusCode === 422) {
           return sendJson(res, 422, {
             error: 'EXCEEDS_CAPTURED_AMOUNT',
             message: 'Requested refund amount exceeds allowable order balance.',
             details: err.details
+          });
+        }
+        if (err.message === 'UNPAID_ORDER_REFUND_PROHIBITED' || err.message === 'NO_CAPTURED_PAYMENT_FOUND') {
+          return sendJson(res, 422, {
+            error: 'UNPAID_ORDER_REFUND_PROHIBITED',
+            message: err.message
           });
         }
         return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: err.message });
@@ -6490,14 +6572,26 @@ const server = http.createServer(async (req, res) => {
               );
             }
 
+            const targetStoreId = session.store_id || authorizedStoreId;
+            const storeChannel = targetStoreId ? `riders_store_${targetStoreId}` : 'riders_broadcast';
+
             if (sseBroadcasterInstance) {
+              sseBroadcasterInstance.broadcast(storeChannel, 'NEW_OFFER_AVAILABLE', {
+                offerId: activeOfferId || String(orderId),
+                orderId,
+                deliveryId: delId,
+                eventId: newEvtId,
+                notificationId: newNotifId,
+                storeId: targetStoreId,
+                broadcast: true
+              });
               sseBroadcasterInstance.broadcast('riders_broadcast', 'NEW_OFFER_AVAILABLE', {
                 offerId: activeOfferId || String(orderId),
                 orderId,
                 deliveryId: delId,
                 eventId: newEvtId,
                 notificationId: newNotifId,
-                storeId: session.store_id || authorizedStoreId,
+                storeId: targetStoreId,
                 broadcast: true
               });
             }
@@ -6520,6 +6614,7 @@ const server = http.createServer(async (req, res) => {
                   notificationId: newNotifId,
                   broadcastNonce: String(Date.now()),
                   riderId: 'broadcast',
+                  storeId: String(targetStoreId || ''),
                   merchantName: String(session.store_name || session.merchant_name || 'Store Partner'),
                   customerAddress: (String(session.delivery_address || session.customer_address || '').split(',').slice(-2).join(', ').trim() || 'Customer Area'),
                   earningsAmount: String(session.delivery_payout || 35.0),
@@ -6529,8 +6624,31 @@ const server = http.createServer(async (req, res) => {
                   serverTime: String(Date.now())
                 }
               };
-              fcmSenderInstance.sendPushToTopic('riders_broadcast', offerPushPayload).catch(err => {
-                console.error('[SellerAccept] FCM topic broadcast error:', err.message);
+
+              // Route notifications directly to authorized, active rider devices for this store
+              if (pool && targetStoreId) {
+                try {
+                  const riderTokens = await pool.query(
+                    `SELECT rdt.token 
+                     FROM rider_device_tokens rdt
+                     JOIN riders r ON (r.rider_id = rdt.rider_id OR r.id = rdt.rider_id)
+                     WHERE r.store_id = $1 AND r.status = 'ACTIVE'`,
+                    [targetStoreId]
+                  );
+                  for (const rRow of riderTokens.rows) {
+                    if (rRow.token) {
+                      fcmSenderInstance.sendPushNotification(rRow.token, offerPushPayload).catch(() => {});
+                    }
+                  }
+                } catch (tokErr) {
+                  console.error('[SellerAccept] Store rider device token push error:', tokErr.message);
+                }
+              }
+
+              // Publish to store-scoped topic (riders_store_xxx) rather than global topic
+              const targetTopic = targetStoreId ? `riders_store_${targetStoreId}` : 'riders_broadcast';
+              fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(err => {
+                console.error('[SellerAccept] FCM store topic broadcast error:', err.message);
               });
             }
           }
@@ -6895,7 +7013,13 @@ const server = http.createServer(async (req, res) => {
         authClaims.role === 'ROLE_ADMIN' ||
         authClaims.sub === 'admin' ||
         (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
-      const isStoreOwner = authClaims.storeId === storeId || authClaims.store_id === storeId;
+      let isStoreOwner = false;
+      if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+        const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+        if (authorizedStoreId && authorizedStoreId === storeId) {
+          isStoreOwner = true;
+        }
+      }
       if (!isAdmin && !isStoreOwner) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify settings for another store.' });
       }
@@ -7878,7 +8002,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view this offer.' });
         }
         const offerStoreId = offer.store_id || offer.storeId || offer.order_store_id;
-        if (riderStoreId && offerStoreId && riderStoreId !== offerStoreId) {
+        if (!riderStoreId || !offerStoreId || riderStoreId !== offerStoreId) {
           return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to view offers from other stores.' });
         }
       }
@@ -7947,6 +8071,14 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Active rider profile not found. You are not authorized to accept delivery offers.' });
       }
 
+      const isAdminRider = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
+      if (!isAdminRider && !authorizedRider.store_id) {
+        return sendJson(res, 403, {
+          error: 'UNASSIGNED_RIDER_STORE',
+          message: 'Active riders must be assigned to an active fulfillment store to accept delivery offers.'
+        });
+      }
+
       const offerId = riderOfferAcceptMatch[1];
 
       const realName = authorizedRider.full_name || authorizedRider.name || authClaims.name || ('Partner ' + cleanPhone.slice(-4));
@@ -7957,7 +8089,8 @@ const server = http.createServer(async (req, res) => {
         realName,
         realPhone,
         realVehicle,
-        storeId: authorizedRider.store_id
+        storeId: authorizedRider.store_id,
+        isAdmin: isAdminRider
       });
 
       if (result.ok) {

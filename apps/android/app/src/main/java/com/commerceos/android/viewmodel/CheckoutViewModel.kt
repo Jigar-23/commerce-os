@@ -326,159 +326,171 @@ class CheckoutViewModel(
     }
 
     fun executeCheckout(paymentMethod: String) {
-        if (uiState.isProcessing || uiState.state is CheckoutState.Confirmed) return
+        if (checkoutJob?.isActive == true || uiState.isProcessing || uiState.state is CheckoutState.Confirmed) return
         val customerIdSnapshot = customerId.trim()
         if (customerIdSnapshot.isBlank()) {
             uiState = uiState.copy(errorMessage = "Authentication required for checkout")
             return
         }
 
-        checkoutJob?.cancel()
+        val gate = mutationGate
         checkoutJob = viewModelScope.launch {
-            mutationGate?.lockMutations()
-            val settledCart = mutationGate?.awaitMutationsIdle() ?: uiState.items
+            gate?.lockMutations()
+            try {
+                val settledCart = gate?.awaitMutationsIdle() ?: uiState.items
 
-            val currentItems = settledCart.toList()
-            val currentSubtotal = itemsSubtotal(currentItems)
-            val currentDiscount = uiState.couponDiscount.min(currentSubtotal)
+                val currentItems = settledCart.toList()
+                val currentSubtotal = itemsSubtotal(currentItems)
+                val currentDiscount = uiState.couponDiscount.min(currentSubtotal)
 
-            uiState = uiState.copy(
-                items = currentItems,
-                itemsSubtotal = currentSubtotal,
-                couponDiscount = currentDiscount,
-                grandTotal = currentSubtotal
-                    .add(uiState.deliveryFee)
-                    .add(uiState.coldChainFee)
-                    .subtract(currentDiscount)
-                    .coerceAtLeast(BigDecimal.ZERO)
-            )
+                uiState = uiState.copy(
+                    items = currentItems,
+                    itemsSubtotal = currentSubtotal,
+                    couponDiscount = currentDiscount,
+                    grandTotal = currentSubtotal
+                        .add(uiState.deliveryFee)
+                        .add(uiState.coldChainFee)
+                        .subtract(currentDiscount)
+                        .coerceAtLeast(BigDecimal.ZERO)
+                )
 
-            val address = uiState.address
-            if (address == null || address.id.isBlank()) {
-                failCheckout("CHECKOUT_NOT_READY", "Select a delivery address")
-                return@launch
-            }
-            if (currentItems.isEmpty()) {
-                failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
-                return@launch
-            }
-
-            // Rerun server serviceability check against settled cart items & address
-            val requestItems = currentItems.map { ServiceabilityItem(it.sku, it.quantity, it.coldChain) }
-            when (val srvResult = repository.getServiceability(customerIdSnapshot, address.id, requestItems)) {
-                is ApiResult.Success -> {
-                    if (!srvResult.data.eligible) {
-                        failCheckout("UNSERVICEABLE", "Selected address is currently outside our delivery zone.")
-                        return@launch
-                    }
-                    val deliveryFee = BigDecimal.valueOf(srvResult.data.deliveryFee)
-                    val coldChainFee = BigDecimal.valueOf(srvResult.data.coldChainFee)
-                    uiState = uiState.copy(
-                        serviceability = ServiceabilityState.Success(address.id, srvResult.data),
-                        deliveryFee = deliveryFee,
-                        coldChainFee = coldChainFee,
-                        grandTotal = currentSubtotal
-                            .add(deliveryFee)
-                            .add(coldChainFee)
-                            .subtract(currentDiscount)
-                            .coerceAtLeast(BigDecimal.ZERO)
-                    )
-                }
-                is ApiResult.Failure -> {
-                    failCheckout("SERVICEABILITY_ERROR", srvResult.error.message)
+                val address = uiState.address
+                if (address == null || address.id.isBlank()) {
+                    failCheckout("CHECKOUT_NOT_READY", "Select a delivery address")
                     return@launch
                 }
-            }
-
-            // Re-read and revalidate state after mutation barrier & serviceability refresh
-            val freshSnapshot = uiState
-            if (!freshSnapshot.readyForPayment) {
-                val reason = when {
-                    !freshSnapshot.addressValid -> "Select a delivery address"
-                    !freshSnapshot.serviceabilityValid -> "Resolve delivery availability first"
-                    !freshSnapshot.cartValid -> "Cart is empty"
-                    !freshSnapshot.pricingValid -> "Checkout quote is incomplete"
-                    !freshSnapshot.prescriptionValid -> "Attach a pharmacist-approved prescription"
-                    else -> "Checkout is not ready for payment"
+                if (currentItems.isEmpty()) {
+                    failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
+                    return@launch
                 }
-                failCheckout("CHECKOUT_NOT_READY", reason)
-                return@launch
-            }
 
-            uiState = freshSnapshot.copy(isProcessing = true, errorMessage = null, state = CheckoutState.PlacingOrder)
-
-            val prescriptionApproved = if (freshSnapshot.items.any { it.prescriptionRequired }) {
-                val serverPrescriptions = when (
-                    val result = repository.getCustomerPrescriptions(customerIdSnapshot)
-                ) {
-                    is ApiResult.Success -> result.data
+                // Rerun server serviceability check against settled cart items & address
+                val requestItems = currentItems.map { ServiceabilityItem(it.sku, it.quantity, it.coldChain) }
+                when (val srvResult = repository.getServiceability(customerIdSnapshot, address.id, requestItems)) {
+                    is ApiResult.Success -> {
+                        if (!srvResult.data.eligible) {
+                            failCheckout("UNSERVICEABLE", "Selected address is currently outside our delivery zone.")
+                            return@launch
+                        }
+                        val deliveryFee = BigDecimal.valueOf(srvResult.data.deliveryFee)
+                        val coldChainFee = BigDecimal.valueOf(srvResult.data.coldChainFee)
+                        uiState = uiState.copy(
+                            serviceability = ServiceabilityState.Success(address.id, srvResult.data),
+                            deliveryFee = deliveryFee,
+                            coldChainFee = coldChainFee,
+                            grandTotal = currentSubtotal
+                                .add(deliveryFee)
+                                .add(coldChainFee)
+                                .subtract(currentDiscount)
+                                .coerceAtLeast(BigDecimal.ZERO)
+                        )
+                    }
                     is ApiResult.Failure -> {
-                        failCheckout("PRESCRIPTION_LOOKUP_FAILED", result.error.message)
+                        failCheckout("SERVICEABILITY_ERROR", srvResult.error.message)
                         return@launch
                     }
                 }
 
-                serverPrescriptions.any {
-                    it.id == freshSnapshot.prescriptionId &&
-                        it.customerId == customerIdSnapshot &&
-                        it.status.equals("APPROVED", ignoreCase = true)
+                // Re-read and revalidate state after mutation barrier & serviceability refresh
+                val freshSnapshot = uiState
+                if (!freshSnapshot.readyForPayment) {
+                    val reason = when {
+                        !freshSnapshot.addressValid -> "Select a delivery address"
+                        !freshSnapshot.serviceabilityValid -> "Resolve delivery availability first"
+                        !freshSnapshot.cartValid -> "Cart is empty"
+                        !freshSnapshot.pricingValid -> "Checkout quote is incomplete"
+                        !freshSnapshot.prescriptionValid -> "Attach a pharmacist-approved prescription"
+                        else -> "Checkout is not ready for payment"
+                    }
+                    failCheckout("CHECKOUT_NOT_READY", reason)
+                    return@launch
                 }
-            } else {
-                true
-            }
 
-            if (!prescriptionApproved) {
-                failCheckout(
-                    "PRESCRIPTION_NOT_APPROVED",
-                    "Attach a pharmacist-approved prescription before checkout."
+                uiState = freshSnapshot.copy(isProcessing = true, errorMessage = null, state = CheckoutState.PlacingOrder)
+
+                val prescriptionApproved = if (freshSnapshot.items.any { it.prescriptionRequired }) {
+                    val serverPrescriptions = when (
+                        val result = repository.getCustomerPrescriptions(customerIdSnapshot)
+                    ) {
+                        is ApiResult.Success -> result.data
+                        is ApiResult.Failure -> {
+                            failCheckout("PRESCRIPTION_LOOKUP_FAILED", result.error.message)
+                            return@launch
+                        }
+                    }
+
+                    serverPrescriptions.any {
+                        it.id == freshSnapshot.prescriptionId &&
+                            it.customerId == customerIdSnapshot &&
+                            it.status.equals("APPROVED", ignoreCase = true)
+                    }
+                } else {
+                    true
+                }
+
+                if (!prescriptionApproved) {
+                    failCheckout(
+                        "PRESCRIPTION_NOT_APPROVED",
+                        "Attach a pharmacist-approved prescription before checkout."
+                    )
+                    return@launch
+                }
+
+                val currentFingerprint = computePayloadFingerprint(
+                    customerIdSnapshot,
+                    address,
+                    freshSnapshot.items,
+                    freshSnapshot.prescriptionId,
+                    freshSnapshot.couponCode,
+                    paymentMethod,
+                    freshSnapshot.selectedSlotText
                 )
-                return@launch
-            }
-
-            val currentFingerprint = computePayloadFingerprint(
-                customerIdSnapshot,
-                address,
-                freshSnapshot.items,
-                freshSnapshot.prescriptionId,
-                freshSnapshot.couponCode,
-                paymentMethod,
-                freshSnapshot.selectedSlotText
-            )
-            if (lastPayloadFingerprint != currentFingerprint) {
-                checkoutIdempotencyKey = null
-                lastPayloadFingerprint = currentFingerprint
-            }
-
-            val idempotencyKey = checkoutIdempotencyKey
-                ?: UUID.randomUUID().toString().also { checkoutIdempotencyKey = it }
-
-            // SERVER-AUTHORITATIVE AMOUNTS: omit client-calculated fees/discounts to eliminate trust-boundary risk
-            val request = CartCheckoutRequest(
-                addressId = address.id,
-                prescriptionId = freshSnapshot.prescriptionId,
-                paymentMethod = paymentMethod,
-                idempotencyKey = idempotencyKey,
-                deliveryAddress = address,
-                deliveryFee = null,
-                discountAmount = null,
-                couponCode = freshSnapshot.couponCode,
-                packagingFee = null,
-                slotText = freshSnapshot.selectedSlotText
-            )
-
-            when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
-                is ApiResult.Success -> {
-                    uiState = freshSnapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
+                if (lastPayloadFingerprint != currentFingerprint) {
                     checkoutIdempotencyKey = null
-                    lastPayloadFingerprint = null
-                    _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
+                    lastPayloadFingerprint = currentFingerprint
                 }
-                is ApiResult.Failure -> {
-                    // Keep checkoutIdempotencyKey for identical payload retry
-                    failCheckout("CHECKOUT_FAILED", result.error.message)
+
+                val idempotencyKey = checkoutIdempotencyKey
+                    ?: UUID.randomUUID().toString().also { checkoutIdempotencyKey = it }
+
+                // SERVER-AUTHORITATIVE AMOUNTS: omit client-calculated fees/discounts to eliminate trust-boundary risk
+                val request = CartCheckoutRequest(
+                    addressId = address.id,
+                    prescriptionId = freshSnapshot.prescriptionId,
+                    paymentMethod = paymentMethod,
+                    idempotencyKey = idempotencyKey,
+                    deliveryAddress = address,
+                    deliveryFee = null,
+                    discountAmount = null,
+                    couponCode = freshSnapshot.couponCode,
+                    packagingFee = null,
+                    slotText = freshSnapshot.selectedSlotText
+                )
+
+                when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
+                    is ApiResult.Success -> {
+                        uiState = freshSnapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
+                        checkoutIdempotencyKey = null
+                        lastPayloadFingerprint = null
+                        _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
+                    }
+                    is ApiResult.Failure -> {
+                        // Keep checkoutIdempotencyKey for identical payload retry
+                        failCheckout("CHECKOUT_FAILED", result.error.message)
+                    }
+                }
+            } finally {
+                if (uiState.state !is CheckoutState.Confirmed) {
+                    gate?.unlockMutations()
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        mutationGate?.unlockMutations()
+    }
     }
 
     fun reset() {

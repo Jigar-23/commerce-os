@@ -1732,4 +1732,104 @@ class KodexAuditBatch1RegressionTest {
         // Key must be deterministic and identical across retries/repeat uploads
         assertEquals(firstKey, secondKey)
     }
+
+    @Test
+    fun testCartViewModel_moveBackToCartWithPreexistingQuantityReconcilesOnlyWhenDeltaCommitted() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val savedItem = CartItem(productId = "p1", sku = "sku_shared", name = "Shared Sku", unitPrice = BigDecimal("50.00"), quantity = 1)
+        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_delta", listOf(savedItem))
+
+        val preexistingCart = CartItem(productId = "p1", sku = "sku_shared", name = "Shared Sku", unitPrice = BigDecimal("50.00"), quantity = 2)
+        var serverQuantity = 2 // Server still has only preexisting 2 (did NOT commit the +1)
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                return ApiResult.Success(CartResponse(items = listOf(
+                    preexistingCart.copy(quantity = serverQuantity)
+                )))
+            }
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                // Return 504 Gateway Timeout (transient upstream failure)
+                return ApiResult.Failure(AppError.Server(504, "GATEWAY_TIMEOUT", "Gateway timeout", null, null))
+            }
+        }
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        viewModel.init("cust_delta")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, viewModel.cartItems.size)
+        assertEquals(2, viewModel.cartItems[0].quantity)
+        assertEquals(1, viewModel.saveForLaterItems.size)
+
+        // Attempt move-back
+        viewModel.moveBackToCart("sku_shared")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Because serverQuantity is still 2 (not expected 3), add was NOT committed.
+        // It must NOT discard the saved item!
+        val persistedSaved = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(fakeContext, "cust_delta")
+        assertEquals(1, persistedSaved.size)
+        assertEquals("sku_shared", persistedSaved[0].sku)
+        assertEquals(1, viewModel.saveForLaterItems.size)
+    }
+
+    @Test
+    fun testCartViewModel_gatewayTimeout504ReconcilesInsteadOfImmediateRollback() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val initialItem = CartItem(productId = "p1", sku = "s_504", name = "504 Item", unitPrice = BigDecimal("50.00"), quantity = 1)
+        var serverHasItem = true
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                val items = if (serverHasItem) listOf(initialItem) else emptyList()
+                return ApiResult.Success(CartResponse(items = items))
+            }
+            override suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> {
+                serverHasItem = false // Server actually removed it before gateway timed out
+                return ApiResult.Failure(AppError.Server(504, "GATEWAY_TIMEOUT", "Upstream timeout", null, null))
+            }
+        }
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        viewModel.init("cust_504")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.moveToSaveForLater("s_504")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 504 is treated as ambiguous and reconciled: server removed it, so move committed!
+        assertEquals(1, viewModel.saveForLaterItems.size)
+        assertEquals("s_504", viewModel.saveForLaterItems[0].sku)
+        val persistedSaved = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(fakeContext, "cust_504")
+        assertEquals(1, persistedSaved.size)
+    }
+
+    @Test
+    fun testPrescriptionViewModel_distinctAttachmentsDoNotCollideIdempotencyKey() = runTest {
+        val keys = mutableListOf<String?>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> {
+                keys.add(request.idempotencyKey)
+                return ApiResult.Success(Prescription(id = "rx_" + keys.size, customerId = request.customerId, patientName = request.patientName))
+            }
+        }
+        val viewModel = PrescriptionViewModel(repo, ioDispatcher = testDispatcher)
+
+        viewModel.upload("cust_1", "Patient A", listOf("data:image/jpeg;base64,attachment_AAAA"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.reset()
+        viewModel.upload("cust_1", "Patient A", listOf("data:image/jpeg;base64,attachment_BBBB"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, keys.size)
+        assertNotEquals(keys[0], keys[1])
+    }
 }
