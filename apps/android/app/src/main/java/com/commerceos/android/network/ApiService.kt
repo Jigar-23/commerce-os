@@ -477,14 +477,10 @@ object NetworkClient {
                 .addInterceptor(authInterceptor)
                 .addInterceptor(refreshInterceptor)
                 .addInterceptor(
-                    HttpLoggingInterceptor { msg ->
-                        if (BuildConfig.DEBUG) {
-                            android.util.Log.d("OkHttp", msg)
-                        }
-                    }.apply {
+                    HttpLoggingInterceptor().apply {
                         redactHeader("Authorization")
                         redactHeader("Cookie")
-                        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
+                        level = HttpLoggingInterceptor.Level.NONE
                     }
                 )
                 .build()
