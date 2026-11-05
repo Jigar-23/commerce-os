@@ -4178,10 +4178,16 @@ const server = http.createServer(async (req, res) => {
       }
       const customerId = custProfileMatch[1];
       const clean10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (clean10.length === 10 && (String(authClaims.phone || '').includes(clean10) || String(authClaims.sub || '').includes(clean10)));
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = clean10.length === 10 && callerPhone10.length === 10 && callerPhone10 === clean10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
       const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to update this customer profile.' });
       }
 
@@ -4288,10 +4294,16 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
       const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = cleanCust10.length === 10 && callerPhone10.length === 10 && callerPhone10 === cleanCust10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
       const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to create addresses for another customer.' });
       }
       const body = await parseJsonBody(req);
@@ -4421,10 +4433,16 @@ const server = http.createServer(async (req, res) => {
       const customerId = addrDefaultMatch[1];
       const addressId = addrDefaultMatch[2];
       const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = cleanCust10.length === 10 && callerPhone10.length === 10 && callerPhone10 === cleanCust10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
       const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify addresses for another customer.' });
       }
       let r;
@@ -4475,10 +4493,16 @@ const server = http.createServer(async (req, res) => {
       const customerId = addrItemMatch[1];
       const addressId = addrItemMatch[2];
       const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = cleanCust10.length === 10 && callerPhone10.length === 10 && callerPhone10 === cleanCust10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
       const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to modify addresses for another customer.' });
       }
       const body = await parseJsonBody(req);
@@ -4542,10 +4566,16 @@ const server = http.createServer(async (req, res) => {
       const customerId = addrItemMatch[1];
       const addressId = addrItemMatch[2];
       const cleanCust10 = customerId.replace(/\D/g, '').slice(-10);
-      const isOwner = authClaims.sub === customerId ||
-        (cleanCust10.length === 10 && (String(authClaims.phone || '').includes(cleanCust10) || String(authClaims.sub || '').includes(cleanCust10)));
+      const isSellerOrRider = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_RIDER', 'RIDER']);
+      const isDirectOwner = authClaims.sub === customerId;
+      const callerPhone10 = String(authClaims.phone || '').replace(/\D/g, '').slice(-10);
+      const isPhoneOwner = cleanCust10.length === 10 && callerPhone10.length === 10 && callerPhone10 === cleanCust10;
+      const isOwner = !isSellerOrRider && (isDirectOwner || isPhoneOwner);
       const isAuthorized = isOwner || hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']);
       if (!isAuthorized) {
+        if (hasRole(authClaims, ['ROLE_SELLER', 'SELLER'])) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Access denied. Sellers must use the authorized store-scoped /api/v1/seller/customers endpoints.' });
+        }
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to delete addresses for another customer.' });
       }
       await pool.query(`DELETE FROM customer_addresses WHERE id = $1 AND (customer_id = $2 OR customer_id IS NULL)`, [addressId, customerId]);
