@@ -445,11 +445,17 @@ fun RiderMainScreen(
                                             res.onSuccess {
                                                 isOnline = nextStatus
                                                 sessionManager.saveShiftOnline(nextStatus)
+                                                val assignedStore = sessionManager.getStoreId().trim()
                                                 if (nextStatus) {
-                                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast") } catch (_: Exception) {}
+                                                    if (assignedStore.isNotBlank()) {
+                                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$assignedStore") } catch (_: Exception) {}
+                                                    }
                                                 } else {
-                                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
+                                                    if (assignedStore.isNotBlank()) {
+                                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStore") } catch (_: Exception) {}
+                                                    }
                                                 }
+                                                try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
                                                 liveProfile = liveProfile?.copy(shiftStatus = if (nextStatus) "ONLINE_AVAILABLE" else "OFFLINE")
                                             }.onFailure {
                                                 Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
@@ -1396,11 +1402,17 @@ fun RiderMainScreen(
                             res.onSuccess {
                                 isOnline = newStatus
                                 sessionManager.saveShiftOnline(newStatus)
+                                val assignedStore = sessionManager.getStoreId().trim()
                                 if (newStatus) {
-                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_broadcast") } catch (_: Exception) {}
+                                    if (assignedStore.isNotBlank()) {
+                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$assignedStore") } catch (_: Exception) {}
+                                    }
                                 } else {
-                                    try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
+                                    if (assignedStore.isNotBlank()) {
+                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStore") } catch (_: Exception) {}
+                                    }
                                 }
+                                try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
                                 liveProfile = liveProfile?.copy(shiftStatus = if (newStatus) "ONLINE_AVAILABLE" else "OFFLINE")
                             }.onFailure {
                                 Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()
@@ -1409,6 +1421,10 @@ fun RiderMainScreen(
                     },
                     onLogout = {
                         scope.launch {
+                            val assignedStore = sessionManager.getStoreId().trim()
+                            if (assignedStore.isNotBlank()) {
+                                try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStore") } catch (_: Exception) {}
+                            }
                             try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
                             try { repository.logoutDeviceToken() } catch (_: Exception) {}
                             sessionManager.clearSession(context)
