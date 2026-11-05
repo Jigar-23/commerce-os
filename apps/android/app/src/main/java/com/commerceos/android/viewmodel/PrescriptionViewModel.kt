@@ -217,27 +217,37 @@ class PrescriptionViewModel(
                     is ApiResult.Success -> {
                         if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
                             activeLogicalUploadKey = null
-                            val serverRx = result.data.copy(attachments = attachments)
-                            var localCacheSaved = true
-                            if (appContext != null) {
-                                localCacheSaved = LocalPrescriptionManager.savePrescription(appContext, serverRx)
-                                com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
-                                    appContext,
-                                    com.commerceos.android.notifications.InAppNotificationItem(
-                                        title = "Prescription Uploaded",
-                                        message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Pending review by pharmacy vendor.",
-                                        category = "Prescriptions",
-                                        deepLinkAction = "PRESCRIPTIONS"
-                                    )
-                                )
-                            }
+                            val serverRx = if (result.data.attachments.isNotEmpty()) result.data else result.data.copy(attachments = attachments)
                             prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
-                            if (!localCacheSaved) {
-                                errorMessage = "Prescription uploaded to server, but offline encrypted cache could not be saved."
-                            } else {
-                                errorMessage = null
+                            errorMessage = null
+
+                            // Local persistence & notification side effects
+                            try {
+                                if (appContext != null) {
+                                    val localCacheSaved = LocalPrescriptionManager.savePrescription(appContext, serverRx)
+                                    if (!localCacheSaved) {
+                                        errorMessage = "Prescription uploaded to server, but offline encrypted cache could not be saved."
+                                    }
+                                    com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
+                                        appContext,
+                                        com.commerceos.android.notifications.InAppNotificationItem(
+                                            title = "Prescription Uploaded",
+                                            message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Pending review by pharmacy vendor.",
+                                            category = "Prescriptions",
+                                            deepLinkAction = "PRESCRIPTIONS"
+                                        )
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
                             }
-                            onUploaded?.invoke(serverRx)
+
+                            // Caller callback must not convert a successful upload into a failure
+                            try {
+                                onUploaded?.invoke(serverRx)
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                            }
                         }
                     }
                     is ApiResult.Failure -> {

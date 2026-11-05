@@ -32,9 +32,14 @@ object LocalSaveForLaterStore {
                 val legacyJson = prefs.getString(legKey, null)
                 if (legacyJson != null) {
                     val migrated = secureStore.save(key, legacyJson)
-                    if (migrated) prefs.edit().remove(legKey).commit()
-                }
-                legacyJson
+                    if (migrated) {
+                        prefs.edit().remove(legKey).commit()
+                        legacyJson
+                    } else {
+                        // Fail closed: Never return plaintext unencrypted data when secure migration fails
+                        null
+                    }
+                } else null
             } ?: return emptyList()
 
             val type = object : TypeToken<List<CartItem>>() {}.type

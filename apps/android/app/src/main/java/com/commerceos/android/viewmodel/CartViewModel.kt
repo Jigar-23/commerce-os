@@ -1370,7 +1370,6 @@ class CartViewModel(
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
         isCouponError = false
-        moveBackKeys.clear()
     }
 
     fun clear() {
