@@ -5762,15 +5762,18 @@ async function handleRequest(port, req, res) {
             }
           }
 
-          // 1. Fleet-wide FCM HTTP v1 Topic Broadcast to riders_broadcast
-          sendGoogleFcmPushNotification(
-            'broadcast',
-            `⚡ New Delivery Order #${order.id.slice(-8).toUpperCase()}`,
-            `Pickup: ${order.storeName || order.merchantName || 'Rewari Central Hub'} (${itemsCount} items) • Bill: ₹${displayBill}`,
-            fcmDataPayload,
-            null,
-            'riders_broadcast'
-          ).catch(err => console.error('[MockServer] Broadcast topic FCM error:', err.message));
+          // 1. Scoped FCM HTTP v1 Topic Broadcast to riders_store_<storeId>
+          const orderStore = order.storeId || order.store_id || order.merchantId;
+          if (orderStore) {
+            sendGoogleFcmPushNotification(
+              'broadcast',
+              `⚡ New Delivery Order #${order.id.slice(-8).toUpperCase()}`,
+              `Pickup: ${order.storeName || order.merchantName || 'Rewari Central Hub'} (${itemsCount} items) • Bill: ₹${displayBill}`,
+              fcmDataPayload,
+              null,
+              `riders_store_${orderStore}`
+            ).catch(err => console.error('[MockServer] Scoped store topic FCM error:', err.message));
+          }
 
           // 2. Direct FCM fan out to active online rider devices only (Double-condition gate: must be online)
           for (const item of registeredTokens) {

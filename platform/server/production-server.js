@@ -1395,7 +1395,7 @@ const server = http.createServer(async (req, res) => {
       if (isSeller) {
         if (pool && !isLocalMode) {
           const sRes = await pool.query(
-            `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR user_id = $1) LIMIT 1`,
+            `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR seller_id = $1) LIMIT 1`,
             [authClaims.sub]
           );
           if (sRes.rows.length === 0 || sRes.rows[0].status !== 'ACTIVE') {
@@ -1576,7 +1576,7 @@ const server = http.createServer(async (req, res) => {
         let sellerStoreId = null;
         if (pool && !isLocalMode) {
           const sCheck = await pool.query(
-            `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR user_id = $1) LIMIT 1`,
+            `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR seller_id = $1) LIMIT 1`,
             [authClaims.sub]
           );
           if (sCheck.rows.length === 0 || sCheck.rows[0].status !== 'ACTIVE') {
@@ -1600,7 +1600,7 @@ const server = http.createServer(async (req, res) => {
           const sellerRecheckTimer = setInterval(async () => {
             try {
               const currentCheck = await pool.query(
-                `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR user_id = $1) LIMIT 1`,
+                `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR seller_id = $1) LIMIT 1`,
                 [authClaims.sub]
               );
               if (currentCheck.rows.length === 0 || currentCheck.rows[0].status !== 'ACTIVE' || currentCheck.rows[0].store_id !== sellerStoreId) {
@@ -6820,11 +6820,13 @@ const server = http.createServer(async (req, res) => {
                 }
               }
 
-              // Publish to store-scoped topic (riders_store_xxx) rather than global topic
-              const targetTopic = targetStoreId ? `riders_store_${targetStoreId}` : 'riders_broadcast';
-              fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(err => {
-                console.error('[SellerAccept] FCM store topic broadcast error:', err.message);
-              });
+              // Publish strictly to store-scoped topic (riders_store_xxx); never to unscoped global topic
+              if (targetStoreId) {
+                const targetTopic = `riders_store_${targetStoreId}`;
+                fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(err => {
+                  console.error('[SellerAccept] FCM store topic broadcast error:', err.message);
+                });
+              }
             }
           }
         } catch (err) {
