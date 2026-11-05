@@ -1346,8 +1346,8 @@ public struct OrderTrackingScreen: View {
                     try? await Task.sleep(nanoseconds: 30_000_000_000)
                     if Task.isCancelled { break }
                     
-                    // Slower periodic reconciliation check while realtime SSE is healthy
-                    if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: false) {
+                    // Slower periodic reconciliation check while realtime SSE is healthy (true network refresh to reconcile missed SSE events)
+                    if let fresh = await container.orderRepository.fetchOrderDetail(orderId: orderId, forceRefresh: true) {
                         await MainActor.run {
                             self.orderDetail = fresh
                             if let lat = fresh.riderLat, let lng = fresh.riderLng, lat != 0.0, lng != 0.0 {

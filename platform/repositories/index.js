@@ -7022,10 +7022,10 @@ class DispatchService {
         const CIRCUIT_BREAKER_FAIL_THRESHOLD = 2;
 
         const routingStartTime = Date.now();
-        let circuitBreakerTripped = false;
-        let timeBudgetExpired = false;
+        circuitBreakerTripped = false;
+        timeBudgetExpired = false;
         let consecutiveFailures = 0;
-        let routedSuccessCount = 0;
+        routedSuccessCount = 0;
         let currentBestLeaderEta = Infinity;
 
         const candidatesToConsider = candidatePool.slice(0, MAX_ROUTED_CANDIDATES);
@@ -7256,6 +7256,9 @@ class DispatchService {
       deliverySession.storeToCustomerMins = storeToCustomerDurMins;
       deliverySession.dispatchRoutingMode = dispatchRoutingMode;
       deliverySession.dispatchCircuitBreaker = circuitBreakerTripped;
+      deliverySession.dispatchBudgetExpired = timeBudgetExpired;
+      deliverySession.dispatchCandidateCount = candidatePool.length;
+      deliverySession.dispatchRoutedCount = routedSuccessCount;
     }
 
     // 7. Persist Offer Transactionally (which writes NEW_DISPATCH_OFFER into outbox)
