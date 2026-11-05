@@ -40,6 +40,7 @@ class CartViewModel(
     private var customerGeneration = 0L
     private var cartLoadJob: Job? = null
     private var accountSyncJob: Job? = null
+    private var reorderAllJob: Job? = null
 
     var cartItems by mutableStateOf<List<CartItem>>(emptyList())
         private set
@@ -154,7 +155,7 @@ class CartViewModel(
 
     val mrpTotal: BigDecimal
         get() = cartItems.fold(BigDecimal.ZERO) { acc, i ->
-            val price = i.mrp ?: i.unitPrice
+            val price = i.mrp.takeIf { it > BigDecimal.ZERO } ?: i.unitPrice
             acc.add(price.multiply(BigDecimal.valueOf(i.quantity.toLong())))
         }
 
@@ -168,6 +169,19 @@ class CartViewModel(
         get() {
             return itemMrpSavings.add(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
         }
+
+    private fun mergeCartItem(items: List<CartItem>, incoming: CartItem): List<CartItem> {
+        val index = items.indexOfFirst { it.sku == incoming.sku }
+        if (index < 0) return items + incoming
+
+        return items.toMutableList().also { merged ->
+            val existing = merged[index]
+            val quantity = (existing.quantity.toLong() + incoming.quantity)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            merged[index] = existing.copy(quantity = quantity)
+        }
+    }
 
     private val LOCAL_OFFLINE_CART_KEY = "local_offline_cart"
 
@@ -223,7 +237,9 @@ class CartViewModel(
         this.customerId = targetId
         cartItems = emptyList()
         totals = null
-        saveForLaterItems = emptyList()
+        saveForLaterItems = appContext?.let { ctx ->
+            com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(ctx, targetId)
+        } ?: emptyList()
         appliedCouponCode = null
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
@@ -478,7 +494,7 @@ class CartViewModel(
                             // Rollback optimistic update on failure to preserve authoritative state
                             cartItems = previousCartItems
                             totals = previousTotals
-                            val errMsg = updated.error.message ?: "Could not add item to cart. Please check your network connection."
+                            val errMsg = updated.error.message.ifBlank { "Could not add item to cart. Please check your network connection." }
                             errorMessage = errMsg
                             _addEvents.trySend(CartAddEvent.Failure(errMsg))
                         }
@@ -487,7 +503,18 @@ class CartViewModel(
                     if (cartDao != null) {
                         try {
                             cartDao.insertOrUpdate(CartItemEntity.fromCartItem(updatedItem, LOCAL_OFFLINE_CART_KEY))
-                        } catch (_: Exception) {}
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            if (generation == customerGeneration && customerId.trim() == targetCustomerId) {
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                                val message = "Could not save the offline cart."
+                                errorMessage = message
+                                _addEvents.trySend(CartAddEvent.Failure(message))
+                            }
+                            return@withLock
+                        }
                     }
                     _addEvents.trySend(CartAddEvent.Success(product.sku, product.name))
                 }
@@ -564,7 +591,7 @@ class CartViewModel(
                         is ApiResult.Failure -> {
                             cartItems = previousCartItems
                             totals = previousTotals
-                            val errMsg = updated.error.message ?: "Could not reorder item. Please check your network connection."
+                            val errMsg = updated.error.message.ifBlank { "Could not reorder item. Please check your network connection." }
                             errorMessage = errMsg
                             _addEvents.trySend(CartAddEvent.Failure(errMsg))
                         }
@@ -573,7 +600,18 @@ class CartViewModel(
                     if (cartDao != null) {
                         try {
                             cartDao.insertOrUpdate(CartItemEntity.fromCartItem(updatedItem, LOCAL_OFFLINE_CART_KEY))
-                        } catch (_: Exception) {}
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            if (generation == customerGeneration && customerId.trim() == targetCustomerId) {
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                                val message = "Could not save the offline cart."
+                                errorMessage = message
+                                _addEvents.trySend(CartAddEvent.Failure(message))
+                            }
+                            return@withLock
+                        }
                     }
                     _addEvents.trySend(CartAddEvent.Success(sku, name))
                 }
@@ -584,89 +622,100 @@ class CartViewModel(
 
     fun reorderAll(items: List<OrderItem>) {
         if (items.isEmpty()) return
+        if (reorderAllJob?.isActive == true) return
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
-            cartMutex.withLock {
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
-                val failedSkus = mutableListOf<String>()
-                items.forEach { item ->
+        reorderAllJob = viewModelScope.launch {
+            try {
+                cartMutex.withLock {
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
-                    val sku = item.effectiveSku
-                    val name = item.effectiveName
-                    val price = item.effectivePrice
-                    if (sku.isBlank() || sku.equals("SKU_ITEM", ignoreCase = true) || price <= BigDecimal.ZERO) {
-                        failedSkus += if (sku.isNotBlank()) sku else "UNKNOWN_SKU"
-                        return@forEach
-                    }
+                    val failedSkus = mutableListOf<String>()
+                    items.forEach { item ->
+                        if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                        val sku = item.effectiveSku
+                        val name = item.effectiveName
+                        val price = item.effectivePrice
+                        if (sku.isBlank() || sku.equals("SKU_ITEM", ignoreCase = true) || price <= BigDecimal.ZERO) {
+                            failedSkus += if (sku.isNotBlank()) sku else "UNKNOWN_SKU"
+                            return@forEach
+                        }
 
-                    val qty = item.effectiveQuantity.coerceAtLeast(1)
-                    val prodId = item.effectiveProductId
-                    val vertId = item.effectiveVerticalId
-                    val pharmacyAttr = if (item.effectiveRxRequired) PharmacyCartAttributes(prescriptionRequired = true, coldChain = false) else null
+                        val qty = item.effectiveQuantity.coerceAtLeast(1)
+                        val prodId = item.effectiveProductId
+                        val vertId = item.effectiveVerticalId
+                        val pharmacyAttr = if (item.effectiveRxRequired) PharmacyCartAttributes(prescriptionRequired = true, coldChain = false) else null
 
-                    val cartItem = CartItem(
-                        productId = prodId,
-                        sku = sku,
-                        name = name,
-                        unitPrice = price,
-                        quantity = qty,
-                        verticalId = vertId,
-                        merchantId = item.merchantId,
-                        mrp = price,
-                        pharmacyAttributes = pharmacyAttr
-                    )
+                        val cartItem = CartItem(
+                            productId = prodId,
+                            sku = sku,
+                            name = name,
+                            unitPrice = price,
+                            quantity = qty,
+                            verticalId = vertId,
+                            merchantId = item.merchantId,
+                            mrp = price,
+                            pharmacyAttributes = pharmacyAttr
+                        )
 
-                    if (targetCustomerId.isNotBlank()) {
-                        try {
-                            when (val updated = repository.addCartItem(targetCustomerId, cartItem)) {
-                                is ApiResult.Success -> {
-                                    if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
-                                    val backendItems = sanitizeCartItems(updated.data.items ?: (cartItems + cartItem))
-                                    cartItems = backendItems
-                                    totals = updated.data
-                                    errorMessage = null
+                        if (targetCustomerId.isNotBlank()) {
+                            try {
+                                when (val updated = repository.addCartItem(targetCustomerId, cartItem)) {
+                                    is ApiResult.Success -> {
+                                        if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                                        val backendItems = sanitizeCartItems(updated.data.items ?: mergeCartItem(cartItems, cartItem))
+                                        cartItems = backendItems
+                                        totals = updated.data
+                                        errorMessage = null
+                                    }
+                                    is ApiResult.Failure -> {
+                                        failedSkus += sku
+                                    }
                                 }
-                                is ApiResult.Failure -> {
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                failedSkus += sku
+                            }
+                        } else {
+                            val previousCartItems = cartItems
+                            val existingIndex = cartItems.indexOfFirst { it.sku == cartItem.sku }
+                            val updatedItem = if (existingIndex >= 0) {
+                                cartItems.toMutableList().also { it[existingIndex] = it[existingIndex].copy(quantity = it[existingIndex].quantity + cartItem.quantity) }
+                            } else {
+                                cartItems + cartItem
+                            }
+                            cartItems = updatedItem
+                            if (cartDao != null) {
+                                try {
+                                    val savedItem = cartItems.find { it.sku == cartItem.sku } ?: cartItem
+                                    cartDao.insertOrUpdate(CartItemEntity.fromCartItem(savedItem, LOCAL_OFFLINE_CART_KEY))
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (_: Exception) {
+                                    cartItems = previousCartItems
                                     failedSkus += sku
                                 }
                             }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (_: Exception) {
-                            failedSkus += sku
-                        }
-                    } else {
-                        val existingIndex = cartItems.indexOfFirst { it.sku == cartItem.sku }
-                        val updatedItem = if (existingIndex >= 0) {
-                            cartItems.toMutableList().also { it[existingIndex] = it[existingIndex].copy(quantity = it[existingIndex].quantity + cartItem.quantity) }
-                        } else {
-                            cartItems + cartItem
-                        }
-                        cartItems = updatedItem
-                        if (cartDao != null) {
-                            try {
-                                val savedItem = cartItems.find { it.sku == cartItem.sku } ?: cartItem
-                                cartDao.insertOrUpdate(CartItemEntity.fromCartItem(savedItem, LOCAL_OFFLINE_CART_KEY))
-                            } catch (_: Exception) {}
                         }
                     }
+                    if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                    if (cartDao != null && targetCustomerId.isNotBlank()) {
+                        try {
+                            cartDao.clearCart(targetCustomerId)
+                            cartDao.insertAll(cartItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
+                        } catch (_: Exception) {}
+                    }
+                    if (failedSkus.isNotEmpty()) {
+                        val message = "Could not reorder ${failedSkus.size} item(s). Please refresh your cart."
+                        errorMessage = message
+                        _addEvents.trySend(CartAddEvent.Failure(message))
+                    } else {
+                        _addEvents.trySend(CartAddEvent.Success("REORDER_ALL", "All order items added to cart"))
+                    }
+                    syncCouponDiscount()
                 }
-                if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
-                if (cartDao != null && targetCustomerId.isNotBlank()) {
-                    try {
-                        cartDao.clearCart(targetCustomerId)
-                        cartDao.insertAll(cartItems.map { CartItemEntity.fromCartItem(it, targetCustomerId) })
-                    } catch (_: Exception) {}
-                }
-                if (failedSkus.isNotEmpty()) {
-                    val message = "Could not reorder ${failedSkus.size} item(s). Please refresh your cart."
-                    errorMessage = message
-                    _addEvents.trySend(CartAddEvent.Failure(message))
-                } else {
-                    _addEvents.trySend(CartAddEvent.Success("REORDER_ALL", "All order items added to cart"))
-                }
-                syncCouponDiscount()
+            } finally {
+                reorderAllJob = null
             }
         }
     }
@@ -705,7 +754,7 @@ class CartViewModel(
                         is ApiResult.Failure -> {
                             cartItems = previousCartItems
                             totals = previousTotals
-                            errorMessage = updated.error.message ?: "Could not update item quantity."
+                            errorMessage = updated.error.message.ifBlank { "Could not update item quantity." }
                         }
                     }
                 } else {
@@ -714,7 +763,16 @@ class CartViewModel(
                         if (targetItem != null) {
                             try {
                                 cartDao.insertOrUpdate(CartItemEntity.fromCartItem(targetItem, LOCAL_OFFLINE_CART_KEY))
-                            } catch (_: Exception) {}
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                if (generation == customerGeneration && customerId.trim() == targetCustomerId) {
+                                    cartItems = previousCartItems
+                                    totals = previousTotals
+                                    errorMessage = "Could not update the offline cart."
+                                }
+                                return@withLock
+                            }
                         }
                     }
                 }
@@ -752,14 +810,23 @@ class CartViewModel(
                         is ApiResult.Failure -> {
                             cartItems = previousCartItems
                             totals = previousTotals
-                            errorMessage = updated.error.message ?: "Could not remove item from cart."
+                            errorMessage = updated.error.message.ifBlank { "Could not remove item from cart." }
                         }
                     }
                 } else {
                     if (cartDao != null) {
                         try {
                             cartDao.deleteBySku(sku, LOCAL_OFFLINE_CART_KEY)
-                        } catch (_: Exception) {}
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            if (generation == customerGeneration && customerId.trim() == targetCustomerId) {
+                                cartItems = previousCartItems
+                                totals = previousTotals
+                                errorMessage = "Could not remove item from the offline cart."
+                            }
+                            return@withLock
+                        }
                     }
                 }
                 syncCouponDiscount()
@@ -774,17 +841,30 @@ class CartViewModel(
             cartMutex.withLock {
                 if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val item = cartItems.firstOrNull { it.sku == sku } ?: return@withLock
+                val previousSaved = saveForLaterItems
+                val newSaved = previousSaved.filterNot { it.sku == sku } + item
+
+                // Persist the saved item before removing it from the cart
+                appContext?.let { ctx ->
+                    com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, newSaved)
+                }
 
                 if (targetCustomerId.isNotBlank()) {
                     val result = repository.removeCartItem(targetCustomerId, sku)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (result) {
                         is ApiResult.Failure -> {
+                            // Rollback saved items store if backend removal failed
+                            appContext?.let { ctx ->
+                                com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
+                            }
                             errorMessage = result.error.message
                             return@withLock
                         }
                         is ApiResult.Success -> {
-                            val backendItems = sanitizeCartItems(result.data.items ?: emptyList())
+                            val backendItems = sanitizeCartItems(
+                                result.data.items ?: cartItems.filterNot { it.sku == sku }
+                            )
                             cartItems = backendItems
                             totals = result.data
                             if (cartDao != null) {
@@ -797,12 +877,16 @@ class CartViewModel(
                         cartDao?.deleteBySku(sku, LOCAL_OFFLINE_CART_KEY)
                         cartItems = cartItems.filterNot { it.sku == sku }
                     } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        appContext?.let { ctx ->
+                            com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
+                        }
                         errorMessage = "Could not save this item for later."
                         return@withLock
                     }
                 }
 
-                saveForLaterItems = saveForLaterItems.filterNot { it.sku == sku } + item
+                saveForLaterItems = newSaved
                 syncCouponDiscount()
             }
         }
@@ -816,7 +900,7 @@ class CartViewModel(
                 if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val targetItem = saveForLaterItems.find { it.sku == sku } ?: return@withLock
                 val prodSellingPrice = targetItem.unitPrice.toDouble().coerceAtLeast(1.0)
-                val prodPrice = (targetItem.mrp?.toDouble() ?: prodSellingPrice).coerceAtLeast(prodSellingPrice)
+                val prodPrice = targetItem.mrp.toDouble().coerceAtLeast(prodSellingPrice)
                 val prod = CommerceProduct(
                     id = targetItem.productId,
                     sku = targetItem.sku,
@@ -861,6 +945,9 @@ class CartViewModel(
                             totals = updated.data
                             errorMessage = null
                             saveForLaterItems = saveForLaterItems.filterNot { it.sku == sku }
+                            appContext?.let { ctx ->
+                                com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, saveForLaterItems)
+                            }
                             _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
                             if (cartDao != null) {
                                 try {
@@ -872,7 +959,7 @@ class CartViewModel(
                         is ApiResult.Failure -> {
                             cartItems = previousCartItems
                             totals = previousTotals
-                            val errMsg = updated.error.message ?: "Could not move item back to cart."
+                            val errMsg = updated.error.message.ifBlank { "Could not move item back to cart." }
                             errorMessage = errMsg
                             _addEvents.trySend(CartAddEvent.Failure(errMsg))
                             return@withLock
@@ -882,9 +969,21 @@ class CartViewModel(
                     if (cartDao != null) {
                         try {
                             cartDao.insertOrUpdate(CartItemEntity.fromCartItem(updatedItem, LOCAL_OFFLINE_CART_KEY))
-                        } catch (_: Exception) {}
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            cartItems = previousCartItems
+                            totals = previousTotals
+                            val errMsg = "Could not restore item to the offline cart."
+                            errorMessage = errMsg
+                            _addEvents.trySend(CartAddEvent.Failure(errMsg))
+                            return@withLock
+                        }
                     }
                     saveForLaterItems = saveForLaterItems.filterNot { it.sku == sku }
+                    appContext?.let { ctx ->
+                        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, saveForLaterItems)
+                    }
                     _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
                 }
                 syncCouponDiscount()
@@ -993,25 +1092,42 @@ class CartViewModel(
     }
 
     fun clear() {
-        val activeCustId = if (customerId.isNotBlank()) customerId else LOCAL_OFFLINE_CART_KEY
+        val activeCustId = customerId.ifBlank { LOCAL_OFFLINE_CART_KEY }
+        customerGeneration++
+        val clearGeneration = customerGeneration
+        accountSyncJob?.cancel()
+        cartLoadJob?.cancel()
+        isLoading = false
+
         cartItems = emptyList()
         totals = null
         appliedCouponCode = null
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
         isCouponError = false
-        if (cartDao != null) {
+
+        cartDao?.let { dao ->
             viewModelScope.launch {
                 try {
-                    cartDao.clearCart(activeCustId)
-                } catch (e: Exception) {
-                    // ignore
+                    dao.clearCart(activeCustId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    if (clearGeneration == customerGeneration) {
+                        errorMessage = "Could not clear the saved cart."
+                    }
                 }
             }
         }
     }
 
     fun reset() {
+        reorderAllJob?.cancel()
+        reorderAllJob = null
         clear()
+        customerId = ""
+        saveForLaterItems = emptyList()
+        errorMessage = null
+        availableCampaigns = emptyList()
     }
 }

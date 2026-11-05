@@ -592,6 +592,18 @@ CREATE TABLE IF NOT EXISTS promotions (
 CREATE INDEX IF NOT EXISTS idx_promotions_code ON promotions(code);
 CREATE INDEX IF NOT EXISTS idx_promotions_status ON promotions(status);
 
+CREATE TABLE IF NOT EXISTS promotion_redemptions (
+    id VARCHAR(64) PRIMARY KEY,
+    promotion_id VARCHAR(64) NOT NULL,
+    order_id VARCHAR(64) NOT NULL,
+    customer_id VARCHAR(64) NOT NULL,
+    discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_promo_redemptions_cust ON promotion_redemptions(promotion_id, customer_id);
+CREATE INDEX IF NOT EXISTS idx_promo_redemptions_order ON promotion_redemptions(order_id);
+
 -- -----------------------------------------------------------------------------
 -- 15. STORE & APP DELIVERY CONFIGURATION
 -- -----------------------------------------------------------------------------

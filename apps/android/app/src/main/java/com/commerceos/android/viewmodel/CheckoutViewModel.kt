@@ -90,7 +90,10 @@ data class CheckoutUiState(
         }
 
     val readyForPayment: Boolean
-        get() = cartValid &&
+        get() = state != CheckoutState.PlacingOrder &&
+            state != CheckoutState.Paying &&
+            state !is CheckoutState.Confirmed &&
+            cartValid &&
             addressValid &&
             serviceabilityValid &&
             pricingValid &&
@@ -116,15 +119,35 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
     private fun computePayloadFingerprint(
         customerId: String,
-        addressId: String?,
+        address: ApiAddress,
         items: List<CartItem>,
         prescriptionId: String?,
         couponCode: String?,
-        paymentMethod: String?
+        paymentMethod: String?,
+        slotText: String?
     ): String {
-        val itemsSig = items.joinToString(",") { "${it.sku}:${it.quantity}:${it.unitPrice}" }
-        return "$customerId|$addressId|$itemsSig|$prescriptionId|$couponCode|$paymentMethod"
+        val itemSignature = items.joinToString("\u001e") {
+            "${it.sku.length}:${it.sku}:${it.quantity}:${it.unitPrice.toPlainString()}"
+        }
+        val canonical = listOf(
+            customerId,
+            address.toString(),
+            itemSignature,
+            prescriptionId.orEmpty(),
+            couponCode.orEmpty(),
+            paymentMethod.orEmpty(),
+            slotText.orEmpty()
+        ).joinToString("\u001f")
+
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
+
+    private fun serviceabilitySignature(items: List<CartItem>): String =
+        items.joinToString("|") {
+            "${it.sku.length}:${it.sku}:${it.quantity}:${it.coldChain}"
+        }
 
     /** Called when the customer reaches address selection: snapshot cart + totals. Preserves selected address/Rx if already set. */
     fun start(
@@ -133,7 +156,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
         couponDiscount: BigDecimal = BigDecimal.ZERO,
         couponCode: String? = null
     ) {
-        if (uiState.isProcessing) return
+        if (uiState.isProcessing || uiState.state is CheckoutState.Confirmed) return
 
         val targetCustomerId = customerId.trim()
         val sameCustomer = this.customerId == targetCustomerId
@@ -171,18 +194,24 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
         if (address != null) refreshServiceability()
     }
 
+    private fun canEditCheckout(): Boolean =
+        !uiState.isProcessing && uiState.state !is CheckoutState.Confirmed
+
     /** Address change triggers immediate universal serviceability. */
     fun selectAddress(address: ApiAddress) {
+        if (!canEditCheckout()) return
         uiState = uiState.copy(address = address)
         refreshServiceability()
     }
 
     fun attachPrescription(prescriptionId: String?) {
+        if (!canEditCheckout()) return
         uiState = uiState.copy(prescriptionId = prescriptionId)
         revalidateIfReady()
     }
 
     fun attachAppointmentSlot(slotText: String?) {
+        if (!canEditCheckout()) return
         uiState = uiState.copy(selectedSlotText = slotText)
         revalidateIfReady()
     }
@@ -205,7 +234,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
         val addressId = address.id
         val items = snapshot.items.toList()
-        val itemSignature = items.joinToString("|") { "${it.sku}:${it.quantity}" }
+        val itemSignature = serviceabilitySignature(items)
         val requestItems = items.map {
             ServiceabilityItem(it.sku, it.quantity, it.coldChain)
         }
@@ -216,7 +245,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
         serviceabilityJob = viewModelScope.launch {
             val result = repository.getServiceability(customerIdSnapshot, addressId, requestItems)
 
-            val currentSignature = uiState.items.joinToString("|") { "${it.sku}:${it.quantity}" }
+            val currentSignature = serviceabilitySignature(uiState.items)
             if (customerId.trim() != customerIdSnapshot ||
                 uiState.address?.id != addressId ||
                 currentSignature != itemSignature
@@ -290,6 +319,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
     fun executeCheckout(paymentMethod: String) {
         val snapshot = uiState
+        if (snapshot.isProcessing || snapshot.state is CheckoutState.Confirmed) return
         val customerIdSnapshot = customerId.trim()
 
         if (!snapshot.readyForPayment) {
@@ -344,11 +374,12 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
             val currentFingerprint = computePayloadFingerprint(
                 customerIdSnapshot,
-                address.id,
+                address,
                 snapshot.items,
                 snapshot.prescriptionId,
                 snapshot.couponCode,
-                paymentMethod
+                paymentMethod,
+                snapshot.selectedSlotText
             )
             if (lastPayloadFingerprint != currentFingerprint) {
                 checkoutIdempotencyKey = null
@@ -374,7 +405,7 @@ class CheckoutViewModel(private val repository: AppRepository) : ViewModel() {
 
             when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
                 is ApiResult.Success -> {
-                    uiState = uiState.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
+                    uiState = snapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
                     checkoutIdempotencyKey = null
                     lastPayloadFingerprint = null
                     _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))

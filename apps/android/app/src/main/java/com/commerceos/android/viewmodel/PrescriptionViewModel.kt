@@ -11,13 +11,17 @@ import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.repository.AppRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class PrescriptionViewModel(
     private val repository: AppRepository,
-    private val appContext: Context? = null
+    private val appContext: Context? = null,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
 
     var prescriptions by mutableStateOf<List<Prescription>>(emptyList())
@@ -26,15 +30,27 @@ class PrescriptionViewModel(
     var isLoading by mutableStateOf(false)
         private set
 
+    var isUploading by mutableStateOf(false)
+        private set
+
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
     private var loadJob: Job? = null
     private var loadGeneration = 0L
     private var uploadJob: Job? = null
+    private var uploadGeneration = 0L
+    private var activeCustomerId: String = ""
+    internal var localPrescriptionsOverride: ((String) -> List<Prescription>)? = null
 
     fun load(customerId: String) {
         val id = customerId.trim()
+        if (activeCustomerId != id) {
+            activeCustomerId = id
+            uploadGeneration++
+            uploadJob?.cancel()
+            isUploading = false
+        }
         loadGeneration++
         val generation = loadGeneration
         loadJob?.cancel()
@@ -49,7 +65,7 @@ class PrescriptionViewModel(
         loadJob = viewModelScope.launch {
             isLoading = true
             try {
-                val local = if (appContext != null) {
+                val local = localPrescriptionsOverride?.invoke(id) ?: if (appContext != null) {
                     LocalPrescriptionManager.getPrescriptions(appContext, id)
                         .filter { it.customerId == id }
                 } else {
@@ -64,7 +80,17 @@ class PrescriptionViewModel(
                     is ApiResult.Success -> {
                         if (generation == loadGeneration) {
                             val server = result.data.filter { it.customerId == id }
-                            prescriptions = (local + server).distinctBy { it.id }
+                            val localById = local.associateBy { it.id }
+                            val serverIds = server.mapTo(mutableSetOf()) { it.id }
+
+                            val mergedServer = server.map { remote ->
+                                remote.copy(
+                                    attachments = localById[remote.id]?.attachments
+                                        ?.takeIf { it.isNotEmpty() }
+                                        ?: remote.attachments
+                                )
+                            }
+                            prescriptions = mergedServer + local.filterNot { it.id in serverIds }
                         }
                     }
                     is ApiResult.Failure -> {
@@ -85,6 +111,55 @@ class PrescriptionViewModel(
         }
     }
 
+    private fun readBoundedBytes(file: File, maxBytes: Int = 5 * 1024 * 1024): ByteArray {
+        val declaredLength = file.length()
+        require(declaredLength <= maxBytes.toLong()) {
+            "Prescription image must be 5 MiB or smaller."
+        }
+        val out = java.io.ByteArrayOutputStream(if (declaredLength in 1..maxBytes.toLong()) declaredLength.toInt() else 8192)
+        val buffer = ByteArray(8192)
+        var totalRead = 0L
+        file.inputStream().use { input ->
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) {
+                totalRead += read
+                require(totalRead <= maxBytes.toLong()) {
+                    "Prescription image must be 5 MiB or smaller."
+                }
+                out.write(buffer, 0, read)
+            }
+        }
+        val bytes = out.toByteArray()
+        require(bytes.isNotEmpty()) { "Prescription image could not be read." }
+        return bytes
+    }
+
+    private suspend fun encodeAttachments(paths: List<String>): List<String> =
+        withContext(ioDispatcher) {
+            paths.map { path ->
+                if (path.startsWith("data:image/")) {
+                    require(path.length <= 7_000_000) { "Prescription image is too large." }
+                    path
+                } else {
+                    val file = File(path.removePrefix("file://"))
+                    require(file.isFile) { "Prescription image could not be read." }
+
+                    val bytes = readBoundedBytes(file)
+
+                    val mime = java.net.URLConnection.guessContentTypeFromStream(
+                        java.io.ByteArrayInputStream(bytes)
+                    )?.takeIf { it.startsWith("image/") }
+                        ?: throw IllegalArgumentException("Unsupported prescription image format.")
+
+                    val base64 = android.util.Base64.encodeToString(
+                        bytes,
+                        android.util.Base64.NO_WRAP
+                    )
+                    "data:$mime;base64,$base64"
+                }
+            }
+        }
+
     fun upload(
         customerId: String,
         patientName: String,
@@ -100,29 +175,14 @@ class PrescriptionViewModel(
             errorMessage = "Attach at least one prescription image"
             return
         }
+        activeCustomerId = safeCustomerId
+        val requestGeneration = ++uploadGeneration
         uploadJob?.cancel()
         uploadJob = viewModelScope.launch {
-            isLoading = true
+            isUploading = true
             errorMessage = null
             try {
-                val lightweightAttachments = attachments.map { path ->
-                    if (path.startsWith("data:")) {
-                        path
-                    } else {
-                        val file = File(path.removePrefix("file://"))
-                        if (file.exists() && file.length() in 1..(5 * 1024 * 1024)) {
-                            try {
-                                val bytes = file.readBytes()
-                                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                "data:image/jpeg;base64,$base64"
-                            } catch (_: Exception) {
-                                file.name
-                            }
-                        } else {
-                            file.name
-                        }
-                    }
-                }
+                val lightweightAttachments = encodeAttachments(attachments)
                 when (val result = repository.uploadPrescription(
                     UploadPrescriptionRequest(
                         customerId = safeCustomerId,
@@ -132,43 +192,55 @@ class PrescriptionViewModel(
                     )
                 )) {
                     is ApiResult.Success -> {
-                        val serverRx = result.data.copy(attachments = attachments)
-                        if (appContext != null) {
-                            LocalPrescriptionManager.savePrescription(appContext, serverRx)
-                            com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
-                                appContext,
-                                com.commerceos.android.notifications.InAppNotificationItem(
-                                    title = "Prescription Uploaded",
-                                    message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Pending review by pharmacy vendor.",
-                                    category = "Prescriptions",
-                                    deepLinkAction = "PRESCRIPTIONS"
+                        if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
+                            val serverRx = result.data.copy(attachments = attachments)
+                            if (appContext != null) {
+                                LocalPrescriptionManager.savePrescription(appContext, serverRx)
+                                com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
+                                    appContext,
+                                    com.commerceos.android.notifications.InAppNotificationItem(
+                                        title = "Prescription Uploaded",
+                                        message = "Prescription slip registered for ${patientName.ifBlank { "patient" }}. Pending review by pharmacy vendor.",
+                                        category = "Prescriptions",
+                                        deepLinkAction = "PRESCRIPTIONS"
+                                    )
                                 )
-                            )
+                            }
+                            prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
+                            errorMessage = null
+                            onUploaded?.invoke(serverRx)
                         }
-                        prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
-                        errorMessage = null
-                        onUploaded?.invoke(serverRx)
                     }
                     is ApiResult.Failure -> {
-                        errorMessage = result.error.message ?: "Failed to upload prescription. Please try again."
+                        if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
+                            errorMessage = result.error.message.ifBlank { "Failed to upload prescription. Please try again." }
+                        }
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                errorMessage = "Could not upload prescription: ${e.message}"
+                if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
+                    errorMessage = "Could not upload prescription: ${e.message}"
+                }
             } finally {
-                isLoading = false
-                uploadJob = null
+                if (requestGeneration == uploadGeneration) {
+                    isUploading = false
+                    uploadJob = null
+                }
             }
         }
     }
 
     fun reset() {
+        uploadGeneration++
+        loadGeneration++
+        activeCustomerId = ""
         loadJob?.cancel()
         uploadJob?.cancel()
         prescriptions = emptyList()
         isLoading = false
+        isUploading = false
         errorMessage = null
     }
 }

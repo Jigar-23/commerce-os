@@ -51,20 +51,25 @@ public final class AppContainer: ObservableObject {
     }
     
     public func loadSession() {
+        // Securely retrieve authentication token from Keychain only (never UserDefaults)
+        let token = KeychainHelper.shared.get(key: "auth_token")
+        // Clean up legacy insecure storage if present
+        UserDefaults.standard.removeObject(forKey: "auth_token")
+
         if let id = UserDefaults.standard.string(forKey: "customer_id"),
-           let token = UserDefaults.standard.string(forKey: "auth_token"),
+           let validToken = token,
            let phone = UserDefaults.standard.string(forKey: "customer_phone"),
-           !token.isEmpty && !phone.isEmpty {
+           !validToken.isEmpty && !phone.isEmpty {
             let name = UserDefaults.standard.string(forKey: "customer_name")
             self.customerSession = CustomerSessionDto(
                 customerId: id,
                 phone: phone,
-                accessToken: token,
+                accessToken: validToken,
                 refreshToken: nil,
                 name: name
             )
             self.isAuthenticated = true
-            self.apiClient.setAuth(token: token, customerId: id)
+            self.apiClient.setAuth(token: validToken, customerId: id)
             AddressViewModel.shared.initialize(customerId: id)
             Task {
                 await self.addressRepository.loadAddresses(customerId: id)
@@ -81,7 +86,10 @@ public final class AppContainer: ObservableObject {
         UserDefaults.standard.set(customerId, forKey: "customer_id")
         UserDefaults.standard.set(phone, forKey: "customer_phone")
         UserDefaults.standard.set(phone, forKey: "last_login_phone")
-        UserDefaults.standard.set(token, forKey: "auth_token")
+        // Store auth token strictly in secure Keychain
+        KeychainHelper.shared.save(key: "auth_token", data: token)
+        UserDefaults.standard.removeObject(forKey: "auth_token")
+
         if let name = name {
             UserDefaults.standard.set(name, forKey: "customer_name")
         } else {
@@ -108,6 +116,7 @@ public final class AppContainer: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "customer_phone")
         UserDefaults.standard.removeObject(forKey: "auth_token")
         UserDefaults.standard.removeObject(forKey: "customer_name")
+        KeychainHelper.shared.delete(key: "auth_token")
         apiClient.clearAuth()
         AddressViewModel.shared.reset()
         self.customerSession = nil

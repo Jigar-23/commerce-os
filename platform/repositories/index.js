@@ -3188,44 +3188,82 @@ class TransactionalDeliveryRepository {
       const orderItems = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []));
       if (order.store_id && orderItems.length > 0 && this.inventoryRepo) {
         const fulfillRes = await this.inventoryRepo.fulfillStockTransactionally(client, order.store_id, orderItems);
-        if (!fulfillRes.ok) {
-          console.warn('[DeliveryComplete] Inventory fulfillment notice:', fulfillRes.message);
+        if (!fulfillRes || !fulfillRes.ok) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 500,
+            error: 'INVENTORY_FULFILLMENT_FAILED',
+            message: fulfillRes?.message || 'Failed to consume stock reservation on delivery.'
+          };
         }
       }
 
       // 4. COD Collection & Reconciliation Check
+      let isCodPaid = false;
       if (order.is_cod) {
-        const isCodCollected = Boolean(
-          options.codCollected ||
-          options.cashCollected != null ||
-          options.collectedAmount != null ||
-          options.codAmount != null
-        );
+        const expectedCod = Number(order.cod_amount || order.total_amount || 0);
+        const hasAmountParam = options.codAmount != null || options.cashCollected != null || options.collectedAmount != null;
         const resolvedAmount = options.codAmount != null ? Number(options.codAmount) :
           (options.cashCollected != null ? Number(options.cashCollected) :
           (options.collectedAmount != null ? Number(options.collectedAmount) : null));
 
-        if (isCodCollected) {
+        if (!hasAmountParam && options.codCollected) {
+          const existingLedger = await client.query(`SELECT * FROM cod_ledger WHERE order_id = $1`, [order.order_id || order.id]);
+          if (existingLedger.rows.length > 0 && existingLedger.rows[0].reconciled && Number(existingLedger.rows[0].amount_collected) >= expectedCod) {
+            isCodPaid = true;
+          } else {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'COD_AMOUNT_REQUIRED',
+              message: `Exact cash collection amount of ₹${expectedCod} must be confirmed before delivery completion.`
+            };
+          }
+        } else {
+          if (resolvedAmount == null || isNaN(resolvedAmount) || resolvedAmount <= 0) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'COD_AMOUNT_REQUIRED',
+              message: `collectedAmount must be explicitly provided and match order COD total (₹${expectedCod}).`
+            };
+          }
+
+          if (resolvedAmount < expectedCod) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'COD_AMOUNT_SHORTAGE',
+              message: `Collected amount (₹${resolvedAmount}) is less than expected COD total (₹${expectedCod}). Shortages cannot be marked as delivered and paid.`
+            };
+          }
+
+          if (resolvedAmount > expectedCod) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'INVALID_COD_AMOUNT',
+              message: `Collected amount (₹${resolvedAmount}) cannot exceed expected COD total (₹${expectedCod}).`
+            };
+          }
+
           await client.query(
             `UPDATE cod_ledger 
-             SET amount_collected = COALESCE($2, amount_expected),
-                 shortage_amount = GREATEST(0, amount_expected - COALESCE($2, amount_expected)),
-                 status = CASE WHEN COALESCE($2, amount_expected) < amount_expected THEN 'COLLECTED_SHORTAGE' ELSE 'COLLECTED_RECONCILED' END,
-                 reconciled = CASE WHEN COALESCE($2, amount_expected) < amount_expected THEN FALSE ELSE TRUE END,
+             SET amount_collected = $2,
+                 shortage_amount = 0,
+                 status = 'COLLECTED_RECONCILED',
+                 reconciled = TRUE,
                  collector_id = $3,
                  updated_at = NOW()
              WHERE order_id = $1`,
             [order.order_id || order.id, resolvedAmount, riderId]
           );
-        }
-        const codCheckRes = await client.query(
-          `SELECT * FROM cod_ledger WHERE order_id = $1`,
-          [order.order_id || order.id]
-        );
-        const codEntry = codCheckRes.rows[0];
-        if (codEntry && !['COLLECTED', 'COLLECTED_RECONCILED', 'COLLECTED_SHORTAGE'].includes(codEntry.status) && !isCodCollected) {
-          await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 409, error: 'COD_NOT_COLLECTED', message: 'Cash on delivery must be collected and confirmed before customer handoff.' };
+          isCodPaid = true;
         }
       }
 
@@ -3239,9 +3277,12 @@ class TransactionalDeliveryRepository {
 
       await client.query(
         `UPDATE orders 
-         SET status = 'DELIVERED', payment_status = CASE WHEN is_cod THEN 'PAID' ELSE payment_status END, otp_verified_at = NOW(), updated_at = NOW()
+         SET status = 'DELIVERED', 
+             payment_status = CASE WHEN is_cod THEN (CASE WHEN $2 = TRUE THEN 'PAID' ELSE 'PAYMENT_PENDING' END) ELSE payment_status END, 
+             otp_verified_at = NOW(), 
+             updated_at = NOW()
          WHERE id = $1 OR order_id = $1`,
-        [order.id || order.order_id]
+        [order.id || order.order_id, isCodPaid]
       );
 
       // 6. Transactional Outbox Event
@@ -3479,6 +3520,34 @@ class TransactionalOrderRepository {
       try {
         await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
 
+        // Fast-path Idempotency Replay Check: Return winning order immediately if already placed
+        const idempotencyKey = data.idempotencyKey || data.idempotency_key || null;
+        if (idempotencyKey) {
+          const existingOrderRes = await client.query(
+            `SELECT id, order_id, customer_id, store_id, status, total_amount, payment_status, request_hash, items, delivery_address
+             FROM orders 
+             WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
+            [customerId, idempotencyKey]
+          );
+          if (existingOrderRes.rows.length > 0) {
+            const existingOrder = existingOrderRes.rows[0];
+            const existingSessionRes = await client.query(
+              `SELECT id, delivery_id, order_id, store_id, rider_id, state, merchant_name, customer_name
+               FROM delivery_sessions WHERE order_id = $1 LIMIT 1`,
+              [existingOrder.order_id || existingOrder.id]
+            );
+            await client.query('COMMIT');
+            const { delivery_otp_hash, ...safeExistingOrder } = existingOrder;
+            return {
+              ok: true,
+              httpStatus: 200,
+              isIdempotentReplay: true,
+              order: safeExistingOrder,
+              session: existingSessionRes.rows[0] || null
+            };
+          }
+        }
+
       // 6. Authoritative Customer Resolution (from customers table)
       const customerRes = await client.query(
         `SELECT id, full_name, phone, is_active FROM customers WHERE id = $1`,
@@ -3592,8 +3661,27 @@ class TransactionalOrderRepository {
       }
 
       // 9. Store-Context Canonical Catalog Resolution & Duplicate Line Normalization
+      let itemsToOrder = data.items;
+      if (data.cartCheckout) {
+        const cartLockRes = await client.query(
+          `SELECT items FROM carts WHERE customer_id = $1 FOR UPDATE`,
+          [customerId]
+        );
+        if (cartLockRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 400, error: 'CART_EMPTY', message: 'Cannot checkout with an empty cart.' };
+        }
+        const cartItemsRaw = cartLockRes.rows[0].items;
+        const currentCartItems = typeof cartItemsRaw === 'string' ? JSON.parse(cartItemsRaw) : (cartItemsRaw || []);
+        if (!Array.isArray(currentCartItems) || currentCartItems.length === 0) {
+          await client.query('ROLLBACK');
+          return { ok: false, httpStatus: 400, error: 'CART_EMPTY', message: 'Cart was already checked out or is empty.' };
+        }
+        itemsToOrder = currentCartItems;
+      }
+
       const mergedBySku = new Map();
-      for (const rawItem of data.items) {
+      for (const rawItem of itemsToOrder) {
         const lookupKey = rawItem.sku || rawItem.productId || rawItem.id;
         if (!lookupKey) continue;
         const qty = Math.max(1, Number(rawItem.quantity) || 1);
@@ -3673,7 +3761,6 @@ class TransactionalOrderRepository {
       })).digest('hex');
 
       // 11. Idempotency Check with Request Hash Binding
-      const idempotencyKey = data.idempotencyKey || data.idempotency_key || null;
       if (idempotencyKey) {
         const existingOrderRes = await client.query(
           `SELECT id, order_id, customer_id, store_id, status, total_amount, payment_status, request_hash, items, delivery_address
@@ -3710,35 +3797,18 @@ class TransactionalOrderRepository {
         }
       }
 
-      // Cart checkout atomicity: lock and verify cart within this order transaction
-      if (data.cartCheckout) {
-        const cartLockRes = await client.query(
-          `SELECT items FROM carts WHERE customer_id = $1 FOR UPDATE`,
-          [customerId]
-        );
-        if (cartLockRes.rows.length === 0) {
-          await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 400, error: 'CART_EMPTY', message: 'Cannot checkout with an empty cart.' };
-        }
-        const cartItemsRaw = cartLockRes.rows[0].items;
-        const currentCartItems = typeof cartItemsRaw === 'string' ? JSON.parse(cartItemsRaw) : (cartItemsRaw || []);
-        if (!Array.isArray(currentCartItems) || currentCartItems.length === 0) {
-          await client.query('ROLLBACK');
-          return { ok: false, httpStatus: 400, error: 'CART_EMPTY', message: 'Cart was already checked out or is empty.' };
-        }
-      }
-
       // 12. Authoritative Financial Totals via Pricing Engine
       const calculatedItemsSubtotal = resolvedItemSnapshots.reduce((acc, it) => acc + it.lineTotal, 0);
       const pricingEngine = require('../pricing-engine');
       // Zero client trust: Client cannot inject arbitrary discountAmount or discount overrides.
       // Discounts must originate strictly from verified promotion/coupon tables in PostgreSQL.
       let authoritativeDiscount = 0;
+      let matchedPromotion = null;
       const requestedCode = String(data.couponCode || data.coupon_code || '').trim().toUpperCase();
 
       if (requestedCode) {
         try {
-          const promoRes = await client.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [requestedCode]);
+          const promoRes = await client.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1) FOR UPDATE', [requestedCode]);
           if (promoRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return { ok: false, httpStatus: 400, error: 'INVALID_COUPON', message: `Coupon code '${requestedCode}' is invalid.` };
@@ -3748,6 +3818,27 @@ class TransactionalOrderRepository {
             await client.query('ROLLBACK');
             return { ok: false, httpStatus: 400, error: 'COUPON_INACTIVE', message: `Coupon '${requestedCode}' is currently ${promo.status.toLowerCase()}.` };
           }
+          if (promo.valid_until && new Date(promo.valid_until) < new Date()) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'COUPON_EXPIRED', message: `Coupon '${requestedCode}' has expired.` };
+          }
+          const usageCount = Number(promo.usage_count || 0);
+          const maxUsage = promo.max_usage != null ? Number(promo.max_usage) : null;
+          if (maxUsage != null && usageCount >= maxUsage) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'COUPON_USAGE_LIMIT_EXCEEDED', message: `Coupon '${requestedCode}' has reached its maximum global usage limit.` };
+          }
+
+          // Per-customer redemption check
+          const priorRedemptions = await client.query(
+            `SELECT COUNT(*)::int as count FROM promotion_redemptions WHERE promotion_id = $1 AND customer_id = $2`,
+            [promo.id, customerId]
+          );
+          if (priorRedemptions.rows[0].count > 0) {
+            await client.query('ROLLBACK');
+            return { ok: false, httpStatus: 400, error: 'COUPON_ALREADY_USED', message: `Coupon '${requestedCode}' has already been redeemed by this account.` };
+          }
+
           const minOrder = Number(promo.min_order_value || 0);
           if (calculatedItemsSubtotal < minOrder) {
             await client.query('ROLLBACK');
@@ -3761,13 +3852,15 @@ class TransactionalOrderRepository {
             authoritativeDiscount = Math.min(Number(promo.flat_discount || 0), calculatedItemsSubtotal);
           }
           authoritativeDiscount = Math.round(authoritativeDiscount * 100) / 100;
+          matchedPromotion = promo;
         } catch (promoErr) {
-          console.warn('[TransactionalOrderRepository] promotions query warning:', promoErr.message);
-          if (requestedCode === 'HEALTH30' && calculatedItemsSubtotal >= 799) {
-            authoritativeDiscount = 150;
-          } else if (requestedCode === 'SAVE10' && calculatedItemsSubtotal >= 199) {
-            authoritativeDiscount = 100;
-          }
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 400,
+            error: promoErr.error || 'COUPON_LOOKUP_FAILED',
+            message: promoErr.message || `Failed to validate coupon '${requestedCode}'.`
+          };
         }
       }
 
@@ -4033,6 +4126,19 @@ class TransactionalOrderRepository {
         );
       }
 
+      // Record promotion redemption & increment usage
+      if (matchedPromotion) {
+        await client.query(
+          `UPDATE promotions SET usage_count = COALESCE(usage_count, 0) + 1, updated_at = NOW() WHERE id = $1`,
+          [matchedPromotion.id]
+        );
+        await client.query(
+          `INSERT INTO promotion_redemptions (id, promotion_id, order_id, customer_id, discount_amount, created_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())`,
+          ['red_' + crypto.randomUUID(), matchedPromotion.id, orderId, customerId, authoritativeDiscount]
+        ).catch(() => {});
+      }
+
       await client.query('COMMIT');
 
       return {
@@ -4268,9 +4374,20 @@ class TransactionalOrderRepository {
           return { ok: false, httpStatus: 403, error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' };
         }
 
-        if (order.status === 'CANCELLED') {
+        if (order.status === 'CANCELLED' || order.status === 'REJECTED') {
           await client.query('COMMIT');
           return { ok: true, order, isIdempotent: true };
+        }
+
+        const allowedRejectionStates = ['PLACED', 'PENDING', 'ACCEPTED', 'PROCESSING'];
+        if (!allowedRejectionStates.includes(order.status)) {
+          await client.query('ROLLBACK');
+          return {
+            ok: false,
+            httpStatus: 409,
+            error: 'INVALID_ORDER_STATE_FOR_REJECTION',
+            message: `Order in status '${order.status}' cannot be rejected by merchant. Rejection is only permitted prior to rider pickup.`
+          };
         }
 
         // Release stock reservation upon rejection: must abort transaction on failure
@@ -6509,32 +6626,52 @@ class TransactionalPaymentRepository {
           const isFailure = ['payment_intent.payment_failed', 'payment.failed', 'charge.failed'].includes(eventType) || (payload.status === 'failed');
 
           if (isSuccess && ord.payment_status !== 'PAID') {
-            await client.query(`UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE id = $1`, [ord.id]);
-            const payId = 'pay_' + crypto.randomUUID();
-            const amountCaptured = Number(payload.data?.object?.amount_received ? payload.data.object.amount_received / 100 : (payload.amount ? payload.amount / 100 : ord.total_amount));
-            await client.query(
-              `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'ONLINE', $5, $6, $7, NOW(), NOW())
-               ON CONFLICT DO NOTHING`,
-              [payId, payId, ord.order_id || ord.id, amountCaptured, provider || 'STRIPE', eventId, JSON.stringify(payload)]
-            );
+            const webhookCurrency = String(payload.data?.object?.currency || payload.payload?.payment?.entity?.currency || payload.currency || 'INR').toUpperCase();
+            const rawAmount = payload.data?.object?.amount_received != null ? payload.data.object.amount_received :
+              (payload.data?.object?.amount != null ? payload.data.object.amount :
+              (payload.payload?.payment?.entity?.amount != null ? payload.payload.payment.entity.amount :
+              (payload.amount != null ? payload.amount : null)));
+            const amountCaptured = rawAmount != null ? (rawAmount > 1000 && Number(ord.total_amount) < 1000 ? rawAmount / 100 : Number(rawAmount)) : Number(ord.total_amount);
 
-            // If order has no pending prescription and is in PLACED or PAYMENT_PENDING, enqueue dispatch
-            const items = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
-            const hasRx = items.some(it => it && (it.rxRequired || it.requiresPrescription));
-            if (!hasRx && ord.status !== 'CANCELLED') {
-              await client.query(`UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE id = $1 AND status IN ('PLACED', 'PAYMENT_PENDING')`, [ord.id]);
-              const outboxPayload = {
-                orderId: ord.order_id || ord.id,
-                storeId: ord.store_id,
-                type: 'DISPATCH_REQUESTED',
-                timestamp: new Date().toISOString()
-              };
+            if (webhookCurrency !== 'INR') {
+              console.warn(`[WebhookReconciliation] Currency mismatch: ${webhookCurrency} !== INR`);
+            } else if (Math.abs(amountCaptured - Number(ord.total_amount)) > 0.5) {
+              console.warn(`[WebhookReconciliation] Amount mismatch: ${amountCaptured} !== ${ord.total_amount}`);
+            } else {
+              await client.query(`UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE id = $1`, [ord.id]);
+              const payId = 'pay_' + crypto.randomUUID();
               await client.query(
-                `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
-                 VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())`,
-                ['evt_' + crypto.randomUUID(), ord.order_id || ord.id, JSON.stringify(outboxPayload)]
+                `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'ONLINE', $5, $6, $7, NOW(), NOW())
+                 ON CONFLICT DO NOTHING`,
+                [payId, payId, ord.order_id || ord.id, amountCaptured, provider || 'STRIPE', eventId, JSON.stringify(payload)]
               );
+
+              // Strict business gates before dispatching:
+              const isNotTerminal = !['CANCELLED', 'REJECTED', 'DELIVERED'].includes(ord.status);
+              let isRxApproved = true;
+              if (ord.prescription_id) {
+                const rxCheck = await client.query('SELECT status FROM prescriptions WHERE id = $1', [ord.prescription_id]);
+                isRxApproved = rxCheck.rows.length > 0 && rxCheck.rows[0].status === 'APPROVED';
+              } else if (ord.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+                isRxApproved = false;
+              }
+              const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
+
+              if (isNotTerminal && isRxApproved && isSellerAccepted) {
+                await client.query(`UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE id = $1 AND status IN ('PLACED', 'PAYMENT_PENDING')`, [ord.id]);
+                const outboxPayload = {
+                  orderId: ord.order_id || ord.id,
+                  storeId: ord.store_id,
+                  type: 'DISPATCH_REQUESTED',
+                  timestamp: new Date().toISOString()
+                };
+                await client.query(
+                  `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+                   VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())`,
+                  ['evt_' + crypto.randomUUID(), ord.order_id || ord.id, JSON.stringify(outboxPayload)]
+                );
+              }
             }
           } else if (isFailure && ord.payment_status !== 'PAID') {
             await client.query(`UPDATE orders SET payment_status = 'FAILED', updated_at = NOW() WHERE id = $1`, [ord.id]);
@@ -6592,7 +6729,13 @@ class TransactionalPaymentRepository {
         [order.order_id, order.id]
       );
       const totalCaptured = Number(payRes.rows[0].total_captured || 0);
-      const effectivePaymentCeiling = totalCaptured > 0 ? totalCaptured : Number(order.total_amount);
+      if (totalCaptured <= 0) {
+        await client.query('ROLLBACK');
+        const unpaidErr = new Error('NO_CAPTURED_PAYMENT_FOUND');
+        unpaidErr.statusCode = 422;
+        unpaidErr.message = 'Cannot issue refund: no captured payment record exists in database for this order.';
+        throw unpaidErr;
+      }
 
       const sumRes = await client.query(
         `SELECT COALESCE(SUM(amount), 0) as total_refunded FROM payment_refunds WHERE order_id = $1 AND status = 'COMPLETED'`,
@@ -6600,13 +6743,14 @@ class TransactionalPaymentRepository {
       );
       const priorRefunded = Number(sumRes.rows[0].total_refunded || 0);
       const requested = Number(refundAmount);
-      const orderTotal = effectivePaymentCeiling;
+      const maxAvailableForRefund = Math.max(0, totalCaptured - priorRefunded);
 
-      if (priorRefunded + requested > orderTotal) {
+      if (requested <= 0 || requested > maxAvailableForRefund) {
         await client.query('ROLLBACK');
         const excessErr = new Error('EXCEEDS_CAPTURED_AMOUNT');
         excessErr.statusCode = 422;
-        excessErr.details = { priorRefunded, requested, orderTotal };
+        excessErr.message = `Requested refund of ₹${requested} exceeds available captured balance of ₹${maxAvailableForRefund}.`;
+        excessErr.details = { priorRefunded, requested, totalCaptured, maxAvailableForRefund };
         throw excessErr;
       }
 
@@ -6618,7 +6762,7 @@ class TransactionalPaymentRepository {
         [refundId, refundId, order.order_id, requested, reason || 'Customer requested refund', idempotencyKey]
       );
 
-      const newStatus = (priorRefunded + requested >= orderTotal) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+      const newStatus = (priorRefunded + requested >= totalCaptured) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
       await client.query(
         `UPDATE orders SET payment_status = $1, updated_at = NOW() WHERE id = $2`,
         [newStatus, order.id]
@@ -6779,6 +6923,17 @@ class ProductionNotificationService {
     const cAddr = offer.customerAddress || offer.customer_address || '';
     const conciseDrop = cAddr ? (cAddr.split(',')[0] || cAddr).trim() : 'Drop address unavailable';
 
+    // Redact full customer street address for broadcast offers
+    const sanitizedBroadcastOffer = {
+      ...offer,
+      dropAddress: conciseDrop,
+      customerAddress: conciseDrop,
+      deliveryAddress: typeof offer.deliveryAddress === 'object' && offer.deliveryAddress ? {
+        locality: offer.deliveryAddress.locality || conciseDrop,
+        city: offer.deliveryAddress.city || 'Local Area'
+      } : conciseDrop
+    };
+
     const notifId = offer.notificationId || offer.notification_id || ('notif_' + crypto.randomUUID());
     const notifRecord = {
       id: notifId,
@@ -6794,7 +6949,7 @@ class ProductionNotificationService {
       title: `🚨 NEW DELIVERY · ₹${earnings}`,
       body: `${totalDist} km (~${duration} min) • Pickup: ${mName} • Drop: ${conciseDrop}`,
       actionUrl: `commerceos://rider/offer/${offer.offerId || offer.offer_id}`,
-      actionPayload: offer,
+      actionPayload: sanitizedBroadcastOffer,
       createdAt: new Date().toISOString(),
       expiresAt: Number(offer.offerExpiresAt || offer.offer_expires_at),
       readAt: null,
@@ -6818,18 +6973,16 @@ class ProductionNotificationService {
     if (this.sseBroadcaster) {
       const targetChannels = [
         riderId,
-        `rider_${riderId}`,
-        'rdr_9817916180',
-        'rider_rdr_9817916180',
-        'riders',
-        'all_riders',
-        'ALL'
+        `rider_${riderId}`
       ];
+      const offerStoreId = offer.storeId || offer.store_id;
+      if (offerStoreId) {
+        targetChannels.push(`store_riders_${offerStoreId}`);
+        targetChannels.push(`riders_store_${offerStoreId}`);
+      }
       for (const ch of targetChannels) {
-        await this.sseBroadcaster(ch, 'NEW_DISPATCH_OFFER', offer);
-        await this.sseBroadcaster(ch, 'NEW_ORDER_OFFER', offer);
-        await this.sseBroadcaster(ch, 'NEW_OFFER', offer);
-        await this.sseBroadcaster(ch, 'ORDER_OFFER', offer);
+        await this.sseBroadcaster(ch, 'NEW_DISPATCH_OFFER', sanitizedBroadcastOffer);
+        await this.sseBroadcaster(ch, 'NEW_ORDER_OFFER', sanitizedBroadcastOffer);
       }
       sseOk = true;
     }
@@ -7235,13 +7388,39 @@ async function initApplicationRepositories(options = {}) {
         const oCheck = await pool.query('SELECT * FROM orders WHERE order_id = $1 OR id = $1', [targetOrderId]);
         const currentOrder = oCheck.rows[0] || null;
 
-        if (!currentOrder || ['CANCELLED', 'DELIVERED'].includes(currentOrder.status)) {
+        if (!currentOrder || ['CANCELLED', 'DELIVERED', 'REJECTED'].includes(currentOrder.status)) {
           console.log(`[OutboxProcessor] Skipping dispatch for order ${targetOrderId} (status: ${currentOrder?.status || 'NOT_FOUND'})`);
           return;
         }
 
-        if (currentOrder.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
-          console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting pharmacist verification`);
+        // 1. Prescription Safety Gate: Must be approved by licensed pharmacist
+        if (currentOrder.prescription_id || currentOrder.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+          if (currentOrder.prescription_id) {
+            const rxCheck = await pool.query('SELECT status FROM prescriptions WHERE id = $1', [currentOrder.prescription_id]);
+            if (rxCheck.rows.length === 0 || rxCheck.rows[0].status !== 'APPROVED') {
+              console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting pharmacist verification`);
+              return;
+            }
+          } else {
+            console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting pharmacist verification`);
+            return;
+          }
+        }
+
+        // 2. Payment Safety Gate: Non-COD orders MUST have verified captured payment
+        const isCodOrder = Boolean(currentOrder.is_cod || currentOrder.payment_method === 'COD');
+        if (!isCodOrder && currentOrder.payment_status !== 'PAID') {
+          console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Payment not captured (status: ${currentOrder.payment_status})`);
+          return;
+        }
+
+        // 3. Seller Approval Gate: Must not be rejected or pending seller acceptance
+        if (currentOrder.seller_approval_status === 'REJECTED') {
+          console.log(`[OutboxProcessor] Skipping dispatch for rejected order ${targetOrderId}`);
+          return;
+        }
+        if (currentOrder.seller_approval_status === 'PENDING') {
+          console.log(`[OutboxProcessor] Gating dispatch for order ${targetOrderId}: Awaiting merchant acceptance`);
           return;
         }
 

@@ -1362,18 +1362,28 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Enforce token TTL disconnect
+      let expiryTimer = null;
       if (authClaims.exp) {
         const ttlMs = (authClaims.exp * 1000) - Date.now();
         if (ttlMs <= 0) {
           return sendJson(res, 401, { error: 'TOKEN_EXPIRED', message: 'JWT token has expired.' });
         }
-        const expiryTimer = setTimeout(() => {
+        expiryTimer = setTimeout(() => {
           try {
-            res.write(`event: error\ndata: ${JSON.stringify({ error: 'TOKEN_EXPIRED', message: 'Session expired. Please reconnect.' })}\n\n`);
+            res.write(`event: token_expired\ndata: ${JSON.stringify({ error: 'TOKEN_EXPIRED', message: 'Session expired. Please reconnect.' })}\n\n`);
             res.end();
           } catch (_) {}
         }, ttlMs);
-        req.on('close', () => clearTimeout(expiryTimer));
+
+        const cleanupTimer = () => {
+          if (expiryTimer) {
+            clearTimeout(expiryTimer);
+            expiryTimer = null;
+          }
+        };
+        res.on('close', cleanupTimer);
+        res.on('finish', cleanupTimer);
+        req.socket?.on('close', cleanupTimer);
       }
 
       res.writeHead(200, {
@@ -1392,10 +1402,21 @@ const server = http.createServer(async (req, res) => {
       sseBroadcasterInstance.subscribe(authClaims.sub, res, lastEventId);
 
       if (isRiderCaller) {
+        let riderStoreId = null;
+        if (pool && !isLocalMode) {
+          const rCheck = await pool.query('SELECT id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1)', [authClaims.sub]);
+          if (rCheck.rows.length === 0 || rCheck.rows[0].status !== 'ACTIVE') {
+            if (expiryTimer) clearTimeout(expiryTimer);
+            try { res.end(); } catch (_) {}
+            return;
+          }
+          riderStoreId = rCheck.rows[0].store_id;
+        }
         sseBroadcasterInstance.subscribe(`rider_${authClaims.sub}`, res, lastEventId);
-        sseBroadcasterInstance.subscribe('riders', res, lastEventId);
-        sseBroadcasterInstance.subscribe('all_riders', res, lastEventId);
-        sseBroadcasterInstance.subscribe('riders_broadcast', res, lastEventId);
+        if (riderStoreId) {
+          sseBroadcasterInstance.subscribe(`store_riders_${riderStoreId}`, res, lastEventId);
+          sseBroadcasterInstance.subscribe(`riders_store_${riderStoreId}`, res, lastEventId);
+        }
       } else if (isSellerCaller) {
         if (authClaims.storeId) {
           sseBroadcasterInstance.subscribe(`seller_${authClaims.storeId}`, res, lastEventId);
@@ -1607,7 +1628,7 @@ const server = http.createServer(async (req, res) => {
 
           // 3. Find and lock all pending orders linked to this prescription FOR UPDATE
           const matchedOrders = await client.query(`
-            SELECT id, order_id, store_id, total_amount, status, items
+            SELECT id, order_id, store_id, total_amount, status, items, is_cod, payment_status, payment_method, seller_approval_status
             FROM orders
             WHERE prescription_id = $1 AND status = 'PRESCRIPTION_VERIFICATION_PENDING'
             FOR UPDATE
@@ -1616,28 +1637,45 @@ const server = http.createServer(async (req, res) => {
           for (const ord of matchedOrders.rows) {
             const targetOrderId = ord.order_id || ord.id;
             if (decision === 'APPROVED') {
-              await client.query(`
-                UPDATE orders
-                SET status = 'READY_FOR_PICKUP', updated_at = NOW()
-                WHERE id = $1
-              `, [ord.id]);
+              const isPaidOrCod = Boolean(ord.is_cod || ord.payment_status === 'PAID' || ord.payment_method === 'COD');
+              const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
 
-              // Emit dispatch event to outbox so background worker assigns rider
-              const outboxPayload = {
-                orderId: targetOrderId,
-                storeId: ord.store_id,
-                type: 'DISPATCH_REQUESTED',
-                timestamp: new Date().toISOString()
-              };
-              await client.query(`
-                INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
-                VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())
-              `, ['evt_' + crypto.randomUUID(), targetOrderId, JSON.stringify(outboxPayload)]);
+              if (isPaidOrCod && isSellerAccepted) {
+                await client.query(`
+                  UPDATE orders
+                  SET status = 'READY_FOR_PICKUP', updated_at = NOW()
+                  WHERE id = $1
+                `, [ord.id]);
+
+                // Emit dispatch event to outbox so background worker assigns rider
+                const outboxPayload = {
+                  orderId: targetOrderId,
+                  storeId: ord.store_id,
+                  type: 'DISPATCH_REQUESTED',
+                  timestamp: new Date().toISOString()
+                };
+                await client.query(`
+                  INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+                  VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())
+                `, ['evt_' + crypto.randomUUID(), targetOrderId, JSON.stringify(outboxPayload)]);
+              } else {
+                // Rx approved, but order still awaits payment or seller approval
+                const nextStatus = isPaidOrCod ? 'ACCEPTED' : 'PAYMENT_PENDING';
+                await client.query(`
+                  UPDATE orders
+                  SET status = $2, updated_at = NOW()
+                  WHERE id = $1
+                `, [ord.id, nextStatus]);
+              }
             } else {
               // REJECTED: Release stock in the same transaction and mark order cancelled
               const ordItems = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
               if (appRepositories && appRepositories.inventoryRepo && appRepositories.inventoryRepo.releaseStockTransactionally && ord.store_id && ordItems.length > 0) {
-                await appRepositories.inventoryRepo.releaseStockTransactionally(client, ord.store_id, ordItems);
+                const relRes = await appRepositories.inventoryRepo.releaseStockTransactionally(client, ord.store_id, ordItems);
+                if (relRes && relRes.ok === false) {
+                  await client.query('ROLLBACK');
+                  return sendJson(res, 500, { error: 'INVENTORY_RELEASE_FAILED', message: relRes.message || 'Failed to release inventory on prescription rejection.' });
+                }
               }
 
               await client.query(`
@@ -5306,9 +5344,6 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Clear server cart upon successful order placement
-      await appRepositories.cartRepo.clearCart(customerId);
-
       const finalBillSummary = placeResult.order.bill_summary || placeResult.order.billSummary || placeResult.pricingResult || {
         itemsSubtotal: placeResult.pricingResult?.itemsSubtotal ?? Number(placeResult.order.total_amount),
         discountAmount: placeResult.pricingResult?.discountAmount ?? 0,
@@ -5773,17 +5808,26 @@ const server = http.createServer(async (req, res) => {
             });
           }
 
-          // Merchant or Admin Authoritative Verification
+          // Merchant or Admin Authoritative Verification: Must be scoped to store
+          const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
+          if (!isAdmin) {
+            const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+            if (!authorizedStoreId || (order.store_id && order.store_id !== authorizedStoreId)) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are only authorized to verify payments for orders in your assigned store.' });
+            }
+          }
+
           await client.query(
             `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (id = $1 OR order_id = $1)`,
             [targetOrderId]
           );
 
-          // Record payment with anti-replay provider_ref
+          // Record payment with audited manual merchant verification
           const paymentId = 'pay_' + crypto.randomUUID();
           await client.query(
             `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'UPI', 'UPI_INTENT', $5, $6, NOW(), NOW())`,
+             VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'UPI', 'MANUAL_MERCHANT_VERIFICATION', $5, $6, NOW(), NOW())`,
             [
               paymentId,
               paymentId,
@@ -5794,10 +5838,20 @@ const server = http.createServer(async (req, res) => {
                 utr: cleanUtr,
                 upiApp: body.upiApp || 'UPI_APP',
                 payerVpa: body.payerVpa || null,
+                verifiedBy: authClaims.sub,
                 verifiedAt: new Date().toISOString()
               })
             ]
           );
+
+          // Verify prescription gating before dispatching
+          let isRxApproved = true;
+          if (order.prescription_id) {
+            const rxCheck = await client.query('SELECT status FROM prescriptions WHERE id = $1', [order.prescription_id]);
+            isRxApproved = rxCheck.rows.length > 0 && rxCheck.rows[0].status === 'APPROVED';
+          } else if (order.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
+            isRxApproved = false;
+          }
 
           // Check delivery session and trigger outbox dispatch
           const sessRes = await client.query(
@@ -5810,7 +5864,7 @@ const server = http.createServer(async (req, res) => {
           );
           const isSellerApprovalRequired = storeRes.rows.length > 0 && storeRes.rows[0].seller_approval_required === true;
 
-          if (sessRes.rows.length > 0) {
+          if (isRxApproved && sessRes.rows.length > 0) {
             const deliveryId = sessRes.rows[0].delivery_id;
             if (!isSellerApprovalRequired) {
               await client.query(
@@ -5938,13 +5992,24 @@ const server = http.createServer(async (req, res) => {
           }
 
           const expectedTotal = Number(session.total_amount || 0);
-          if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount < expectedTotal) {
+          if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount !== expectedTotal) {
             await client.query('ROLLBACK');
             return sendJson(res, 400, {
               error: 'INVALID_COLLECTED_AMOUNT',
-              message: `collectedAmount must be explicitly provided and match or exceed order total (₹${expectedTotal}).`
+              message: `collectedAmount must be explicitly provided and exactly match the order total (₹${expectedTotal}).`
             });
           }
+
+          // Anti-Replay check for doorstep UTR
+          const existingUtr = await client.query(
+            `SELECT id FROM payments WHERE provider_ref = $1 LIMIT 1`,
+            [cleanUtr]
+          );
+          if (existingUtr.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, { error: 'UTR_ALREADY_USED', message: 'This UTR reference has already been recorded in the payments ledger.' });
+          }
+
           const finalAmount = collectedAmount;
 
           // Update COD ledger to reconciled via UPI
@@ -6349,34 +6414,41 @@ const server = http.createServer(async (req, res) => {
       const notes = String(body.notes || 'Cash verified and collected by Merchant');
 
       if (pool && !isLocalMode) {
+        const client = await pool.connect();
         try {
-          const ordRes = await pool.query(
-            `SELECT order_id, store_id, is_cod, total_amount, cod_amount, status FROM orders WHERE (order_id = $1 OR id = $1)`,
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+          const ordRes = await client.query(
+            `SELECT order_id, store_id, is_cod, total_amount, cod_amount, status FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
             [orderId]
           );
           if (ordRes.rows.length === 0) {
+            await client.query('ROLLBACK');
             return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
           }
           const ord = ordRes.rows[0];
           if (['CANCELLED', 'REJECTED'].includes(ord.status)) {
+            await client.query('ROLLBACK');
             return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot collect COD for a cancelled order.' });
           }
           if (authorizedStoreId && ord.store_id && ord.store_id !== authorizedStoreId && !authClaims.role?.includes('ADMIN') && !authClaims.roles?.includes('ROLE_ADMIN')) {
+            await client.query('ROLLBACK');
             return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
           }
           if (!ord.is_cod) {
+            await client.query('ROLLBACK');
             return sendJson(res, 400, { error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
           }
 
           const expectedCod = Number(ord.cod_amount || ord.total_amount || 0);
-          if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount < expectedCod) {
+          if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount !== expectedCod) {
+            await client.query('ROLLBACK');
             return sendJson(res, 400, {
               error: 'INVALID_COLLECTED_AMOUNT',
-              message: `collectedAmount must be explicitly provided and match or exceed order COD total (₹${expectedCod}).`
+              message: `collectedAmount must be explicitly provided and exactly match order COD total (₹${expectedCod}).`
             });
           }
           const finalAmount = collectedAmount;
-          await pool.query(
+          await client.query(
             `UPDATE cod_ledger
              SET status = 'COLLECTED_RECONCILED',
                  amount_collected = $2,
@@ -6388,10 +6460,12 @@ const server = http.createServer(async (req, res) => {
             [ord.order_id, finalAmount, authClaims.sub, notes]
           );
 
-          await pool.query(
+          await client.query(
             `UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
             [ord.order_id]
           );
+
+          await client.query('COMMIT');
 
           return sendJson(res, 200, {
             ok: true,
@@ -6401,8 +6475,11 @@ const server = http.createServer(async (req, res) => {
             message: 'Cash on delivery collected and reconciled successfully.'
           });
         } catch (e) {
+          await client.query('ROLLBACK').catch(() => {});
           console.error('[ProductionServer] collect-cod error:', e);
           return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: e.message });
+        } finally {
+          client.release();
         }
       }
 
@@ -6795,6 +6872,17 @@ const server = http.createServer(async (req, res) => {
       const riderId = `rdr_${phoneDigits}`;
 
       try {
+        const existingRiderRes = await pool.query('SELECT id, store_id FROM riders WHERE phone = $1', [formattedPhone]);
+        if (existingRiderRes.rows.length > 0) {
+          const existingRider = existingRiderRes.rows[0];
+          if (existingRider.store_id && existingRider.store_id !== storeId && !isAdmin) {
+            return sendJson(res, 409, {
+              error: 'RIDER_EXISTS_IN_ANOTHER_STORE',
+              message: 'Rider is already enrolled with another store. Cross-store fleet re-assignment requires administrative authorization.'
+            });
+          }
+        }
+
         const insertRes = await pool.query(
           `INSERT INTO riders (id, rider_id, phone, full_name, vehicle_number, vehicle_type, tier, status, aadhaar_number, store_id, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, 'STANDARD', 'ACTIVE', $7, $8, NOW(), NOW())
@@ -6804,10 +6892,10 @@ const server = http.createServer(async (req, res) => {
                vehicle_type = EXCLUDED.vehicle_type,
                status = 'ACTIVE',
                aadhaar_number = COALESCE(EXCLUDED.aadhaar_number, riders.aadhaar_number),
-               store_id = COALESCE(EXCLUDED.store_id, riders.store_id),
+               store_id = CASE WHEN $9 = TRUE THEN EXCLUDED.store_id ELSE riders.store_id END,
                updated_at = NOW()
            RETURNING *`,
-          [riderId, riderId, formattedPhone, fullName, vehicleNumber, vehicleType, aadhaarNumber, storeId]
+          [riderId, riderId, formattedPhone, fullName, vehicleNumber, vehicleType, aadhaarNumber, storeId, isAdmin]
         );
         const rider = { ...insertRes.rows[0] };
         delete rider.aadhaar_number;
@@ -6823,19 +6911,35 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
-      const targetRiderId = riderStatusMatch[1];
+      const isSellerOrAdmin = hasRole(authClaims, ['ROLE_SELLER', 'SELLER', 'ROLE_ADMIN', 'ADMIN']);
+      if (!isSellerOrAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller or Admin authorization is required.' });
+      }
+      const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+      const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
+      if (!isAdmin && !authorizedStoreId) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+      }
+
+      const targetRiderId = decodeURIComponent(riderStatusMatch[1]);
       const body = await parseJsonBody(req);
       const newStatus = String(body.status || 'ACTIVE').trim().toUpperCase();
 
       try {
-        const updRes = await pool.query(
-          `UPDATE riders SET status = $1, updated_at = NOW() WHERE id = $2 OR rider_id = $2 RETURNING *`,
-          [newStatus, targetRiderId]
-        );
-        if (updRes.rows.length === 0) {
-          return sendJson(res, 404, { error: 'RIDER_NOT_FOUND', message: 'Rider not found.' });
+        let query = `UPDATE riders SET status = $1, updated_at = NOW() WHERE (id = $2 OR rider_id = $2)`;
+        const params = [newStatus, targetRiderId];
+        if (!isAdmin && authorizedStoreId) {
+          query += ` AND store_id = $3`;
+          params.push(authorizedStoreId);
         }
-        return sendJson(res, 200, { ok: true, rider: updRes.rows[0] });
+        query += ` RETURNING *`;
+        const updRes = await pool.query(query, params);
+        if (updRes.rows.length === 0) {
+          return sendJson(res, 404, { error: 'RIDER_NOT_FOUND', message: 'Rider not found in your authorized store fleet.' });
+        }
+        const rider = { ...updRes.rows[0] };
+        delete rider.aadhaar_number;
+        return sendJson(res, 200, { ok: true, rider });
       } catch (err) {
         return sendJson(res, 500, { error: 'DB_ERROR', message: err.message });
       }
@@ -6846,6 +6950,10 @@ const server = http.createServer(async (req, res) => {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+      const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
+      if (!isAdmin) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Permanent fleet rider deletion is restricted strictly to platform administrators.' });
       }
       const targetRiderId = decodeURIComponent(riderDeleteMatch[1]);
       try {
@@ -7025,9 +7133,17 @@ const server = http.createServer(async (req, res) => {
         }
         const finalVariants = Array.from(new Set(custVariants.filter(Boolean)));
 
-        // 2. Fetch all saved addresses
+        // 2. Fetch saved addresses (scoped to store orders if not admin)
         let addrRes;
-        if (effectiveClean10) {
+        if (!isAdmin && authorizedStoreId) {
+          addrRes = await pool.query(
+            `SELECT ca.* FROM customer_addresses ca
+             WHERE (ca.customer_id = ANY($1) OR ca.contact_phone LIKE '%' || $2)
+               AND ca.id IN (SELECT DISTINCT address_id FROM orders WHERE store_id = $3 AND address_id IS NOT NULL)
+             ORDER BY ca.is_default DESC, ca.created_at DESC`,
+            [finalVariants, effectiveClean10 || clean10, authorizedStoreId]
+          );
+        } else if (effectiveClean10) {
           addrRes = await pool.query(
             `SELECT * FROM customer_addresses 
              WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2
@@ -7088,16 +7204,19 @@ const server = http.createServer(async (req, res) => {
           };
         });
 
-        // 4. Fetch active cart
-        const cartRes = await pool.query(
-          `SELECT * FROM carts 
-           WHERE customer_id = ANY($1) 
-           ORDER BY updated_at DESC LIMIT 1`,
-          [uniqueVariants]
-        );
-        let cart = cartRes.rows[0] || null;
-        if (cart && typeof cart.items === 'string') {
-          try { cart.items = JSON.parse(cart.items); } catch { cart.items = []; }
+        // 4. Fetch active cart (omitted for seller responses)
+        let cart = null;
+        if (isAdmin || isSelf) {
+          const cartRes = await pool.query(
+            `SELECT * FROM carts 
+             WHERE customer_id = ANY($1) 
+             ORDER BY updated_at DESC LIMIT 1`,
+            [uniqueVariants]
+          );
+          cart = cartRes.rows[0] || null;
+          if (cart && typeof cart.items === 'string') {
+            try { cart.items = JSON.parse(cart.items); } catch { cart.items = []; }
+          }
         }
 
         // 5. Fetch prescriptions (scoped to orders in this store if not admin)
@@ -7220,12 +7339,29 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are not authorized to update this customer profile.' });
       }
 
+      if (isSeller && !isAdmin) {
+        const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+        if (!authorizedStoreId) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Seller account is inactive or not authorized.' });
+        }
+        const relCheck = await pool.query(
+          `SELECT 1 FROM orders WHERE (customer_id = $1 OR customer_id = ANY($2) OR (delivery_address IS NOT NULL AND (delivery_address->>'contact_phone') LIKE '%' || $3)) AND store_id = $4 LIMIT 1`,
+          [targetCustomerId, uniqueVariants, clean10, authorizedStoreId]
+        );
+        if (relCheck.rows.length === 0) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer has no active transaction history with your store.' });
+        }
+      }
+
       try {
         const body = await parseJsonBody(req);
 
-        // Restrict phone number modification to Administrator only to prevent account hijacking
+        // Restrict phone number, tier, and status modification to Administrator only
         if (body.phone && !isAdmin) {
           return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer phone number (login identity) can only be modified by an administrator.' });
+        }
+        if ((body.isActive !== undefined || body.is_active !== undefined || body.tier !== undefined) && !isAdmin) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Customer active status and tier can only be modified by an administrator.' });
         }
 
         const fullName = body.fullName || body.full_name || body.name;
@@ -7684,13 +7820,16 @@ const server = http.createServer(async (req, res) => {
     // POST /api/v1/delivery/rider/device-token/logout
     if (pathname === '/api/v1/delivery/rider/device-token/logout' && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
-      const body = await parseJsonBody(req).catch(() => ({}));
-      const riderId = (authClaims && authClaims.sub) || body.riderId || null;
-      const targetToken = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
-
-      if (!riderId && !targetToken) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or riderId/deviceToken is required.' });
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for rider logout.' });
       }
+      const isRider = authClaims.role?.includes('RIDER') || authClaims.roles?.includes('ROLE_RIDER') || authClaims.scope?.includes('rider') || authClaims.role === 'ROLE_ADMIN';
+      if (!isRider) {
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only active registered riders can unregister device tokens.' });
+      }
+      const riderId = authClaims.sub;
+      const body = await parseJsonBody(req).catch(() => ({}));
+      const targetToken = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
       if (riderId && appRepositories && appRepositories.deviceTokenRepo && appRepositories.deviceTokenRepo.unregisterToken) {
         await appRepositories.deviceTokenRepo.unregisterToken(riderId);
         prometheusMetricsInstance.recordTokenUnregistered('iOS-Rider');
@@ -8396,42 +8535,51 @@ const server = http.createServer(async (req, res) => {
         const collectedAmount = Number(body.collectedAmount ?? body.codAmount ?? body.cashCollected ?? body.amount ?? 0);
         let orderId = deliveryId;
         if (pool && !isLocalMode) {
+          const client = await pool.connect();
           try {
-            const sessionRes = await pool.query(
+            await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+            const sessionRes = await client.query(
               `SELECT ds.id, ds.order_id, ds.rider_id, ds.state, o.is_cod, o.total_amount, o.cod_amount, o.status as order_status
                FROM delivery_sessions ds
                JOIN orders o ON (o.order_id = ds.order_id OR o.id = ds.order_id)
-               WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)`,
+               WHERE (ds.id = $1 OR ds.delivery_id = $1 OR ds.order_id = $1)
+               FOR UPDATE`,
               [deliveryId]
             );
             if (sessionRes.rows.length === 0) {
+              await client.query('ROLLBACK');
               return sendJson(res, 404, { ok: false, error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
             }
             const row = sessionRes.rows[0];
             if (!row.rider_id || (row.rider_id !== authorizedRiderId && authClaims.role !== 'ROLE_ADMIN')) {
+              await client.query('ROLLBACK');
               return sendJson(res, 403, { ok: false, error: 'FORBIDDEN', message: 'Only the assigned rider can complete COD.' });
             }
             if (['CANCELLED', 'REJECTED'].includes(row.order_status) || row.state === 'CANCELLED') {
+              await client.query('ROLLBACK');
               return sendJson(res, 409, { ok: false, error: 'ORDER_CANCELLED', message: 'Cannot complete COD for a cancelled order.' });
             }
             const validPreStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
             if (!validPreStates.includes(row.state)) {
+              await client.query('ROLLBACK');
               return sendJson(res, 409, { ok: false, error: 'INVALID_DELIVERY_STATE', message: 'Order must be picked up before completing COD.' });
             }
             if (!row.is_cod) {
+              await client.query('ROLLBACK');
               return sendJson(res, 400, { ok: false, error: 'ORDER_NOT_COD', message: 'Order is not cash on delivery.' });
             }
             const expectedCod = Number(row.cod_amount || row.total_amount || 0);
-            if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount < expectedCod) {
+            if (isNaN(collectedAmount) || collectedAmount <= 0 || collectedAmount !== expectedCod) {
+              await client.query('ROLLBACK');
               return sendJson(res, 400, {
                 ok: false,
                 error: 'INVALID_COD_AMOUNT',
-                message: `collectedAmount must be explicitly provided and match or exceed order COD total (₹${expectedCod}).`
+                message: `collectedAmount must be explicitly provided and exactly match order COD total (₹${expectedCod}).`
               });
             }
             orderId = row.order_id;
             const finalAmount = collectedAmount;
-            const updateRes = await pool.query(
+            const updateRes = await client.query(
               `UPDATE cod_ledger
                SET status = 'COLLECTED_RECONCILED',
                    amount_collected = $2,
@@ -8442,8 +8590,10 @@ const server = http.createServer(async (req, res) => {
               [orderId, finalAmount, authorizedRiderId]
             );
             if (updateRes.rowCount === 0) {
+              await client.query('ROLLBACK');
               return sendJson(res, 404, { ok: false, error: 'COD_LEDGER_NOT_FOUND', message: 'COD ledger entry not found for this order.' });
             }
+            await client.query('COMMIT');
             return sendJson(res, 200, {
               ok: true,
               codReconciled: true,
@@ -8453,8 +8603,11 @@ const server = http.createServer(async (req, res) => {
               message: 'Cash on delivery reconciled successfully.'
             });
           } catch (e) {
+            await client.query('ROLLBACK').catch(() => {});
             console.error('[ProductionServer] complete-cod error:', e);
             return sendJson(res, 500, { ok: false, error: 'INTERNAL_ERROR', message: e.message });
+          } finally {
+            client.release();
           }
         }
         return sendJson(res, 200, {

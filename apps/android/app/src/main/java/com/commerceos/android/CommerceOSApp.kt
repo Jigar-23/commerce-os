@@ -240,6 +240,7 @@ fun CommerceOSApp(
         checkoutViewModel.events.collect { event ->
             when (event) {
                 is CheckoutEvent.OrderPlaced -> {
+                    checkoutViewModel.reset()
                     cartViewModel.clear()
                     cartViewModel.loadCart()
                     val pin = event.order?.effectiveDeliveryPin

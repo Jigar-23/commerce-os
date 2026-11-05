@@ -107,7 +107,7 @@ data class CartItem(
 data class CartResponse(
     @SerializedName(value = "customerId", alternate = ["customer_id"])
     val customerId: String = "",
-    val items: List<CartItem> = emptyList(),
+    val items: List<CartItem>? = emptyList(),
     @SerializedName(value = "itemsSubtotal", alternate = ["subtotal", "items_subtotal"])
     val itemsSubtotal: BigDecimal? = null,
     @SerializedName(value = "expressDeliveryFee", alternate = ["deliveryFee", "delivery_fee", "express_delivery_fee"])
