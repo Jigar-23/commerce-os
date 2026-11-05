@@ -54,8 +54,13 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_NAME")
-        onCreate(db)
+        // Versioned schema upgrades preserving queued rider telemetry rows
+        if (oldVersion < 2) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_EVENT_TYPE TEXT DEFAULT 'TELEMETRY_UPDATED'")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COLUMN_IS_CRITICAL INTEGER DEFAULT 0")
+            } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -96,7 +101,10 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
                 put(COLUMN_IS_CRITICAL, if (isCritical) 1 else 0)
             }
 
-            db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_IGNORE)
+            val rowId = db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_IGNORE)
+            if (rowId == -1L) {
+                return false
+            }
             db.setTransactionSuccessful()
             return true
         } catch (e: Exception) {
@@ -107,19 +115,18 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
     }
 
     /**
-     * Atomically fetch the head item for transmission restricted to active delivery session.
-     * Prevents cross-delivery telemetry leakage (Requirement 41).
+     * Atomically fetch the head item for transmission restricted strictly to active delivery session.
+     * Never queries or leaks inactive or completed deliveries.
      */
     @Synchronized
     fun peekHead(activeDeliveryId: String? = null): RiderLocationUpdate? {
+        if (activeDeliveryId.isNullOrBlank()) return null
         val db = readableDatabase
-        val selection = if (!activeDeliveryId.isNullOrBlank()) "$COLUMN_DELIVERY_ID = ?" else null
-        val selectionArgs = if (!activeDeliveryId.isNullOrBlank()) arrayOf(activeDeliveryId) else null
         val cursor = db.query(
             TABLE_NAME,
             null,
-            selection,
-            selectionArgs,
+            "$COLUMN_DELIVERY_ID = ?",
+            arrayOf(activeDeliveryId),
             null,
             null,
             "$COLUMN_TIMESTAMP ASC, $COLUMN_SEQUENCE_NUMBER ASC",
@@ -149,6 +156,13 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
         if (activeDeliveryId.isBlank()) return
         val db = writableDatabase
         db.delete(TABLE_NAME, "$COLUMN_DELIVERY_ID != ?", arrayOf(activeDeliveryId))
+    }
+
+    @Synchronized
+    fun purgeDelivery(deliveryId: String) {
+        if (deliveryId.isBlank()) return
+        val db = writableDatabase
+        db.delete(TABLE_NAME, "$COLUMN_DELIVERY_ID = ?", arrayOf(deliveryId))
     }
 
     /**

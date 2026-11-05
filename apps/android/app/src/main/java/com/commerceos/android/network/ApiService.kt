@@ -482,7 +482,9 @@ object NetworkClient {
                             android.util.Log.d("OkHttp", msg)
                         }
                     }.apply {
-                        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
+                        redactHeader("Authorization")
+                        redactHeader("Cookie")
+                        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
                     }
                 )
                 .build()

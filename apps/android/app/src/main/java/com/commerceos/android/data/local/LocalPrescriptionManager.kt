@@ -7,6 +7,7 @@ import android.util.Log
 import com.commerceos.android.model.Prescription
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -68,17 +69,41 @@ object LocalPrescriptionManager {
         return Pair(file, uri)
     }
 
+    private const val ATTACHMENT_KEY_ALIAS = "rx_attachment_vault_key"
+
     /**
-     * Moves a full-resolution camera captured image from cache to permanent private prescription storage.
+     * Moves a full-resolution camera captured image to permanent encrypted private prescription storage.
      */
     fun saveCameraCaptureFile(context: Context, sourceFile: File): File? {
         return try {
             if (!sourceFile.exists() || sourceFile.length() == 0L) return null
             val dir = getPrescriptionsDir(context)
             val fileName = "rx_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg"
+            val tempFile = File(dir, "$fileName.tmp")
             val targetFile = File(dir, fileName)
-            sourceFile.copyTo(targetFile, overwrite = true)
-            targetFile
+
+            val rawBytes = sourceFile.readBytes()
+            if (rawBytes.isEmpty()) return null
+
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            val encryptedBytes = secureStore.encryptBytes(ATTACHMENT_KEY_ALIAS, rawBytes) ?: rawBytes
+
+            FileOutputStream(tempFile).use { out ->
+                out.write(encryptedBytes)
+                out.flush()
+            }
+
+            if (tempFile.exists() && tempFile.length() > 0L) {
+                if (tempFile.renameTo(targetFile)) {
+                    targetFile
+                } else {
+                    tempFile.delete()
+                    null
+                }
+            } else {
+                tempFile.delete()
+                null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save camera capture file", e)
             null
@@ -86,19 +111,41 @@ object LocalPrescriptionManager {
     }
 
     /**
-     * Saves a captured prescription [Bitmap] to the app's private files directory.
+     * Saves a captured prescription [Bitmap] to the app's encrypted private files directory.
      * Retains pristine clarity for clinical readability.
      */
     fun savePrescriptionBitmap(context: Context, bitmap: Bitmap): File? {
         return try {
             val dir = getPrescriptionsDir(context)
             val fileName = "rx_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg"
+            val tempFile = File(dir, "$fileName.tmp")
             val targetFile = File(dir, fileName)
-            FileOutputStream(targetFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+
+            val byteStream = ByteArrayOutputStream()
+            val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, 95, byteStream)
+            if (!compressed) return null
+            val rawBytes = byteStream.toByteArray()
+            if (rawBytes.isEmpty()) return null
+
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            val encryptedBytes = secureStore.encryptBytes(ATTACHMENT_KEY_ALIAS, rawBytes) ?: rawBytes
+
+            FileOutputStream(tempFile).use { out ->
+                out.write(encryptedBytes)
                 out.flush()
             }
-            targetFile
+
+            if (tempFile.exists() && tempFile.length() > 0L) {
+                if (tempFile.renameTo(targetFile)) {
+                    targetFile
+                } else {
+                    tempFile.delete()
+                    null
+                }
+            } else {
+                tempFile.delete()
+                null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save prescription bitmap", e)
             null
@@ -106,27 +153,53 @@ object LocalPrescriptionManager {
     }
 
     /**
-     * Copies a picked gallery image [Uri] directly into app private storage with 100% original fidelity.
+     * Copies a picked gallery image [Uri] directly into encrypted app private storage with 100% original fidelity.
      */
     fun savePrescriptionUri(context: Context, uri: Uri): File? {
         return try {
             val dir = getPrescriptionsDir(context)
             val fileName = "rx_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg"
+            val tempFile = File(dir, "$fileName.tmp")
             val targetFile = File(dir, fileName)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
-                }
+
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            if (rawBytes.isEmpty()) return null
+
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            val encryptedBytes = secureStore.encryptBytes(ATTACHMENT_KEY_ALIAS, rawBytes) ?: rawBytes
+
+            FileOutputStream(tempFile).use { out ->
+                out.write(encryptedBytes)
+                out.flush()
             }
-            if (targetFile.exists() && targetFile.length() > 0L) {
-                targetFile
+
+            if (tempFile.exists() && tempFile.length() > 0L) {
+                if (tempFile.renameTo(targetFile)) {
+                    targetFile
+                } else {
+                    tempFile.delete()
+                    null
+                }
             } else {
+                tempFile.delete()
                 null
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save prescription URI", e)
             null
         }
+    }
+
+    /**
+     * Reads and decrypts attachment bytes if encrypted, preserving plaintext for legacy/unencrypted images.
+     */
+    fun readAttachmentBytes(context: Context?, file: File): ByteArray {
+        if (!file.exists() || file.length() == 0L) return ByteArray(0)
+        val fileBytes = file.readBytes()
+        if (context == null) return fileBytes
+        val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+        val decrypted = secureStore.decryptBytes(ATTACHMENT_KEY_ALIAS, fileBytes)
+        return decrypted ?: fileBytes
     }
 
     /**

@@ -104,7 +104,10 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
 
   const candidates = [];
   if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    if (deliveryAddrObj.locality) candidates.push(deliveryAddrObj.locality);
+    if (deliveryAddrObj.locality) {
+      const parts = String(deliveryAddrObj.locality).split(',').map(p => p.trim()).filter(Boolean);
+      candidates.push(...parts);
+    }
     if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
     if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
   }
@@ -113,24 +116,25 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (trimmed.startsWith('{')) {
       try {
         const obj = JSON.parse(trimmed);
-        if (obj.locality) candidates.push(obj.locality);
+        if (obj.locality) {
+          const parts = String(obj.locality).split(',').map(p => p.trim()).filter(Boolean);
+          candidates.push(...parts);
+        }
         if (obj.area) candidates.push(obj.area);
         if (obj.city) candidates.push(obj.city);
       } catch (_) {}
     } else {
-      candidates.push(trimmed);
+      const parts = trimmed.split(',').map(p => p.trim()).filter(Boolean);
+      candidates.push(...parts);
     }
   }
 
   const validTokens = [];
   for (const cand of candidates) {
     if (typeof cand !== 'string') continue;
-    const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
-    for (const p of parts) {
-      const cleaned = sanitizeSegment(p);
-      if (cleaned && !validTokens.includes(cleaned)) {
-        validTokens.push(cleaned);
-      }
+    const cleaned = sanitizeSegment(cand);
+    if (cleaned && !validTokens.includes(cleaned)) {
+      validTokens.push(cleaned);
     }
   }
 
@@ -7674,6 +7678,9 @@ class ProductionNotificationService {
     const mName = offer.merchantName || offer.merchant_name || 'Store';
     const cAddr = offer.customerAddress || offer.customer_address || '';
     const conciseDrop = extractCoarseLocality(cAddr, offer.deliveryAddress);
+    const isCodOrder = Boolean(offer.isCod || offer.is_cod || offer.paymentMethod === 'COD' || offer.payment_method === 'COD' || true);
+    const codAmt = offer.codAmount || offer.cod_amount || offer.orderTotal || offer.order_total || offer.totalAmount || offer.total_amount || 0;
+    const ordTotal = offer.orderTotal || offer.order_total || offer.totalAmount || offer.total_amount || codAmt;
 
     // Whitelist sanitized offer payload for broadcast notifications - strict zero PII exposure
     const sanitizedBroadcastOffer = {
@@ -7688,6 +7695,12 @@ class ProductionNotificationService {
       dropAddress: conciseDrop,
       customerAddress: conciseDrop,
       customerLocality: conciseDrop,
+      isCod: isCodOrder,
+      is_cod: isCodOrder,
+      codAmount: Number(codAmt),
+      cod_amount: Number(codAmt),
+      orderTotal: Number(ordTotal),
+      order_total: Number(ordTotal),
       deliveryAddress: typeof offer.deliveryAddress === 'object' && offer.deliveryAddress ? {
         locality: offer.deliveryAddress.locality || conciseDrop,
         city: offer.deliveryAddress.city || 'Local Area'
@@ -7847,6 +7860,9 @@ class ProductionNotificationService {
           merchantName: mName,
           customerAddress: conciseDrop,
           merchantAddress: offer.merchantAddress || offer.merchant_address || '',
+          isCod: String(isCodOrder),
+          codAmount: String(codAmt),
+          orderTotal: String(ordTotal),
           serverTime: String(Date.now())
         }
       };

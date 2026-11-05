@@ -114,6 +114,8 @@ data class CartResponse(
     val expressDeliveryFee: BigDecimal? = null,
     @SerializedName(value = "coldChainPackagingFee", alternate = ["packagingFee", "handlingFee", "cold_chain_packaging_fee"])
     val coldChainPackagingFee: BigDecimal? = null,
+    @SerializedName(value = "discount", alternate = ["couponDiscount", "discountAmount", "discount_amount"])
+    val discount: BigDecimal? = null,
     @SerializedName(value = "grandTotal", alternate = ["total", "grand_total", "totalAmount", "total_amount"])
     val grandTotal: BigDecimal? = null,
     @SerializedName(value = "freeDeliveryThreshold", alternate = ["free_delivery_threshold"])

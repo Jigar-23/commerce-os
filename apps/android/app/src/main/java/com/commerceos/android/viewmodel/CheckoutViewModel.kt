@@ -11,10 +11,13 @@ import com.commerceos.android.repository.AppRepository
 import java.math.BigDecimal
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface ServiceabilityState {
     val targetAddressId: String?
@@ -105,10 +108,11 @@ data class CheckoutUiState(
 class CheckoutViewModel(
     private val repository: AppRepository,
     private var mutationGate: CartMutationGate? = null,
-    private val context: android.content.Context? = null
+    private val context: android.content.Context? = null,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
 
-    constructor(repository: AppRepository) : this(repository, null, null)
+    constructor(repository: AppRepository) : this(repository, null, null, Dispatchers.IO)
 
     fun setMutationGate(gate: CartMutationGate?) {
         this.mutationGate = gate
@@ -130,14 +134,24 @@ class CheckoutViewModel(
         loadPersistedIdempotency()
     }
 
-    private fun persistIdempotency(key: String?, fingerprint: String?) {
-        checkoutIdempotencyKey = key
-        lastPayloadFingerprint = fingerprint
-        context?.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE)
-            ?.edit()
-            ?.putString("idempotency_key", key)
-            ?.putString("payload_fingerprint", fingerprint)
-            ?.apply()
+    private suspend fun persistIdempotency(key: String?, fingerprint: String?): Boolean {
+        val currentContext = context ?: run {
+            checkoutIdempotencyKey = key
+            lastPayloadFingerprint = fingerprint
+            return true
+        }
+        return withContext(ioDispatcher) {
+            val prefs = currentContext.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE)
+            val committed = prefs.edit()
+                .putString("idempotency_key", key)
+                .putString("payload_fingerprint", fingerprint)
+                .commit()
+            if (committed) {
+                checkoutIdempotencyKey = key
+                lastPayloadFingerprint = fingerprint
+            }
+            committed
+        }
     }
 
     private fun loadPersistedIdempotency() {
@@ -388,18 +402,28 @@ class CheckoutViewModel(
                         val serverItems = cartDto.items
                         if (!serverItems.isNullOrEmpty()) {
                             authoritativeItems = serverItems
+                        } else if (serverItems != null && (cartDto.itemsSubtotal != null || cartDto.grandTotal != null)) {
+                            authoritativeItems = emptyList()
                         }
-                        authoritativeSubtotal = cartDto.itemsSubtotal ?: currentSubtotal
+                        if (authoritativeItems.isEmpty()) {
+                            failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
+                            return@launch
+                        }
+                        val serverSubtotal = cartDto.itemsSubtotal ?: itemsSubtotal(authoritativeItems)
+                        val serverDiscount = cartDto.discount ?: currentDiscount
+                        authoritativeSubtotal = serverSubtotal
+                        authoritativeDiscount = serverDiscount.min(authoritativeSubtotal)
                         authoritativeDeliveryFee = cartDto.expressDeliveryFee ?: uiState.deliveryFee
                         authoritativeColdChainFee = cartDto.coldChainPackagingFee ?: uiState.coldChainFee
-                        authoritativeGrandTotal = cartDto.grandTotal ?: currentSubtotal
+                        authoritativeGrandTotal = cartDto.grandTotal ?: authoritativeSubtotal
                             .add(authoritativeDeliveryFee)
                             .add(authoritativeColdChainFee)
-                            .subtract(currentDiscount)
+                            .subtract(authoritativeDiscount)
                             .coerceAtLeast(BigDecimal.ZERO)
                     }
                     is ApiResult.Failure -> {
-                        // Keep current local snapshot if backend fetch has transient error
+                        failCheckout("CART_SYNC_ERROR", backendQuote.error.message.ifBlank { "Failed to refresh cart quote" })
+                        return@launch
                     }
                 }
 
@@ -417,13 +441,13 @@ class CheckoutViewModel(
                     failCheckout("CHECKOUT_NOT_READY", "Select a delivery address")
                     return@launch
                 }
-                if (currentItems.isEmpty()) {
+                if (authoritativeItems.isEmpty()) {
                     failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
                     return@launch
                 }
 
-                // Rerun server serviceability check against settled cart items & address
-                val requestItems = currentItems.map { ServiceabilityItem(it.sku, it.quantity, it.coldChain) }
+                // Rerun server serviceability check against settled authoritative cart items & address
+                val requestItems = authoritativeItems.map { ServiceabilityItem(it.sku, it.quantity, it.coldChain) }
                 when (val srvResult = repository.getServiceability(customerIdSnapshot, address.id, requestItems)) {
                     is ApiResult.Success -> {
                         if (!srvResult.data.eligible) {
@@ -436,10 +460,10 @@ class CheckoutViewModel(
                             serviceability = ServiceabilityState.Success(address.id, srvResult.data),
                             deliveryFee = deliveryFee,
                             coldChainFee = coldChainFee,
-                            grandTotal = currentSubtotal
+                            grandTotal = authoritativeSubtotal
                                 .add(deliveryFee)
                                 .add(coldChainFee)
-                                .subtract(currentDiscount)
+                                .subtract(authoritativeDiscount)
                                 .coerceAtLeast(BigDecimal.ZERO)
                         )
                     }
@@ -504,12 +528,22 @@ class CheckoutViewModel(
                     freshSnapshot.selectedSlotText
                 )
                 if (lastPayloadFingerprint != currentFingerprint) {
-                    persistIdempotency(null, currentFingerprint)
+                    val cleared = persistIdempotency(null, currentFingerprint)
+                    if (!cleared) {
+                        failCheckout("STORAGE_ERROR", "Failed to clear stale checkout idempotency state")
+                        return@launch
+                    }
                 }
 
                 val idempotencyKey = checkoutIdempotencyKey
-                    ?: UUID.randomUUID().toString().also { newKey ->
-                        persistIdempotency(newKey, currentFingerprint)
+                    ?: run {
+                        val newKey = UUID.randomUUID().toString()
+                        val persisted = persistIdempotency(newKey, currentFingerprint)
+                        if (!persisted) {
+                            failCheckout("STORAGE_ERROR", "Failed to persist checkout idempotency key")
+                            return@launch
+                        }
+                        newKey
                     }
 
                 // SERVER-AUTHORITATIVE AMOUNTS: omit client-calculated fees/discounts to eliminate trust-boundary risk

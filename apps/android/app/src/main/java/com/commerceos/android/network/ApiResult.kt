@@ -129,7 +129,7 @@ object Api {
             val body = response?.errorBody()?.string()
             val info = ErrorBodyParser.parse(body)
             val path = response?.raw()?.request?.url?.encodedPath ?: ""
-            android.util.Log.e("ApiRun", "HttpException on $path: code=${e.code()}, body=$body", e)
+            android.util.Log.e("ApiRun", "HttpException on $path: code=${e.code()}, errorCode=${info?.errorCode ?: "UNKNOWN"}")
             val isIdentityError = path.startsWith("/api/v1/auth")
             return if (e.code() == 401 && !isIdentityError) {
                 ApiResult.Failure(AppError.Unauthorized())

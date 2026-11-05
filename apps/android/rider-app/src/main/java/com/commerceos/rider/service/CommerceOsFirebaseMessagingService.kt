@@ -23,23 +23,7 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
         sessionMgr.saveFcmToken(token)
 
         val assignedStoreId = sessionMgr.getStoreId().trim()
-        if (sessionMgr.isLoggedIn() && sessionMgr.isShiftOnline() && assignedStoreId.isNotBlank()) {
-            val storeTopic = "riders_store_$assignedStoreId"
-            try {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic(storeTopic)
-                    .addOnCompleteListener { task ->
-                        if (task.isSuccessful) {
-                            Log.d(TAG, "Subscribed to store topic $storeTopic on token refresh")
-                        }
-                    }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to subscribe to $storeTopic on token refresh: ${e.message}")
-            }
-        } else if (assignedStoreId.isNotBlank()) {
-            try {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStoreId")
-            } catch (_: Exception) {}
-        }
+        sessionMgr.reconcileStoreTopic(assignedStoreId, sessionMgr.isShiftOnline())
 
         // Strictly purge fleet-wide broadcast subscription
         try {

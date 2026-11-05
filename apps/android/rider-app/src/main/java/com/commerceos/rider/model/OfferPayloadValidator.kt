@@ -277,8 +277,9 @@ object OfferPayloadValidator {
             val customerLat = if (isAccepted) rawCustomerLat else 0.0
             val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
-            val isCod = data["isCod"]?.toBoolean() ?: false
-            val codAmount = data["codAmount"]?.toDoubleOrNull() ?: 0.0
+            val isCodRaw = data["isCod"] ?: data["is_cod"]
+            val isCod = if (isCodRaw != null) isCodRaw.toBoolean() else true
+            val codAmount = data["codAmount"]?.toDoubleOrNull() ?: data["cod_amount"]?.toDoubleOrNull() ?: 0.0
 
             val orderTotal = data["orderTotal"]?.toDoubleOrNull()
                 ?: data["order_total"]?.toDoubleOrNull()
@@ -294,10 +295,10 @@ object OfferPayloadValidator {
                 ?: (orderTotal?.times(0.15)?.coerceAtLeast(35.0))
                 ?: 35.0
 
-            val deliveryDistanceKm = data["deliveryDistanceKm"]?.toDoubleOrNull() ?: 1.5
+            val totalDistanceKm = data["totalDistanceKm"]?.toDoubleOrNull() ?: data["total_distance_km"]?.toDoubleOrNull() ?: 2.0
+            val estimatedDurationMins = data["estimatedDurationMins"]?.toIntOrNull() ?: data["estimated_duration_mins"]?.toIntOrNull() ?: 15
+            val deliveryDistanceKm = data["deliveryDistanceKm"]?.toDoubleOrNull() ?: totalDistanceKm
             val pickupDistanceKm = data["pickupDistanceKm"]?.toDoubleOrNull() ?: 0.5
-            val totalDistanceKm = data["totalDistanceKm"]?.toDoubleOrNull() ?: (pickupDistanceKm + deliveryDistanceKm)
-            val estimatedDurationMins = data["estimatedDurationMins"]?.toIntOrNull()?.takeIf { it > 0 } ?: 15
 
             val expiresAt = data["expiresAt"]?.toLongOrNull()
                 ?: data["offerExpiresAt"]?.toLongOrNull()

@@ -35,19 +35,11 @@ sealed interface CartAddEvent {
     data class Failure(val message: String) : CartAddEvent
 }
 
-private val defaultIoDispatcher: CoroutineDispatcher
-    get() = try {
-        Class.forName("org.junit.Test")
-        Dispatchers.Unconfined
-    } catch (_: Throwable) {
-        Dispatchers.IO
-    }
-
 class CartViewModel(
     private val repository: AppRepository,
     private val cartDao: CartDao? = null,
     private val appContext: android.content.Context? = null,
-    private val ioDispatcher: CoroutineDispatcher = defaultIoDispatcher
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel(), CartMutationGate {
 
     var customerId by mutableStateOf("")
@@ -281,7 +273,14 @@ class CartViewModel(
 
     init {
         saveForLaterItems = appContext?.let { ctx ->
-            com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(ctx, "")
+            when (val res = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItemsWithResult(ctx, "")) {
+                is com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult.Success -> res.data
+                is com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult.DecryptError -> {
+                    errorMessage = "Storage error: could not decrypt saved items. Ciphertext preserved."
+                    emptyList()
+                }
+                else -> emptyList()
+            }
         } ?: emptyList()
         loadFromLocalStorage(LOCAL_OFFLINE_CART_KEY)
         refreshDeliveryConfigAndPromotions()
@@ -336,7 +335,14 @@ class CartViewModel(
         cartItems = emptyList()
         totals = null
         saveForLaterItems = appContext?.let { ctx ->
-            com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(ctx, targetId)
+            when (val res = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItemsWithResult(ctx, targetId)) {
+                is com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult.Success -> res.data
+                is com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult.DecryptError -> {
+                    errorMessage = "Storage error: could not decrypt saved items. Ciphertext preserved."
+                    emptyList()
+                }
+                else -> emptyList()
+            }
         } ?: emptyList()
         appliedCouponCode = null
         couponDiscountAmount = BigDecimal.ZERO
@@ -716,7 +722,7 @@ class CartViewModel(
                 val opKey = existingPendingKey ?: run {
                     val newKey = "add_${targetCustomerId}_${item.sku}_${UUID.randomUUID()}"
                     val saved = appContext?.let { ctx ->
-                        LocalSaveForLaterStore.setPendingAddKey(ctx, targetCustomerId, item.sku, newKey)
+                        LocalSaveForLaterStore.setPendingAddKey(ctx, targetCustomerId, item.sku, newKey, item)
                     } ?: true
                     if (!saved) {
                         cartItems = previousCartItems
@@ -1703,7 +1709,14 @@ class CartViewModel(
         customerId = ""
         isInitialized = false
         saveForLaterItems = appContext?.let { ctx ->
-            com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItems(ctx, "")
+            when (val res = com.commerceos.android.data.local.LocalSaveForLaterStore.getSavedItemsWithResult(ctx, "")) {
+                is com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult.Success -> res.data
+                is com.commerceos.android.data.local.LocalSaveForLaterStore.StorageResult.DecryptError -> {
+                    errorMessage = "Storage error: could not decrypt saved items. Ciphertext preserved."
+                    emptyList()
+                }
+                else -> emptyList()
+            }
         } ?: emptyList()
         errorMessage = null
         availableCampaigns = emptyList()

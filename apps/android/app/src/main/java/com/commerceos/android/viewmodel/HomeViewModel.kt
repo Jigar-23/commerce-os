@@ -69,7 +69,8 @@ class HomeViewModel(private val repository: AppRepository) : ViewModel() {
 
         val requestId = java.util.UUID.randomUUID().toString()
         activeHomeRequestId = requestId
-        android.util.Log.d("HomeViewModel", "loadHomeData called: customerId=$customerId, addressId=$addressId, requestId=$requestId")
+        val safeCustomerId = if (customerId.isBlank()) "guest" else "${customerId.take(3)}***"
+        android.util.Log.d("HomeViewModel", "loadHomeData called: customerId=$safeCustomerId, hasAddress=${!addressId.isNullOrBlank()}, requestId=$requestId")
 
         viewModelScope.launch {
             isLoading = true

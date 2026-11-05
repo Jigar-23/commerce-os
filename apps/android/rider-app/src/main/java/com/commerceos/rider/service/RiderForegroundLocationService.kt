@@ -93,7 +93,11 @@ class RiderForegroundLocationService : Service(), LocationListener {
             }
         }
 
-        fun clearDeliverySession() {
+        fun clearDeliverySession(deliveryIdToPurge: String? = null) {
+            val toPurge = deliveryIdToPurge ?: activeDeliveryId
+            if (toPurge.isNotBlank()) {
+                staticDbHelper?.purgeDelivery(toPurge)
+            }
             activeDeliveryId = ""
         }
 
@@ -312,30 +316,22 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 onLocationChanged(best)
             }
 
+            val minTimeMs = if (activeDeliveryId.isNotBlank()) 3000L else 10000L
+            val minDistanceM = if (activeDeliveryId.isNotBlank()) 3.0f else 10.0f
             val mainLooper = android.os.Looper.getMainLooper()
             if (isGpsEnabled) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    1000L,
-                    0f,
+                    minTimeMs,
+                    minDistanceM,
                     this,
                     mainLooper
                 )
-            }
-            if (isNetEnabled) {
+            } else if (isNetEnabled) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    1500L,
-                    0f,
-                    this,
-                    mainLooper
-                )
-            }
-            if (isPassiveEnabled) {
-                locationManager?.requestLocationUpdates(
-                    LocationManager.PASSIVE_PROVIDER,
-                    1000L,
-                    0f,
+                    minTimeMs,
+                    minDistanceM,
                     this,
                     mainLooper
                 )
@@ -417,7 +413,11 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
         if (activeDeliveryId.isNotBlank()) {
             // Atomic SQLite enqueue for active delivery telemetry
-            dbHelper?.enqueue(update)
+            val enqueued = dbHelper?.enqueue(update) ?: false
+            if (!enqueued) {
+                Log.e(TAG, "Failed to persist telemetry fix to SQLite queue for delivery $activeDeliveryId")
+                _isStale.value = true
+            }
             _pendingQueueCount.value = dbHelper?.getQueueSize() ?: 0
         }
 
@@ -491,10 +491,11 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
 
     private suspend fun transmitHeadTelemetry(): Boolean = withContext(Dispatchers.IO) {
-        if (activeDeliveryId.isNotBlank()) {
-            dbHelper?.purgeInactiveDeliveries(activeDeliveryId)
+        if (activeDeliveryId.isBlank()) {
+            return@withContext true
         }
-        val nextUpdate = dbHelper?.peekHead(activeDeliveryId.ifBlank { null }) ?: return@withContext true
+        dbHelper?.purgeInactiveDeliveries(activeDeliveryId)
+        val nextUpdate = dbHelper?.peekHead(activeDeliveryId) ?: return@withContext true
         val targetDeliveryId = nextUpdate.deliveryId.ifBlank { activeDeliveryId }
         val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
         val baseUrl = sessionMgr.getBaseUrl()

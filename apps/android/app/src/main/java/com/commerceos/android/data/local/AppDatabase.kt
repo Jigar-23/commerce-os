@@ -55,7 +55,6 @@ abstract class AppDatabase : RoomDatabase() {
                     "commerce_os_cart.db"
                 )
                 .addMigrations(MIGRATION_1_2)
-                .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
             }

@@ -918,7 +918,14 @@ class AddressViewModel(
         }
     }
 
+    private var defaultAddressJob: Job? = null
+    private var defaultAddressGeneration: Long = 0L
+
     fun setDefaultAddress(addressId: String) {
+        val currentGen = ++defaultAddressGeneration
+        val previousAddresses = addresses
+        val previousSelected = selectedAddress
+
         // Optimistic UI update
         addresses = addresses.map { it.copy(isDefault = it.id == addressId) }
         val target = addresses.find { it.id == addressId }
@@ -926,14 +933,21 @@ class AddressViewModel(
             selectedAddress = target
         }
 
-        viewModelScope.launch {
+        defaultAddressJob?.cancel()
+        defaultAddressJob = viewModelScope.launch {
             when (val result = repository.setDefaultAddress(customerId, addressId)) {
                 is ApiResult.Success -> {
-                    addresses = addresses.map { it.copy(isDefault = it.id == addressId) }
-                    selectedAddress = result.data
+                    if (currentGen == defaultAddressGeneration) {
+                        addresses = addresses.map { it.copy(isDefault = it.id == addressId) }
+                        selectedAddress = result.data
+                    }
                 }
                 is ApiResult.Failure -> {
-                    // Non-fatal if address exists locally
+                    if (currentGen == defaultAddressGeneration) {
+                        addresses = previousAddresses
+                        selectedAddress = previousSelected
+                        errorMessage = "Failed to set default address: ${result.error.message}"
+                    }
                 }
             }
         }

@@ -58,8 +58,8 @@ fun RiderOfferCard(
         }
     }
 
-    val totalTripKm = Math.round((pickupDistKm + dropDistKm) * 10.0) / 10.0
-    val totalTripMins = maxOf(6, Math.round(totalTripKm * 3.5 + 4).toInt())
+    val totalTripKm = if (offer.totalDistanceKm > 0.0) offer.totalDistanceKm else Math.round((pickupDistKm + dropDistKm) * 10.0) / 10.0
+    val totalTripMins = if (offer.estimatedDurationMins > 0) offer.estimatedDurationMins else maxOf(6, Math.round(totalTripKm * 3.5 + 4).toInt())
 
     Card(
         shape = RoundedCornerShape(22.dp),

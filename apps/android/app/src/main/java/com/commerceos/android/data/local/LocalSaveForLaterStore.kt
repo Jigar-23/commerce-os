@@ -2,12 +2,14 @@ package com.commerceos.android.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import com.commerceos.android.model.CartItem
 import com.commerceos.android.session.SecureCredentialStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
 object LocalSaveForLaterStore {
+    private const val TAG = "LocalSaveForLaterStore"
     private const val PREFS_NAME = "commerce_os_save_for_later"
     private const val SECURE_KEY_PREFIX = "saved_items_sec_"
     private const val LEGACY_KEY_PREFIX = "saved_items_"
@@ -38,36 +40,58 @@ object LocalSaveForLaterStore {
         return false
     }
 
-    fun getSavedItems(context: Context, customerId: String): List<CartItem> {
+    sealed interface StorageResult<out T> {
+        data class Success<T>(val data: T) : StorageResult<T>
+        object NotFound : StorageResult<Nothing>
+        data class DecryptError(val cause: Throwable) : StorageResult<Nothing>
+    }
+
+    fun getSavedItemsWithResult(context: Context, customerId: String): StorageResult<List<CartItem>> {
         return try {
             val key = secureKey(customerId)
             val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
-            val json = secureStore.read(key) ?: run {
-                // Check legacy/plaintext prefs for migration
-                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                val legKey = legacyKey(customerId)
-                val legacyJson = prefs.getString(legKey, null)
-                if (legacyJson != null) {
-                    val migrated = secureStore.save(key, legacyJson)
-                    if (migrated) {
-                        val cleaned = commitWithRetry(prefs.edit().remove(legKey))
-                        if (cleaned) {
-                            legacyJson
+            when (val check = secureStore.readWithResult(key)) {
+                is SecureCredentialStore.SecureReadResult.Success -> {
+                    val type = object : TypeToken<List<CartItem>>() {}.type
+                    val list: List<CartItem> = gson.fromJson(check.value, type) ?: emptyList()
+                    StorageResult.Success(list)
+                }
+                is SecureCredentialStore.SecureReadResult.DecryptError -> {
+                    StorageResult.DecryptError(check.cause)
+                }
+                is SecureCredentialStore.SecureReadResult.NotFound -> {
+                    // Check legacy/plaintext prefs for migration ONLY on NotFound
+                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    val legKey = legacyKey(customerId)
+                    val legacyJson = prefs.getString(legKey, null)
+                    if (legacyJson != null) {
+                        val migrated = secureStore.save(key, legacyJson)
+                        if (migrated) {
+                            val cleaned = commitWithRetry(prefs.edit().remove(legKey))
+                            if (cleaned) {
+                                val type = object : TypeToken<List<CartItem>>() {}.type
+                                val list: List<CartItem> = gson.fromJson(legacyJson, type) ?: emptyList()
+                                StorageResult.Success(list)
+                            } else {
+                                StorageResult.NotFound
+                            }
                         } else {
-                            // Fail closed: Never return plaintext unencrypted data when legacy cleanup fails
-                            null
+                            StorageResult.NotFound
                         }
                     } else {
-                        // Fail closed: Never return plaintext unencrypted data when secure migration fails
-                        null
+                        StorageResult.NotFound
                     }
-                } else null
-            } ?: return emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            StorageResult.NotFound
+        }
+    }
 
-            val type = object : TypeToken<List<CartItem>>() {}.type
-            gson.fromJson<List<CartItem>>(json, type) ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
+    fun getSavedItems(context: Context, customerId: String): List<CartItem> {
+        return when (val res = getSavedItemsWithResult(context, customerId)) {
+            is StorageResult.Success -> res.data
+            else -> emptyList()
         }
     }
 
@@ -76,6 +100,14 @@ object LocalSaveForLaterStore {
             val key = secureKey(customerId)
             val legKey = legacyKey(customerId)
             val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
+
+            // If ciphertext has DecryptError, preserve existing ciphertext to prevent permanent data loss!
+            val currentCheck = secureStore.readWithResult(key)
+            if (currentCheck is SecureCredentialStore.SecureReadResult.DecryptError) {
+                Log.e(TAG, "Decryption error for storageKey=$key; preserving existing ciphertext to prevent data loss")
+                return false
+            }
+
             if (items.isEmpty()) {
                 val cleared = secureStore.clear(key)
                 if (!cleared) return false
@@ -136,21 +168,29 @@ object LocalSaveForLaterStore {
         }
     }
 
+    data class PendingAddRecord(val key: String, val item: CartItem? = null)
+
     fun getPendingAddKey(context: Context, customerId: String, sku: String): String? {
         return try {
             val safeId = customerId.trim().ifBlank { "guest" }
             val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
-            secureStore.read(PENDING_ADD_PREFIX + "${safeId}_$sku")
+            val stored = secureStore.read(PENDING_ADD_PREFIX + "${safeId}_$sku") ?: return null
+            if (stored.startsWith("{") && stored.contains("\"key\"")) {
+                gson.fromJson(stored, PendingAddRecord::class.java)?.key
+            } else {
+                stored
+            }
         } catch (_: Exception) {
             null
         }
     }
 
-    fun setPendingAddKey(context: Context, customerId: String, sku: String, key: String): Boolean {
+    fun setPendingAddKey(context: Context, customerId: String, sku: String, key: String, item: CartItem? = null): Boolean {
         return try {
             val safeId = customerId.trim().ifBlank { "guest" }
             val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
-            secureStore.save(PENDING_ADD_PREFIX + "${safeId}_$sku", key)
+            val payload = if (item != null) gson.toJson(PendingAddRecord(key, item)) else key
+            secureStore.save(PENDING_ADD_PREFIX + "${safeId}_$sku", payload)
         } catch (_: Exception) {
             false
         }

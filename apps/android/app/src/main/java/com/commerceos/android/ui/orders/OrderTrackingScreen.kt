@@ -316,7 +316,7 @@ fun OrderTrackingContent(
                                 color = if (isCancelled) Color(0xFFDC2626) else Color(0xFF0F172A)
                             )
                             Text(
-                                if (isCancelled) "Cancellation & Refund Status" else "Summary & Receipt",
+                                if (isCancelled) "Cancellation Status" else "Summary & Receipt",
                                 fontSize = 11.sp,
                                 color = Color(0xFF64748B)
                             )
@@ -421,7 +421,7 @@ fun OrderTrackingContent(
                         )
 
                         Text(
-                            text = "This order was cancelled. If you paid online, a full refund of ₹${order.totalAmount} will be credited to your account within 2-4 hours. For Cash on Delivery, no payment is due.",
+                            text = "Your order was cancelled. No payment was collected; no refund is due.",
                             color = Color(0xFF64748B),
                             fontSize = 12.sp,
                             lineHeight = 18.sp,
@@ -1241,7 +1241,7 @@ fun OrderTrackingContent(
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Paid Online",
+                                text = if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Payment: ${order.paymentMethod.ifBlank { "Unspecified" }}",
                                 color = Color(0xFF059669),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -1423,7 +1423,7 @@ fun OrderTrackingContent(
                             Text("Payment Mode", fontSize = 12.sp, color = Color(0xFF64748B))
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Paid Online",
+                                text = if (order.paymentMethod.equals("COD", ignoreCase = true)) "Cash on Delivery" else "Payment: ${order.paymentMethod.ifBlank { "Unspecified" }}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0F172A)

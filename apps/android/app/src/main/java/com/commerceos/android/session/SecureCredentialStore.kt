@@ -38,6 +38,18 @@ open class SecureCredentialStore(private val context: Context? = null) {
     }
 
     open fun readWithResult(alias: String): SecureReadResult {
+        if (context == null) {
+            val overridden = try {
+                javaClass.getMethod("read", String::class.java).declaringClass != SecureCredentialStore::class.java
+            } catch (_: Exception) {
+                false
+            }
+            if (overridden) {
+                val v = read(alias)
+                return if (v != null) SecureReadResult.Success(v) else SecureReadResult.NotFound
+            }
+            return SecureReadResult.NotFound
+        }
         return try {
             val stored = prefs?.getString(alias, null) ?: return SecureReadResult.NotFound
             val payload = Base64.decode(stored, Base64.NO_WRAP)
@@ -58,6 +70,37 @@ open class SecureCredentialStore(private val context: Context? = null) {
             is SecureReadResult.Success -> res.value
             else -> null
         }
+    }
+
+    open fun encryptBytes(alias: String, bytes: ByteArray): ByteArray? = try {
+        if (context == null) {
+            bytes
+        } else {
+            val key = getOrCreateKey(alias)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val ciphertext = cipher.doFinal(bytes)
+            cipher.iv + ciphertext
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    open fun decryptBytes(alias: String, encryptedPayload: ByteArray): ByteArray? = try {
+        if (context == null) {
+            encryptedPayload
+        } else if (encryptedPayload.size <= IV_LENGTH) {
+            null
+        } else {
+            val iv = encryptedPayload.copyOfRange(0, IV_LENGTH)
+            val ciphertext = encryptedPayload.copyOfRange(IV_LENGTH, encryptedPayload.size)
+            val key = getOrCreateKey(alias)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.doFinal(ciphertext)
+        }
+    } catch (_: Exception) {
+        null
     }
 
     open fun clear(alias: String): Boolean {

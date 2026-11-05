@@ -573,7 +573,10 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
 
   const candidates = [];
   if (deliveryAddrObj && typeof deliveryAddrObj === 'object') {
-    if (deliveryAddrObj.locality) candidates.push(deliveryAddrObj.locality);
+    if (deliveryAddrObj.locality) {
+      const parts = String(deliveryAddrObj.locality).split(',').map(p => p.trim()).filter(Boolean);
+      candidates.push(...parts);
+    }
     if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
     if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
   }
@@ -582,24 +585,25 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (trimmed.startsWith('{')) {
       try {
         const obj = JSON.parse(trimmed);
-        if (obj.locality) candidates.push(obj.locality);
+        if (obj.locality) {
+          const parts = String(obj.locality).split(',').map(p => p.trim()).filter(Boolean);
+          candidates.push(...parts);
+        }
         if (obj.area) candidates.push(obj.area);
         if (obj.city) candidates.push(obj.city);
       } catch (_) {}
     } else {
-      candidates.push(trimmed);
+      const parts = trimmed.split(',').map(p => p.trim()).filter(Boolean);
+      candidates.push(...parts);
     }
   }
 
   const validTokens = [];
   for (const cand of candidates) {
     if (typeof cand !== 'string') continue;
-    const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
-    for (const p of parts) {
-      const cleaned = sanitizeSegment(p);
-      if (cleaned && !validTokens.includes(cleaned)) {
-        validTokens.push(cleaned);
-      }
+    const cleaned = sanitizeSegment(cand);
+    if (cleaned && !validTokens.includes(cleaned)) {
+      validTokens.push(cleaned);
     }
   }
 

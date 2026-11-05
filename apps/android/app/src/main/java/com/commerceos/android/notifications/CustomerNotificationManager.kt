@@ -204,11 +204,11 @@ object CustomerNotificationManager {
             "CANCELLED" -> {
                 Triple(
                     "❌ Order #$orderCode Cancelled",
-                    "Your order was cancelled. Any debited amount will be refunded to source.",
+                    "Your order was cancelled. No payment was collected; no refund is due.",
                     buildString {
                         append("Order #$orderCode has been cancelled as requested.\n")
-                        append("💳 Any online payment will be refunded within 24-48 hours.\n")
-                        append("Need assistance? Contact our 24x7 Pharmacy Helpdesk.")
+                        append("💵 Cash on Delivery order: No payment was collected and no payment is due.\n")
+                        append("Need assistance? Contact our 24x7 Customer Support.")
                     }
                 )
             }

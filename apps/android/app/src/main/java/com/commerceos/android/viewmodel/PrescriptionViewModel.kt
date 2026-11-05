@@ -20,18 +20,10 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
-private val defaultIoDispatcher: CoroutineDispatcher
-    get() = try {
-        Class.forName("org.junit.Test")
-        Dispatchers.Unconfined
-    } catch (_: Throwable) {
-        Dispatchers.IO
-    }
-
 class PrescriptionViewModel(
     private val repository: AppRepository,
     private val appContext: Context? = null,
-    private val ioDispatcher: CoroutineDispatcher = defaultIoDispatcher
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
 
     var prescriptions by mutableStateOf<List<Prescription>>(emptyList())
@@ -144,25 +136,9 @@ class PrescriptionViewModel(
     }
 
     private fun readBoundedBytes(file: File, maxBytes: Int = 5 * 1024 * 1024): ByteArray {
-        val declaredLength = file.length()
-        require(declaredLength <= maxBytes.toLong()) {
-            "Prescription image must be 5 MiB or smaller."
-        }
-        val out = java.io.ByteArrayOutputStream(if (declaredLength in 1..maxBytes.toLong()) declaredLength.toInt() else 8192)
-        val buffer = ByteArray(8192)
-        var totalRead = 0L
-        file.inputStream().use { input ->
-            var read: Int
-            while (input.read(buffer).also { read = it } != -1) {
-                totalRead += read
-                require(totalRead <= maxBytes.toLong()) {
-                    "Prescription image must be 5 MiB or smaller."
-                }
-                out.write(buffer, 0, read)
-            }
-        }
-        val bytes = out.toByteArray()
+        val bytes = LocalPrescriptionManager.readAttachmentBytes(appContext, file)
         require(bytes.isNotEmpty()) { "Prescription image could not be read." }
+        require(bytes.size <= maxBytes) { "Prescription image must be 5 MiB or smaller." }
         return bytes
     }
 
@@ -252,17 +228,17 @@ class PrescriptionViewModel(
                         currentUploadFingerprint = persistedUpload.fingerprint
                         persistedUpload.idempotencyKey
                     } else {
-                        "rx_upload_${safeCustomerId}_${UUID.randomUUID()}".also { newKey ->
-                            currentUploadKey = newKey
-                            currentUploadFingerprint = uploadFingerprint
-                            appContext?.let { ctx ->
-                                LocalPrescriptionManager.setPendingUpload(
-                                    ctx,
-                                    safeCustomerId,
-                                    LocalPrescriptionManager.PendingUploadRecord(newKey, uploadFingerprint)
-                                )
-                            }
+                        val newKey = "rx_upload_${safeCustomerId}_${UUID.randomUUID()}"
+                        if (appContext != null) {
+                            LocalPrescriptionManager.setPendingUpload(
+                                appContext,
+                                safeCustomerId,
+                                LocalPrescriptionManager.PendingUploadRecord(newKey, uploadFingerprint)
+                            )
                         }
+                        currentUploadKey = newKey
+                        currentUploadFingerprint = uploadFingerprint
+                        newKey
                     }
 
                 when (val result = repository.uploadPrescription(

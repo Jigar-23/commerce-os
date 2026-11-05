@@ -757,11 +757,11 @@ fun CommerceOSApp(
                             ?: addressViewModel.addresses.firstOrNull { it.isDefault }
 
                         val isCompleteSavedAddress = currentSelected != null &&
+                            currentSelected.id.isNotBlank() &&
                             !currentSelected.id.startsWith("temp_gps_") &&
                             !currentSelected.tag.equals("Current Location", ignoreCase = true) &&
-                            !currentSelected.city.equals("Wadgaon", ignoreCase = true) &&
                             (currentSelected.latitude ?: 0.0) != 0.0 &&
-                            kotlin.math.abs((currentSelected.latitude ?: 0.0) - 20.5937) > 0.01
+                            (currentSelected.longitude ?: 0.0) != 0.0
 
                         checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
 

@@ -1,6 +1,8 @@
 package com.commerceos.rider.session
 
 import android.content.Context
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -83,25 +85,38 @@ class RiderSessionManager private constructor(context: Context) {
         }
     }
 
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val topicMutex = kotlinx.coroutines.sync.Mutex()
+    private var reconciliationGeneration = 0L
+
     fun isLoggedIn(): Boolean {
         return getAuthToken().isNotBlank() && getRiderId().isNotBlank()
     }
 
     fun clearSession(context: Context? = null) {
         val currentStore = getStoreId().trim()
-        if (currentStore.isNotBlank()) {
-            try {
-                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$currentStore")
-            } catch (_: Exception) {}
+        scope.launch {
+            topicMutex.withLock {
+                if (currentStore.isNotBlank()) {
+                    try {
+                        com.google.android.gms.tasks.Tasks.await(
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$currentStore")
+                        )
+                    } catch (_: Exception) {}
+                }
+                try {
+                    com.google.android.gms.tasks.Tasks.await(
+                        com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                    )
+                } catch (_: Exception) {}
+            }
         }
-        try {
-            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
-        } catch (_: Exception) {}
         saveShiftOnline(false)
         secureStore.deleteKeyAndValue(KEY_AUTH_TOKEN)
         secureStore.deleteKeyAndValue(KEY_REFRESH_TOKEN)
         saveRiderId("")
-        prefs.edit().clear().apply()
+        saveStoreId("")
+        prefs.edit().clear().commit()
         context?.let { ctx ->
             try {
                 val notifManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
@@ -111,63 +126,58 @@ class RiderSessionManager private constructor(context: Context) {
     }
 
     fun reconcileStoreTopic(newStoreId: String?, isOnline: Boolean) {
-        val oldStore = getStoreId().trim()
-        val newStore = if (newStoreId.equals("null", ignoreCase = true)) "" else (newStoreId?.trim() ?: "")
+        val newStore = if (newStoreId == null || newStoreId.equals("null", ignoreCase = true)) "" else newStoreId.trim()
+        val targetStore = newStore
+        scope.launch {
+            topicMutex.withLock {
+                val gen = ++reconciliationGeneration
+                val oldStore = getStoreId().trim()
 
-        if (newStore.isBlank()) {
-            // Rider is unassigned or store assignment was removed: clear saved store and unsubscribe
-            saveStoreId("")
-            if (oldStore.isNotBlank()) {
-                try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
-                } catch (_: Exception) {}
-            }
-        } else if (newStore != oldStore) {
-            // Store changed to a new store: unsubscribe from old store topic before registering new store
-            if (oldStore.isNotBlank()) {
-                try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
-                        .addOnCompleteListener {
-                            saveStoreId(newStore)
-                            if (isOnline) {
-                                try {
-                                    com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
-                                } catch (_: Exception) {}
-                            }
-                        }
-                } catch (_: Exception) {
-                    saveStoreId(newStore)
-                    if (isOnline) {
+                if (newStore.isBlank()) {
+                    if (oldStore.isNotBlank()) {
                         try {
-                            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
-                        } catch (_: Exception) {}
+                            com.google.android.gms.tasks.Tasks.await(
+                                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.w("RiderSessionManager", "Failed to unsubscribe: ${e.message}")
+                        }
+                    }
+                    saveStoreId("")
+                    return@withLock
+                }
+
+                if (oldStore.isNotBlank() && (oldStore != targetStore || !isOnline)) {
+                    try {
+                        com.google.android.gms.tasks.Tasks.await(
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.w("RiderSessionManager", "Failed to unsubscribe from old store topic: ${e.message}")
                     }
                 }
-            } else {
-                saveStoreId(newStore)
-                if (isOnline) {
+
+                if (gen != reconciliationGeneration) return@withLock
+
+                saveStoreId(targetStore)
+
+                if (targetStore.isNotBlank() && isOnline && isLoggedIn()) {
                     try {
-                        com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
-                    } catch (_: Exception) {}
+                        com.google.android.gms.tasks.Tasks.await(
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$targetStore")
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.w("RiderSessionManager", "Failed to subscribe to store topic: ${e.message}")
+                    }
                 }
-            }
-        } else {
-            // Store confirmed unchanged: presence-gated topic subscription
-            saveStoreId(newStore)
-            if (!isOnline) {
+
                 try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$newStore")
-                } catch (_: Exception) {}
-            } else {
-                try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
+                    com.google.android.gms.tasks.Tasks.await(
+                        com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
+                    )
                 } catch (_: Exception) {}
             }
         }
-
-        try {
-            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast")
-        } catch (_: Exception) {}
     }
 
     fun getFcmToken(): String {

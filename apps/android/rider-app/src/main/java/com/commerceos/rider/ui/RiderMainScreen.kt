@@ -1409,16 +1409,7 @@ fun RiderMainScreen(
                                 isOnline = newStatus
                                 sessionManager.saveShiftOnline(newStatus)
                                 val assignedStore = sessionManager.getStoreId().trim()
-                                if (newStatus) {
-                                    if (assignedStore.isNotBlank()) {
-                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$assignedStore") } catch (_: Exception) {}
-                                    }
-                                } else {
-                                    if (assignedStore.isNotBlank()) {
-                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStore") } catch (_: Exception) {}
-                                    }
-                                }
-                                try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
+                                sessionManager.reconcileStoreTopic(assignedStore, newStatus)
                                 liveProfile = liveProfile?.copy(shiftStatus = if (newStatus) "ONLINE_AVAILABLE" else "OFFLINE")
                             }.onFailure {
                                 Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()

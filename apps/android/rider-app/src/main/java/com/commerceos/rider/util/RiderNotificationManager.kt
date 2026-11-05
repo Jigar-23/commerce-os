@@ -231,4 +231,30 @@ object RiderNotificationManager {
             // Ignore
         }
     }
+
+    fun showLocationSyncRequiredNotification(context: Context) {
+        try {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                1002,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentTitle("📍 Location Sync Required")
+                .setContentText("Tap to open app and resume active shift location tracking.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(1002, builder.build())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show location sync notification: ${e.message}")
+        }
+    }
 }

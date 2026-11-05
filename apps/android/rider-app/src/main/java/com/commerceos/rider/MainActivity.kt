@@ -20,10 +20,22 @@ class MainActivity : ComponentActivity() {
 
     private var pendingIntentOfferId by mutableStateOf<String?>(null)
 
+    private val backgroundPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        startLocationService()
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        // Permissions granted callback - ensure service starts
+    ) { _ ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val bgGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!bgGranted) {
+                backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                return@registerForActivityResult
+            }
+        }
         startLocationService()
     }
 
