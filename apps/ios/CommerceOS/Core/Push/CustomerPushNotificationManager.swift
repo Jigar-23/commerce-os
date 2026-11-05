@@ -11,7 +11,18 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
 
     public override init() {
         super.init()
+        if let savedToken = UserDefaults.standard.string(forKey: "pending_apns_device_token"), !savedToken.isEmpty {
+            self.deviceToken = savedToken
+            self.isRegisteredForRemoteNotifications = true
+        }
         self.requestAuthorization()
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.syncPendingToken()
+        }
     }
 
     public func requestAuthorization() {
@@ -29,7 +40,15 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
         let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         self.deviceToken = tokenString
         self.isRegisteredForRemoteNotifications = true
+        UserDefaults.standard.set(tokenString, forKey: "pending_apns_device_token")
         self.registerTokenWithBackend(token: tokenString)
+    }
+
+    public func syncPendingToken() {
+        guard let token = UserDefaults.standard.string(forKey: "pending_apns_device_token"), !token.isEmpty else {
+            return
+        }
+        self.registerTokenWithBackend(token: token)
     }
 
     public func registerTokenWithBackend(token: String) {
@@ -44,8 +63,9 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
                     endpoint: "/api/v1/customer/device-token",
                     body: body
                 )
+                UserDefaults.standard.set(true, forKey: "apns_device_token_synced")
             } catch {
-                // Ignore transient network errors; retries on next app foreground
+                // Ignore transient network errors; retries on next app foreground or authentication
             }
         }
     }

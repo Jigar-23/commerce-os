@@ -97,6 +97,7 @@ public final class AppContainer: ObservableObject {
         }
         
         apiClient.setAuth(token: token, customerId: customerId)
+        CustomerPushNotificationManager.shared.syncPendingToken()
         AddressViewModel.shared.initialize(customerId: customerId)
         self.customerSession = CustomerSessionDto(
             customerId: customerId,

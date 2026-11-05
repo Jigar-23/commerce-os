@@ -590,9 +590,8 @@ public struct OrderTrackingScreen: View {
     // MARK: - Assigned Partner Card (🛵 Icon + Call Button)
     private var assignedPartnerCard: some View {
         let riderName = trackingData?.riderName ?? orderDetail?.riderName ?? "Assigned Delivery Partner"
-        let riderPhone = (trackingData?.riderPhone?.isEmpty == false ? trackingData?.riderPhone : nil)
-            ?? (orderDetail?.riderPhone?.isEmpty == false ? orderDetail?.riderPhone : nil)
-            ?? "+91 98179 16180"
+        let riderPhone = (trackingData?.riderPhone?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? trackingData?.riderPhone?.trimmingCharacters(in: .whitespacesAndNewlines) : nil)
+            ?? (orderDetail?.riderPhone?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? orderDetail?.riderPhone?.trimmingCharacters(in: .whitespacesAndNewlines) : nil)
         let riderVehicle = orderDetail?.riderVehicle ?? "Electric Delivery Scooter"
         
         return HStack(alignment: .center, spacing: 12) {
@@ -623,20 +622,22 @@ public struct OrderTrackingScreen: View {
             
             Spacer()
             
-            Button(action: {
-                initiateCallToRider(phone: riderPhone)
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "phone.fill")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("Call")
-                        .font(.system(size: 12, weight: .bold))
+            if let phone = riderPhone {
+                Button(action: {
+                    initiateCallToRider(phone: phone)
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "phone.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Call")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: "059669"))
+                    .cornerRadius(10)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color(hex: "059669"))
-                .cornerRadius(10)
             }
         }
         .padding(16)

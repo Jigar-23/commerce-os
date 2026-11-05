@@ -128,8 +128,8 @@ CREATE TABLE IF NOT EXISTS products (
     safety_advice JSONB NOT NULL DEFAULT '[]'::jsonb,
     storage_condition VARCHAR(255),
     therapeutic_class VARCHAR(255),
-    hsn_code VARCHAR(16) NOT NULL DEFAULT '3004',
-    gst_rate NUMERIC(4, 2) NOT NULL DEFAULT 5.0,
+    hsn_code VARCHAR(16) NOT NULL,
+    gst_rate NUMERIC(4, 2) NOT NULL,
     store_id VARCHAR(64) REFERENCES stores(id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     service_radius_km DOUBLE PRECISION NOT NULL DEFAULT 10.0,
@@ -312,6 +312,9 @@ CREATE TABLE IF NOT EXISTS orders (
     delivery_otp_hash VARCHAR(128) NOT NULL,
     otp_expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '45 minutes',
     otp_attempts INT NOT NULL DEFAULT 0,
+    cumulative_otp_attempts INT NOT NULL DEFAULT 0,
+    otp_resend_count INT NOT NULL DEFAULT 0,
+    last_otp_resent_at TIMESTAMPTZ,
     otp_verified_at TIMESTAMPTZ,
     cancellation JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -411,6 +414,7 @@ CREATE TABLE IF NOT EXISTS payments (
 
 CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_upi_utr ON payments(provider_ref) WHERE provider = 'UPI_INTENT' AND provider_ref IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_ref ON payments (provider, provider_ref) WHERE provider_ref IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS payment_webhook_events (
     id VARCHAR(64) PRIMARY KEY,
@@ -667,8 +671,14 @@ UPDATE products SET gst_rate = 5.0 WHERE gst_rate IS NULL AND hsn_code = '3004';
 UPDATE products SET gst_rate = 12.0 WHERE gst_rate IS NULL AND hsn_code = '9018';
 UPDATE products SET gst_rate = 18.0 WHERE gst_rate IS NULL AND hsn_code = '2106';
 UPDATE products SET gst_rate = 5.0 WHERE gst_rate IS NULL;
-ALTER TABLE products ALTER COLUMN hsn_code SET DEFAULT '3004';
-ALTER TABLE products ALTER COLUMN gst_rate SET DEFAULT 5.0;
+ALTER TABLE products ALTER COLUMN hsn_code DROP DEFAULT;
+ALTER TABLE products ALTER COLUMN gst_rate DROP DEFAULT;
+
+-- Delivery OTP Attempt Rate Limiting & Anti-Flooding
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS otp_resend_count INT NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_otp_resent_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cumulative_otp_attempts INT NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_ref ON payments (provider, provider_ref) WHERE provider_ref IS NOT NULL;
 
 
 

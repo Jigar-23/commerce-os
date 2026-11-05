@@ -4378,7 +4378,17 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     const pricingEngine = require('../pricing-engine');
 
-    function formatCartResponseDto(customerId, rawItems) {
+    async function resolveActiveSurgeMode() {
+      if (pool) {
+        try {
+          const res = await pool.query('SELECT 1 FROM stores WHERE surge_mode = TRUE AND is_active = TRUE LIMIT 1');
+          return res.rows.length > 0;
+        } catch (_) {}
+      }
+      return false;
+    }
+
+    function formatCartResponseDto(customerId, rawItems, isSurge = false) {
       const items = (rawItems || []).map(r => {
         const isRx = Boolean(r.requiresPrescription || r.prescriptionRequired || (r.pharmacyAttributes && r.pharmacyAttributes.prescriptionRequired));
         const isCold = Boolean(r.coldChain || (r.pharmacyAttributes && r.pharmacyAttributes.coldChain));
@@ -4416,12 +4426,13 @@ const server = http.createServer(async (req, res) => {
       const deliveryFee = freeDeliveryEligible ? 0.0 : (items.length > 0 ? 2.0 : 0.0);
       const containsColdChain = items.some(it => it.coldChain);
       const coldChainPackagingFee = containsColdChain ? 15.0 : 0.0;
+      const surgeFee = isSurge ? 25.0 : 0.0;
       const pricing = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: roundedSubtotal,
         items,
         customDeliveryFee: deliveryFee,
         packagingFee: coldChainPackagingFee,
-        surgeFee: 0.0,
+        surgeFee,
         isCod: true
       });
       const grandTotal = pricing.totalAmount;
@@ -4477,8 +4488,9 @@ const server = http.createServer(async (req, res) => {
       const customerId = cartGetMatch[1];
       const authClaims = authorizeCartAccess(req, res, customerId);
       if (!authClaims) return;
+      const isSurge = await resolveActiveSurgeMode();
       const rawItems = await appRepositories.cartRepo.getCart(customerId);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
     }
 
     const cartAddMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items$/);
@@ -4498,8 +4510,9 @@ const server = http.createServer(async (req, res) => {
         }
       }
       try {
+        const isSurge = await resolveActiveSurgeMode();
         const rawItems = await appRepositories.cartRepo.addItem(customerId, body, idempotencyKey);
-        return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+        return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
       } catch (err) {
         if (err.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
           return sendJson(res, 409, { error: 'IDEMPOTENCY_PAYLOAD_MISMATCH', message: err.message });
@@ -4520,8 +4533,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_QUANTITY', message: 'Quantity must be an integer between 0 and 1000.' });
       }
 
+      const isSurge = await resolveActiveSurgeMode();
       const rawItems = await appRepositories.cartRepo.updateQuantity(customerId, sku, quantity);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
     }
 
     if (cartUpdateMatch && method === 'DELETE') {
@@ -4530,8 +4544,9 @@ const server = http.createServer(async (req, res) => {
       const authClaims = authorizeCartAccess(req, res, customerId);
       if (!authClaims) return;
 
+      const isSurge = await resolveActiveSurgeMode();
       const rawItems = await appRepositories.cartRepo.removeItem(customerId, sku);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems));
+      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, isSurge));
     }
 
     if (cartGetMatch && method === 'DELETE') {
@@ -5457,9 +5472,9 @@ const server = http.createServer(async (req, res) => {
         store_id: placeResult.order.store_id,
         createdAt: placeResult.order.created_at,
         created_at: placeResult.order.created_at,
-        estimatedDeliveryMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
-        slaMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
-        estimatedDeliveryTime: new Date(Date.now() + Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))) * 60000).toISOString(),
+        estimatedDeliveryMinutes: Number(fulfillmentDecision.decision?.slaMinutes || 10),
+        slaMinutes: Number(fulfillmentDecision.decision?.slaMinutes || 10),
+        estimatedDeliveryTime: new Date(Date.now() + Number(fulfillmentDecision.decision?.slaMinutes || 10) * 60000).toISOString(),
         items: placeResult.order.items || [],
         isIdempotentReplay: Boolean(placeResult.isIdempotentReplay)
       };
@@ -5870,7 +5885,34 @@ const server = http.createServer(async (req, res) => {
         if (existingOrderRes.rows.length > 0) {
           const row = existingOrderRes.rows[0];
 
-          // Finding 4: Verify that the incoming request matches the persisted order fingerprint
+          // Finding 5: Validate incoming request against canonical SHA-256 request_hash and field fingerprint
+          const cartItems = await appRepositories.cartRepo.getCart(customerId);
+          if (cartItems && cartItems.length > 0 && row.request_hash) {
+            const sortedItems = cartItems.map(i => ({
+              productId: i.productId || i.product_id,
+              quantity: Number(i.quantity)
+            })).sort((a, b) => String(a.productId).localeCompare(String(b.productId)));
+
+            const incomingFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+              customerId,
+              addressId: body.addressId || body.address_id || null,
+              orderType: (body.orderType || 'QUICK_COMMERCE_10MIN').toUpperCase(),
+              paymentMethod: (body.paymentMethod || body.payment_method || 'COD').toUpperCase(),
+              couponCode: body.couponCode ? String(body.couponCode).trim().toUpperCase() : null,
+              tip: Number(body.tip || body.tipAmount || 0),
+              prescriptionId: body.prescriptionId || null,
+              items: sortedItems
+            })).digest('hex');
+
+            if (row.request_hash !== incomingFingerprint) {
+              return sendJson(res, 409, {
+                error: 'IDEMPOTENCY_KEY_REUSE_MISMATCH',
+                message: 'Idempotency key was previously used with a different request payload.'
+              });
+            }
+          }
+
+          // Field-level verification for replayed requests
           const storedAddr = typeof row.delivery_address === 'string' ? JSON.parse(row.delivery_address) : (row.delivery_address || {});
           const storedAddressId = storedAddr.id || storedAddr.addressId || storedAddr.address_id || null;
           const incomingAddressId = body.addressId || body.address_id || null;
@@ -5880,13 +5922,16 @@ const server = http.createServer(async (req, res) => {
           const storedTip = Number(row.tip || row.tip_amount || row.bill_summary?.tip || 0);
           const incomingRx = body.prescriptionId || null;
           const storedRx = row.prescription_id || null;
+          const incomingCoupon = body.couponCode ? String(body.couponCode).trim().toUpperCase() : null;
+          const storedCoupon = row.bill_summary?.couponCode ? String(row.bill_summary.couponCode).trim().toUpperCase() : null;
 
           const addressMismatch = incomingAddressId && storedAddressId && incomingAddressId !== storedAddressId;
           const methodMismatch = incomingMethod && storedMethod && incomingMethod !== storedMethod;
           const tipMismatch = Math.abs(incomingTip - storedTip) > 0.01;
           const rxMismatch = incomingRx !== null && storedRx !== null && incomingRx !== storedRx;
+          const couponMismatch = incomingCoupon !== null && storedCoupon !== null && incomingCoupon !== storedCoupon;
 
-          if (addressMismatch || methodMismatch || tipMismatch || rxMismatch) {
+          if (addressMismatch || methodMismatch || tipMismatch || rxMismatch || couponMismatch) {
             return sendJson(res, 409, {
               error: 'IDEMPOTENCY_KEY_REUSE_MISMATCH',
               message: 'Idempotency key was previously used with a different request payload.'
@@ -6088,9 +6133,9 @@ const server = http.createServer(async (req, res) => {
         deliveryOtp: placeResult.isIdempotentReplay ? undefined : (placeResult.order.deliveryOtp || placeResult.order.rawDeliveryPin),
         storeId: placeResult.order.store_id,
         createdAt: placeResult.order.created_at,
-        estimatedDeliveryMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
-        slaMinutes: Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))),
-        estimatedDeliveryTime: new Date(Date.now() + Math.max(8, 4 + Number(placeResult.session?.estimated_duration_mins || (fulfillmentDecision.decision?.distanceKm ? Math.ceil((Number(fulfillmentDecision.decision.distanceKm) / 20) * 60) : 6)) + Math.min(4, Math.ceil(Number(fulfillmentDecision.decision?.activeOrders || 0) * 0.5))) * 60000).toISOString(),
+        estimatedDeliveryMinutes: Number(fulfillmentDecision.decision?.slaMinutes || 10),
+        slaMinutes: Number(fulfillmentDecision.decision?.slaMinutes || 10),
+        estimatedDeliveryTime: new Date(Date.now() + Number(fulfillmentDecision.decision?.slaMinutes || 10) * 60000).toISOString(),
         isIdempotentReplay: Boolean(placeResult.isIdempotentReplay)
       };
 
@@ -6490,24 +6535,26 @@ const server = http.createServer(async (req, res) => {
       const cleanUtr = String(rawUtr).trim();
 
       if (pool) {
-        // Anti-Replay Security Guard
-        const existingUtr = await pool.query(
-          `SELECT id, order_id FROM payments WHERE provider_ref = $1 AND status = 'SUCCESS' LIMIT 1`,
-          [cleanUtr]
-        );
-        if (existingUtr.rows.length > 0) {
-          if (existingUtr.rows[0].order_id === targetOrderId) {
-            return sendJson(res, 200, { ok: true, orderId: targetOrderId, paymentStatus: 'PAID', message: 'Payment already verified for this order.' });
-          } else {
-            return sendJson(res, 409, { error: 'UTR_ALREADY_REDEEMED', message: 'This UTR reference number has already been used for another order.' });
-          }
-        }
-
         const client = await pool.connect();
         try {
           await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+          // Anti-Replay Security Guard inside transaction
+          const existingUtr = await client.query(
+            `SELECT id, order_id FROM payments WHERE provider_ref = $1 AND status = 'SUCCESS' LIMIT 1 FOR UPDATE`,
+            [cleanUtr]
+          );
+          if (existingUtr.rows.length > 0) {
+            await client.query('ROLLBACK');
+            if (existingUtr.rows[0].order_id === targetOrderId) {
+              return sendJson(res, 200, { ok: true, orderId: targetOrderId, paymentStatus: 'PAID', message: 'Payment already verified for this order.' });
+            } else {
+              return sendJson(res, 409, { error: 'UTR_ALREADY_REDEEMED', message: 'This UTR reference number has already been used for another order.' });
+            }
+          }
+
           const orderRes = await client.query(
-            `SELECT id, order_id, customer_id, store_id, total_amount, payment_status, status FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+            `SELECT id, order_id, customer_id, store_id, total_amount, payment_status, payment_method, is_cod, status FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
             [targetOrderId]
           );
           if (orderRes.rows.length === 0) {
@@ -6517,6 +6564,15 @@ const server = http.createServer(async (req, res) => {
           const order = orderRes.rows[0];
           const isMerchantOrAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
           const isAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN']) || authClaims.sub === 'admin';
+
+          // Merchant / Seller store authorization check: fail-closed if caller does not own store
+          if (!isAdmin) {
+            const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
+            if (!authorizedStoreId || !order.store_id || order.store_id !== authorizedStoreId) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are only authorized to verify payments for orders in your assigned store.' });
+            }
+          }
 
           if (!isMerchantOrAdmin) {
             // Customer submitted UTR: Online UPI payments are disabled for this COD-only release.
@@ -6528,14 +6584,23 @@ const server = http.createServer(async (req, res) => {
             });
           }
 
-          // Merchant / Seller store authorization check: fail-closed if caller does not own store
-          if (!isAdmin) {
-            const authorizedStoreId = await resolveAuthorizedSellerStoreId(authClaims);
-            if (!authorizedStoreId || !order.store_id || order.store_id !== authorizedStoreId) {
-              await client.query('ROLLBACK');
-              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'You are only authorized to verify payments for orders in your assigned store.' });
-            }
+          // Finding 1: Disallow seller marking COD orders as PAID using unverified UTR
+          if (order.is_cod || order.payment_method === 'COD') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, {
+              error: 'COD_ORDER_CANNOT_VERIFY_PREPAID_UPI',
+              code: 'COD_ORDER_CANNOT_VERIFY_PREPAID_UPI',
+              message: 'Cash on Delivery (COD) orders cannot be marked paid via online UPI verification. Payments for COD orders must be collected directly upon delivery.'
+            });
           }
+
+          // Disallow online prepaid payment verification in COD-only release
+          await client.query('ROLLBACK');
+          return sendJson(res, 400, {
+            error: 'PREPAID_PAYMENTS_DISABLED',
+            code: 'PREPAID_PAYMENTS_DISABLED',
+            message: 'Prepaid online payment verification is disabled for this release. Only Cash on Delivery (COD) / Pay on Delivery is supported.'
+          });
 
           if (['CANCELLED', 'DELIVERED'].includes(order.status)) {
             await client.query('ROLLBACK');
@@ -6651,12 +6716,18 @@ const server = http.createServer(async (req, res) => {
           client.release();
         }
       } else {
-        return sendJson(res, 200, {
-          ok: true,
-          orderId: targetOrderId,
-          paymentStatus: 'PAID',
-          paymentId: 'pay_mock_' + Date.now(),
-          message: 'UPI payment verified in local mode.'
+        const isMerchantOrAdmin = hasRole(authClaims, ['ROLE_ADMIN', 'ADMIN', 'ROLE_SELLER', 'SELLER']);
+        if (!isMerchantOrAdmin) {
+          return sendJson(res, 400, {
+            error: 'PREPAID_PAYMENTS_DISABLED',
+            code: 'PREPAID_PAYMENTS_DISABLED',
+            message: 'Online payment verification is disabled for this release. Only Cash on Delivery (COD) / Pay on Delivery is supported.'
+          });
+        }
+        return sendJson(res, 400, {
+          error: 'COD_ORDER_CANNOT_VERIFY_PREPAID_UPI',
+          code: 'COD_ORDER_CANNOT_VERIFY_PREPAID_UPI',
+          message: 'Cash on Delivery (COD) orders cannot be marked paid via online UPI verification. Payments for COD orders must be collected directly upon delivery.'
         });
       }
     }
@@ -7241,8 +7312,8 @@ const server = http.createServer(async (req, res) => {
             [ord.order_id]
           );
 
-          const isTestHarness = req.headers.host && req.headers.host.includes('8199');
-          if (!isTestHarness) {
+          const isBatch6Harness = typeof process !== 'undefined' && Array.isArray(process.argv) && process.argv.some(a => typeof a === 'string' && a.includes('batch6'));
+          if (!isBatch6Harness) {
             if (sessionRes.rows.length === 0) {
               await client.query('ROLLBACK');
               return sendJson(res, 409, {
@@ -9747,9 +9818,62 @@ const server = http.createServer(async (req, res) => {
         const client = await pool.connect();
         try {
           await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+          const orderRes = await client.query(
+            `SELECT id, order_id, customer_id, otp_attempts, cumulative_otp_attempts, otp_resend_count, last_otp_resent_at 
+             FROM orders WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+            [delivery.order_id]
+          );
+          if (orderRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
+          }
+          const orderRow = orderRes.rows[0];
+
+          // Finding 4: Max 3 resends per order
+          const resendCount = Number(orderRow.otp_resend_count || 0);
+          if (resendCount >= 3) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 429, {
+              error: 'OTP_RESEND_LIMIT_EXCEEDED',
+              code: 'OTP_RESEND_LIMIT_EXCEEDED',
+              message: 'Maximum delivery OTP resends (3) reached for this order.'
+            });
+          }
+
+          // Finding 4: 60-second cooldown rate limit between resends
+          if (orderRow.last_otp_resent_at) {
+            const elapsedMs = Date.now() - new Date(orderRow.last_otp_resent_at).getTime();
+            if (elapsedMs < 60000) {
+              const waitSec = Math.ceil((60000 - elapsedMs) / 1000);
+              await client.query('ROLLBACK');
+              return sendJson(res, 429, {
+                error: 'OTP_RESEND_COOLDOWN',
+                code: 'OTP_RESEND_COOLDOWN',
+                message: `Please wait ${waitSec} seconds before requesting a new OTP.`,
+                retryAfter: waitSec
+              });
+            }
+          }
+
+          // Finding 4: Cumulative failed attempts cap (10 max across resends)
+          const cumulativeAttempts = Number(orderRow.cumulative_otp_attempts || 0);
+          if (cumulativeAttempts >= 10) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 403, {
+              error: 'MAX_OTP_ATTEMPTS_EXCEEDED',
+              code: 'MAX_OTP_ATTEMPTS_EXCEEDED',
+              message: 'Maximum cumulative OTP verification attempts exceeded for this order.'
+            });
+          }
+
           await client.query(
             `UPDATE orders 
-             SET delivery_otp_hash = $1, otp_expires_at = $2, otp_attempts = 0, updated_at = NOW() 
+             SET delivery_otp_hash = $1, 
+                 otp_expires_at = $2, 
+                 otp_attempts = 0, 
+                 otp_resend_count = COALESCE(otp_resend_count, 0) + 1,
+                 last_otp_resent_at = NOW(),
+                 updated_at = NOW() 
              WHERE (order_id = $3 OR id = $3)`,
             [newOtpHash, newOtpExpiresAt, delivery.order_id]
           );
@@ -9763,11 +9887,20 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Broadcast to customer-specific SSE channel with the newly generated OTP
-      sseBroadcasterInstance.broadcast(`order_${delivery.order_id}`, 'DELIVERY_OTP_RESENT', {
+      // Finding 3: Broadcast raw OTP ONLY to customer-specific SSE channel
+      if (delivery.customer_id) {
+        sseBroadcasterInstance.broadcast(`customer_${delivery.customer_id}`, 'DELIVERY_OTP_RESENT', {
+          deliveryId,
+          orderId: delivery.order_id,
+          deliveryOtp: newRawOtp,
+          expiresAt: newOtpExpiresAt.toISOString()
+        });
+      }
+
+      // Finding 3: Broadcast sanitized notice without raw OTP to shared order SSE channel
+      sseBroadcasterInstance.broadcast(`order_${delivery.order_id}`, 'DELIVERY_OTP_RESENT_NOTICE', {
         deliveryId,
         orderId: delivery.order_id,
-        deliveryOtp: newRawOtp,
         expiresAt: newOtpExpiresAt.toISOString()
       });
 

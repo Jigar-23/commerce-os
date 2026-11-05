@@ -263,18 +263,65 @@ class TransactionalCatalogRepository {
           : JSON.stringify([product.safetyAdvice || product.safety_advice])
         : '[]');
 
-    const categoryLower = String(product.category || '').toLowerCase();
-    let defaultHsn = '3004';
-    let defaultGst = 5.0;
-    if (categoryLower.includes('device') || categoryLower.includes('diagnostic') || categoryLower.includes('equipment')) {
-      defaultHsn = '9018';
-      defaultGst = 12.0;
+    const categoryLower = String(product.category || '').toLowerCase().trim();
+    const VALID_GST_RATES = [0, 5, 12, 18, 28];
+    const HSN_REGEX = /^\d{4,8}$/;
+
+    let explicitHsn = product.hsnCode || product.hsn_code ? String(product.hsnCode || product.hsn_code).trim() : null;
+    let explicitGst = product.gstRate != null ? Number(product.gstRate) : (product.gst_rate != null ? Number(product.gst_rate) : null);
+
+    let resolvedHsn = null;
+    let resolvedGst = null;
+
+    if (explicitHsn && explicitGst != null) {
+      if (!HSN_REGEX.test(explicitHsn) || !VALID_GST_RATES.includes(explicitGst)) {
+        const err = new Error('INVALID_TAX_CLASSIFICATION: Invalid HSN code format (must be 4-8 digits) or unapproved GST rate. Approved GST rates are 0%, 5%, 12%, 18%, 28%.');
+        err.code = 'INVALID_TAX_CLASSIFICATION';
+        err.httpStatus = 400;
+        throw err;
+      }
+      resolvedHsn = explicitHsn;
+      resolvedGst = explicitGst;
+    } else if (categoryLower.includes('device') || categoryLower.includes('diagnostic') || categoryLower.includes('equipment')) {
+      resolvedHsn = explicitHsn && HSN_REGEX.test(explicitHsn) ? explicitHsn : '9018';
+      resolvedGst = explicitGst != null && VALID_GST_RATES.includes(explicitGst) ? explicitGst : 12.0;
     } else if (categoryLower.includes('supplement') || categoryLower.includes('nutrition') || categoryLower.includes('wellness')) {
-      defaultHsn = '2106';
-      defaultGst = 18.0;
+      resolvedHsn = explicitHsn && HSN_REGEX.test(explicitHsn) ? explicitHsn : '2106';
+      resolvedGst = explicitGst != null && VALID_GST_RATES.includes(explicitGst) ? explicitGst : 18.0;
+    } else if (
+      !categoryLower ||
+      categoryLower.includes('medicine') ||
+      categoryLower.includes('pharmacy') ||
+      categoryLower.includes('rx') ||
+      categoryLower.includes('allopathy') ||
+      categoryLower.includes('ayurveda') ||
+      categoryLower.includes('drug') ||
+      categoryLower.includes('tablet') ||
+      categoryLower.includes('syrup') ||
+      categoryLower.includes('capsule') ||
+      categoryLower.includes('antibiotic') ||
+      categoryLower.includes('pharma') ||
+      product.rxRequirement === 'RX' ||
+      product.rx_requirement === 'RX'
+    ) {
+      resolvedHsn = explicitHsn && HSN_REGEX.test(explicitHsn) ? explicitHsn : '3004';
+      resolvedGst = explicitGst != null && VALID_GST_RATES.includes(explicitGst) ? explicitGst : 5.0;
+    } else if (explicitHsn && HSN_REGEX.test(explicitHsn)) {
+      resolvedHsn = explicitHsn;
+      if (explicitGst != null && VALID_GST_RATES.includes(explicitGst)) {
+        resolvedGst = explicitGst;
+      } else {
+        const err = new Error('INVALID_TAX_CLASSIFICATION: Explicit approved GST rate (0, 5, 12, 18, 28) is required for product.');
+        err.code = 'INVALID_TAX_CLASSIFICATION';
+        err.httpStatus = 400;
+        throw err;
+      }
+    } else {
+      const err = new Error(`INVALID_TAX_CLASSIFICATION: Category '${product.category}' is unrecognized and requires explicit valid HSN code (4-8 digits) and approved GST rate (0, 5, 12, 18, 28).`);
+      err.code = 'INVALID_TAX_CLASSIFICATION';
+      err.httpStatus = 400;
+      throw err;
     }
-    const resolvedHsn = product.hsnCode || product.hsn_code || defaultHsn;
-    const resolvedGst = Number(product.gstRate != null ? product.gstRate : (product.gst_rate != null ? product.gst_rate : defaultGst));
 
     const res = await this.pool.query(
       `INSERT INTO products (
@@ -1362,22 +1409,31 @@ class ServiceabilityService {
       }
 
       // 2d. Surge & Active Order Capacity Guard (Count all nonterminal orders)
-      if (pool && store.max_active_orders) {
+      let activeOrderCount = 0;
+      if (pool) {
         try {
           const capRes = await pool.query(
             `SELECT COUNT(*) FROM orders 
              WHERE store_id = $1 AND status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')`,
             [store.id]
           );
-          const activeOrderCount = Number(capRes.rows[0]?.count || 0);
-          if (activeOrderCount >= Number(store.max_active_orders)) {
-            continue;
+          activeOrderCount = Number(capRes.rows[0]?.count || 0);
+          if (store.max_active_orders) {
+            let effectiveMaxOrders = Number(store.max_active_orders);
+            if (store.surge_mode) {
+              // Finding 6: When surge mode is active, reduce capacity threshold by 30%
+              effectiveMaxOrders = Math.floor(effectiveMaxOrders * 0.7);
+            }
+            if (activeOrderCount >= effectiveMaxOrders) {
+              continue;
+            }
           }
         } catch (_) {}
       }
 
       candidateStores.push({
         ...store,
+        activeOrders: activeOrderCount,
         distanceKm: isProd ? dist : Math.min(dist, 2.5)
       });
     }
@@ -1477,6 +1533,16 @@ class ServiceabilityService {
       }
     }
 
+    // Finding 7: Dynamic ETA derived from routable travel time (20 km/h) + 4 mins pick/pack + active store order workload factor + surge mode buffer
+    const travelTimeMinutes = Math.ceil((Number(selectedStore.distanceKm || 1.5) / 20) * 60);
+    const pickPackMinutes = 4;
+    const loadMinutes = Math.min(10, Math.ceil(Number(selectedStore.activeOrders || 0) * 0.5));
+    const surgeBufferMinutes = selectedStore.surge_mode ? 5 : 0;
+    const dynamicSlaMinutes = Math.max(
+      Number(selectedStore.sla_minutes || 10),
+      pickPackMinutes + travelTimeMinutes + loadMinutes + surgeBufferMinutes
+    );
+
     const decision = new FulfillmentDecision({
       storeId: selectedStore.id,
       storeName: selectedStore.store_name,
@@ -1484,7 +1550,9 @@ class ServiceabilityService {
       storeLatitude: selectedStore.latitude,
       storeLongitude: selectedStore.longitude,
       distanceKm: selectedStore.distanceKm,
-      slaMinutes: selectedStore.sla_minutes || 10,
+      slaMinutes: dynamicSlaMinutes,
+      activeOrders: selectedStore.activeOrders || 0,
+      surgeMode: Boolean(selectedStore.surge_mode),
       decisionSource,
       deterministicRank: 1,
       resolvedItems: normalizedItems
@@ -3480,10 +3548,19 @@ class TransactionalDeliveryRepository {
       // 3. Secure OTP Verification against orders.delivery_otp_hash with Expiry Guard
       const expectedOtpHash = order.delivery_otp_hash;
       const isExpired = order.otp_expires_at ? (new Date() > new Date(order.otp_expires_at)) : false;
+      const cumulativeAttempts = Number(order.cumulative_otp_attempts || 0);
+      if (cumulativeAttempts >= 10 || (order.otp_attempts || 0) >= 5) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 429, error: 'MAX_OTP_ATTEMPTS_EXCEEDED', message: 'Maximum delivery OTP verification attempts exceeded.' };
+      }
       const otpVerifyResult = DeliveryOtpService.verifyOtp(submittedOtp, expectedOtpHash, order.otp_attempts || 0, 5, isExpired, pepper);
       if (!otpVerifyResult.ok) {
         await client.query(
-          `UPDATE orders SET otp_attempts = COALESCE(otp_attempts, 0) + 1, updated_at = NOW() WHERE id = $1 OR order_id = $1`,
+          `UPDATE orders 
+           SET otp_attempts = COALESCE(otp_attempts, 0) + 1, 
+               cumulative_otp_attempts = COALESCE(cumulative_otp_attempts, 0) + 1, 
+               updated_at = NOW() 
+           WHERE id = $1 OR order_id = $1`,
           [order.id || order.order_id]
         );
         await client.query('COMMIT');
@@ -4260,6 +4337,8 @@ class TransactionalOrderRepository {
       const calculatedDeliveryFee = calculatedItemsSubtotal >= freeDeliveryThreshold ? 0.0 : standardDeliveryFee;
 
       const hasColdChain = resolvedItemSnapshots.some(it => it.cold_chain_required === true);
+      const isSurge = Boolean(store.surge_mode || (fulfillmentDecision && fulfillmentDecision.decision && fulfillmentDecision.decision.surgeMode));
+      const surgeFee = isSurge ? 25.0 : 0.0;
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,
         items: resolvedItemSnapshots,
@@ -4269,6 +4348,7 @@ class TransactionalOrderRepository {
         customDeliveryFee: calculatedDeliveryFee,
         discountAmount: authoritativeDiscount,
         packagingFee: hasColdChain ? 15.0 : 0.0,
+        surgeFee,
         taxAmount: 0
       });
       const deliveryFee = pricingResult.deliveryFee;
