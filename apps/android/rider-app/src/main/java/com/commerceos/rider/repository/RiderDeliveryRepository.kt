@@ -8,7 +8,10 @@ import com.commerceos.rider.model.RoutePoint
 import com.commerceos.rider.model.ServerDeliverySession
 import com.commerceos.rider.model.ServerOffer
 import com.commerceos.rider.model.TelemetryState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -965,6 +968,8 @@ class RiderDeliveryRepository(
         destLat: Double,
         destLng: Double
     ): Result<DeliveryRouteResult> = withContext(Dispatchers.IO) {
+        val requestContext = currentCoroutineContext()
+
         // 1. Try via Commerce OS Server
         try {
             val path = "/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
@@ -994,49 +999,15 @@ class RiderDeliveryRepository(
                     )
                 }
             }
-        } catch (_: Exception) {}
-
-        // 2. Direct HTTPS fallback to OSRM OpenStreetMap routing service
-        try {
-            val osrmUrl = java.net.URL("https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson")
-            val conn = (osrmUrl.openConnection() as java.net.HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 4000
-                readTimeout = 4000
-                setRequestProperty("User-Agent", "CommerceOS-Rider/2.0")
-            }
-            if (conn.responseCode == 200) {
-                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(jsonStr)
-                val routes = json.getJSONArray("routes")
-                if (routes.length() > 0) {
-                    val routeObj = routes.getJSONObject(0)
-                    val distMeters = routeObj.getDouble("distance")
-                    val durSeconds = routeObj.getDouble("duration")
-                    val geom = routeObj.getJSONObject("geometry")
-                    val coords = geom.getJSONArray("coordinates")
-                    val waypoints = mutableListOf<RoutePoint>()
-                    for (i in 0 until coords.length()) {
-                        val c = coords.getJSONArray(i)
-                        waypoints.add(RoutePoint(lat = c.getDouble(1), lng = c.getDouble(0)))
-                    }
-                    if (waypoints.size >= 2) {
-                        return@withContext Result.success(
-                            DeliveryRouteResult(
-                                distanceKm = Math.round((distMeters / 1000.0) * 10.0) / 10.0,
-                                durationMins = Math.max(1, (durSeconds / 60.0).toInt()),
-                                waypoints = waypoints,
-                                provider = "OSRM_DIRECT"
-                            )
-                        )
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            return@withContext Result.failure(e)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            requestContext.ensureActive()
         }
 
-        return@withContext Result.failure(Exception("Road route geometry calculation unavailable"))
+        requestContext.ensureActive()
+
+        Result.failure(Exception("Road route geometry calculation unavailable"))
     }
 
     private fun parseSessionJson(json: JSONObject): ServerDeliverySession {

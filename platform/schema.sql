@@ -373,6 +373,7 @@ CREATE TABLE IF NOT EXISTS delivery_sessions (
     waypoints JSONB NOT NULL DEFAULT '[]'::jsonb,
     route_version INT NOT NULL DEFAULT 1,
     remaining_duration_mins NUMERIC(6, 2) DEFAULT 0.0,
+    eta_updated_at TIMESTAMPTZ,
     rider_to_store_mins NUMERIC(6, 2) DEFAULT 0.0,
     store_to_customer_mins NUMERIC(6, 2) DEFAULT 0.0,
     traversed_waypoints JSONB NOT NULL DEFAULT '[]'::jsonb,

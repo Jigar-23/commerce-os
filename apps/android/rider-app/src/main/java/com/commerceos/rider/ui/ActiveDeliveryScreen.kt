@@ -132,6 +132,8 @@ fun ActiveDeliveryScreen(
     var lastRoutedTargetLat by remember { mutableStateOf<Double?>(null) }
     var lastRoutedTargetLng by remember { mutableStateOf<Double?>(null) }
     var routeRetryTrigger by remember { mutableIntStateOf(0) }
+    var failedRouteKey by remember { mutableStateOf<String?>(null) }
+    var failedAtRetryTrigger by remember { mutableIntStateOf(-1) }
 
     // Active 5-second ticker for accurate countdown of server ETA
     var currentClockMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -148,6 +150,16 @@ fun ActiveDeliveryScreen(
     LaunchedEffect(riderLat, riderLng, isStale, targetLat, targetLng, isPhase1, routeRetryTrigger) {
         val hasTarget = com.commerceos.rider.model.OfferPayloadValidator.isValidLat(targetLat) &&
             com.commerceos.rider.model.OfferPayloadValidator.isValidLng(targetLng)
+
+        val routeKey = "$isPhase1:$targetLat:$targetLng"
+        if (
+            hasValidFreshRiderGps &&
+            hasTarget &&
+            routeKey == failedRouteKey &&
+            routeRetryTrigger == failedAtRetryTrigger
+        ) {
+            return@LaunchedEffect
+        }
 
         val isPhaseOrTargetChanged = (isPhase1 != lastRoutedPhase) ||
             (lastRoutedTargetLat != null && targetLat != lastRoutedTargetLat) ||
@@ -201,6 +213,8 @@ fun ActiveDeliveryScreen(
             }
             routeDistanceKm = routeResult.distanceKm
             routeDurationMins = routeResult.durationMins
+            failedRouteKey = null
+            failedAtRetryTrigger = -1
         }.onFailure {
             // Failed reroute: clear old leg's waypoints and ETA, visibly mark unavailable, provide retry state
             waypoints = emptyList()
@@ -209,6 +223,8 @@ fun ActiveDeliveryScreen(
             lastRoutedOriginLat = null
             lastRoutedOriginLng = null
             routeUnavailable = true
+            failedRouteKey = routeKey
+            failedAtRetryTrigger = routeRetryTrigger
         }
         isRouteLoading = false
     }

@@ -3036,6 +3036,10 @@ class TransactionalOfferRepository {
              state = 'ACCEPTED', pricing_snapshot = COALESCE($5, pricing_snapshot),
              waypoints = CASE WHEN $6::jsonb != '[]'::jsonb THEN $6::jsonb ELSE waypoints END,
              remaining_duration_mins = COALESCE($7, remaining_duration_mins),
+             eta_updated_at = CASE
+                 WHEN $7 IS NOT NULL THEN NOW()
+                 ELSE eta_updated_at
+             END,
              distance_km = COALESCE($8, distance_km),
              history = history || $9::jsonb, updated_at = NOW()
          WHERE id = $10
@@ -3411,14 +3415,15 @@ class TransactionalDeliveryRepository {
 
     const deliveryId = sessionData.deliveryId || sessionData.id || ('del_' + crypto.randomUUID());
     const primaryKeyId = sessionData.id || deliveryId;
+    const remainingDur = Number(sessionData.remainingDurationMins || sessionData.remaining_duration_mins || sessionData.durationMins || 0.0);
     const res = await this.pool.query(
       `INSERT INTO delivery_sessions (
         id, delivery_id, order_id, store_id, rider_id, rider_name, rider_phone, rider_vehicle,
         state, merchant_name, merchant_address, merchant_lat, merchant_lng,
         customer_name, customer_phone, customer_address, customer_lat, customer_lng,
-        distance_km, waypoints, route_version, remaining_duration_mins, rider_to_store_mins, store_to_customer_mins,
+        distance_km, waypoints, route_version, remaining_duration_mins, eta_updated_at, rider_to_store_mins, store_to_customer_mins,
         is_cod, cod_amount, otp_verified, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, FALSE, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, FALSE, NOW(), NOW())
       RETURNING *`,
       [
         primaryKeyId,
@@ -3442,7 +3447,8 @@ class TransactionalDeliveryRepository {
         Number(sessionData.distanceKm || 0.0),
         JSON.stringify(sessionData.waypoints || []),
         Number(sessionData.routeVersion || sessionData.route_version || 1),
-        Number(sessionData.remainingDurationMins || sessionData.remaining_duration_mins || sessionData.durationMins || 0.0),
+        remainingDur,
+        remainingDur > 0 ? new Date() : null,
         Number(sessionData.riderToStoreMins || sessionData.rider_to_store_mins || 0.0),
         Number(sessionData.storeToCustomerMins || sessionData.store_to_customer_mins || 0.0),
         Boolean(sessionData.isCod),
@@ -3458,6 +3464,10 @@ class TransactionalDeliveryRepository {
       `UPDATE delivery_sessions 
        SET waypoints = $2,
            remaining_duration_mins = COALESCE($3, remaining_duration_mins),
+           eta_updated_at = CASE
+               WHEN $3 IS NOT NULL THEN NOW()
+               ELSE eta_updated_at
+           END,
            distance_km = COALESCE($4, distance_km),
            route_version = COALESCE($5, route_version + 1),
            updated_at = NOW()
@@ -3517,7 +3527,7 @@ class TransactionalDeliveryRepository {
       } catch (_) {}
     }
     const ordTot = Number(row.total_amount || row.cod_amount || 0);
-    const etaUpdatedMs = row.updated_at ? new Date(row.updated_at).getTime() : Date.now();
+    const etaUpdatedMs = row.eta_updated_at ? new Date(row.eta_updated_at).getTime() : null;
     return {
       ...row,
       customer_address: fullCustomerAddress,
@@ -3981,7 +3991,11 @@ class LocalDevelopmentDeliveryRepository {
     const session = ((this.db.deliverySessions || {})[deliveryId] || Object.values(this.db.deliverySessions || {}).find(s => s.deliveryId === deliveryId || s.orderId === deliveryId));
     if (!session) return null;
     session.waypoints = waypoints || [];
-    if (durationMins != null) session.remainingDurationMins = durationMins;
+    if (durationMins != null) {
+      session.remainingDurationMins = durationMins;
+      session.eta_updated_at = new Date().toISOString();
+      session.etaUpdatedAt = session.eta_updated_at;
+    }
     if (distanceKm != null) session.distanceKm = distanceKm;
     session.routeVersion = routeVersion != null ? routeVersion : ((session.routeVersion || 1) + 1);
     this.saveDb();
@@ -3989,7 +4003,17 @@ class LocalDevelopmentDeliveryRepository {
   }
 
   async findActiveSessionForRider(riderId) {
-    return Object.values(this.db.deliverySessions || {}).find(s => s.riderId === riderId && !['DELIVERED', 'CANCELLED', 'DECLINED', 'FAILED'].includes(s.state)) || null;
+    const session = Object.values(this.db.deliverySessions || {}).find(s => s.riderId === riderId && !['DELIVERED', 'CANCELLED', 'DECLINED', 'FAILED'].includes(s.state)) || null;
+    if (!session) return null;
+    const etaUpdatedMs = session.eta_updated_at || session.etaUpdatedAt
+      ? new Date(session.eta_updated_at || session.etaUpdatedAt).getTime()
+      : null;
+    return {
+      ...session,
+      etaUpdatedAt: etaUpdatedMs,
+      etaTimestamp: etaUpdatedMs,
+      estimatedTimeMins: Number(session.remainingDurationMins || session.remaining_duration_mins || 0) || null
+    };
   }
 }
 

@@ -212,7 +212,7 @@ fun RxUploadDialog(
     var isDismissing by remember { mutableStateOf(false) }
 
     fun handleDismiss() {
-        if (busy || isDismissing) return
+        if (busy || isDismissing || isDraftLoading) return
         isDismissing = true
         draftJob?.cancel()
         if (hasDraftStorageError) {
@@ -248,7 +248,7 @@ fun RxUploadDialog(
     }
 
     Dialog(
-        onDismissRequest = { if (!busy) handleDismiss() },
+        onDismissRequest = { if (!busy && !isDraftLoading) handleDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -288,10 +288,14 @@ fun RxUploadDialog(
                     }
                     IconButton(
                         onClick = { handleDismiss() },
-                        enabled = !busy,
+                        enabled = !busy && !isDraftLoading,
                         modifier = Modifier.size(34.dp)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = if (!busy && !isDraftLoading) Color(0xFF64748B) else Color(0xFFCBD5E1)
+                        )
                     }
                 }
 

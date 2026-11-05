@@ -159,6 +159,9 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS aadhaar_number VARCHAR(32);`).catch(() => {});
   pool.query(`ALTER TABLE riders ADD COLUMN IF NOT EXISTS store_id VARCHAR(64);`).catch(() => {});
   pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS route_version INT NOT NULL DEFAULT 1;`).catch(() => {});
+  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS eta_updated_at TIMESTAMPTZ;`).catch(() => {});
+  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS rider_to_store_mins NUMERIC(6, 2) DEFAULT 0.0;`).catch(() => {});
+  pool.query(`ALTER TABLE delivery_sessions ADD COLUMN IF NOT EXISTS store_to_customer_mins NUMERIC(6, 2) DEFAULT 0.0;`).catch(() => {});
   pool.query(`ALTER TABLE inventory_ledger ALTER COLUMN reason SET NOT NULL;`).catch(() => {});
   pool.query(`ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS reversal_of_id VARCHAR(64);`).catch(() => {});
   pool.query(`ALTER TABLE inventory_ledger ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
