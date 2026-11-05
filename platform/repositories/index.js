@@ -1118,8 +1118,14 @@ class LocalDevelopmentCodLedgerRepository {
     return entry || null;
   }
 
-  async getAll() {
-    return this.db.codLedger || [];
+  async getAll(storeId = null) {
+    const all = this.db.codLedger || [];
+    if (!storeId) return all;
+    const orders = this.db.orders || [];
+    const storeOrderIds = new Set(
+      orders.filter(o => o.storeId === storeId || o.store_id === storeId).map(o => o.id || o.orderId || o.order_id)
+    );
+    return all.filter(c => storeOrderIds.has(c.orderId || c.order_id) || c.storeId === storeId || c.store_id === storeId);
   }
 }
 
@@ -1287,6 +1293,64 @@ class ServiceabilityService {
     return Number(distanceKm) <= maxRadius;
   }
 
+  static validateAddressCoordinatesConsistency(lat, lng, city, state, postalCode) {
+    const cityLower = String(city || '').toLowerCase().trim();
+    const postal = String(postalCode || '').trim();
+
+    const CITY_BOUNDARIES = {
+      'delhi': { minLat: 28.35, maxLat: 28.95, minLng: 76.75, maxLng: 77.45 },
+      'new delhi': { minLat: 28.35, maxLat: 28.95, minLng: 76.75, maxLng: 77.45 },
+      'ncr': { minLat: 28.15, maxLat: 29.05, minLng: 76.60, maxLng: 77.60 },
+      'gurgaon': { minLat: 28.25, maxLat: 28.60, minLng: 76.80, maxLng: 77.20 },
+      'gurugram': { minLat: 28.25, maxLat: 28.60, minLng: 76.80, maxLng: 77.20 },
+      'rewari': { minLat: 28.00, maxLat: 28.45, minLng: 76.40, maxLng: 76.85 },
+      'bangalore': { minLat: 12.70, maxLat: 13.25, minLng: 77.30, maxLng: 77.85 },
+      'bengaluru': { minLat: 12.70, maxLat: 13.25, minLng: 77.30, maxLng: 77.85 },
+      'mumbai': { minLat: 18.80, maxLat: 19.45, minLng: 72.65, maxLng: 73.15 },
+      'pune': { minLat: 18.30, maxLat: 18.80, minLng: 73.60, maxLng: 74.15 }
+    };
+
+    for (const [key, b] of Object.entries(CITY_BOUNDARIES)) {
+      if (cityLower.includes(key)) {
+        if (lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng) {
+          return {
+            ok: false,
+            error: 'ADDRESS_COORDINATE_MISMATCH',
+            message: `Delivery coordinates [${lat}, ${lng}] do not match the declared city/district boundary for '${city}'.`
+          };
+        }
+        return { ok: true };
+      }
+    }
+
+    if (postal.length >= 2) {
+      const prefix2 = postal.slice(0, 2);
+      if (prefix2 === '11' && (lat < 28.0 || lat > 29.5 || lng < 76.5 || lng > 77.8)) {
+        return {
+          ok: false,
+          error: 'ADDRESS_COORDINATE_MISMATCH',
+          message: `Delivery coordinates [${lat}, ${lng}] do not match postal code region '${postal}'.`
+        };
+      }
+      if (prefix2 === '56' && (lat < 12.0 || lat > 14.0 || lng < 76.5 || lng > 78.5)) {
+        return {
+          ok: false,
+          error: 'ADDRESS_COORDINATE_MISMATCH',
+          message: `Delivery coordinates [${lat}, ${lng}] do not match postal code region '${postal}'.`
+        };
+      }
+      if (prefix2 === '40' && (lat < 18.0 || lat > 20.0 || lng < 72.0 || lng > 73.5)) {
+        return {
+          ok: false,
+          error: 'ADDRESS_COORDINATE_MISMATCH',
+          message: `Delivery coordinates [${lat}, ${lng}] do not match postal code region '${postal}'.`
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
   static async resolveAuthoritativeFulfillmentStore({
     address,
     items = [],
@@ -1303,6 +1367,15 @@ class ServiceabilityService {
     const cLng = Number(address.longitude);
     if (cLat < -90 || cLat > 90 || cLng < -180 || cLng > 180) {
       return { ok: false, error: 'INVALID_COORDINATES', message: 'Authoritative customer coordinates must be within valid legal ranges: latitude [-90, 90] and longitude [-180, 180].' };
+    }
+
+    const city = String(address.city || address.city_name || '').trim();
+    const postalCode = String(address.postal_code || address.postalCode || '').trim();
+    if (city || postalCode) {
+      const geoCheck = ServiceabilityService.validateAddressCoordinatesConsistency(cLat, cLng, city, address.state, postalCode);
+      if (!geoCheck.ok) {
+        return { ok: false, error: geoCheck.error, message: geoCheck.message };
+      }
     }
 
     // 1. Fetch active stores with authoritative operational state, hours, and capacity guards
@@ -1555,12 +1628,14 @@ class ServiceabilityService {
             if (routeRes && routeRes.ok && routeRes.durationMins != null) {
               routedTravelMinutes = Math.max(1, Math.round(Number(routeRes.durationMins)));
               if (routeRes.distanceKm != null) routedDistanceKm = Number(routeRes.distanceKm);
+              isApproximateEta = false;
+              candidateStore.etaMode = 'TRAFFIC_ROUTED';
             }
           } catch (_) {}
         } else if (process.env.OSRM_BASE_URL) {
           try {
             const baseUrl = process.env.OSRM_BASE_URL.replace(/\/+$/, '');
-            const osrmUrl = `${baseUrl}/route/v1/driving/${cLng},${cLat};${candidateStore.longitude},${candidateStore.latitude}?overview=false`;
+            const osrmUrl = `${baseUrl}/route/v1/driving/${candidateStore.longitude},${candidateStore.latitude};${cLng},${cLat}?overview=false`;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 1500);
             const oRes = await fetch(osrmUrl, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
@@ -1570,6 +1645,8 @@ class ServiceabilityService {
               if (oData.routes && oData.routes.length > 0) {
                 routedTravelMinutes = Math.max(1, Math.round(oData.routes[0].duration / 60));
                 routedDistanceKm = Math.round((oData.routes[0].distance / 1000) * 10) / 10;
+                isApproximateEta = false;
+                candidateStore.etaMode = 'TRAFFIC_ROUTED';
               }
             }
           } catch (_) {}
@@ -1578,6 +1655,7 @@ class ServiceabilityService {
 
       if (routedTravelMinutes == null) {
         isApproximateEta = true;
+        candidateStore.etaMode = 'ESTIMATED_APPROXIMATE';
         const effDist = routedDistanceKm != null ? routedDistanceKm : candidateStore.distanceKm;
         routedTravelMinutes = Math.ceil((Number(effDist || 1.5) / 20) * 60);
       }
@@ -2172,6 +2250,96 @@ class TransactionalInventoryRepository {
       actorId: r.actor_id,
       timestamp: r.created_at
     }));
+  }
+
+  async undoAdjustmentForStore(storeId, adjustmentId, actor = { type: 'SELLER' }) {
+    if (!this.pool) return { ok: false, error: 'NO_POOL' };
+    if (!storeId) {
+      return { ok: false, httpStatus: 400, error: 'STORE_REQUIRED', message: 'Authoritative store context required.' };
+    }
+    if (!adjustmentId) {
+      return { ok: false, httpStatus: 400, error: 'ADJUSTMENT_ID_REQUIRED', message: 'adjustmentId is required.' };
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+      // Lock original ledger row FOR UPDATE to strictly prevent concurrent double undo
+      const ledgerRes = await client.query(
+        `SELECT * FROM inventory_ledger WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+        [adjustmentId, storeId]
+      );
+      if (ledgerRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 404, error: 'ADJUSTMENT_NOT_FOUND', message: 'Original adjustment not found.' };
+      }
+
+      const orig = ledgerRes.rows[0];
+      if (orig.is_reversed || orig.reversal_of_id) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 409, error: 'ALREADY_REVERSED', message: 'This inventory adjustment has already been undone.' };
+      }
+
+      const reverseDelta = -Number(orig.delta);
+
+      // Lock inventory row FOR UPDATE
+      const invLock = await client.query(
+        `SELECT stock_count, reserved_count FROM inventory WHERE store_id = $1 AND product_id = $2 AND sku = $3 FOR UPDATE`,
+        [storeId, orig.product_id, String(orig.sku)]
+      );
+      if (invLock.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 404, error: 'SKU_NOT_FOUND_IN_STORE', message: `Product ${orig.sku} has no inventory row in store ${storeId}.` };
+      }
+
+      const currentStock = Number(invLock.rows[0].stock_count || 0);
+      const currentReserved = Number(invLock.rows[0].reserved_count || 0);
+      const nextStock = currentStock + reverseDelta;
+
+      if (nextStock < 0) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 400, error: 'INSUFFICIENT_STOCK', message: `Cannot reverse adjustment: stock would fall below zero (current: ${currentStock}, delta: ${reverseDelta}).` };
+      }
+      if (nextStock < currentReserved) {
+        await client.query('ROLLBACK');
+        return { ok: false, httpStatus: 409, error: 'INSUFFICIENT_STOCK', message: `Cannot reverse adjustment below active reservations (current: ${currentStock}, reserved: ${currentReserved}, requested: ${nextStock}).` };
+      }
+
+      await client.query(
+        `UPDATE inventory SET stock_count = $1, updated_at = NOW() WHERE store_id = $2 AND product_id = $3 AND sku = $4`,
+        [nextStock, storeId, orig.product_id, String(orig.sku)]
+      );
+
+      const reversalAdjustmentId = 'adj_' + crypto.randomUUID();
+      const actorId = (actor && (actor.id || actor.actorId)) || 'SELLER';
+      await client.query(
+        `INSERT INTO inventory_ledger (id, store_id, product_id, sku, delta, new_stock, reason, actor_id, reversal_of_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'SELLER_ADJUSTMENT', $7, $8, NOW())`,
+        [reversalAdjustmentId, storeId, orig.product_id, String(orig.sku), reverseDelta, nextStock, actorId, orig.id]
+      );
+
+      await client.query(
+        `UPDATE inventory_ledger SET is_reversed = TRUE, reversal_of_id = $1 WHERE id = $2`,
+        [reversalAdjustmentId, orig.id]
+      );
+
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        undoneAdjustmentId: adjustmentId,
+        adjustmentId: reversalAdjustmentId,
+        sku: orig.sku,
+        delta: reverseDelta,
+        newStock: nextStock,
+        storeId
+      };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async markAdjustmentReversed(originalId, reversalId = null) {
@@ -3764,71 +3932,88 @@ class TransactionalDeliveryRepository {
           (options.cashCollected != null ? Number(options.cashCollected) :
           (options.collectedAmount != null ? Number(options.collectedAmount) : null));
 
-        // Authoritative verification of locked, reconciled ledger for the assigned rider during OTP completion
-        const existingLedger = await client.query(
-          `SELECT * FROM cod_ledger WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
-          [order.order_id || order.id]
-        );
-        const ledgerRow = existingLedger.rows[0];
-        const isReconciledByRider = ledgerRow &&
-          (ledgerRow.status === 'COLLECTED_RECONCILED' || ledgerRow.status === 'COLLECTED' || ledgerRow.reconciled) &&
-          (ledgerRow.collector_id === riderId || session.rider_id === riderId) &&
-          Number(ledgerRow.amount_collected) >= expectedCod;
-
-        if (isReconciledByRider) {
+        if (expectedCod === 0) {
+          // Zero-COD order (e.g. 100% coupon promotion): complete delivery with ₹0 collection
           isCodPaid = true;
-        } else if (hasAmountParam) {
-          if (resolvedAmount == null || isNaN(resolvedAmount) || resolvedAmount <= 0) {
+          await client.query(
+            `UPDATE cod_ledger 
+             SET amount_collected = 0.00,
+                 shortage_amount = 0.00,
+                 status = 'COLLECTED_RECONCILED',
+                 reconciled = TRUE,
+                 collector_id = $2,
+                 notes = COALESCE(notes, '') || ' [ZERO_COD: 100% promotion order reconciled with ₹0 collection]',
+                 updated_at = NOW()
+             WHERE (order_id = $1 OR id = $1)`,
+            [order.order_id || order.id, riderId]
+          ).catch(() => {});
+        } else {
+          // Authoritative verification of locked, reconciled ledger for the assigned rider during OTP completion
+          const existingLedger = await client.query(
+            `SELECT * FROM cod_ledger WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+            [order.order_id || order.id]
+          );
+          const ledgerRow = existingLedger.rows[0];
+          const isReconciledByRider = ledgerRow &&
+            (ledgerRow.status === 'COLLECTED_RECONCILED' || ledgerRow.status === 'COLLECTED' || ledgerRow.reconciled) &&
+            (ledgerRow.collector_id === riderId || session.rider_id === riderId) &&
+            Number(ledgerRow.amount_collected) >= expectedCod;
+
+          if (isReconciledByRider) {
+            isCodPaid = true;
+          } else if (hasAmountParam) {
+            if (resolvedAmount == null || isNaN(resolvedAmount) || resolvedAmount <= 0) {
+              await client.query('ROLLBACK');
+              return {
+                ok: false,
+                httpStatus: 400,
+                error: 'COD_AMOUNT_REQUIRED',
+                message: `collectedAmount must be explicitly provided and match order COD total (₹${expectedCod}).`
+              };
+            }
+
+            if (resolvedAmount < expectedCod) {
+              await client.query('ROLLBACK');
+              return {
+                ok: false,
+                httpStatus: 400,
+                error: 'COD_AMOUNT_SHORTAGE',
+                message: `Collected amount (₹${resolvedAmount}) is less than expected COD total (₹${expectedCod}). Shortages cannot be marked as delivered and paid.`
+              };
+            }
+
+            if (resolvedAmount > expectedCod) {
+              await client.query('ROLLBACK');
+              return {
+                ok: false,
+                httpStatus: 400,
+                error: 'INVALID_COD_AMOUNT',
+                message: `Collected amount (₹${resolvedAmount}) cannot exceed expected COD total (₹${expectedCod}).`
+              };
+            }
+
+            // Record rider cash collection attestation as pending merchant reconciliation (Finding 1)
+            await client.query(
+              `UPDATE cod_ledger 
+               SET amount_collected = $2,
+                   shortage_amount = 0,
+                   status = 'COLLECTED_PENDING_RECONCILIATION',
+                   reconciled = FALSE,
+                   collector_id = $3,
+                   updated_at = NOW()
+               WHERE (order_id = $1 OR id = $1) AND reconciled = FALSE`,
+              [order.order_id || order.id, resolvedAmount, riderId]
+            );
+            isCodPaid = false;
+          } else {
             await client.query('ROLLBACK');
             return {
               ok: false,
               httpStatus: 400,
               error: 'COD_AMOUNT_REQUIRED',
-              message: `collectedAmount must be explicitly provided and match order COD total (₹${expectedCod}).`
+              message: `Exact cash collection amount of ₹${expectedCod} must be confirmed before delivery completion.`
             };
           }
-
-          if (resolvedAmount < expectedCod) {
-            await client.query('ROLLBACK');
-            return {
-              ok: false,
-              httpStatus: 400,
-              error: 'COD_AMOUNT_SHORTAGE',
-              message: `Collected amount (₹${resolvedAmount}) is less than expected COD total (₹${expectedCod}). Shortages cannot be marked as delivered and paid.`
-            };
-          }
-
-          if (resolvedAmount > expectedCod) {
-            await client.query('ROLLBACK');
-            return {
-              ok: false,
-              httpStatus: 400,
-              error: 'INVALID_COD_AMOUNT',
-              message: `Collected amount (₹${resolvedAmount}) cannot exceed expected COD total (₹${expectedCod}).`
-            };
-          }
-
-          // Record rider cash collection attestation as pending merchant reconciliation (Finding 1)
-          await client.query(
-            `UPDATE cod_ledger 
-             SET amount_collected = $2,
-                 shortage_amount = 0,
-                 status = 'COLLECTED_PENDING_RECONCILIATION',
-                 reconciled = FALSE,
-                 collector_id = $3,
-                 updated_at = NOW()
-             WHERE (order_id = $1 OR id = $1) AND reconciled = FALSE`,
-            [order.order_id || order.id, resolvedAmount, riderId]
-          );
-          isCodPaid = false;
-        } else {
-          await client.query('ROLLBACK');
-          return {
-            ok: false,
-            httpStatus: 400,
-            error: 'COD_AMOUNT_REQUIRED',
-            message: `Exact cash collection amount of ₹${expectedCod} must be confirmed before delivery completion.`
-          };
         }
       }
 
@@ -4336,6 +4521,7 @@ class TransactionalOrderRepository {
 
         const prodRes = await client.query(
           `SELECT id, sku, name, brand_name, price, mrp, discounted_price, rx_requirement, is_active,
+                  COALESCE(cold_chain_required, FALSE) AS cold_chain_required,
                   COALESCE(hsn_code, '3004') AS hsn_code,
                   COALESCE(gst_rate, 5.0) AS gst_rate
            FROM products 
@@ -4355,6 +4541,7 @@ class TransactionalOrderRepository {
         const mrp = Number(product.mrp || product.price);
         const rxReq = (product.rx_requirement || 'OTC').toUpperCase();
         const isRxRequired = rxReq === 'RX_REQUIRED' || rxReq === 'SCHEDULE_H';
+        const isColdChainRequired = Boolean(product.cold_chain_required);
 
         if (mergedBySku.has(canonicalSku)) {
           const existing = mergedBySku.get(canonicalSku);
@@ -4372,7 +4559,9 @@ class TransactionalOrderRepository {
             lineTotal: Math.round(unitPrice * qty * 100) / 100,
             hsnCode: product.hsn_code || '3004',
             gstRate: Number(product.gst_rate || 5.0),
-            rxRequired: isRxRequired
+            rxRequired: isRxRequired,
+            cold_chain_required: isColdChainRequired,
+            coldChain: isColdChainRequired
           });
         }
       }
@@ -4519,20 +4708,23 @@ class TransactionalOrderRepository {
       // Authoritative Delivery Policy: query delivery_config table
       let freeDeliveryThreshold = 199.0;
       let standardDeliveryFee = 2.0;
+      let coldChainPackagingFee = 15.0;
       try {
-        const delivRes = await client.query('SELECT free_delivery_threshold, standard_delivery_fee FROM delivery_config WHERE is_active = TRUE LIMIT 1');
+        const delivRes = await client.query('SELECT free_delivery_threshold, standard_delivery_fee, COALESCE(cold_chain_packaging_fee, 15.00) AS cold_chain_packaging_fee FROM delivery_config WHERE is_active = TRUE LIMIT 1');
         if (delivRes.rows.length > 0) {
           freeDeliveryThreshold = Number(delivRes.rows[0].free_delivery_threshold || 199.0);
           standardDeliveryFee = Number(delivRes.rows[0].standard_delivery_fee || 2.0);
+          coldChainPackagingFee = Number(delivRes.rows[0].cold_chain_packaging_fee || 15.0);
         }
       } catch (delivErr) {
         // use defaults
       }
       const calculatedDeliveryFee = calculatedItemsSubtotal >= freeDeliveryThreshold ? 0.0 : standardDeliveryFee;
 
-      const hasColdChain = resolvedItemSnapshots.some(it => it.cold_chain_required === true);
+      const hasColdChain = resolvedItemSnapshots.some(it => it.cold_chain_required === true || it.coldChain === true);
       const isSurge = Boolean(store.surge_mode || (decision && (decision.surgeMode || (decision.decision && decision.decision.surgeMode))));
       const surgeFee = isSurge ? 25.0 : 0.0;
+      const packagingFee = hasColdChain ? coldChainPackagingFee : 0.0;
       const pricingResult = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: calculatedItemsSubtotal,
         items: resolvedItemSnapshots,
@@ -4541,7 +4733,7 @@ class TransactionalOrderRepository {
         tip: Math.max(0, Number(data.tip || data.selectedTip || 0)),
         customDeliveryFee: calculatedDeliveryFee,
         discountAmount: authoritativeDiscount,
-        packagingFee: hasColdChain ? 15.0 : 0.0,
+        packagingFee,
         surgeFee,
         taxAmount: 0
       });
@@ -4573,9 +4765,9 @@ class TransactionalOrderRepository {
       const hasRxRequiredItem = resolvedItemSnapshots.some(item => item.rxRequired);
       const authoritativeInitialStatus = hasRxRequiredItem ? 'PRESCRIPTION_VERIFICATION_PENDING' : 'PLACED';
 
-      // Prescription Ownership and Eligibility Verification
-      if (hasRxRequiredItem) {
-        if (!data.prescriptionId) {
+      // Prescription Ownership and Scope Verification (Finding 3)
+      if (hasRxRequiredItem || data.prescriptionId) {
+        if (hasRxRequiredItem && !data.prescriptionId) {
           await client.query('ROLLBACK');
           return {
             ok: false,
@@ -4584,8 +4776,9 @@ class TransactionalOrderRepository {
             message: 'One or more items in the order require a prescription. Please provide a valid prescriptionId.'
           };
         }
+        await client.query(`ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS authorized_items JSONB DEFAULT '[]'::jsonb`).catch(() => {});
         const rxCheck = await client.query(
-          `SELECT id, customer_id, status FROM prescriptions WHERE id = $1 AND customer_id = $2`,
+          `SELECT id, customer_id, status, authorized_items FROM prescriptions WHERE id = $1 AND customer_id = $2`,
           [data.prescriptionId, customer.id]
         );
         if (rxCheck.rows.length === 0 || ['REJECTED', 'EXPIRED'].includes(rxCheck.rows[0].status)) {
@@ -4597,19 +4790,54 @@ class TransactionalOrderRepository {
             message: 'Prescription does not exist, is expired/rejected, or does not belong to the authenticated customer.'
           };
         }
-      } else if (data.prescriptionId) {
-        const rxCheck = await client.query(
-          `SELECT id, customer_id, status FROM prescriptions WHERE id = $1 AND customer_id = $2`,
-          [data.prescriptionId, customer.id]
-        );
-        if (rxCheck.rows.length === 0 || ['REJECTED', 'EXPIRED'].includes(rxCheck.rows[0].status)) {
-          await client.query('ROLLBACK');
-          return {
-            ok: false,
-            httpStatus: 400,
-            error: 'INVALID_PRESCRIPTION',
-            message: 'Prescription does not exist, is expired/rejected, or does not belong to the authenticated customer.'
-          };
+
+        const rxRow = rxCheck.rows[0];
+        // If prescription was already approved, verify approved scope covers all Rx items in order
+        if (rxRow.status === 'APPROVED' && hasRxRequiredItem) {
+          const authItemsRaw = rxRow.authorized_items;
+          const authItems = Array.isArray(authItemsRaw) ? authItemsRaw : (typeof authItemsRaw === 'string' ? JSON.parse(authItemsRaw) : []);
+          if (authItems.length > 0) {
+            for (const rxItem of resolvedItemSnapshots.filter(item => item.rxRequired)) {
+              const matched = authItems.find(ai =>
+                (ai.sku && ai.sku === rxItem.sku) ||
+                (ai.productId && ai.productId === rxItem.productId) ||
+                (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
+              );
+              if (!matched) {
+                await client.query('ROLLBACK');
+                return {
+                  ok: false,
+                  httpStatus: 400,
+                  error: 'PRESCRIPTION_ITEM_UNAUTHORIZED',
+                  message: `Prescription does not authorize item '${rxItem.name || rxItem.sku}'.`
+                };
+              }
+              const maxAllowedQty = Number(matched.quantity || matched.qty || 999);
+              if (Number(rxItem.quantity || 1) > maxAllowedQty) {
+                await client.query('ROLLBACK');
+                return {
+                  ok: false,
+                  httpStatus: 400,
+                  error: 'PRESCRIPTION_QUANTITY_EXCEEDED',
+                  message: `Requested quantity (${rxItem.quantity}) for '${rxItem.name || rxItem.sku}' exceeds approved limit (${maxAllowedQty}).`
+                };
+              }
+            }
+          }
+        } else if (rxRow.status === 'PENDING' && hasRxRequiredItem) {
+          // Bind the order's Rx items to the prescription for pharmacist review
+          const rxItemsToAuthorize = resolvedItemSnapshots.filter(item => item.rxRequired).map(it => ({
+            productId: it.productId,
+            sku: it.sku,
+            name: it.name,
+            quantity: it.quantity
+          }));
+          await client.query(
+            `UPDATE prescriptions 
+             SET authorized_items = $1, updated_at = NOW() 
+             WHERE id = $2 AND (authorized_items IS NULL OR authorized_items = '[]'::jsonb)`,
+            [JSON.stringify(rxItemsToAuthorize), data.prescriptionId]
+          ).catch(() => {});
         }
       }
 
@@ -5015,13 +5243,36 @@ class TransactionalOrderRepository {
           return { ok: false, httpStatus: 409, error: 'INVALID_ORDER_STATE_TRANSITION', message: `Cannot accept order in state '${order.status}'.` };
         }
 
-        // Check if Rx verification is still pending
+        // Check if Rx verification is still pending and verify approved scope (Finding 3)
         let isRxPending = false;
         if (order.prescription_id || order.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
           if (order.prescription_id) {
-            const rxCheck = await client.query('SELECT status FROM prescriptions WHERE id = $1', [order.prescription_id]);
+            const rxCheck = await client.query('SELECT status, authorized_items FROM prescriptions WHERE id = $1', [order.prescription_id]);
             if (rxCheck.rows.length === 0 || rxCheck.rows[0].status !== 'APPROVED') {
               isRxPending = true;
+            } else {
+              // Verify authorized items scope
+              const authItemsRaw = rxCheck.rows[0].authorized_items;
+              const authItems = Array.isArray(authItemsRaw) ? authItemsRaw : (typeof authItemsRaw === 'string' ? JSON.parse(authItemsRaw) : []);
+              if (authItems.length > 0) {
+                const ordItems = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : []);
+                for (const rxItem of ordItems.filter(it => it.rxRequired)) {
+                  const matched = authItems.find(ai =>
+                    (ai.sku && ai.sku === rxItem.sku) ||
+                    (ai.productId && ai.productId === rxItem.productId) ||
+                    (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
+                  );
+                  if (!matched) {
+                    await client.query('ROLLBACK');
+                    return { ok: false, httpStatus: 409, error: 'PRESCRIPTION_SCOPE_MISMATCH', message: `Order item '${rxItem.name || rxItem.sku}' is not authorized by the approved prescription.` };
+                  }
+                  const maxQty = Number(matched.quantity || matched.qty || 999);
+                  if (Number(rxItem.quantity || 1) > maxQty) {
+                    await client.query('ROLLBACK');
+                    return { ok: false, httpStatus: 409, error: 'PRESCRIPTION_SCOPE_MISMATCH', message: `Quantity for '${rxItem.name || rxItem.sku}' exceeds approved limit.` };
+                  }
+                }
+              }
             }
           } else {
             isRxPending = true;
@@ -8334,11 +8585,41 @@ class ProductionNotificationService {
           fcmOk = await this.fcmSender(riderId, notifRecord.title, notifRecord.body, fcmPayload.data, deviceToken);
         }
       } else if (isBroadcast && offerStoreId) {
+        // Fan out private offer details strictly to authorized active rider device tokens for this store (Finding 1)
+        if (this.deviceTokenRepo && this.deviceTokenRepo.pool) {
+          try {
+            const fcmTokens = await this.deviceTokenRepo.pool.query(
+              `SELECT rdt.token
+               FROM rider_device_tokens rdt
+               JOIN riders r ON (r.id = rdt.rider_id OR r.rider_id = rdt.rider_id)
+               WHERE r.store_id = $1 AND r.status = 'ACTIVE'`,
+              [offerStoreId]
+            );
+            for (const rRow of fcmTokens.rows) {
+              if (rRow.token && typeof this.fcmSender.sendPushNotification === 'function') {
+                this.fcmSender.sendPushNotification(rRow.token, fcmPayload).catch(() => {});
+              }
+            }
+          } catch (_) {}
+        }
+
+        // Send strictly generic, non-sensitive wake-up ping to the public FCM topic (zero PII, zero amounts, zero order IDs)
         const storeTopic = `riders_store_${offerStoreId}`;
+        const genericTopicPayload = {
+          notificationId: notifId,
+          storeId: String(offerStoreId),
+          title: notifRecord.title,
+          body: notifRecord.body,
+          data: {
+            type: 'NEW_OFFER_AVAILABLE',
+            storeId: String(offerStoreId),
+            serverTime: String(Date.now())
+          }
+        };
         if (typeof this.fcmSender.sendPushToTopic === 'function') {
-          fcmOk = await this.fcmSender.sendPushToTopic(storeTopic, fcmPayload);
+          fcmOk = await this.fcmSender.sendPushToTopic(storeTopic, genericTopicPayload);
         } else if (typeof this.fcmSender.sendPushNotification === 'function') {
-          fcmOk = await this.fcmSender.sendPushNotification(`/topics/${storeTopic}`, fcmPayload);
+          fcmOk = await this.fcmSender.sendPushNotification(`/topics/${storeTopic}`, genericTopicPayload);
         }
       }
     }
@@ -8715,6 +8996,55 @@ class OutboxProcessor {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Authoritative Dispatch-Failure Expiry Guard (Finding 10):
+      // When unassigned orders exceed the dispatch deadline (25 minutes), atomically cancel order,
+      // release reserved inventory, void COD ledger, and mark delivery session FAILED/EXPIRED.
+      const expiredDispatchesRes = await client.query(
+        `SELECT o.id, o.order_id, o.store_id, o.items, ds.delivery_id
+         FROM orders o
+         JOIN delivery_sessions ds ON (ds.order_id = o.order_id OR ds.order_id = o.id)
+         WHERE ds.state = 'LOOKING_FOR_RIDER'
+           AND ds.rider_id IS NULL
+           AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED')
+           AND ds.created_at <= NOW() - INTERVAL '25 minutes'
+         LIMIT 10
+         FOR UPDATE OF o SKIP LOCKED`
+      );
+
+      for (const expOrd of expiredDispatchesRes.rows) {
+        const expItems = Array.isArray(expOrd.items) ? expOrd.items : (typeof expOrd.items === 'string' ? JSON.parse(expOrd.items) : (expOrd.items || []));
+        if (this.inventoryRepo && typeof this.inventoryRepo.releaseStockTransactionally === 'function' && expOrd.store_id && expItems.length > 0) {
+          await this.inventoryRepo.releaseStockTransactionally(client, expOrd.store_id, expItems).catch(() => {});
+        }
+        await client.query(
+          `UPDATE orders 
+           SET status = 'CANCELLED', cancellation = '{"reason": "DISPATCH_TIMEOUT_EXPIRED", "actor": "SYSTEM"}'::jsonb, updated_at = NOW() 
+           WHERE id = $1`,
+          [expOrd.id]
+        );
+        await client.query(
+          `UPDATE delivery_sessions 
+           SET state = 'FAILED', updated_at = NOW() 
+           WHERE (order_id = $1 OR delivery_id = $2)`,
+          [expOrd.order_id || expOrd.id, expOrd.delivery_id]
+        );
+        await client.query(
+          `UPDATE cod_ledger 
+           SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [EXPIRED: Dispatch deadline exceeded]', updated_at = NOW() 
+           WHERE (order_id = $1 OR order_id = $2) AND status != 'COLLECTED_RECONCILED'`,
+          [expOrd.order_id, expOrd.id]
+        ).catch(() => {});
+        await client.query(
+          `UPDATE offers SET status = 'EXPIRED', updated_at = NOW() WHERE (order_id = $1 OR delivery_id = $2)`,
+          [expOrd.order_id || expOrd.id, expOrd.delivery_id]
+        ).catch(() => {});
+        await client.query(
+          `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id IN ($1, $2) AND status IN ('PENDING', 'PROCESSING')`,
+          [expOrd.order_id, expOrd.id]
+        ).catch(() => {});
+      }
+
       const strandedOrdersRes = await client.query(
         `SELECT o.order_id, o.id, ds.delivery_id, ds.store_id
          FROM orders o

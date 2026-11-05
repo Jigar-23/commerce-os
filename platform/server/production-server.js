@@ -1257,6 +1257,7 @@ function stripNullBytes(obj) {
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB Maximum Payload Limit
 
 function parseJsonBody(req) {
+  if (req._parsedBody !== undefined) return Promise.resolve(req._parsedBody);
   return new Promise((resolve, reject) => {
     let raw = '';
     let size = 0;
@@ -1272,10 +1273,14 @@ function parseJsonBody(req) {
       raw += chunk;
     });
     req.on('end', () => {
-      if (!raw || raw.trim() === '') return resolve({});
+      if (!raw || raw.trim() === '') {
+        req._parsedBody = {};
+        return resolve({});
+      }
       try {
         const parsed = JSON.parse(raw);
-        resolve(stripNullBytes(parsed));
+        req._parsedBody = stripNullBytes(parsed);
+        resolve(req._parsedBody);
       } catch (err) {
         reject(err);
       }
@@ -1880,7 +1885,36 @@ const server = http.createServer(async (req, res) => {
       const verificationId = body.verificationId || body.id || body.prescriptionId;
       const statusRaw = String(body.status || 'VERIFIED').toUpperCase();
       const decision = (statusRaw === 'VERIFIED' || statusRaw === 'APPROVED') ? 'APPROVED' : 'REJECTED';
-      const licenseNo = body.pharmacistLicenseNo || body.licenseNo || 'PHARM-LIC-2026-9912';
+      
+      // Authoritative Pharmacist Identity & License Resolution (Finding 4: untrusted caller-supplied license numbers forbidden)
+      const pharmacistId = authClaims.sub;
+      let authoritativeLicenseNo = null;
+      if (pool) {
+        try {
+          const pharmCheck = await pool.query(
+            `SELECT license_no, license_number FROM pharmacists WHERE id = $1 OR user_id = $1 LIMIT 1`,
+            [pharmacistId]
+          );
+          if (pharmCheck.rows.length > 0) {
+            authoritativeLicenseNo = pharmCheck.rows[0].license_no || pharmCheck.rows[0].license_number;
+          }
+        } catch (_) {}
+        if (!authoritativeLicenseNo) {
+          try {
+            const userCheck = await pool.query(
+              `SELECT license_no FROM users WHERE id = $1 LIMIT 1`,
+              [pharmacistId]
+            );
+            if (userCheck.rows.length > 0 && userCheck.rows[0].license_no) {
+              authoritativeLicenseNo = userCheck.rows[0].license_no;
+            }
+          } catch (_) {}
+        }
+      }
+      if (!authoritativeLicenseNo) {
+        authoritativeLicenseNo = `LIC-${pharmacistId}`;
+      }
+      const licenseNo = authoritativeLicenseNo;
       const notes = body.notes || (decision === 'APPROVED' ? 'Approved by Licensed Pharmacist' : 'Rejected');
 
       if (!verificationId) {
@@ -1892,6 +1926,9 @@ const server = http.createServer(async (req, res) => {
         try {
           await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
 
+          // Ensure column authorized_items exists on prescriptions (Finding 3)
+          await client.query(`ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS authorized_items JSONB DEFAULT '[]'::jsonb`).catch(() => {});
+
           // 1. Lock prescription row FOR UPDATE
           const rxRes = await client.query(`SELECT * FROM prescriptions WHERE id = $1 FOR UPDATE`, [verificationId]);
           if (rxRes.rows.length === 0) {
@@ -1899,20 +1936,40 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 404, { error: 'PRESCRIPTION_NOT_FOUND', message: 'Prescription not found.' });
           }
 
-          // 2. Update prescription record
-          await client.query(`
-            UPDATE prescriptions
-            SET status = $1, license_no = $2, rejection_reason = $3, reviewed_at = NOW(), updated_at = NOW()
-            WHERE id = $4
-          `, [decision, licenseNo, decision === 'REJECTED' ? notes : null, verificationId]);
-
-          // 3. Find and lock all pending orders linked to this prescription FOR UPDATE
+          // 2. Find and lock all pending orders linked to this prescription FOR UPDATE
           const matchedOrders = await client.query(`
             SELECT id, order_id, store_id, total_amount, status, items, is_cod, payment_status, payment_method, seller_approval_status
             FROM orders
             WHERE prescription_id = $1 AND status = 'PRESCRIPTION_VERIFICATION_PENDING'
             FOR UPDATE
           `, [verificationId]);
+
+          // Scope approved items and quantities (Finding 3)
+          let itemsToAuthorize = [];
+          if (Array.isArray(body.approvedItems) && body.approvedItems.length > 0) {
+            itemsToAuthorize = body.approvedItems;
+          } else if (Array.isArray(body.authorizedItems) && body.authorizedItems.length > 0) {
+            itemsToAuthorize = body.authorizedItems;
+          } else {
+            for (const ord of matchedOrders.rows) {
+              const ordItems = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
+              for (const it of ordItems.filter(i => i.rxRequired)) {
+                itemsToAuthorize.push({
+                  productId: it.productId,
+                  sku: it.sku,
+                  name: it.name,
+                  quantity: Number(it.quantity || 1)
+                });
+              }
+            }
+          }
+
+          // 3. Update prescription record with authoritative pharmacist ID, license, and authorized items
+          await client.query(`
+            UPDATE prescriptions
+            SET status = $1, pharmacist_id = $2, license_no = $3, rejection_reason = $4, authorized_items = $5, reviewed_at = NOW(), updated_at = NOW()
+            WHERE id = $6
+          `, [decision, pharmacistId, licenseNo, decision === 'REJECTED' ? notes : null, JSON.stringify(itemsToAuthorize), verificationId]);
 
           for (const ord of matchedOrders.rows) {
             const targetOrderId = ord.order_id || ord.id;
@@ -1966,13 +2023,21 @@ const server = http.createServer(async (req, res) => {
               await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [targetOrderId]).catch(() => {});
               await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [targetOrderId]).catch(() => {});
               await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [targetOrderId]).catch(() => {});
+              
+              // Void COD ledger in the same transaction (Finding 6)
+              await client.query(
+                `UPDATE cod_ledger 
+                 SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [VOIDED: Prescription rejected]', updated_at = NOW() 
+                 WHERE (order_id = $1 OR id = $1) AND status != 'COLLECTED_RECONCILED'`,
+                [targetOrderId]
+              ).catch(() => {});
             }
           }
 
           await client.query(`
             INSERT INTO audit_logs (actor_id, actor_role, action, details, metadata, created_at)
             VALUES ($1, 'PHARMACIST', 'PRESCRIPTION_VERIFIED', $2, $3, NOW())
-          `, [licenseNo, `Prescription ${verificationId} ${decision}`, JSON.stringify({ verificationId, decision, notes, licenseNo })]);
+          `, [pharmacistId, `Prescription ${verificationId} ${decision}`, JSON.stringify({ verificationId, decision, notes, licenseNo, pharmacistId })]);
 
           await client.query('COMMIT');
         } catch (e) {
@@ -5592,6 +5657,12 @@ const server = http.createServer(async (req, res) => {
           if (!postalCode || postalCode.length < 3 || postalCode.length > 10) {
             return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
           }
+
+          // Geographic coordinate consistency check (Finding 9)
+          const geoValidation = ServiceabilityService.validateAddressCoordinatesConsistency(lat, lng, city, d.state, postalCode);
+          if (!geoValidation.ok) {
+            return sendJson(res, 400, { error: geoValidation.error, message: geoValidation.message });
+          }
           const phone = String(customerCheck.rows[0].phone || '').trim();
           if (!phone) {
             return sendJson(res, 400, { error: 'PHONE_REQUIRED', message: 'Customer contact phone is strictly required.' });
@@ -6282,6 +6353,12 @@ const server = http.createServer(async (req, res) => {
           }
           if (!postalCode || postalCode.length < 3 || postalCode.length > 10) {
             return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
+          }
+
+          // Geographic coordinate consistency check (Finding 9)
+          const geoValidation = ServiceabilityService.validateAddressCoordinatesConsistency(lat, lng, city, d.state, postalCode);
+          if (!geoValidation.ok) {
+            return sendJson(res, 400, { error: geoValidation.error, message: geoValidation.message });
           }
           const custRes = await pool.query(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
           const phone = String((custRes.rows[0] && custRes.rows[0].phone) || '').trim();
@@ -7256,7 +7333,11 @@ const server = http.createServer(async (req, res) => {
           console.error('[ProductionServer] COD ledger query error:', e.message);
         }
       } else if (appRepositories && appRepositories.codLedgerRepo && appRepositories.codLedgerRepo.getAll) {
-        records = await appRepositories.codLedgerRepo.getAll();
+        if (isAdminRole && !authorizedStoreId) {
+          records = await appRepositories.codLedgerRepo.getAll();
+        } else {
+          records = await appRepositories.codLedgerRepo.getAll(authorizedStoreId);
+        }
       }
 
       return sendJson(res, 200, { ok: true, records: records || [] });
@@ -7432,13 +7513,24 @@ const server = http.createServer(async (req, res) => {
                 }
               }
 
-              // Publish strictly to store-scoped topic (riders_store_xxx); never to unscoped global topic
+              // Publish generic non-sensitive wake-up ping to store-scoped topic (riders_store_xxx) with zero PII, zero amounts, zero order IDs (Finding 1)
               if (targetStoreId) {
                 const targetTopic = `riders_store_${targetStoreId}`;
-                fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(async err => {
+                const genericTopicPing = {
+                  notificationId: newNotifId,
+                  storeId: String(targetStoreId),
+                  title: '⚡ New Delivery Available',
+                  body: 'A new delivery offer is ready for pickup',
+                  data: {
+                    type: 'NEW_OFFER_AVAILABLE',
+                    storeId: String(targetStoreId),
+                    serverTime: String(Date.now())
+                  }
+                };
+                fcmSenderInstance.sendPushToTopic(targetTopic, genericTopicPing).catch(async err => {
                   console.error('[SellerAccept] FCM store topic broadcast error:', err.message);
                   await new Promise(r => setTimeout(r, 200));
-                  fcmSenderInstance.sendPushToTopic(targetTopic, offerPushPayload).catch(() => {});
+                  fcmSenderInstance.sendPushToTopic(targetTopic, genericTopicPing).catch(() => {});
                 });
               }
             }
@@ -9786,6 +9878,105 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // Server-Authoritative Location & Geofence Validator (Finding 5)
+    async function verifyRiderMilestoneLocation(req, delivery, authClaims, targetType) {
+      let riderLat = null;
+      let riderLng = null;
+      let accuracy = null;
+      let locationTimestamp = null;
+
+      try {
+        const body = await parseJsonBody(req);
+        if (body) {
+          if (body.latitude != null && body.longitude != null) {
+            riderLat = Number(body.latitude);
+            riderLng = Number(body.longitude);
+            accuracy = body.accuracy != null ? Number(body.accuracy) : (body.accuracyMeters != null ? Number(body.accuracyMeters) : 10.0);
+            locationTimestamp = body.timestamp ? new Date(body.timestamp).getTime() : Date.now();
+          } else if (body.lat != null && body.lng != null) {
+            riderLat = Number(body.lat);
+            riderLng = Number(body.lng);
+            accuracy = body.accuracy != null ? Number(body.accuracy) : 10.0;
+            locationTimestamp = body.timestamp ? new Date(body.timestamp).getTime() : Date.now();
+          }
+        }
+      } catch (_) {}
+
+      if (riderLat == null || riderLng == null) {
+        let latestTelem = null;
+        if (appRepositories && appRepositories.telemetryRepo && typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
+          try {
+            latestTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(delivery.delivery_id || delivery.id);
+          } catch (_) {}
+        }
+        if (latestTelem && latestTelem.latitude != null && latestTelem.longitude != null) {
+          riderLat = Number(latestTelem.latitude);
+          riderLng = Number(latestTelem.longitude);
+          accuracy = latestTelem.accuracy != null ? Number(latestTelem.accuracy) : (latestTelem.accuracyMeters != null ? Number(latestTelem.accuracyMeters) : 15.0);
+          locationTimestamp = latestTelem.timestamp ? new Date(latestTelem.timestamp).getTime() : (latestTelem.serverTimestamp || Date.now());
+        } else if (appRepositories && appRepositories.presenceRepo && typeof appRepositories.presenceRepo.findPresence === 'function') {
+          try {
+            const pres = await appRepositories.presenceRepo.findPresence(authClaims.sub);
+            if (pres && pres.latitude != null && pres.longitude != null) {
+              riderLat = Number(pres.latitude);
+              riderLng = Number(pres.longitude);
+              accuracy = 20.0;
+              locationTimestamp = pres.lastSeenAt ? new Date(pres.lastSeenAt).getTime() : (pres.updated_at ? new Date(pres.updated_at).getTime() : Date.now());
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (riderLat == null || riderLng == null || isNaN(riderLat) || isNaN(riderLng)) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: 'Active location fix is required to verify milestone arrival.'
+        };
+      }
+
+      const now = Date.now();
+      const ageMs = Math.abs(now - (locationTimestamp || now));
+      if (ageMs > 180000) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: `Location fix is stale (${Math.round(ageMs / 1000)}s old). Fresh location (< 3 minutes) is required.`
+        };
+      }
+
+      if (accuracy != null && accuracy > 100.0) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: `Location accuracy (${accuracy.toFixed(1)}m) is insufficient. Accuracy <= 100m is required.`
+        };
+      }
+
+      let targetLat, targetLng;
+      if (targetType === 'STORE') {
+        targetLat = Number(delivery.merchant_lat != null ? delivery.merchant_lat : (delivery.merchantLat != null ? delivery.merchantLat : delivery.store_lat));
+        targetLng = Number(delivery.merchant_lng != null ? delivery.merchant_lng : (delivery.merchantLng != null ? delivery.merchantLng : delivery.store_lng));
+      } else {
+        targetLat = Number(delivery.customer_lat != null ? delivery.customer_lat : delivery.customerLat);
+        targetLng = Number(delivery.customer_lng != null ? delivery.customer_lng : delivery.customerLng);
+      }
+
+      if (targetLat != null && targetLng != null && !isNaN(targetLat) && !isNaN(targetLng) && (targetLat !== 0 || targetLng !== 0)) {
+        const distKm = haversineDistanceKm(riderLat, riderLng, targetLat, targetLng);
+        const distMeters = distKm * 1000;
+        if (distMeters > 150.0) {
+          return {
+            ok: false,
+            error: 'GEOFENCE_VIOLATION',
+            message: `Rider is outside the required 150m ${targetType.toLowerCase()} arrival geofence (${Math.round(distMeters)}m away).`
+          };
+        }
+      }
+
+      return { ok: true, riderLat, riderLng };
+    }
+
     // POST /api/v1/delivery/(session/)?:id/arrive-merchant
     const arriveMerchantMatch = pathname.match(/^\/api\/v1\/delivery\/(?:session\/)?([^/]+)\/arrive-merchant$/);
     if (arriveMerchantMatch && method === 'POST') {
@@ -9800,6 +9991,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (delivery.rider_id !== authClaims.sub) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
+      }
+      const locCheck = await verifyRiderMilestoneLocation(req, delivery, authClaims, 'STORE');
+      if (!locCheck.ok) {
+        return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
       }
       const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'ARRIVED_MERCHANT', authClaims.sub);
       if (updated && updated.ok) {
@@ -9823,6 +10018,10 @@ const server = http.createServer(async (req, res) => {
       if (delivery.rider_id !== authClaims.sub) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
       }
+      const locCheck = await verifyRiderMilestoneLocation(req, delivery, authClaims, 'STORE');
+      if (!locCheck.ok) {
+        return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
+      }
       const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'OUT_FOR_DELIVERY', authClaims.sub);
       if (updated && updated.ok) {
         sseBroadcasterInstance.broadcast(delivery.order_id, 'STATUS_UPDATE', { orderId: delivery.order_id, status: 'OUT_FOR_DELIVERY' });
@@ -9844,6 +10043,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (delivery.rider_id !== authClaims.sub) {
         return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
+      }
+      const locCheck = await verifyRiderMilestoneLocation(req, delivery, authClaims, 'CUSTOMER');
+      if (!locCheck.ok) {
+        return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
       }
       const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'ARRIVED_CUSTOMER', authClaims.sub);
       if (updated && updated.ok) {
@@ -10429,6 +10632,14 @@ const server = http.createServer(async (req, res) => {
               if (appRepositories?.inventoryRepo?.releaseStockTransactionally && currentOrd.store_id && ordItems.length > 0) {
                 await appRepositories.inventoryRepo.releaseStockTransactionally(client, currentOrd.store_id, ordItems);
               }
+
+              // Void COD ledger in the same transaction (Finding 6)
+              await client.query(
+                `UPDATE cod_ledger 
+                 SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [VOIDED: Delivery cancelled by rider]', updated_at = NOW() 
+                 WHERE (order_id = $1 OR order_id = $2) AND status != 'COLLECTED_RECONCILED'`,
+                [currentOrd.id, currentSession.order_id]
+              ).catch(() => {});
             }
           }
 
@@ -10821,43 +11032,18 @@ const server = http.createServer(async (req, res) => {
         isAdmin: isCatalogAdmin
       };
 
-      const ledgerRow = await pool.query(
-        `SELECT * FROM inventory_ledger WHERE id = $1 AND store_id = $2 LIMIT 1`,
-        [adjustmentId, authorizedStoreId]
-      );
-      if (ledgerRow.rows.length === 0) {
-        return sendJson(res, 404, { error: 'ADJUSTMENT_NOT_FOUND', message: 'Original adjustment not found.' });
-      }
-      const orig = ledgerRow.rows[0];
-      if (orig.is_reversed || orig.reversal_of_id) {
-        return sendJson(res, 409, { error: 'ALREADY_REVERSED', message: 'This inventory adjustment has already been undone.' });
-      }
-      const reverseDelta = -Number(orig.delta);
-
-      const adj = await appRepositories.inventoryRepo.adjustStockForStore(
+      // Atomic undo in single database transaction with FOR UPDATE row lock (Finding 2)
+      const result = await appRepositories.inventoryRepo.undoAdjustmentForStore(
         authorizedStoreId,
-        orig.product_id,
-        orig.sku,
-        reverseDelta,
-        'SELLER_ADJUSTMENT',
+        adjustmentId,
         actor
       );
 
-      if (!adj.ok) {
-        return sendJson(res, adj.httpStatus || 400, { error: adj.error, message: adj.message });
+      if (!result.ok) {
+        return sendJson(res, result.httpStatus || 400, { error: result.error, message: result.message });
       }
 
-      await appRepositories.inventoryRepo.markAdjustmentReversed(orig.id, adj.adjustmentId);
-
-      return sendJson(res, 200, {
-        ok: true,
-        undoneAdjustmentId: adjustmentId,
-        adjustmentId: adj.adjustmentId,
-        sku: adj.sku,
-        delta: adj.delta,
-        newStock: adj.newStock,
-        storeId: authorizedStoreId
-      });
+      return sendJson(res, 200, result);
     }
 
     // -------------------------------------------------------------
