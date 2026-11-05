@@ -1713,10 +1713,15 @@ class KodexAuditBatch1RegressionTest {
     @Test
     fun testPrescriptionViewModel_uploadGeneratesStableIdempotencyKey() = runTest {
         val keys = mutableListOf<String?>()
+        var shouldFail = true
         val repo = object : FakeAppRepository() {
             override suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> {
                 keys.add(request.idempotencyKey)
-                return ApiResult.Success(Prescription(id = "rx_idemp", customerId = request.customerId, patientName = request.patientName))
+                return if (shouldFail) {
+                    ApiResult.Failure(AppError.Network("Network timeout"))
+                } else {
+                    ApiResult.Success(Prescription(id = "rx_idemp", customerId = request.customerId, patientName = request.patientName))
+                }
             }
         }
         val viewModel = PrescriptionViewModel(repo, ioDispatcher = testDispatcher)
@@ -1727,17 +1732,26 @@ class KodexAuditBatch1RegressionTest {
         assertEquals(1, keys.size)
         val firstKey = keys[0]
         assertNotNull(firstKey)
-        assertTrue(firstKey!!.startsWith("rx_idemp_"))
+        assertTrue(firstKey!!.startsWith("rx_upload_"))
 
-        // Reset and trigger another upload with identical customer, patient and attachments
-        viewModel.reset()
+        // Retry the failed upload: must retain and reuse the stable operation-scoped key
         viewModel.upload("cust_rx", "Jane Doe", attachments)
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(2, keys.size)
-        val secondKey = keys[1]
-        // Key must be deterministic and identical across retries/repeat uploads
-        assertEquals(firstKey, secondKey)
+        val retryKey = keys[1]
+        assertEquals(firstKey, retryKey)
+
+        // Reset and trigger a new submission: must generate a new operation-scoped key
+        shouldFail = false
+        viewModel.reset()
+        viewModel.upload("cust_rx", "Jane Doe", attachments)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(3, keys.size)
+        val newSubmissionKey = keys[2]
+        assertNotNull(newSubmissionKey)
+        assertNotEquals(firstKey, newSubmissionKey)
     }
 
     @Test
@@ -1838,5 +1852,265 @@ class KodexAuditBatch1RegressionTest {
 
         assertEquals(2, keys.size)
         assertNotEquals(keys[0], keys[1])
+    }
+
+    @Test
+    fun testCartViewModel_addItem_reusesOperationKeyOnRetry() = runTest {
+        val keys = mutableListOf<String?>()
+        var shouldFail = true
+        val repo = object : FakeAppRepository() {
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                keys.add(idempotencyKey)
+                return if (shouldFail) {
+                    ApiResult.Failure(AppError.Network("Timeout"))
+                } else {
+                    ApiResult.Success(CartResponse(items = listOf(item)))
+                }
+            }
+        }
+        val viewModel = CartViewModel(repo)
+        viewModel.init("cust_retry_add")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val product = CommerceProduct(id = "p1", sku = "sku_op", name = "Test Item", price = 100.0, sellingPrice = 100.0)
+
+        // Attempt 1: Fails
+        viewModel.addItem(product)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, keys.size)
+        val firstKey = keys[0]
+        assertNotNull(firstKey)
+        assertTrue(firstKey!!.startsWith("add_cust_retry_add_sku_op_"))
+
+        // Attempt 2 (Retry of failed add): Must reuse the exact same operation key
+        viewModel.addItem(product)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(2, keys.size)
+        val retryKey = keys[1]
+        assertEquals(firstKey, retryKey)
+
+        // Now attempt 2 succeeded: Next distinct action must get a fresh key
+        shouldFail = false
+        viewModel.addItem(product)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(3, keys.size)
+        val thirdKey = keys[2]
+        assertEquals(retryKey, thirdKey) // Third call succeeded because attempt 2 had failed
+    }
+
+    @Test
+    fun testCartViewModel_reorderAll_retryAfterPartialFailureDoesNotReAddSuccessfulSkus() = runTest {
+        val attemptedSkus = mutableListOf<String>()
+        var failSku2 = true
+        val repo = object : FakeAppRepository() {
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                attemptedSkus.add(item.sku)
+                return if (item.sku == "sku_fail" && failSku2) {
+                    ApiResult.Failure(AppError.Network("Timeout on item 2"))
+                } else {
+                    ApiResult.Success(CartResponse(items = listOf(item)))
+                }
+            }
+        }
+        val viewModel = CartViewModel(repo)
+        viewModel.init("cust_partial_reorder")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val items = listOf(
+            OrderItem(productId = "p1", sku = "sku_ok", name = "Success Item", unitPrice = BigDecimal("50.00"), quantity = 1),
+            OrderItem(productId = "p2", sku = "sku_fail", name = "Failed Item", unitPrice = BigDecimal("60.00"), quantity = 1)
+        )
+
+        // Run 1: sku_ok succeeds, sku_fail fails
+        viewModel.reorderAll(items)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("sku_ok", "sku_fail"), attemptedSkus)
+
+        // Run 2: User retries reorderAll. sku_ok was already successful, so it MUST NOT be added again!
+        failSku2 = false
+        attemptedSkus.clear()
+        viewModel.reorderAll(items)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf("sku_fail"), attemptedSkus)
+        assertFalse("Already successful sku_ok must not be re-added on retry", attemptedSkus.contains("sku_ok"))
+    }
+
+    @Test
+    fun testCartViewModel_moveBackToCart_abortsIfPendingKeyStorageFails() = runTest {
+        var addCalled = false
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val savedItem = CartItem(productId = "p1", sku = "sku_abort", name = "Item", unitPrice = BigDecimal("10.00"), quantity = 1)
+        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_key_fail", listOf(savedItem))
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                addCalled = true
+                return ApiResult.Success(CartResponse(items = listOf(item)))
+            }
+        }
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        viewModel.init("cust_key_fail")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Turn on failure for pending key save
+        fakeSecureStore.shouldFailSave = true
+        viewModel.moveBackToCart("sku_abort")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Network add must NEVER be sent if storing the idempotency key failed
+        assertFalse("Network request must not be sent if durable key storage failed", addCalled)
+        assertEquals("Could not store durable idempotency key for moving item.", viewModel.errorMessage)
+    }
+
+    @Test
+    fun testCartViewModel_moveBackToCart_retainsKeyWhenRetryFails() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val savedItem = CartItem(productId = "p1", sku = "sku_retain", name = "Retained Item", unitPrice = BigDecimal("25.00"), quantity = 1)
+        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_retain", listOf(savedItem))
+
+        var attempts = 0
+        val repo = object : FakeAppRepository() {
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                attempts++
+                return if (attempts == 1) {
+                    // Attempt 1: Ambiguous failure
+                    ApiResult.Failure(AppError.Server(504, "GATEWAY_TIMEOUT", "Timeout", null, null))
+                } else {
+                    // Retry attempt: Definitive/non-ambiguous 500 failure
+                    ApiResult.Failure(AppError.Server(500, "INTERNAL_ERROR", "Internal server error", null, null))
+                }
+            }
+        }
+
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        viewModel.init("cust_retain")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.moveBackToCart("sku_retain")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Because attempt 1 was ambiguous, retry failure must NOT clear the pending move key
+        val pendingKey = com.commerceos.android.data.local.LocalSaveForLaterStore.getPendingMoveKey(fakeContext, "cust_retain", "sku_retain")
+        assertNotNull("Pending move key must be retained after ambiguous attempt and failed retry", pendingKey)
+        assertTrue(pendingKey!!.startsWith("move_back_cust_retain_sku_retain_"))
+    }
+
+    @Test
+    fun testCartViewModel_moveBackToCart_retainsKeyIfSavingRemainingItemsFails() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val savedItem1 = CartItem(productId = "p1", sku = "sku_save_fail", name = "Item 1", unitPrice = BigDecimal("30.00"), quantity = 1)
+        val savedItem2 = CartItem(productId = "p2", sku = "sku_keep", name = "Item 2", unitPrice = BigDecimal("20.00"), quantity = 1)
+        com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(fakeContext, "cust_save_fail", listOf(savedItem1, savedItem2))
+        // Pre-seed durable pending move key so setPendingMoveKey is not needed during add
+        com.commerceos.android.data.local.LocalSaveForLaterStore.setPendingMoveKey(fakeContext, "cust_save_fail", "sku_save_fail", "durable_key_123")
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                return ApiResult.Success(CartResponse(items = listOf(item)))
+            }
+        }
+
+        val viewModel = CartViewModel(repo, appContext = fakeContext)
+        viewModel.init("cust_save_fail")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Make saving remaining saved items fail
+        fakeSecureStore.shouldFailSave = true
+        viewModel.moveBackToCart("sku_save_fail")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Because saving remaining items failed, key must NOT be cleared
+        fakeSecureStore.shouldFailSave = false
+        val pendingKey = com.commerceos.android.data.local.LocalSaveForLaterStore.getPendingMoveKey(fakeContext, "cust_save_fail", "sku_save_fail")
+        assertNotNull("Pending move key must be retained if saving remaining saved items fails", pendingKey)
+        assertEquals("durable_key_123", pendingKey)
+    }
+
+    @Test
+    fun testCartViewModel_moveToSaveForLater_ambiguousFetchFailureEntersUncertainStateAndBlocksMoves() = runTest {
+        val repo = object : FakeAppRepository() {
+            override suspend fun removeCartItem(customerId: String, sku: String): ApiResult<CartResponse> {
+                return ApiResult.Failure(AppError.Network("Transport dropped"))
+            }
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                return ApiResult.Failure(AppError.Network("Cannot reach server"))
+            }
+        }
+        val viewModel = CartViewModel(repo)
+        viewModel.init("cust_unc")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Manually place item in cart
+        viewModel.addItem(CommerceProduct(id = "p1", sku = "sku_unc", name = "Uncertain Item", price = 40.0, sellingPrice = 40.0))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.moveToSaveForLater("sku_unc")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(viewModel.uncertainMoveSkus.contains("sku_unc"))
+
+        // Subsequent move for this SKU is blocked
+        viewModel.moveToSaveForLater("sku_unc")
+        assertEquals("Item move is pending resolution. Please refresh your cart.", viewModel.errorMessage)
+
+        viewModel.moveBackToCart("sku_unc")
+        assertEquals("Item move is pending resolution. Please refresh your cart.", viewModel.errorMessage)
+    }
+
+    @Test
+    fun testLocalPrescriptionManager_legacyMigration_failsClosedWhenSecureStoreFails() {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        fakeSecureStore.shouldFailSave = true // Fail secure save
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        // Put legacy plaintext JSON
+        val rxJson = """[{"id":"rx_1","customerId":"cust_fail_close","patientName":"Alice","attachments":[]}]"""
+        store["rx_records_cust_fail_close"] = rxJson
+
+        val results = com.commerceos.android.data.local.LocalPrescriptionManager.getPrescriptions(fakeContext, "cust_fail_close")
+
+        // Must fail closed: return emptyList, and do NOT delete the plaintext legacy pref
+        assertEquals(emptyList<Prescription>(), results)
+        assertEquals(rxJson, store["rx_records_cust_fail_close"])
+    }
+
+    @Test
+    fun testLocalPrescriptionManager_sanitizationCollisionFixedWithSha256Buckets() {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val rxHyphen = Prescription(id = "rx_hyphen", customerId = "cust-a", patientName = "Hyphen Patient")
+        val rxUnderscore = Prescription(id = "rx_underscore", customerId = "cust_a", patientName = "Underscore Patient")
+
+        com.commerceos.android.data.local.LocalPrescriptionManager.savePrescription(fakeContext, rxHyphen)
+        com.commerceos.android.data.local.LocalPrescriptionManager.savePrescription(fakeContext, rxUnderscore)
+
+        val hyphenList = com.commerceos.android.data.local.LocalPrescriptionManager.getPrescriptions(fakeContext, "cust-a")
+        val underscoreList = com.commerceos.android.data.local.LocalPrescriptionManager.getPrescriptions(fakeContext, "cust_a")
+
+        assertEquals(1, hyphenList.size)
+        assertEquals("rx_hyphen", hyphenList[0].id)
+        assertEquals("cust-a", hyphenList[0].customerId)
+
+        assertEquals(1, underscoreList.size)
+        assertEquals("rx_underscore", underscoreList[0].id)
+        assertEquals("cust_a", underscoreList[0].customerId)
     }
 }

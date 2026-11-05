@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import com.commerceos.android.util.MoneyFormatter
 
 /** One-shot outcome of a cart mutation. State and events are separate concerns:
@@ -45,7 +47,12 @@ class CartViewModel(
     private var reorderAllJob: Job? = null
     private var sanitizationCleanupJob: Job? = null
     private var isInitialized = false
-    private val moveBackKeys = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val moveBackKeys = ConcurrentHashMap<String, String>()
+    private val pendingAddKeys = ConcurrentHashMap<String, String>()
+    private val pendingReorderKeys = ConcurrentHashMap<String, String>()
+    private val reorderBatchKeys = ConcurrentHashMap<String, String>()
+    private val reorderBatchSuccessfulSkus = ConcurrentHashMap<String, MutableSet<String>>()
+    val uncertainMoveSkus = ConcurrentHashMap.newKeySet<String>()
 
     override var isLockedForCheckout by mutableStateOf(false)
         private set
@@ -70,13 +77,41 @@ class CartViewModel(
             activeJobs.forEach { it.join() }
         }
 
+        if (uncertainMoveSkus.isNotEmpty()) {
+            val targetCustomerId = customerId.trim()
+            if (targetCustomerId.isNotBlank()) {
+                when (val check = repository.fetchBackendCart(targetCustomerId)) {
+                    is ApiResult.Success -> {
+                        cartMutex.withLock {
+                            val backendItems = sanitizeCartItems(check.data.items ?: emptyList())
+                            cartItems = backendItems
+                            totals = check.data
+                            uncertainMoveSkus.toList().forEach { sku ->
+                                if (backendItems.none { it.sku == sku }) {
+                                    uncertainMoveSkus.remove(sku)
+                                } else {
+                                    uncertainMoveSkus.remove(sku)
+                                    val previousSaved = saveForLaterItems.filterNot { it.sku == sku }
+                                    appContext?.let { ctx ->
+                                        LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
+                                    }
+                                    saveForLaterItems = previousSaved
+                                }
+                            }
+                        }
+                    }
+                    is ApiResult.Failure -> {
+                        throw IllegalStateException("Cannot checkout: cart contains items in an uncertain state (${uncertainMoveSkus.joinToString()}). Please refresh cart.")
+                    }
+                }
+            }
+        }
+
         // Capture settled cart state under mutex
         return cartMutex.withLock {
             cartItems.toList()
         }
     }
-
-    override fun getSettledCartItems(): List<CartItem> = cartItems.toList()
 
     var cartItems by mutableStateOf<List<CartItem>>(emptyList())
         private set
@@ -285,6 +320,16 @@ class CartViewModel(
         couponFeedbackMessage = null
         isCouponError = false
         moveBackKeys.clear()
+        pendingAddKeys.clear()
+        pendingReorderKeys.clear()
+        reorderBatchKeys.clear()
+        reorderBatchSuccessfulSkus.clear()
+        uncertainMoveSkus.clear()
+        pendingAddKeys.clear()
+        pendingReorderKeys.clear()
+        reorderBatchKeys.clear()
+        reorderBatchSuccessfulSkus.clear()
+        uncertainMoveSkus.clear()
         errorMessage = null
 
         refreshDeliveryConfigAndPromotions()
@@ -517,6 +562,20 @@ class CartViewModel(
                     is ApiResult.Success -> {
                         if (generation != customerGeneration || customerId.trim() != activeCustId) return@launch
                         val items = sanitizeCartItems(result.data.items ?: emptyList())
+                        if (uncertainMoveSkus.isNotEmpty()) {
+                            uncertainMoveSkus.toList().forEach { uncertainSku ->
+                                if (items.none { it.sku == uncertainSku }) {
+                                    uncertainMoveSkus.remove(uncertainSku)
+                                } else {
+                                    uncertainMoveSkus.remove(uncertainSku)
+                                    val previousSaved = saveForLaterItems.filterNot { it.sku == uncertainSku }
+                                    appContext?.let { ctx ->
+                                        LocalSaveForLaterStore.saveItems(ctx, activeCustId, previousSaved)
+                                    }
+                                    saveForLaterItems = previousSaved
+                                }
+                            }
+                        }
                         cartItems = items
                         totals = result.data
                         errorMessage = null
@@ -543,7 +602,7 @@ class CartViewModel(
 
     private val cartMutex = kotlinx.coroutines.sync.Mutex()
 
-    fun addItem(product: CommerceProduct) {
+    fun addItem(product: CommerceProduct, operationKey: String? = null) {
         if (isLockedForCheckout) {
             val message = "Cart cannot be modified while checkout is in progress."
             errorMessage = message
@@ -617,11 +676,17 @@ class CartViewModel(
                     cartItems + item
                 }
 
+                val opMapKey = "${targetCustomerId}:${item.sku}"
+                val opKey = operationKey ?: pendingAddKeys[opMapKey] ?: "add_${targetCustomerId}_${item.sku}_${UUID.randomUUID()}".also {
+                    pendingAddKeys[opMapKey] = it
+                }
+
                 if (targetCustomerId.isNotBlank()) {
-                    val updated = repository.addCartItem(targetCustomerId, item)
+                    val updated = repository.addCartItem(targetCustomerId, item, opKey)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (updated) {
                         is ApiResult.Success -> {
+                            pendingAddKeys.remove(opMapKey)
                             val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
                             cartItems = backendItems
                             totals = updated.data
@@ -665,7 +730,7 @@ class CartViewModel(
         }
     }
 
-    fun addReorderItem(item: OrderItem) {
+    fun addReorderItem(item: OrderItem, operationKey: String? = null) {
         if (isLockedForCheckout) {
             val message = "Cart cannot be modified while checkout is in progress."
             errorMessage = message
@@ -719,11 +784,17 @@ class CartViewModel(
                     cartItems + cartItem
                 }
 
+                val opMapKey = "${targetCustomerId}:${sku}"
+                val opKey = operationKey ?: pendingReorderKeys[opMapKey] ?: "reorder_item_${targetCustomerId}_${sku}_${UUID.randomUUID()}".also {
+                    pendingReorderKeys[opMapKey] = it
+                }
+
                 if (targetCustomerId.isNotBlank()) {
-                    val updated = repository.addCartItem(targetCustomerId, cartItem)
+                    val updated = repository.addCartItem(targetCustomerId, cartItem, opKey)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     when (updated) {
                         is ApiResult.Success -> {
+                            pendingReorderKeys.remove(opMapKey)
                             val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
                             cartItems = backendItems
                             totals = updated.data
@@ -782,14 +853,29 @@ class CartViewModel(
                 cartMutex.withLock {
                     if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                     val failedSkus = mutableListOf<String>()
-                    items.forEach { item ->
+                    val batchSignature = items.map { "${it.effectiveSku}:${it.effectiveQuantity}" }.sorted().joinToString(";")
+                    val batchKey = "${targetCustomerId}_${batchSignature}"
+                    val batchId = reorderBatchKeys.computeIfAbsent(batchKey) {
+                        UUID.randomUUID().toString()
+                    }
+                    val successfulSkus = reorderBatchSuccessfulSkus.computeIfAbsent(batchKey) {
+                        ConcurrentHashMap.newKeySet()
+                    }
+
+                    items.forEachIndexed { index, item ->
                         if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                         val sku = item.effectiveSku
                         val name = item.effectiveName
                         val price = item.effectivePrice
                         if (sku.isBlank() || sku.equals("SKU_ITEM", ignoreCase = true) || price <= BigDecimal.ZERO) {
                             failedSkus += if (sku.isNotBlank()) sku else "UNKNOWN_SKU"
-                            return@forEach
+                            return@forEachIndexed
+                        }
+
+                        val itemKey = "${index}_${sku}"
+                        if (successfulSkus.contains(itemKey)) {
+                            // Already successfully committed for this reorder batch item; do not duplicate
+                            return@forEachIndexed
                         }
 
                         val qty = item.effectiveQuantity.coerceAtLeast(1)
@@ -810,10 +896,12 @@ class CartViewModel(
                         )
 
                         if (targetCustomerId.isNotBlank()) {
+                            val itemOpKey = "reorder_${targetCustomerId}_${batchId}_${index}_${sku}_${qty}"
                             try {
-                                when (val updated = repository.addCartItem(targetCustomerId, cartItem)) {
+                                when (val updated = repository.addCartItem(targetCustomerId, cartItem, itemOpKey)) {
                                     is ApiResult.Success -> {
                                         if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                                        successfulSkus.add(itemKey)
                                         val backendItems = sanitizeCartItems(updated.data.items ?: mergeCartItem(cartItems, cartItem))
                                         cartItems = backendItems
                                         totals = updated.data
@@ -862,6 +950,8 @@ class CartViewModel(
                         errorMessage = message
                         _addEvents.trySend(CartAddEvent.Failure(message))
                     } else {
+                        reorderBatchKeys.remove(batchKey)
+                        reorderBatchSuccessfulSkus.remove(batchKey)
                         _addEvents.trySend(CartAddEvent.Success("REORDER_ALL", "All order items added to cart"))
                     }
                     syncCouponDiscount()
@@ -1004,11 +1094,19 @@ class CartViewModel(
             errorMessage = "Cart cannot be modified while checkout is in progress."
             return
         }
+        if (uncertainMoveSkus.contains(sku)) {
+            errorMessage = "Item move is pending resolution. Please refresh your cart."
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (uncertainMoveSkus.contains(sku)) {
+                    errorMessage = "Item move is pending resolution. Please refresh your cart."
+                    return@withLock
+                }
                 val item = cartItems.firstOrNull { it.sku == sku } ?: return@withLock
                 val previousSaved = saveForLaterItems
                 val newSaved = previousSaved.filterNot { it.sku == sku } + item
@@ -1045,18 +1143,21 @@ class CartViewModel(
                             } else false
 
                             if (serverCommitted == true) {
+                                uncertainMoveSkus.remove(sku)
                                 deleteLocalCartItem(targetCustomerId, sku)
                                 saveForLaterItems = newSaved
                                 errorMessage = null
                                 syncCouponDiscount()
                                 return@withLock
                             } else if (serverCommitted == null) {
-                                errorMessage = "Network timeout while moving item. Your item is preserved in Saved for Later."
+                                uncertainMoveSkus.add(sku)
+                                errorMessage = "Network timeout while moving item. Your item is preserved in Saved for Later, and cart checkout is held until state is resolved."
                                 saveForLaterItems = newSaved
                                 syncCouponDiscount()
                                 return@withLock
                             }
 
+                            uncertainMoveSkus.remove(sku)
                             // Rollback saved items store if backend removal failed
                             val rollbackPersisted = appContext?.let { ctx ->
                                 com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(ctx, targetCustomerId, previousSaved)
@@ -1072,6 +1173,7 @@ class CartViewModel(
                             return@withLock
                         }
                         is ApiResult.Success -> {
+                            uncertainMoveSkus.remove(sku)
                             val backendItems = sanitizeCartItems(
                                 result.data.items ?: cartItems.filterNot { it.sku == sku }
                             )
@@ -1118,11 +1220,23 @@ class CartViewModel(
             _addEvents.trySend(CartAddEvent.Failure(message))
             return
         }
+        if (uncertainMoveSkus.contains(sku)) {
+            val message = "Item move is pending resolution. Please refresh your cart."
+            errorMessage = message
+            _addEvents.trySend(CartAddEvent.Failure(message))
+            return
+        }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
         viewModelScope.launch {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
+                if (uncertainMoveSkus.contains(sku)) {
+                    val message = "Item move is pending resolution. Please refresh your cart."
+                    errorMessage = message
+                    _addEvents.trySend(CartAddEvent.Failure(message))
+                    return@withLock
+                }
                 val targetItem = saveForLaterItems.find { it.sku == sku } ?: return@withLock
                 val previousSaved = saveForLaterItems
                 val remainingSaved = previousSaved.filterNot { it.sku == sku }
@@ -1149,14 +1263,26 @@ class CartViewModel(
                 )
 
                 val moveMapKey = "${targetCustomerId}:${sku}"
-                val moveKey = appContext?.let { LocalSaveForLaterStore.getPendingMoveKey(it, targetCustomerId, sku) }
+                val existingPendingKey = appContext?.let { LocalSaveForLaterStore.getPendingMoveKey(it, targetCustomerId, sku) }
                     ?: moveBackKeys[moveMapKey]
-                    ?: "move_back_${targetCustomerId}_${targetItem.sku}_${targetItem.quantity}_${java.util.UUID.randomUUID()}".also { generatedKey ->
-                        appContext?.let { ctx ->
-                            LocalSaveForLaterStore.setPendingMoveKey(ctx, targetCustomerId, sku, generatedKey)
+
+                val moveKey: String
+                if (existingPendingKey != null) {
+                    moveKey = existingPendingKey
+                } else {
+                    val generatedKey = "move_back_${targetCustomerId}_${targetItem.sku}_${targetItem.quantity}_${UUID.randomUUID()}"
+                    if (appContext != null) {
+                        val stored = LocalSaveForLaterStore.setPendingMoveKey(appContext, targetCustomerId, sku, generatedKey)
+                        if (!stored) {
+                            val message = "Could not store durable idempotency key for moving item."
+                            errorMessage = message
+                            _addEvents.trySend(CartAddEvent.Failure(message))
+                            return@withLock
                         }
-                        moveBackKeys[moveMapKey] = generatedKey
                     }
+                    moveBackKeys[moveMapKey] = generatedKey
+                    moveKey = generatedKey
+                }
 
                 if (targetCustomerId.isNotBlank()) {
                     val updated = repository.addCartItem(targetCustomerId, targetItem, moveKey)
@@ -1198,11 +1324,15 @@ class CartViewModel(
                                     } ?: true
                                     if (persisted) {
                                         saveForLaterItems = remainingSaved
+                                        appContext?.let { ctx ->
+                                            LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
+                                        }
+                                        moveBackKeys.remove(moveMapKey)
+                                    } else {
+                                        errorMessage = "Could not update saved items storage."
+                                        // Retain moveKey so that future reconciliation or retry can resolve it without duplicate add
+                                        return@withLock
                                     }
-                                    appContext?.let { ctx ->
-                                        LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
-                                    }
-                                    moveBackKeys.remove(moveMapKey)
                                     val backendItems = sanitizeCartItems(reconciled.data.items ?: (cartItems + targetItem))
                                     cartItems = backendItems
                                     totals = reconciled.data
@@ -1210,16 +1340,17 @@ class CartViewModel(
                                     _addEvents.trySend(CartAddEvent.Success(prod.sku, prod.name))
                                     syncLocalCartCache(targetCustomerId, backendItems)
                                     return@withLock
-                                } else if (reconciled is ApiResult.Failure && reconciled.error.isAmbiguousMutationFailure()) {
-                                    // Still ambiguous: preserve saved items and keep durable move key intact for retry
-                                    val errMsg = updated.error.message.ifBlank { "Network timeout while moving item back to cart. Your item is preserved in Saved for Later." }
+                                } else if (reconciled is ApiResult.Failure) {
+                                    // Any failure on retry after an ambiguous first attempt leaves the outcome unresolved!
+                                    // Retain the pending move key for future retry.
+                                    val errMsg = reconciled.error.message.ifBlank { "Network timeout while moving item back to cart. Your item is preserved in Saved for Later." }
                                     errorMessage = errMsg
                                     _addEvents.trySend(CartAddEvent.Failure(errMsg))
                                     return@withLock
                                 }
                             }
 
-                            // Definitive failure: clear pending key, item remains safely in saved items
+                            // Definitive first-attempt failure: clear pending key, item remains safely in saved items
                             appContext?.let { ctx ->
                                 LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
                             }
@@ -1387,6 +1518,11 @@ class CartViewModel(
         couponFeedbackMessage = null
         isCouponError = false
         moveBackKeys.clear()
+        pendingAddKeys.clear()
+        pendingReorderKeys.clear()
+        reorderBatchKeys.clear()
+        reorderBatchSuccessfulSkus.clear()
+        uncertainMoveSkus.clear()
 
         cartDao?.let { dao ->
             viewModelScope.launch {

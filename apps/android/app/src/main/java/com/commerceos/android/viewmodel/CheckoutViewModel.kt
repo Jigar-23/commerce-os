@@ -10,6 +10,7 @@ import com.commerceos.android.network.ApiResult
 import com.commerceos.android.repository.AppRepository
 import java.math.BigDecimal
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -479,6 +480,10 @@ class CheckoutViewModel(
                         failCheckout("CHECKOUT_FAILED", result.error.message)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failCheckout("CHECKOUT_ERROR", e.message ?: "Unable to proceed with checkout")
             } finally {
                 if (uiState.state !is CheckoutState.Confirmed) {
                     gate?.unlockMutations()

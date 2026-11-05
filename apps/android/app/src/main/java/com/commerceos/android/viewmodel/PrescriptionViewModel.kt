@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 class PrescriptionViewModel(
     private val repository: AppRepository,
@@ -41,7 +42,8 @@ class PrescriptionViewModel(
     private var uploadJob: Job? = null
     private var uploadGeneration = 0L
     private var activeCustomerId: String = ""
-    private var activeLogicalUploadKey: String? = null
+    private var currentUploadKey: String? = null
+    private var currentUploadFingerprint: String? = null
     internal var localPrescriptionsOverride: ((String) -> List<Prescription>)? = null
 
     fun load(customerId: String) {
@@ -169,6 +171,7 @@ class PrescriptionViewModel(
         customerId: String,
         patientName: String,
         attachments: List<String>,
+        operationKey: String? = null,
         onUploaded: ((Prescription) -> Unit)? = null
     ) {
         val safeCustomerId = customerId.trim()
@@ -185,7 +188,8 @@ class PrescriptionViewModel(
         }
         if (activeCustomerId != safeCustomerId) {
             activeCustomerId = safeCustomerId
-            activeLogicalUploadKey = null
+            currentUploadKey = null
+            currentUploadFingerprint = null
             loadGeneration++
             loadJob?.cancel()
             prescriptions = emptyList()
@@ -200,11 +204,17 @@ class PrescriptionViewModel(
             errorMessage = null
             try {
                 val lightweightAttachments = encodeAttachments(attachments)
-                val stableIdempotencyKey = computeUploadIdempotencyKey(
-                    safeCustomerId,
-                    patientName,
-                    lightweightAttachments
-                ).also { activeLogicalUploadKey = it }
+                val uploadFingerprint = "${safeCustomerId}|${patientName.trim()}|${lightweightAttachments.hashCode()}"
+                val stableIdempotencyKey = operationKey
+                    ?: if (currentUploadKey != null && currentUploadFingerprint == uploadFingerprint) {
+                        currentUploadKey!!
+                    } else {
+                        "rx_upload_${safeCustomerId}_${UUID.randomUUID()}".also {
+                            currentUploadKey = it
+                            currentUploadFingerprint = uploadFingerprint
+                        }
+                    }
+
                 when (val result = repository.uploadPrescription(
                     UploadPrescriptionRequest(
                         customerId = safeCustomerId,
@@ -216,7 +226,8 @@ class PrescriptionViewModel(
                 )) {
                     is ApiResult.Success -> {
                         if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
-                            activeLogicalUploadKey = null
+                            currentUploadKey = null
+                            currentUploadFingerprint = null
                             val serverRx = if (result.data.attachments.isNotEmpty()) result.data else result.data.copy(attachments = attachments)
                             prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
                             errorMessage = null
@@ -271,31 +282,12 @@ class PrescriptionViewModel(
         }
     }
 
-    private fun computeUploadIdempotencyKey(
-        customerId: String,
-        patientName: String,
-        attachments: List<String>
-    ): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        digest.update(customerId.trim().toByteArray(Charsets.UTF_8))
-        digest.update(0.toByte())
-        digest.update(patientName.trim().toByteArray(Charsets.UTF_8))
-        digest.update(0.toByte())
-        attachments.forEach { attachment ->
-            val attBytes = attachment.toByteArray(Charsets.UTF_8)
-            val attDigest = java.security.MessageDigest.getInstance("SHA-256").digest(attBytes)
-            digest.update(attDigest)
-            digest.update(0.toByte())
-        }
-        val finalDigest = digest.digest()
-        return "rx_idemp_" + finalDigest.joinToString("") { "%02x".format(it.toInt() and 0xff) }.take(32)
-    }
-
     fun reset() {
         uploadGeneration++
         loadGeneration++
         activeCustomerId = ""
-        activeLogicalUploadKey = null
+        currentUploadKey = null
+        currentUploadFingerprint = null
         loadJob?.cancel()
         uploadJob?.cancel()
         prescriptions = emptyList()
