@@ -8695,8 +8695,8 @@ class OutboxProcessor {
            AND o.status NOT IN ('CANCELLED', 'DELIVERED', 'REJECTED', 'PRESCRIPTION_VERIFICATION_PENDING')
            AND COALESCE(o.seller_approval_status, 'NOT_REQUIRED') != 'PENDING'
            AND (
-             (COALESCE(o.seller_approval_status, 'NOT_REQUIRED') = 'NOT_REQUIRED' AND o.status IN ('PLACED', 'ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED'))
-             OR (o.seller_approval_status = 'ACCEPTED' AND o.status IN ('ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED'))
+             (COALESCE(o.seller_approval_status, 'NOT_REQUIRED') = 'NOT_REQUIRED' AND o.status IN ('PLACED', 'ACCEPTED', 'SELLER_ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED'))
+             OR (o.seller_approval_status = 'ACCEPTED' AND o.status IN ('SELLER_ACCEPTED', 'ACCEPTED', 'READY_FOR_PICKUP', 'PACKED', 'CONFIRMED'))
            )
            AND (
              o.is_cod = TRUE 
@@ -8741,16 +8741,16 @@ class OutboxProcessor {
           // Strict Idempotency Guard: Atomically insert only if no pending/processing dispatch event exists
           const insertRes = await client.query(
             `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, next_attempt_at, retry_count)
-             SELECT 'order', $1, 'DISPATCH_REQUESTED', $2::jsonb, 'PENDING', NOW(), 0
+             SELECT 'order', $1::varchar, 'DISPATCH_REQUESTED', $2::jsonb, 'PENDING', NOW(), 0
              WHERE NOT EXISTS (
                SELECT 1 FROM outbox_events oe
                WHERE (
-                 oe.aggregate_id = $1 
-                 OR oe.aggregate_id = $3
-                 OR oe.payload->>'orderId' = $1 
-                 OR oe.payload->>'order_id' = $1
-                 OR oe.payload->>'deliveryId' = $3
-                 OR oe.payload->'deliverySession'->>'deliveryId' = $3
+                 oe.aggregate_id = $1::varchar 
+                 OR oe.aggregate_id = $3::varchar
+                 OR oe.payload->>'orderId' = $1::varchar 
+                 OR oe.payload->>'order_id' = $1::varchar
+                 OR oe.payload->>'deliveryId' = $3::varchar
+                 OR oe.payload->'deliverySession'->>'deliveryId' = $3::varchar
                )
                AND oe.event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED')
                AND oe.status IN ('PENDING', 'PROCESSING')
