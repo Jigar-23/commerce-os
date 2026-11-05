@@ -255,8 +255,18 @@ class RiderForegroundLocationService : Service(), LocationListener {
     }
 
     private suspend fun presenceProcessingLoop() {
-        for (update in presenceChannel) {
+        var pendingPresenceRetry: PresenceUpdate? = null
+        var retryBackoffMs = 2000L
+
+        while (serviceScope.isActive) {
             try {
+                val update = if (pendingPresenceRetry != null) {
+                    delay(retryBackoffMs)
+                    presenceChannel.tryReceive().getOrNull() ?: pendingPresenceRetry!!
+                } else {
+                    presenceChannel.receive()
+                }
+
                 val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
                 val isShiftOnline = sessionMgr.isShiftOnline()
                 if (!isShiftOnline && activeDeliveryId.isBlank()) {
@@ -266,44 +276,60 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 val baseUrl = sessionMgr.getBaseUrl()
                 val token = sessionMgr.getAuthToken()
                 if (baseUrl.isNotBlank() && token.isNotBlank()) {
+                    val now = System.currentTimeMillis()
                     if (activeDeliveryId.isNotBlank()) {
                         transmitHeadTelemetry()
                         val minActivePresenceInterval = 10000L
-                        if (update.timestamp - lastPresencePostTime < minActivePresenceInterval) {
+                        if (now - lastPresencePostTime < minActivePresenceInterval && pendingPresenceRetry == null) {
                             continue
                         }
-                        lastPresencePostTime = update.timestamp
                     } else {
-                        if (update.timestamp - lastPresencePostTime < 30000L) {
+                        if (now - lastPresencePostTime < 30000L && pendingPresenceRetry == null) {
                             continue
                         }
-                        lastPresencePostTime = update.timestamp
                     }
 
-                    val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
-                    val conn = url.openConnection() as java.net.HttpURLConnection
-                    conn.requestMethod = "POST"
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.setRequestProperty("Authorization", "Bearer $token")
-                    conn.doOutput = true
-                    conn.connectTimeout = 3000
-                    conn.readTimeout = 3000
+                    var postSuccessful = false
+                    try {
+                        val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.requestMethod = "POST"
+                        conn.setRequestProperty("Content-Type", "application/json")
+                        conn.setRequestProperty("Authorization", "Bearer $token")
+                        conn.doOutput = true
+                        conn.connectTimeout = 3000
+                        conn.readTimeout = 3000
 
-                    val body = JSONObject().apply {
-                        put("latitude", update.latitude)
-                        put("longitude", update.longitude)
-                        put("speedKmh", update.speedKmh)
-                        if (update.heading != null) {
-                            put("heading", update.heading)
+                        val body = JSONObject().apply {
+                            put("latitude", update.latitude)
+                            put("longitude", update.longitude)
+                            put("speedKmh", update.speedKmh)
+                            if (update.heading != null) {
+                                put("heading", update.heading)
+                            }
+                            put("accuracyMeters", update.accuracy)
+                            put("isOnline", isShiftOnline)
+                            put("sequenceNumber", update.sequenceNumber)
+                            put("timestamp", update.timestamp)
                         }
-                        put("accuracyMeters", update.accuracy)
-                        put("isOnline", isShiftOnline)
-                        put("sequenceNumber", update.sequenceNumber)
-                        put("timestamp", update.timestamp)
+                        conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                        val code = conn.responseCode
+                        conn.disconnect()
+                        if (code in 200..299) {
+                            postSuccessful = true
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Presence update post failed: ${e.message}")
                     }
-                    conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                    conn.responseCode
-                    conn.disconnect()
+
+                    if (postSuccessful) {
+                        lastPresencePostTime = System.currentTimeMillis()
+                        pendingPresenceRetry = null
+                        retryBackoffMs = 2000L
+                    } else {
+                        pendingPresenceRetry = update
+                        retryBackoffMs = (retryBackoffMs * 2).coerceAtMost(16000L)
+                    }
                 }
             } catch (_: Exception) {}
         }
@@ -436,13 +462,16 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 _isStale.value = true
             }
 
-            // Immediately prime last known location so UI doesn't stall waiting for hardware callback
+            // Immediately prime last known location with freshest fix within 60s freshness threshold
             val lastGps = try { locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER) } catch (_: Exception) { null }
             val lastNet = try { locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) } catch (_: Exception) { null }
             val lastPassive = try { locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER) } catch (_: Exception) { null }
-            val best = lastGps ?: lastNet ?: lastPassive
-            if (best != null) {
-                onLocationChanged(best)
+            val allFixes = listOfNotNull(lastGps, lastNet, lastPassive)
+            val now = System.currentTimeMillis()
+            val freshFixes = allFixes.filter { (now - it.time) < 60_000L }
+            val freshest = freshFixes.maxByOrNull { it.time }
+            if (freshest != null) {
+                onLocationChanged(freshest)
             }
 
             val isActiveDelivery = activeDeliveryId.isNotBlank()
@@ -536,6 +565,11 @@ class RiderForegroundLocationService : Service(), LocationListener {
         }
 
         val now = System.currentTimeMillis()
+        val fixTime = if (location.time > 0L) location.time else now
+        if (now - fixTime > 60_000L) {
+            return
+        }
+
         if (isMock) {
             lastMockTimestamp = now
         } else if (now - lastMockTimestamp < 5000L) {
@@ -590,7 +624,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
             speedKmh = speedKmh,
             heading = headingValue,
             accuracyMeters = accuracy,
-            timestamp = now
+            timestamp = fixTime
         )
 
         _lastLocation.value = update

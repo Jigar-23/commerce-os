@@ -17,6 +17,7 @@ import com.commerceos.android.network.ApiResult
 import com.commerceos.android.network.AppError
 import com.commerceos.android.repository.AppRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -58,6 +59,14 @@ class CartViewModel(
     private val reorderBatchKeys = ConcurrentHashMap<String, String>()
     private val reorderBatchSuccessfulSkus = ConcurrentHashMap<String, MutableSet<String>>()
     val uncertainMoveSkus = ConcurrentHashMap.newKeySet<String>()
+    private val activeMutationJobs = ConcurrentHashMap.newKeySet<Job>()
+
+    private fun trackMutationJob(block: suspend CoroutineScope.() -> Unit): Job {
+        val job = viewModelScope.launch(block = block)
+        activeMutationJobs.add(job)
+        job.invokeOnCompletion { activeMutationJobs.remove(job) }
+        return job
+    }
 
     override var isLockedForCheckout by mutableStateOf(false)
         private set
@@ -79,7 +88,8 @@ class CartViewModel(
             val loadJob = cartLoadJob
             val refJob = refreshJob
             val retJob = retryJob
-            val activeJobs = listOfNotNull(syncJob, reorderJob, cleanupJob, loadJob, refJob, retJob).filter { it.isActive }
+            val mutationJobs = activeMutationJobs.toList().filter { it.isActive }
+            val activeJobs = listOfNotNull(syncJob, reorderJob, cleanupJob, loadJob, refJob, retJob).filter { it.isActive } + mutationJobs
             if (activeJobs.isEmpty()) break
             activeJobs.forEach { it.join() }
         }
@@ -647,6 +657,8 @@ class CartViewModel(
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 success = false
             }
@@ -799,7 +811,7 @@ class CartViewModel(
         }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
+        trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
 
@@ -871,7 +883,6 @@ class CartViewModel(
                     when (val res = LocalSaveForLaterStore.getPendingAddRecord(currentCtx, targetCustomerId, item.sku)) {
                         is StorageResult.Success -> {
                             val record = res.data
-                            // Allocate one key per user-intended add. Reuse it only to retry the identical request payload!
                             if (record.item == null || (record.item.sku == item.sku && record.item.quantity == item.quantity)) {
                                 existingPendingKey = record.key
                             }
@@ -883,9 +894,7 @@ class CartViewModel(
                             _addEvents.trySend(CartAddEvent.Failure("Storage decrypt error"))
                             return@withLock
                         }
-                        is StorageResult.NotFound -> {
-                            // Normal cold add: proceed to allocate fresh key
-                        }
+                        is StorageResult.NotFound -> {}
                     }
                 }
 
@@ -1000,7 +1009,7 @@ class CartViewModel(
         }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
+        trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
 
@@ -1046,18 +1055,11 @@ class CartViewModel(
                 }
 
                 val opMapKey = "${targetCustomerId}:${sku}"
-                val existingPendingKey = operationKey
-                    ?: pendingReorderKeys[opMapKey]
-                    ?: appContext?.let { LocalSaveForLaterStore.getPendingReorderItemKey(it, targetCustomerId, sku) }
-
-                val opKey = existingPendingKey ?: "reorder_item_${targetCustomerId}_${sku}_${UUID.randomUUID()}".also { newKey ->
+                val opKey = operationKey ?: "reorder_item_${targetCustomerId}_${sku}_${UUID.randomUUID()}".also { newKey ->
                     pendingReorderKeys[opMapKey] = newKey
                     appContext?.let { ctx ->
                         LocalSaveForLaterStore.setPendingReorderItemKey(ctx, targetCustomerId, sku, newKey)
                     }
-                }
-                if (existingPendingKey != null) {
-                    pendingReorderKeys[opMapKey] = existingPendingKey
                 }
 
                 if (targetCustomerId.isNotBlank()) {
@@ -1298,7 +1300,7 @@ class CartViewModel(
         }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
+        trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val previousCartItems = cartItems
@@ -1384,7 +1386,7 @@ class CartViewModel(
         }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
+        trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 val previousCartItems = cartItems
@@ -1479,7 +1481,7 @@ class CartViewModel(
         }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
+        trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 if (uncertainMoveSkus.contains(sku)) {
@@ -1632,7 +1634,7 @@ class CartViewModel(
         }
         val targetCustomerId = customerId.trim()
         val generation = customerGeneration
-        viewModelScope.launch {
+        trackMutationJob {
             cartMutex.withLock {
                 if (isLockedForCheckout || generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
                 if (uncertainMoveSkus.contains(sku)) {

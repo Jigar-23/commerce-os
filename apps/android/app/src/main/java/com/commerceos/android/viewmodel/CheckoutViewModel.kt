@@ -429,34 +429,52 @@ class CheckoutViewModel(
                             return@launch
                         }
                         if (serverItems.isNotEmpty()) {
+                            if (cartDto.itemsSubtotal == null || cartDto.grandTotal == null) {
+                                failCheckout("CART_SYNC_ERROR", "Server returned incomplete cart quote: missing subtotal or grandTotal")
+                                return@launch
+                            }
                             authoritativeItems = serverItems
+                            val serverSubtotal = cartDto.itemsSubtotal
+                            val serverDiscount = (cartDto.discount ?: BigDecimal.ZERO).min(serverSubtotal)
+                            authoritativeSubtotal = serverSubtotal
+                            authoritativeDiscount = serverDiscount
+                            authoritativeDeliveryFee = cartDto.expressDeliveryFee ?: uiState.deliveryFee
+                            authoritativeColdChainFee = cartDto.coldChainPackagingFee ?: uiState.coldChainFee
+                            authoritativeGrandTotal = cartDto.grandTotal
                         } else if (cartDto.itemsSubtotal != null || cartDto.grandTotal != null || cartDto.customerId.isNotBlank()) {
                             authoritativeItems = emptyList()
                         }
-                        if (authoritativeItems.isEmpty()) {
-                            failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
-                            return@launch
-                        }
-                        if (serverItems.isNotEmpty() && (cartDto.itemsSubtotal == null || cartDto.grandTotal == null)) {
-                            failCheckout("CART_SYNC_ERROR", "Server returned incomplete cart quote: missing subtotal or grandTotal")
-                            return@launch
-                        }
-                        val serverSubtotal = cartDto.itemsSubtotal ?: itemsSubtotal(authoritativeItems)
-                        val serverDiscount = cartDto.discount ?: BigDecimal.ZERO
-                        authoritativeSubtotal = serverSubtotal
-                        authoritativeDiscount = serverDiscount.min(authoritativeSubtotal)
-                        authoritativeDeliveryFee = cartDto.expressDeliveryFee ?: uiState.deliveryFee
-                        authoritativeColdChainFee = cartDto.coldChainPackagingFee ?: uiState.coldChainFee
-                        authoritativeGrandTotal = cartDto.grandTotal ?: authoritativeSubtotal
-                            .add(authoritativeDeliveryFee)
-                            .add(authoritativeColdChainFee)
-                            .subtract(authoritativeDiscount)
-                            .coerceAtLeast(BigDecimal.ZERO)
                     }
                     is ApiResult.Failure -> {
                         failCheckout("CART_SYNC_ERROR", backendQuote.error.message.ifBlank { "Failed to refresh cart quote" })
                         return@launch
                     }
+                }
+
+                val initialAuthSig = currentItems.map {
+                    "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
+                }.sorted()
+                val freshAuthSig = authoritativeItems.map {
+                    "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
+                }.sorted()
+                val initialGrandTotal = currentSubtotal
+                    .add(uiState.deliveryFee)
+                    .add(uiState.coldChainFee)
+                    .subtract(currentDiscount)
+                    .coerceAtLeast(BigDecimal.ZERO)
+
+                if (initialAuthSig != freshAuthSig || (initialGrandTotal > BigDecimal.ZERO && authoritativeGrandTotal.compareTo(initialGrandTotal) != 0)) {
+                    uiState = uiState.copy(
+                        items = authoritativeItems,
+                        itemsSubtotal = authoritativeSubtotal,
+                        couponDiscount = authoritativeDiscount,
+                        deliveryFee = authoritativeDeliveryFee,
+                        coldChainFee = authoritativeColdChainFee,
+                        grandTotal = authoritativeGrandTotal,
+                        isProcessing = false,
+                        errorMessage = "Cart contents or price updated. Please review and confirm your order."
+                    )
+                    return@launch
                 }
 
                 uiState = uiState.copy(
@@ -491,61 +509,76 @@ class CheckoutViewModel(
 
                         // Refresh server quote after serviceability to check quote against final serviceability rates
                         val refreshedQuote = repository.fetchBackendCart(customerIdSnapshot)
-                        val finalGrandTotal = if (refreshedQuote is ApiResult.Success) {
-                            if (refreshedQuote.data.grandTotal != null) {
-                                refreshedQuote.data.grandTotal
-                            } else if (refreshedQuote.data.items?.isNotEmpty() == true) {
+                        val refreshedData = (refreshedQuote as? ApiResult.Success)?.data
+                        val refreshedItems = refreshedData?.items
+                        val finalGrandTotal = refreshedData?.grandTotal
+                        val isExplicitServerQuote = refreshedData != null && (
+                            !refreshedItems.isNullOrEmpty() ||
+                            finalGrandTotal != null ||
+                            refreshedData.itemsSubtotal != null ||
+                            refreshedData.customerId.isNotBlank()
+                        )
+
+                        if (isExplicitServerQuote) {
+                            if (refreshedItems.isNullOrEmpty() || finalGrandTotal == null) {
                                 failCheckout("CART_SYNC_ERROR", "Server returned incomplete quote after serviceability check")
                                 return@launch
-                            } else {
-                                authoritativeSubtotal
-                                    .add(deliveryFee)
-                                    .add(coldChainFee)
-                                    .subtract(authoritativeDiscount)
-                                    .coerceAtLeast(BigDecimal.ZERO)
                             }
-                        } else {
-                            failCheckout("CART_SYNC_ERROR", "Failed to refresh cart quote after serviceability check")
-                            return@launch
-                        }
 
-                        val refreshedItems = refreshedQuote.data.items
-                        if (refreshedItems != null && refreshedItems.isNotEmpty()) {
-                            val authSig = authoritativeItems.map { "${it.sku.trim()}:${it.quantity}:${it.unitPrice}:${it.prescriptionRequired}:${it.coldChain}" }.sorted()
-                            val refSig = refreshedItems.map { "${it.sku.trim()}:${it.quantity}:${it.unitPrice}:${it.prescriptionRequired}:${it.coldChain}" }.sorted()
-                            if (authSig != refSig) {
+                            val refreshedSubtotal = refreshedData.itemsSubtotal ?: itemsSubtotal(refreshedItems)
+                            val refreshedDiscount = (refreshedData.discount ?: BigDecimal.ZERO).min(refreshedSubtotal)
+                            val finalDeliveryFee = refreshedData.expressDeliveryFee ?: deliveryFee
+                            val finalColdChainFee = refreshedData.coldChainPackagingFee ?: coldChainFee
+
+                            val authSig = authoritativeItems.map {
+                                "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
+                            }.sorted()
+                            val refSig = refreshedItems.map {
+                                "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
+                            }.sorted()
+
+                            val itemsChanged = authSig != refSig
+                            val pricingChanged = finalGrandTotal.compareTo(authoritativeGrandTotal) != 0 ||
+                                refreshedSubtotal.compareTo(authoritativeSubtotal) != 0 ||
+                                refreshedDiscount.compareTo(authoritativeDiscount) != 0 ||
+                                finalDeliveryFee.compareTo(deliveryFee) != 0 ||
+                                finalColdChainFee.compareTo(coldChainFee) != 0
+
+                            if (itemsChanged || pricingChanged) {
                                 uiState = uiState.copy(
                                     items = refreshedItems,
                                     serviceability = ServiceabilityState.Success(address.id, srvResult.data),
-                                    deliveryFee = deliveryFee,
-                                    coldChainFee = coldChainFee,
+                                    deliveryFee = finalDeliveryFee,
+                                    coldChainFee = finalColdChainFee,
                                     grandTotal = finalGrandTotal,
                                     isProcessing = false,
-                                    errorMessage = "Cart contents updated. Please review and confirm your order."
+                                    errorMessage = "Cart contents or pricing updated. Please review and confirm your order."
                                 )
                                 return@launch
                             }
-                        }
 
-                        // If quote changed after serviceability check, return to review screen for explicit confirmation
-                        if (authoritativeGrandTotal > BigDecimal.ZERO && finalGrandTotal.compareTo(authoritativeGrandTotal) != 0) {
                             uiState = uiState.copy(
+                                items = refreshedItems,
+                                serviceability = ServiceabilityState.Success(address.id, srvResult.data),
+                                deliveryFee = finalDeliveryFee,
+                                coldChainFee = finalColdChainFee,
+                                grandTotal = finalGrandTotal
+                            )
+                        } else {
+                            val finalGrandTotalCalculated = authoritativeSubtotal
+                                .add(deliveryFee)
+                                .add(coldChainFee)
+                                .subtract(authoritativeDiscount)
+                                .coerceAtLeast(BigDecimal.ZERO)
+
+                            uiState = uiState.copy(
+                                items = authoritativeItems,
                                 serviceability = ServiceabilityState.Success(address.id, srvResult.data),
                                 deliveryFee = deliveryFee,
                                 coldChainFee = coldChainFee,
-                                grandTotal = finalGrandTotal,
-                                isProcessing = false,
-                                errorMessage = "Order total updated from ₹$authoritativeGrandTotal to ₹$finalGrandTotal. Please review and confirm your order."
+                                grandTotal = finalGrandTotalCalculated
                             )
-                            return@launch
                         }
-
-                        uiState = uiState.copy(
-                            serviceability = ServiceabilityState.Success(address.id, srvResult.data),
-                            deliveryFee = deliveryFee,
-                            coldChainFee = coldChainFee,
-                            grandTotal = finalGrandTotal
-                        )
                     }
                     is ApiResult.Failure -> {
                         failCheckout("SERVICEABILITY_ERROR", srvResult.error.message)

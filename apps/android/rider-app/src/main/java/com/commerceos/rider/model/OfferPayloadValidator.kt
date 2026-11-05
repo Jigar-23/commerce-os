@@ -123,6 +123,16 @@ object OfferPayloadValidator {
                 Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces COD / Pay on Delivery.")
                 return null
             }
+
+            val paymentMethod = json.optString("paymentMethod")
+                .ifBlank { json.optString("payment_method") }
+                .ifBlank { json.optString("paymentMode") }
+                .ifBlank { json.optString("payment_mode") }
+            if (paymentMethod.isNotBlank() && !paymentMethod.contains("COD", ignoreCase = true) && !paymentMethod.contains("CASH", ignoreCase = true) && !paymentMethod.contains("DELIVERY", ignoreCase = true)) {
+                Log.w(TAG, "Rejecting offer $offerId: payment method $paymentMethod contradicts COD-only deployment.")
+                return null
+            }
+
             val parsedCodAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount")
             val parsedOrderTotal = json.optDoubleOrNull("orderTotal")
                 ?: json.optDoubleOrNull("order_total")
@@ -149,6 +159,10 @@ object OfferPayloadValidator {
                 ?: 0.0)
 
             val itemsList = mutableListOf<RiderOrderItem>()
+            val packageCount = (json.optInt("packageCount", 0).takeIf { it > 0 }
+                ?: json.optInt("itemCount", 0).takeIf { it > 0 }
+                ?: json.optJSONArray("items")?.length()?.takeIf { it > 0 }
+                ?: 1)
             if (isAccepted) {
                 val itemsArray = json.optJSONArray("items")
                 if (itemsArray != null) {
@@ -203,6 +217,7 @@ object OfferPayloadValidator {
                 codAmount = codAmount,
                 orderTotal = orderTotal,
                 items = itemsList,
+                packageCount = packageCount,
                 customerName = customerName,
                 customerAddress = customerAddress,
                 customerLat = customerLat,
@@ -293,6 +308,13 @@ object OfferPayloadValidator {
                 Log.w(TAG, "Rejecting offer $offerId: deployment strictly enforces COD / Pay on Delivery.")
                 return null
             }
+
+            val paymentMethod = (data["paymentMethod"] ?: data["payment_method"] ?: data["paymentMode"] ?: data["payment_mode"] ?: "").trim()
+            if (paymentMethod.isNotBlank() && !paymentMethod.contains("COD", ignoreCase = true) && !paymentMethod.contains("CASH", ignoreCase = true) && !paymentMethod.contains("DELIVERY", ignoreCase = true)) {
+                Log.w(TAG, "Rejecting offer $offerId: payment method $paymentMethod contradicts COD-only deployment.")
+                return null
+            }
+
             val parsedCodAmount = data["codAmount"]?.toDoubleOrNull() ?: data["cod_amount"]?.toDoubleOrNull()
             val parsedOrderTotal = data["orderTotal"]?.toDoubleOrNull()
                 ?: data["order_total"]?.toDoubleOrNull()
@@ -333,6 +355,10 @@ object OfferPayloadValidator {
 
             val serverTime = data["serverTime"]?.toLongOrNull() ?: nowMs
 
+            val packageCount = data["packageCount"]?.toIntOrNull()
+                ?: data["itemCount"]?.toIntOrNull()
+                ?: 1
+
             return ServerOffer(
                 offerId = offerId,
                 eventId = eventId,
@@ -350,6 +376,7 @@ object OfferPayloadValidator {
                 codAmount = codAmount,
                 orderTotal = orderTotal,
                 items = emptyList(),
+                packageCount = packageCount,
                 customerName = customerName,
                 customerAddress = customerAddress,
                 customerLat = customerLat,

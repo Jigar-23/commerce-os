@@ -46,6 +46,11 @@ fun PaymentScreen(
 ) {
     var selectedMethod by remember { mutableStateOf(PaymentConstants.COD) }
 
+    val srv = (checkoutUiState.serviceability as? ServiceabilityState.Success)?.response
+    val dynamicEta = srv?.etaLabel?.takeIf { it.isNotBlank() }
+        ?: srv?.etaMinutes?.let { "${it.min}-${it.max} Mins" }
+        ?: srv?.fulfillmentNode?.slaMinutes?.let { "$it Mins" }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -80,8 +85,9 @@ fun PaymentScreen(
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
                     )
+                    val itemCountLabel = "${checkoutUiState.items.size} ${if (checkoutUiState.items.size == 1) "item" else "items"}"
                     Text(
-                        text = "${checkoutUiState.items.size} ${if (checkoutUiState.items.size == 1) "item" else "items"} • 10-Minute Express Delivery",
+                        text = if (dynamicEta != null) "$itemCountLabel • $dynamicEta Express Delivery" else itemCountLabel,
                         fontSize = 11.sp,
                         color = Color(0xFF059669),
                         fontWeight = FontWeight.Medium
@@ -211,17 +217,19 @@ fun PaymentScreen(
                                     color = Color(0xFF0F172A)
                                 )
                             }
-                            Surface(
-                                color = Color(0xFFECFDF5),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = "⚡ 10 MINS SLA",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF059669),
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
+                            if (dynamicEta != null) {
+                                Surface(
+                                    color = Color(0xFFECFDF5),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "⚡ $dynamicEta SLA",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF059669),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
 

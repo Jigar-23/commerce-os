@@ -93,6 +93,19 @@ fun CommerceOSApp(
     var currentScreen by remember { mutableStateOf<Screen>(if (session.isAuthenticated) Screen.Home else Screen.Auth) }
     val backStack = remember { mutableStateListOf<Screen>() }
 
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                cartViewModel.retryPendingMutations()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     fun navigate(screen: Screen) {
         if (currentScreen != screen) {
             backStack.add(currentScreen)

@@ -384,7 +384,7 @@ object LocalSaveForLaterStore {
                     is StorageResult.NotFound -> mutableListOf()
                     is StorageResult.DecryptError -> return@synchronized false
                 }
-                existing.removeAll { it.opId == mutation.opId || (it.type == mutation.type && it.sku == mutation.sku) }
+                existing.removeAll { it.opId == mutation.opId }
                 existing.add(mutation)
                 val secureStore = secureStoreProvider?.invoke(context) ?: SecureCredentialStore(context)
                 secureStore.save(PENDING_CART_MUTATIONS_PREFIX + safeId, gson.toJson(existing))

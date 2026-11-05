@@ -129,7 +129,11 @@ fun RiderOfferCard(
 
                 // Customer Order Bill Card
                 val cartVal = offer.orderTotal ?: offer.codAmount ?: 0.0
-                val totalItemCount = offer.items.sumOf { it.quantity }.takeIf { it > 0 } ?: 1
+                val totalItemCount = if (offer.isAccepted && offer.items.isNotEmpty()) {
+                    offer.items.sumOf { it.quantity }
+                } else {
+                    offer.packageCount
+                }
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = RiderColors.SurfaceSubtle,

@@ -170,24 +170,35 @@ fun RxUploadDialog(
         }
     }
 
+    var isDismissing by remember { mutableStateOf(false) }
+
     fun handleDismiss() {
+        if (busy || isDismissing) return
+        isDismissing = true
         draftJob?.cancel()
         val appContext = context.applicationContext
-        coroutineScope.launch(Dispatchers.IO) {
-            LocalPrescriptionManager.saveDraft(
-                appContext,
-                customerId,
-                LocalPrescriptionManager.PrescriptionDraft(
-                    patientName = patientName,
-                    attachmentPath = attachment,
-                    attachmentName = attachmentName
+        coroutineScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                LocalPrescriptionManager.saveDraft(
+                    appContext,
+                    customerId,
+                    LocalPrescriptionManager.PrescriptionDraft(
+                        patientName = patientName,
+                        attachmentPath = attachment,
+                        attachmentName = attachmentName
+                    )
                 )
-            )
+            }
+            if (!ok) {
+                draftError = "Failed to save draft securely. Please retry."
+                isDismissing = false
+            } else {
+                try {
+                    tempCameraFile?.delete()
+                } catch (_: Exception) {}
+                onDismiss()
+            }
         }
-        try {
-            tempCameraFile?.delete()
-        } catch (_: Exception) {}
-        onDismiss()
     }
 
     Dialog(

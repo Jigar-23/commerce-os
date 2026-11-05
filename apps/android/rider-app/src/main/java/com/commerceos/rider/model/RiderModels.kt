@@ -138,6 +138,7 @@ data class ServerOffer(
     val codAmount: Double? = null,
     val orderTotal: Double? = null,
     val items: List<RiderOrderItem> = emptyList(),
+    val packageCount: Int = 1,
     val customerName: String,
     val customerAddress: String,
     val customerLat: Double,
