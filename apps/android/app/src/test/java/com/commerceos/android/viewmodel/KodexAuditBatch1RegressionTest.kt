@@ -65,6 +65,42 @@ class KodexAuditBatch1RegressionTest {
         Dispatchers.resetMain()
     }
 
+    private fun createFakeContext(store: MutableMap<String, String>): android.content.Context {
+        lateinit var editor: android.content.SharedPreferences.Editor
+        editor = java.lang.reflect.Proxy.newProxyInstance(
+            android.content.SharedPreferences.Editor::class.java.classLoader,
+            arrayOf(android.content.SharedPreferences.Editor::class.java)
+        ) { _, method, args ->
+            when (method?.name) {
+                "putString" -> { store[args[0] as String] = args[1] as String; editor }
+                "putLong" -> { store[args[0] as String] = (args[1] as Long).toString(); editor }
+                "remove" -> { store.remove(args[0] as String); editor }
+                "commit" -> true
+                "apply" -> null
+                else -> editor
+            }
+        } as android.content.SharedPreferences.Editor
+
+        val prefs = java.lang.reflect.Proxy.newProxyInstance(
+            android.content.SharedPreferences::class.java.classLoader,
+            arrayOf(android.content.SharedPreferences::class.java)
+        ) { _, method, args ->
+            when (method?.name) {
+                "getString" -> store[args[0] as String] ?: (args.getOrNull(1) as? String)
+                "getLong" -> (args.getOrNull(1) as? Long) ?: 0L
+                "getInt" -> (args.getOrNull(1) as? Int) ?: 0
+                "getBoolean" -> (args.getOrNull(1) as? Boolean) ?: false
+                "edit" -> editor
+                else -> null
+            }
+        } as android.content.SharedPreferences
+
+        return object : android.content.ContextWrapper(null) {
+            override fun getSharedPreferences(name: String?, mode: Int): android.content.SharedPreferences = prefs
+            override fun getApplicationContext(): android.content.Context = this
+        }
+    }
+
     // -------------------------------------------------------------
     // CART VIEW MODEL TESTS
     // -------------------------------------------------------------
@@ -881,6 +917,7 @@ class KodexAuditBatch1RegressionTest {
         }
         val viewModel = CartViewModel(repo)
         viewModel.init("cust_1")
+        testDispatcher.scheduler.advanceUntilIdle()
         val orderItems = listOf(
             OrderItem(productId = "p1", sku = "sku_1", name = "Medicine A", unitPrice = BigDecimal("50.00"), quantity = 1)
         )
@@ -904,6 +941,7 @@ class KodexAuditBatch1RegressionTest {
         }
         val viewModel = CartViewModel(repo)
         viewModel.init("cust_1")
+        testDispatcher.scheduler.advanceUntilIdle()
         val orderItems = listOf(
             OrderItem(productId = "p1", sku = "sku_same", name = "Item 1", unitPrice = BigDecimal("20.00"), quantity = 2),
             OrderItem(productId = "p2", sku = "sku_same", name = "Item 1", unitPrice = BigDecimal("20.00"), quantity = 3)
@@ -1087,12 +1125,12 @@ class KodexAuditBatch1RegressionTest {
         }
         val viewModel = CartViewModel(repo)
         viewModel.init("cust_1")
+        testDispatcher.scheduler.advanceUntilIdle()
         viewModel.lockMutations()
         assertTrue(viewModel.isLockedForCheckout)
 
         val prod = CommerceProduct(id = "p1", sku = "s1", name = "Prod 1", price = 100.0, sellingPrice = 100.0)
         viewModel.addItem(prod)
-        testDispatcher.scheduler.advanceUntilIdle()
 
         // Mutation should be rejected immediately
         assertEquals(0, viewModel.cartItems.size)
@@ -1199,5 +1237,160 @@ class KodexAuditBatch1RegressionTest {
         // Final state contains only cust_B's upload
         assertEquals(1, viewModel.prescriptions.size)
         assertEquals("cust_B", viewModel.prescriptions[0].customerId)
+    }
+
+    // -------------------------------------------------------------
+    // KODEX BATCH 1 RE-VERIFICATION TARGETED AUDIT TESTS
+    // -------------------------------------------------------------
+
+    @Test
+    fun testCheckoutViewModel_revalidatesFreshSnapshotAfterAcquiringGateLock() = runTest {
+        var checkoutAttempted = false
+        val repo = object : FakeAppRepository() {
+            override suspend fun checkoutFromCart(customerId: String, request: CartCheckoutRequest): ApiResult<CustomerOrderApiResponse> {
+                checkoutAttempted = true
+                return ApiResult.Success(CustomerOrderApiResponse(id = "ord_ok"))
+            }
+            override suspend fun getServiceability(customerId: String, addressId: String, items: List<ServiceabilityItem>): ApiResult<ServiceabilityResponse> {
+                return ApiResult.Success(ServiceabilityResponse(eligible = true))
+            }
+        }
+        val viewModel = CheckoutViewModel(repo)
+        val items = listOf(CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("100.00"), quantity = 1))
+        viewModel.start("cust_1", items)
+        viewModel.selectAddress(ApiAddress(id = "addr_1", addressLine = "Main St", city = "BLR", postalCode = "560001"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Gate that alters/invalidates state during awaitMutationsIdle
+        val mutatingGate = object : CartMutationGate {
+            override val isLockedForCheckout: Boolean get() = false
+            override fun lockMutations() {}
+            override fun unlockMutations() {}
+            override suspend fun awaitMutationsIdle() {
+                // Emulate a remote cart wipe while waiting for barrier
+                viewModel.start("cust_1", emptyList())
+            }
+        }
+        viewModel.setMutationGate(mutatingGate)
+
+        viewModel.executeCheckout("COD")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Fresh snapshot check must reject execution since cart is now empty!
+        assertFalse(checkoutAttempted)
+        assertFalse(viewModel.uiState.state is CheckoutState.Confirmed)
+    }
+
+    @Test
+    fun testLocalSaveForLaterStore_failsClosedWhenEncryptionFailsAndDoesNotWritePlaintext() {
+        val store = mutableMapOf<String, String>()
+        val context = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        fakeSecureStore.shouldFailSave = true
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val items = listOf(CartItem(productId = "p1", sku = "med_1", name = "Sensitive Medicine", unitPrice = BigDecimal("50.00"), quantity = 1))
+        val result = com.commerceos.android.data.local.LocalSaveForLaterStore.saveItems(context, "cust_1", items)
+
+        // Must fail closed (return false) and never write to plaintext prefs!
+        assertFalse(result)
+        assertTrue(store.isEmpty())
+    }
+
+    @Test
+    fun testLocalPrescriptionManager_enforcesCustomerPartitionBoundary() {
+        val store = mutableMapOf<String, String>()
+        val context = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val rxAlice = Prescription(id = "rx_alice_1", customerId = "cust_alice", patientName = "Alice")
+        val saved = com.commerceos.android.data.local.LocalPrescriptionManager.savePrescription(context, rxAlice)
+        assertTrue(saved)
+
+        // Bob must not see Alice's prescription
+        val bobList = com.commerceos.android.data.local.LocalPrescriptionManager.getPrescriptions(context, "cust_bob")
+        assertTrue(bobList.isEmpty())
+
+        // Blank customer must return empty list
+        val blankList = com.commerceos.android.data.local.LocalPrescriptionManager.getAllPrescriptions(context, "")
+        assertTrue(blankList.isEmpty())
+
+        // Alice sees only Alice's prescription
+        val aliceList = com.commerceos.android.data.local.LocalPrescriptionManager.getPrescriptions(context, "cust_alice")
+        assertEquals(1, aliceList.size)
+        assertEquals("rx_alice_1", aliceList[0].id)
+    }
+
+    @Test
+    fun testLocalPrescriptionManager_preservesLegacyRecordWhenEncryptedSaveFails() {
+        val store = mutableMapOf<String, String>()
+        val context = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        fakeSecureStore.shouldFailSave = true
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        val legacyRx = Prescription(id = "rx_legacy", customerId = "cust_1", patientName = "Legacy User")
+        val legacyJson = com.google.gson.Gson().toJson(listOf(legacyRx))
+        store["rx_records_cust_1"] = legacyJson
+
+        val newRx = Prescription(id = "rx_new", customerId = "cust_1", patientName = "New User")
+        val saved = com.commerceos.android.data.local.LocalPrescriptionManager.savePrescription(context, newRx)
+
+        // Encryption failed, so save must return false and legacy plaintext must NOT be purged
+        assertFalse(saved)
+        assertEquals(legacyJson, store["rx_records_cust_1"])
+    }
+
+    @Test
+    fun testCartItemEntity_compositePrimaryKeyDistinctPerCustomer() {
+        val entityGuest = CartItemEntity(
+            sku = "SKU_SAME",
+            customerId = "offline_cart",
+            productId = "p1",
+            name = "Product 1",
+            unitPrice = 10.0,
+            quantity = 2
+        )
+        val entityAuth = CartItemEntity(
+            sku = "SKU_SAME",
+            customerId = "cust_user123",
+            productId = "p1",
+            name = "Product 1",
+            unitPrice = 10.0,
+            quantity = 5
+        )
+
+        // Composite primary key ensures distinct identity across customers
+        assertNotEquals(entityGuest, entityAuth)
+        assertEquals("offline_cart", entityGuest.customerId)
+        assertEquals("cust_user123", entityAuth.customerId)
+        assertEquals(entityGuest.sku, entityAuth.sku)
+    }
+
+    @Test
+    fun testCartViewModel_surfacesOfflineCacheErrorWhenDaoFails() = runTest {
+        val failingDao = object : CartDao {
+            override fun observeCartItems(customerId: String): Flow<List<CartItemEntity>> = emptyFlow()
+            override suspend fun getCartItems(customerId: String): List<CartItemEntity> = emptyList()
+            override suspend fun insertOrUpdate(item: CartItemEntity) = throw RuntimeException("Disk I/O error")
+            override suspend fun insertAll(items: List<CartItemEntity>) = throw RuntimeException("Disk I/O error")
+            override suspend fun replaceCart(customerId: String, items: List<CartItemEntity>) = throw RuntimeException("Disk I/O error")
+            override suspend fun deleteBySku(sku: String, customerId: String) {}
+            override suspend fun clearCart(customerId: String) {}
+        }
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                return ApiResult.Success(CartResponse(items = listOf(
+                    CartItem(productId = "p1", sku = "s1", name = "Item 1", unitPrice = BigDecimal("10.00"), quantity = 1)
+                )))
+            }
+        }
+        val viewModel = CartViewModel(repo, cartDao = failingDao)
+        viewModel.init("cust_1")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Cache update failure should be surfaced in errorMessage
+        assertEquals("Could not update offline cart cache.", viewModel.errorMessage)
     }
 }
