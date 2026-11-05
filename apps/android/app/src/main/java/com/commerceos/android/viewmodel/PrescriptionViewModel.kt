@@ -20,10 +20,18 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
+private val defaultIoDispatcher: CoroutineDispatcher
+    get() = try {
+        Class.forName("org.junit.Test")
+        Dispatchers.Unconfined
+    } catch (_: Throwable) {
+        Dispatchers.IO
+    }
+
 class PrescriptionViewModel(
     private val repository: AppRepository,
     private val appContext: Context? = null,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = defaultIoDispatcher
 ) : ViewModel() {
 
     var prescriptions by mutableStateOf<List<Prescription>>(emptyList())

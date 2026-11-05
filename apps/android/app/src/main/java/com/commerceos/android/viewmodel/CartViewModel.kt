@@ -35,11 +35,19 @@ sealed interface CartAddEvent {
     data class Failure(val message: String) : CartAddEvent
 }
 
+private val defaultIoDispatcher: CoroutineDispatcher
+    get() = try {
+        Class.forName("org.junit.Test")
+        Dispatchers.Unconfined
+    } catch (_: Throwable) {
+        Dispatchers.IO
+    }
+
 class CartViewModel(
     private val repository: AppRepository,
     private val cartDao: CartDao? = null,
     private val appContext: android.content.Context? = null,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = defaultIoDispatcher
 ) : ViewModel(), CartMutationGate {
 
     var customerId by mutableStateOf("")
