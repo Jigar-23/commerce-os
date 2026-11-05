@@ -627,10 +627,14 @@ fun RiderMainScreen(
             var stickyLng by remember { mutableStateOf<Double?>(null) }
             var stickyHeading by remember { mutableStateOf<Float?>(null) }
 
-            if (lastLocation != null) {
+            if (lastLocation != null && !isStale) {
                 stickyLat = lastLocation?.latitude
                 stickyLng = lastLocation?.longitude
                 stickyHeading = lastLocation?.heading
+            } else if (isStale) {
+                stickyLat = null
+                stickyLng = null
+                stickyHeading = null
             }
 
             when (selectedTab) {
@@ -639,21 +643,21 @@ fun RiderMainScreen(
                     val currentOffer = activeOffer
 
                     if (currentSession != null && currentSession.state != "DELIVERED") {
-                        val effectiveRiderLat = stickyLat
-                            ?: currentSession.telemetry?.latitude
-                            ?: when (currentSession.state) {
-                                in listOf("ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "PICKED_UP") -> currentSession.merchantLat
-                                in listOf("ARRIVED_CUSTOMER", "HANDOFF_STARTED", "DELIVERED") -> currentSession.customerLat
-                                else -> null
-                            }
-                        val effectiveRiderLng = stickyLng
-                            ?: currentSession.telemetry?.longitude
-                            ?: when (currentSession.state) {
-                                in listOf("ARRIVED_PICKUP", "ARRIVED_STORE", "ARRIVED_AT_STORE", "PICKED_UP") -> currentSession.merchantLng
-                                in listOf("ARRIVED_CUSTOMER", "HANDOFF_STARTED", "DELIVERED") -> currentSession.customerLng
-                                else -> null
-                            }
-                        val effectiveRiderHeading = stickyHeading ?: currentSession.telemetry?.heading
+                        val effectiveRiderLat = if (!isStale && stickyLat != null) {
+                            stickyLat
+                        } else if (currentSession.telemetry != null && !currentSession.telemetry.isStale) {
+                            currentSession.telemetry.latitude
+                        } else {
+                            null
+                        }
+                        val effectiveRiderLng = if (!isStale && stickyLng != null) {
+                            stickyLng
+                        } else if (currentSession.telemetry != null && !currentSession.telemetry.isStale) {
+                            currentSession.telemetry.longitude
+                        } else {
+                            null
+                        }
+                        val effectiveRiderHeading = if (!isStale) stickyHeading ?: currentSession.telemetry?.heading else null
 
                         ActiveDeliveryScreen(
                             session = currentSession,

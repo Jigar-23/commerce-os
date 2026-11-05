@@ -108,7 +108,9 @@ fun ActiveDeliveryScreen(
         session.customerPhone.ifBlank { session.maskedCustomerPhone }
     }
 
-    val hasRiderGps = riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0
+    val hasValidFreshRiderGps = !isStale && (session.telemetry?.isStale != true) &&
+        com.commerceos.rider.model.OfferPayloadValidator.isValidLat(riderLat) &&
+        com.commerceos.rider.model.OfferPayloadValidator.isValidLng(riderLng)
 
     var waypoints by remember { mutableStateOf<List<RoutePoint>>(emptyList()) }
     var routeDistanceKm by remember { mutableStateOf<Double?>(null) }
@@ -118,24 +120,26 @@ fun ActiveDeliveryScreen(
     var lastRoutedOriginLat by remember { mutableStateOf<Double?>(null) }
     var lastRoutedOriginLng by remember { mutableStateOf<Double?>(null) }
     var lastRoutedPhase by remember { mutableStateOf(isPhase1) }
-    var cachedRiderLat by remember { mutableStateOf<Double?>(null) }
-    var cachedRiderLng by remember { mutableStateOf<Double?>(null) }
-
-    if (hasRiderGps) {
-        cachedRiderLat = riderLat
-        cachedRiderLng = riderLng
-    }
 
     // Authoritative OSRM road route fetching
-    LaunchedEffect(riderLat, riderLng, targetLat, targetLng, isPhase1) {
-        if (!com.commerceos.rider.model.OfferPayloadValidator.isValidLat(targetLat) ||
-            !com.commerceos.rider.model.OfferPayloadValidator.isValidLng(targetLng)) {
+    // Strictly requires a valid, fresh rider GPS fix; never synthesizes an origin or uses stale/invented coordinates.
+    LaunchedEffect(riderLat, riderLng, isStale, targetLat, targetLng, isPhase1) {
+        val hasTarget = com.commerceos.rider.model.OfferPayloadValidator.isValidLat(targetLat) &&
+            com.commerceos.rider.model.OfferPayloadValidator.isValidLng(targetLng)
+
+        if (!hasValidFreshRiderGps || !hasTarget) {
+            // Clear stale route & ETA data when fresh rider GPS or destination is unavailable
+            waypoints = emptyList()
+            routeDistanceKm = null
+            routeDurationMins = null
+            lastRoutedOriginLat = null
+            lastRoutedOriginLng = null
+            isRouteLoading = false
             return@LaunchedEffect
         }
-        val effectiveLat = riderLat ?: cachedRiderLat
-        val effectiveLng = riderLng ?: cachedRiderLng
-        val originLat = effectiveLat ?: (if (isPhase1) (merchantLat - 0.008) else merchantLat)
-        val originLng = effectiveLng ?: (if (isPhase1) (merchantLng - 0.006) else merchantLng)
+
+        val originLat = riderLat!!
+        val originLng = riderLng!!
 
         val prevLat = lastRoutedOriginLat
         val prevLng = lastRoutedOriginLng
@@ -162,10 +166,10 @@ fun ActiveDeliveryScreen(
         isRouteLoading = false
     }
 
-    val distanceToStoreMeters = remember(riderLat, riderLng, merchantLat, merchantLng) {
-        if (riderLat != null && riderLng != null && riderLat != 0.0 && riderLng != 0.0) {
+    val distanceToStoreMeters = remember(riderLat, riderLng, isStale, merchantLat, merchantLng) {
+        if (hasValidFreshRiderGps && merchantLat != 0.0 && merchantLng != 0.0) {
             val results = FloatArray(1)
-            android.location.Location.distanceBetween(riderLat, riderLng, merchantLat, merchantLng, results)
+            android.location.Location.distanceBetween(riderLat!!, riderLng!!, merchantLat, merchantLng, results)
             results[0].toDouble()
         } else {
             null
@@ -173,8 +177,29 @@ fun ActiveDeliveryScreen(
     }
     val isWithinStoreArrivalRadius = distanceToStoreMeters != null && distanceToStoreMeters <= 200.0
 
-    val displayDistanceKm = routeDistanceKm ?: session.distanceKm ?: 0.0
-    val displayEtaMins = routeDurationMins ?: session.estimatedTimeMins ?: 0
+    val serverEtaTimestamp = session.etaTimestamp
+        ?: session.telemetry?.serverTimestamp?.takeIf { it > 0L }
+        ?: session.telemetry?.clientTimestamp?.takeIf { it > 0L }
+        ?: session.history.lastOrNull()?.timestamp?.takeIf { it.isNotBlank() }
+
+    val hasTimestampedServerEta = session.estimatedTimeMins != null &&
+        session.estimatedTimeMins > 0 &&
+        serverEtaTimestamp != null
+
+    val isUsingServerEta = routeDurationMins == null && hasTimestampedServerEta
+    val isWaitingForRiderGps = !hasValidFreshRiderGps
+
+    val displayEtaText: String = when {
+        routeDurationMins != null -> "${routeDurationMins} MIN"
+        hasTimestampedServerEta -> "${session.estimatedTimeMins} MIN"
+        else -> "-- MIN"
+    }
+
+    val displayDistanceText: String = when {
+        routeDistanceKm != null -> "%.1f km".format(routeDistanceKm)
+        isUsingServerEta && session.distanceKm != null && session.distanceKm > 0.0 -> "%.1f km (Server)".format(session.distanceKm)
+        else -> "-- km"
+    }
 
     val stageTitle = when {
         isAtCustomer -> "AT DOORSTEP"
@@ -224,6 +249,35 @@ fun ActiveDeliveryScreen(
                     isPhase1 = isPhase1,
                     modifier = Modifier.fillMaxSize()
                 )
+
+                if (isWaitingForRiderGps) {
+                    Surface(
+                        color = Color(0xFF0F172A).copy(alpha = 0.90f),
+                        border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFF59E0B),
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Waiting for rider location",
+                                fontSize = 11.sp,
+                                color = Color(0xFFFDE047),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
                 // Top Floating Glass HUD Card
                 Surface(
@@ -276,18 +330,42 @@ fun ActiveDeliveryScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            if (isWaitingForRiderGps) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isUsingServerEta) "Waiting for rider location • Server estimate" else "Waiting for rider location",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFF59E0B)
+                                )
+                            }
                         }
 
                         // ETA & Distance Cluster
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                text = "$displayEtaMins MIN",
+                                text = displayEtaText,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
-                                color = stageBadgeColor
+                                color = if (isWaitingForRiderGps && !isUsingServerEta) Color(0xFF94A3B8) else stageBadgeColor
                             )
+                            if (isUsingServerEta) {
+                                Surface(
+                                    color = Color(0xFFF59E0B).copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "SERVER ETA",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color(0xFFF59E0B),
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                text = "%.1f km".format(displayDistanceKm),
+                                text = displayDistanceText,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = RiderColors.TextMuted

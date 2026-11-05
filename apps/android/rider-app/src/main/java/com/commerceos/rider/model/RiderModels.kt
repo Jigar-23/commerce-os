@@ -44,6 +44,7 @@ data class ServerDeliverySession(
     val payoutFormatted: String? = null,
     val distanceKm: Double? = null,
     val estimatedTimeMins: Int? = null,
+    val etaTimestamp: Long? = null,
     val state: String,
     val otpAttemptsLeft: Int,
     val otpVerified: Boolean,
