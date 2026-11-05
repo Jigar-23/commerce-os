@@ -31,18 +31,32 @@ open class SecureCredentialStore(private val context: Context? = null) {
         false
     }
 
-    open fun read(alias: String): String? {
+    sealed class SecureReadResult {
+        data class Success(val value: String) : SecureReadResult()
+        object NotFound : SecureReadResult()
+        data class DecryptError(val cause: Throwable) : SecureReadResult()
+    }
+
+    open fun readWithResult(alias: String): SecureReadResult {
         return try {
-            val stored = prefs?.getString(alias, null) ?: return null
+            val stored = prefs?.getString(alias, null) ?: return SecureReadResult.NotFound
             val payload = Base64.decode(stored, Base64.NO_WRAP)
             val iv = payload.copyOfRange(0, IV_LENGTH)
             val ciphertext = payload.copyOfRange(IV_LENGTH, payload.size)
             val key = getOrCreateKey(alias)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
-            String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+            val decrypted = String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+            SecureReadResult.Success(decrypted)
         } catch (e: Exception) {
-            null
+            SecureReadResult.DecryptError(e)
+        }
+    }
+
+    open fun read(alias: String): String? {
+        return when (val res = readWithResult(alias)) {
+            is SecureReadResult.Success -> res.value
+            else -> null
         }
     }
 

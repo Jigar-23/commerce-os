@@ -1,5 +1,8 @@
 package com.commerceos.android.viewmodel
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,7 +38,8 @@ sealed interface CartAddEvent {
 class CartViewModel(
     private val repository: AppRepository,
     private val cartDao: CartDao? = null,
-    private val appContext: android.content.Context? = null
+    private val appContext: android.content.Context? = null,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel(), CartMutationGate {
 
     var customerId by mutableStateOf("")
@@ -701,11 +705,20 @@ class CartViewModel(
                     ?: pendingAddKeys[opMapKey]
                     ?: appContext?.let { LocalSaveForLaterStore.getPendingAddKey(it, targetCustomerId, item.sku) }
 
-                val opKey = existingPendingKey ?: "add_${targetCustomerId}_${item.sku}_${UUID.randomUUID()}".also { newKey ->
-                    pendingAddKeys[opMapKey] = newKey
-                    appContext?.let { ctx ->
+                val opKey = existingPendingKey ?: run {
+                    val newKey = "add_${targetCustomerId}_${item.sku}_${UUID.randomUUID()}"
+                    val saved = appContext?.let { ctx ->
                         LocalSaveForLaterStore.setPendingAddKey(ctx, targetCustomerId, item.sku, newKey)
+                    } ?: true
+                    if (!saved) {
+                        cartItems = previousCartItems
+                        totals = previousTotals
+                        errorMessage = "Failed to securely record cart mutation idempotency state."
+                        _addEvents.trySend(CartAddEvent.Failure("Failed to persist mutation idempotency"))
+                        return@withLock
                     }
+                    pendingAddKeys[opMapKey] = newKey
+                    newKey
                 }
                 if (existingPendingKey != null) {
                     pendingAddKeys[opMapKey] = existingPendingKey
@@ -915,13 +928,17 @@ class CartViewModel(
                         }
                     }
                     if (persistedBatch == null) {
-                        appContext?.let { ctx ->
+                        val saved = appContext?.let { ctx ->
                             LocalSaveForLaterStore.setPendingReorderBatch(
                                 ctx,
                                 targetCustomerId,
                                 batchSignature,
                                 LocalSaveForLaterStore.ReorderBatchRecord(batchId, successfulSkus)
                             )
+                        } ?: true
+                        if (!saved) {
+                            errorMessage = "Failed to securely record reorder batch idempotency state."
+                            return@withLock
                         }
                     }
 
@@ -1214,6 +1231,16 @@ class CartViewModel(
                     return@withLock
                 }
 
+                val moveJournalKey = "move_sfl_${targetCustomerId}_${sku}_${UUID.randomUUID()}"
+                val journalRecorded = appContext?.let { ctx ->
+                    LocalSaveForLaterStore.setPendingMoveKey(ctx, targetCustomerId, sku, moveJournalKey)
+                } ?: true
+
+                if (!journalRecorded) {
+                    errorMessage = "Could not record pending move journal"
+                    return@withLock
+                }
+
                 if (targetCustomerId.isNotBlank()) {
                     val result = repository.removeCartItem(targetCustomerId, sku)
                     if (generation != customerGeneration || customerId.trim() != targetCustomerId) return@withLock
@@ -1278,6 +1305,9 @@ class CartViewModel(
                             uncertainMoveSkus.remove(sku)
                             appContext?.let { ctx ->
                                 LocalSaveForLaterStore.removeUncertainMoveSku(ctx, targetCustomerId, sku)
+                            }
+                            appContext?.let { ctx ->
+                                LocalSaveForLaterStore.clearPendingMoveKey(ctx, targetCustomerId, sku)
                             }
                             val backendItems = sanitizeCartItems(
                                 result.data.items ?: cartItems.filterNot { it.sku == sku }

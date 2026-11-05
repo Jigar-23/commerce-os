@@ -742,8 +742,7 @@ fun CommerceOSApp(
                     prescriptions = prescriptionViewModel.prescriptions,
                     attachedPrescriptionId = checkoutViewModel.uiState.prescriptionId,
                     deliveryAddress = addressViewModel.selectedAddress
-                        ?: addressViewModel.addresses.firstOrNull { it.isDefault }
-                        ?: addressViewModel.addresses.firstOrNull(),
+                        ?: addressViewModel.addresses.firstOrNull { it.isDefault },
                     onChangeAddress = {
                         checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
                         addressViewModel.init(authenticatedCustomerId, force = true)
@@ -756,7 +755,6 @@ fun CommerceOSApp(
                     onProceedToAddress = {
                         val currentSelected = addressViewModel.selectedAddress
                             ?: addressViewModel.addresses.firstOrNull { it.isDefault }
-                            ?: addressViewModel.addresses.firstOrNull()
 
                         val isCompleteSavedAddress = currentSelected != null &&
                             !currentSelected.id.startsWith("temp_gps_") &&
@@ -836,7 +834,7 @@ fun CommerceOSApp(
                     if ((checkoutViewModel.uiState.items.isEmpty() && cartViewModel.cartItems.isNotEmpty()) ||
                         checkoutViewModel.customerId.isBlank()) {
                         checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
-                        val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull()
+                        val activeAddr = addressViewModel.selectedAddress ?: addressViewModel.addresses.firstOrNull { it.isDefault }
                         if (activeAddr != null && checkoutViewModel.uiState.address == null) {
                             checkoutViewModel.selectAddress(activeAddr)
                         }

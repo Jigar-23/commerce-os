@@ -4630,13 +4630,13 @@ const server = http.createServer(async (req, res) => {
       }
       const body = await parseJsonBody(req);
       const addrLine = String(body.addressLine || body.street || body.formattedAddress || '').trim();
-      const city = String(body.city || 'Rewari').trim();
-      const postalCode = String(body.postalCode || '123401').trim();
+      const city = String(body.city || '').trim();
+      const postalCode = String(body.postalCode || '').trim();
       const lat = Number(body.latitude || (body.geoLocation && body.geoLocation.latitude));
       const lng = Number(body.longitude || (body.geoLocation && body.geoLocation.longitude));
 
-      if (!addrLine || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, and valid legal latitude [-90, 90] and longitude [-180, 180] are mandatory.' });
+      if (!addrLine || !city || !postalCode || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, city, postalCode, and valid legal latitude [-90, 90] and longitude [-180, 180] are mandatory.' });
       }
 
       let rawPhone = String(body.contactPhone || body.phone || body.recipientPhone || '').trim();
@@ -8576,10 +8576,35 @@ const server = http.createServer(async (req, res) => {
       if (pool && !isLocalMode) {
         try {
           if (riderId) await pool.query('DELETE FROM rider_device_tokens WHERE rider_id = $1', [riderId]);
-          if (targetToken) await pool.query('DELETE FROM rider_device_tokens WHERE token = $1', [targetToken]);
+          if (targetToken && riderId) await pool.query('DELETE FROM rider_device_tokens WHERE token = $1 AND rider_id = $2', [targetToken, riderId]);
         } catch (_) {}
       }
       return sendJson(res, 200, { ok: true, loggedOut: true });
+    }
+
+    // POST /api/v1/customer/device-token
+    if (pathname === '/api/v1/customer/device-token' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for customer token registration.' });
+      }
+      const body = await parseJsonBody(req);
+      const token = body.deviceToken || body.fcmToken || body.token || body.apnsToken;
+      const clientPlatformHeader = req.headers['x-client-platform'] || '';
+      const platformRaw = body.platform || (clientPlatformHeader.toLowerCase().includes('ios') ? 'IOS' : 'ANDROID');
+      const normalizedPlatform = String(platformRaw).toUpperCase().includes('IOS') ? 'IOS' : 'ANDROID';
+      if (!token) {
+        return sendJson(res, 400, { error: 'BAD_REQUEST', message: 'deviceToken is required.' });
+      }
+      if (pool && !isLocalMode) {
+        await pool.query(
+          `INSERT INTO customer_device_tokens (customer_id, token, platform, updated_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (customer_id, token) DO UPDATE SET platform = EXCLUDED.platform, updated_at = NOW()`,
+          [authClaims.sub, token, normalizedPlatform]
+        ).catch(() => {});
+      }
+      return sendJson(res, 200, { ok: true, registered: true, platform: normalizedPlatform, customerId: authClaims.sub });
     }
 
     // GET /api/v1/delivery/rider/notifications

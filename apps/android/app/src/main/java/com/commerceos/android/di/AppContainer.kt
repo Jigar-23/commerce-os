@@ -59,7 +59,7 @@ class AppContainer(context: Context) {
                 modelClass.isAssignableFrom(CartViewModel::class.java) ->
                     CartViewModel(repo, cartDao, context.applicationContext) as T
                 modelClass.isAssignableFrom(CheckoutViewModel::class.java) ->
-                    CheckoutViewModel(repo) as T
+                    CheckoutViewModel(repo, context = context.applicationContext) as T
                 modelClass.isAssignableFrom(AddressViewModel::class.java) ->
                     AddressViewModel(
                         repository = repo,

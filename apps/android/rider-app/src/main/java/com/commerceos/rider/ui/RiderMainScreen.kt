@@ -444,17 +444,18 @@ fun RiderMainScreen(
                                             res.onSuccess {
                                                 isOnline = nextStatus
                                                 sessionManager.saveShiftOnline(nextStatus)
-                                                val assignedStore = sessionManager.getStoreId().trim()
+                                                val authoritativeStoreId = liveProfile?.storeId ?: sessionManager.getStoreId()
+                                                sessionManager.reconcileStoreTopic(authoritativeStoreId, nextStatus)
                                                 if (nextStatus) {
-                                                    if (assignedStore.isNotBlank()) {
-                                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$assignedStore") } catch (_: Exception) {}
-                                                    }
-                                                } else {
-                                                    if (assignedStore.isNotBlank()) {
-                                                        try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$assignedStore") } catch (_: Exception) {}
-                                                    }
+                                                    try {
+                                                        val svcIntent = android.content.Intent(context, com.commerceos.rider.service.RiderForegroundLocationService::class.java)
+                                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                                            context.startForegroundService(svcIntent)
+                                                        } else {
+                                                            context.startService(svcIntent)
+                                                        }
+                                                    } catch (_: Exception) {}
                                                 }
-                                                try { com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_broadcast") } catch (_: Exception) {}
                                                 liveProfile = liveProfile?.copy(shiftStatus = if (nextStatus) "ONLINE_AVAILABLE" else "OFFLINE")
                                             }.onFailure {
                                                 Toast.makeText(context, "Shift status update failed: ${it.message}", Toast.LENGTH_SHORT).show()

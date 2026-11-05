@@ -244,14 +244,14 @@ class PrescriptionViewModel(
                         currentUploadFingerprint = persistedUpload.fingerprint
                         persistedUpload.idempotencyKey
                     } else {
-                        "rx_upload_${safeCustomerId}_${UUID.randomUUID()}".also {
-                            currentUploadKey = it
+                        "rx_upload_${safeCustomerId}_${UUID.randomUUID()}".also { newKey ->
+                            currentUploadKey = newKey
                             currentUploadFingerprint = uploadFingerprint
                             appContext?.let { ctx ->
                                 LocalPrescriptionManager.setPendingUpload(
                                     ctx,
                                     safeCustomerId,
-                                    LocalPrescriptionManager.PendingUploadRecord(it, uploadFingerprint)
+                                    LocalPrescriptionManager.PendingUploadRecord(newKey, uploadFingerprint)
                                 )
                             }
                         }

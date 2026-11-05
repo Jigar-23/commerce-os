@@ -104,8 +104,11 @@ data class CheckoutUiState(
 
 class CheckoutViewModel(
     private val repository: AppRepository,
-    private var mutationGate: CartMutationGate? = null
+    private var mutationGate: CartMutationGate? = null,
+    private val context: android.content.Context? = null
 ) : ViewModel() {
+
+    constructor(repository: AppRepository) : this(repository, null, null)
 
     fun setMutationGate(gate: CartMutationGate?) {
         this.mutationGate = gate
@@ -122,6 +125,30 @@ class CheckoutViewModel(
 
     private var checkoutIdempotencyKey: String? = null
     private var lastPayloadFingerprint: String? = null
+
+    init {
+        loadPersistedIdempotency()
+    }
+
+    private fun persistIdempotency(key: String?, fingerprint: String?) {
+        checkoutIdempotencyKey = key
+        lastPayloadFingerprint = fingerprint
+        context?.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putString("idempotency_key", key)
+            ?.putString("payload_fingerprint", fingerprint)
+            ?.apply()
+    }
+
+    private fun loadPersistedIdempotency() {
+        val prefs = context?.getSharedPreferences("commerce_checkout_idempotency", android.content.Context.MODE_PRIVATE) ?: return
+        val savedKey = prefs.getString("idempotency_key", null)
+        val savedFingerprint = prefs.getString("payload_fingerprint", null)
+        if (!savedKey.isNullOrBlank() && !savedFingerprint.isNullOrBlank()) {
+            checkoutIdempotencyKey = savedKey
+            lastPayloadFingerprint = savedFingerprint
+        }
+    }
     private var serviceabilityJob: Job? = null
     private var checkoutJob: Job? = null
 
@@ -344,15 +371,45 @@ class CheckoutViewModel(
                 val currentSubtotal = itemsSubtotal(currentItems)
                 val currentDiscount = uiState.couponDiscount.min(currentSubtotal)
 
+                var authoritativeItems = currentItems
+                var authoritativeSubtotal = currentSubtotal
+                var authoritativeDiscount = currentDiscount
+                var authoritativeDeliveryFee = uiState.deliveryFee
+                var authoritativeColdChainFee = uiState.coldChainFee
+                var authoritativeGrandTotal = currentSubtotal
+                    .add(uiState.deliveryFee)
+                    .add(uiState.coldChainFee)
+                    .subtract(currentDiscount)
+                    .coerceAtLeast(BigDecimal.ZERO)
+
+                when (val backendQuote = repository.fetchBackendCart(customerIdSnapshot)) {
+                    is ApiResult.Success -> {
+                        val cartDto = backendQuote.data
+                        val serverItems = cartDto.items
+                        if (!serverItems.isNullOrEmpty()) {
+                            authoritativeItems = serverItems
+                        }
+                        authoritativeSubtotal = cartDto.itemsSubtotal ?: currentSubtotal
+                        authoritativeDeliveryFee = cartDto.expressDeliveryFee ?: uiState.deliveryFee
+                        authoritativeColdChainFee = cartDto.coldChainPackagingFee ?: uiState.coldChainFee
+                        authoritativeGrandTotal = cartDto.grandTotal ?: currentSubtotal
+                            .add(authoritativeDeliveryFee)
+                            .add(authoritativeColdChainFee)
+                            .subtract(currentDiscount)
+                            .coerceAtLeast(BigDecimal.ZERO)
+                    }
+                    is ApiResult.Failure -> {
+                        // Keep current local snapshot if backend fetch has transient error
+                    }
+                }
+
                 uiState = uiState.copy(
-                    items = currentItems,
-                    itemsSubtotal = currentSubtotal,
-                    couponDiscount = currentDiscount,
-                    grandTotal = currentSubtotal
-                        .add(uiState.deliveryFee)
-                        .add(uiState.coldChainFee)
-                        .subtract(currentDiscount)
-                        .coerceAtLeast(BigDecimal.ZERO)
+                    items = authoritativeItems,
+                    itemsSubtotal = authoritativeSubtotal,
+                    couponDiscount = authoritativeDiscount,
+                    deliveryFee = authoritativeDeliveryFee,
+                    coldChainFee = authoritativeColdChainFee,
+                    grandTotal = authoritativeGrandTotal
                 )
 
                 val address = uiState.address
@@ -447,12 +504,13 @@ class CheckoutViewModel(
                     freshSnapshot.selectedSlotText
                 )
                 if (lastPayloadFingerprint != currentFingerprint) {
-                    checkoutIdempotencyKey = null
-                    lastPayloadFingerprint = currentFingerprint
+                    persistIdempotency(null, currentFingerprint)
                 }
 
                 val idempotencyKey = checkoutIdempotencyKey
-                    ?: UUID.randomUUID().toString().also { checkoutIdempotencyKey = it }
+                    ?: UUID.randomUUID().toString().also { newKey ->
+                        persistIdempotency(newKey, currentFingerprint)
+                    }
 
                 // SERVER-AUTHORITATIVE AMOUNTS: omit client-calculated fees/discounts to eliminate trust-boundary risk
                 val request = CartCheckoutRequest(
@@ -471,8 +529,7 @@ class CheckoutViewModel(
                 when (val result = repository.checkoutFromCart(customerIdSnapshot, request)) {
                     is ApiResult.Success -> {
                         uiState = freshSnapshot.copy(state = CheckoutState.Confirmed(result.data), isProcessing = false)
-                        checkoutIdempotencyKey = null
-                        lastPayloadFingerprint = null
+                        persistIdempotency(null, null)
                         _events.send(CheckoutEvent.OrderPlaced(result.data.id, result.data))
                     }
                     is ApiResult.Failure -> {
@@ -501,8 +558,6 @@ class CheckoutViewModel(
         mutationGate?.unlockMutations()
         serviceabilityJob?.cancel()
         checkoutJob?.cancel()
-        checkoutIdempotencyKey = null
-        lastPayloadFingerprint = null
         uiState = CheckoutUiState()
         customerId = ""
     }

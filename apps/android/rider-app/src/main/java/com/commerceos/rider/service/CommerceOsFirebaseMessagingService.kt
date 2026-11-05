@@ -82,6 +82,10 @@ class CommerceOsFirebaseMessagingService : FirebaseMessagingService() {
         // Handle Silent Watchdog PING_LOCATION Wakeups
         val action = data["action"] ?: data["type"] ?: ""
         if (action.equals("PING_LOCATION", ignoreCase = true) || action.equals("WAKEUP_LOCATION", ignoreCase = true)) {
+            if (!isLoggedIn || (!isOnline && sessionMgr.getActiveDeliveryId().isBlank())) {
+                Log.i(TAG, "RECEIVED_FCM_PING_LOCATION: Ignored because rider is offline or logged out.")
+                return
+            }
             Log.i(TAG, "RECEIVED_FCM_PING_LOCATION: Watchdog requested location wakeup.")
             val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
             val wakeLock = powerManager?.newWakeLock(

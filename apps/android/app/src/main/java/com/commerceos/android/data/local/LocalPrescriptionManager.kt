@@ -250,6 +250,14 @@ object LocalPrescriptionManager {
             val exactRaw = rx.customerId.trim()
             if (exactRaw.isBlank()) return false
             val storageKey = customerStorageKey(exactRaw)
+            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
+            when (val check = secureStore.readWithResult(storageKey)) {
+                is com.commerceos.android.session.SecureCredentialStore.SecureReadResult.DecryptError -> {
+                    Log.e(TAG, "Decryption error for storageKey=$storageKey; preserving existing ciphertext to prevent data loss")
+                    return false
+                }
+                else -> {}
+            }
             val existing = getPrescriptions(context, exactRaw).toMutableList()
             existing.removeAll { it.id == rx.id }
             existing.add(0, rx) // Most recent first
@@ -257,7 +265,6 @@ object LocalPrescriptionManager {
             val json = gson.toJson(existing, type)
 
             // Persist to Keystore-backed AES-GCM encrypted store
-            val secureStore = secureStoreProvider?.invoke(context) ?: com.commerceos.android.session.SecureCredentialStore(context)
             val saved = secureStore.save(storageKey, json)
 
             if (saved) {
@@ -348,11 +355,19 @@ object LocalPrescriptionManager {
     }
 
     private fun scheduleOrphanCleanup(context: Context, failedPaths: List<String>) {
+        if (failedPaths.isEmpty()) return
         try {
             val prefs = context.getSharedPreferences(ORPHAN_CLEANUP_PREFS, Context.MODE_PRIVATE)
             val existing = prefs.getStringSet(KEY_PENDING_ORPHAN_FILES, emptySet())?.toMutableSet() ?: mutableSetOf()
             existing.addAll(failedPaths)
-            prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, existing).commit()
+            var committed = false
+            for (attempt in 1..3) {
+                committed = prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, existing).commit()
+                if (committed) break
+            }
+            if (!committed) {
+                Log.e(TAG, "Failed to commit scheduled orphan cleanup after 3 attempts")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule orphan cleanup", e)
         }
@@ -388,7 +403,11 @@ object LocalPrescriptionManager {
                     remaining.add(path)
                 }
             }
-            prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, remaining).commit()
+            var committed = false
+            for (attempt in 1..3) {
+                committed = prefs.edit().putStringSet(KEY_PENDING_ORPHAN_FILES, remaining).commit()
+                if (committed) break
+            }
             cleanedCount
         } catch (e: Exception) {
             Log.e(TAG, "Error cleaning up orphaned prescription files", e)

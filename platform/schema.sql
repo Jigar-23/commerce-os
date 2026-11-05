@@ -508,6 +508,15 @@ CREATE TABLE IF NOT EXISTS rider_device_tokens (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS customer_device_tokens (
+    customer_id VARCHAR(64) NOT NULL,
+    token TEXT NOT NULL,
+    platform VARCHAR(32) NOT NULL DEFAULT 'IOS',
+    app_version VARCHAR(32),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (customer_id, token)
+);
+
 CREATE TABLE IF NOT EXISTS rider_telemetry (
     id BIGSERIAL PRIMARY KEY,
     rider_id VARCHAR(64) NOT NULL,

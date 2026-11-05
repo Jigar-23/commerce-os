@@ -232,8 +232,8 @@ public struct ServerOrderResponse: Identifiable, Codable {
         return pin
     }
 
-    public var effectiveSlaMins: Int {
-        return max(deliverySlaMins ?? 10, 8)
+    public var effectiveSlaMins: Int? {
+        return deliverySlaMins
     }
 
     public var displayOrderCode: String {

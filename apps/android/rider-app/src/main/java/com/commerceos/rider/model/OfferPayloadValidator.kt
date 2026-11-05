@@ -21,6 +21,34 @@ object OfferPayloadValidator {
     private fun isValidPositiveNumber(n: Double?): Boolean =
         n != null && n.isFinite() && !n.isNaN() && n > 0.0
 
+    fun extractCoarseLocality(rawAddress: String?, localityCandidate: String? = null): String {
+        if (!localityCandidate.isNullOrBlank()) {
+            return sanitizeLocalityString(localityCandidate)
+        }
+        if (rawAddress.isNullOrBlank()) return "Customer Area"
+        val parts = rawAddress.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val filtered = parts.filterNot { part ->
+            part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
+            part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
+            part.matches(Regex("^#?\\d+.*"))
+        }
+        return if (filtered.isNotEmpty()) {
+            filtered.takeLast(2).joinToString(", ")
+        } else {
+            "Customer Area"
+        }
+    }
+
+    private fun sanitizeLocalityString(candidate: String): String {
+        val parts = candidate.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val filtered = parts.filterNot { part ->
+            part.matches(Regex("(?i)^(flat|apt|apartment|unit|tower|house|h\\.no|villa|plot|floor|block|room|bldg|b-?\\d+)[\\s\\d\\-#].*")) ||
+            part.matches(Regex("^[A-Z]?-\\d+.*", RegexOption.IGNORE_CASE)) ||
+            part.matches(Regex("^#?\\d+.*"))
+        }
+        return if (filtered.isNotEmpty()) filtered.joinToString(", ") else "Customer Area"
+    }
+
     /**
      * Validates and parses a raw JSON object (from SSE or HTTP reconciliation).
      * Returns null if any mandatory authoritative field is missing or invalid.
@@ -70,18 +98,30 @@ object OfferPayloadValidator {
             val merchantLat = json.optDoubleOrNull("merchantLat") ?: json.optDoubleOrNull("merchant_lat") ?: json.optDoubleOrNull("storeLat") ?: 0.0
             val merchantLng = json.optDoubleOrNull("merchantLng") ?: json.optDoubleOrNull("merchant_lng") ?: json.optDoubleOrNull("storeLng") ?: 0.0
 
-            val customerName = json.optString("customerName").takeIf { it.isNotBlank() }
+            val offerStatus = json.optString("status", "CREATED")
+            val isAccepted = offerStatus.equals("ACCEPTED", ignoreCase = true) || offerStatus.equals("ASSIGNED", ignoreCase = true)
+
+            val rawCustomerName = json.optString("customerName").takeIf { it.isNotBlank() }
                 ?: json.optString("customer_name").takeIf { it.isNotBlank() }
                 ?: "Customer"
 
-            val customerAddress = json.optString("customerAddress").takeIf { it.isNotBlank() }
+            val rawCustomerAddress = json.optString("customerAddress").takeIf { it.isNotBlank() }
                 ?: json.optString("customer_address").takeIf { it.isNotBlank() }
                 ?: json.optString("deliveryAddress").takeIf { it.isNotBlank() }
                 ?: json.optString("delivery_address").takeIf { it.isNotBlank() }
                 ?: "Delivery Address"
 
-            val customerLat = json.optDoubleOrNull("customerLat") ?: json.optDoubleOrNull("customer_lat") ?: json.optDoubleOrNull("destLat") ?: 0.0
-            val customerLng = json.optDoubleOrNull("customerLng") ?: json.optDoubleOrNull("customer_lng") ?: json.optDoubleOrNull("destLng") ?: 0.0
+            val rawCustomerLat = json.optDoubleOrNull("customerLat") ?: json.optDoubleOrNull("customer_lat") ?: json.optDoubleOrNull("destLat") ?: 0.0
+            val rawCustomerLng = json.optDoubleOrNull("customerLng") ?: json.optDoubleOrNull("destLng") ?: 0.0
+
+            val localityHint = json.optString("locality").takeIf { it.isNotBlank() }
+                ?: json.optString("dropLocality").takeIf { it.isNotBlank() }
+                ?: json.optString("customerLocality").takeIf { it.isNotBlank() }
+
+            val customerName = if (isAccepted) rawCustomerName else "Customer"
+            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
+            val customerLat = if (isAccepted) rawCustomerLat else 0.0
+            val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
             val isCod = json.optBoolean("isCod", json.optBoolean("is_cod", false))
             val codAmount = json.optDoubleOrNull("codAmount") ?: json.optDoubleOrNull("cod_amount") ?: 0.0
@@ -215,14 +255,27 @@ object OfferPayloadValidator {
             val merchantLat = data["merchantLat"]?.toDoubleOrNull() ?: 0.0
             val merchantLng = data["merchantLng"]?.toDoubleOrNull() ?: 0.0
 
-            val customerName = data["customerName"]?.takeIf { it.isNotBlank() } ?: "Customer"
+            val offerStatus = data["status"] ?: "CREATED"
+            val isAccepted = offerStatus.equals("ACCEPTED", ignoreCase = true) || offerStatus.equals("ASSIGNED", ignoreCase = true)
 
-            val customerAddress = data["customerAddress"]?.takeIf { it.isNotBlank() }
+            val rawCustomerName = data["customerName"]?.takeIf { it.isNotBlank() } ?: "Customer"
+
+            val rawCustomerAddress = data["customerAddress"]?.takeIf { it.isNotBlank() }
                 ?: data["customer_address"]?.takeIf { it.isNotBlank() }
+                ?: data["deliveryAddress"]?.takeIf { it.isNotBlank() }
                 ?: "Delivery Address"
 
-            val customerLat = data["customerLat"]?.toDoubleOrNull() ?: 0.0
-            val customerLng = data["customerLng"]?.toDoubleOrNull() ?: 0.0
+            val rawCustomerLat = data["customerLat"]?.toDoubleOrNull() ?: 0.0
+            val rawCustomerLng = data["customerLng"]?.toDoubleOrNull() ?: 0.0
+
+            val localityHint = data["locality"]?.takeIf { it.isNotBlank() }
+                ?: data["dropLocality"]?.takeIf { it.isNotBlank() }
+                ?: data["customerLocality"]?.takeIf { it.isNotBlank() }
+
+            val customerName = if (isAccepted) rawCustomerName else "Customer"
+            val customerAddress = if (isAccepted) rawCustomerAddress else extractCoarseLocality(rawCustomerAddress, localityHint)
+            val customerLat = if (isAccepted) rawCustomerLat else 0.0
+            val customerLng = if (isAccepted) rawCustomerLng else 0.0
 
             val isCod = data["isCod"]?.toBoolean() ?: false
             val codAmount = data["codAmount"]?.toDoubleOrNull() ?: 0.0

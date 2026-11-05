@@ -78,6 +78,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startLocationService() {
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+        if (!sessionMgr.isLoggedIn() || (!sessionMgr.isShiftOnline() && sessionMgr.getActiveDeliveryId().isBlank())) {
+            android.util.Log.d("MainActivity", "Location service not started: rider offline and no active delivery.")
+            return
+        }
         try {
             val intent = android.content.Intent(this, com.commerceos.rider.service.RiderForegroundLocationService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

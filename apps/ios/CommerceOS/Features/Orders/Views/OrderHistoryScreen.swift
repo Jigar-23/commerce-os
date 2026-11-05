@@ -375,13 +375,15 @@ public struct OrderHistoryCard: View {
                 
                 // Delivery SLA ETA Badge if active
                 if isActive {
-                    Text("⚡ In \(order.effectiveSlaMins) mins")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color(hex: "059669"))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color(hex: "ECFDF5"))
-                        .cornerRadius(6)
+                    if let sla = order.effectiveSlaMins {
+                        Text("⚡ In \(sla) mins")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(hex: "059669"))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color(hex: "ECFDF5"))
+                            .cornerRadius(6)
+                    }
                 }
             }
             

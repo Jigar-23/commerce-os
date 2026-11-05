@@ -96,7 +96,7 @@ class RiderTelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATAB
                 put(COLUMN_IS_CRITICAL, if (isCritical) 1 else 0)
             }
 
-            db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_IGNORE)
             db.setTransactionSuccessful()
             return true
         } catch (e: Exception) {

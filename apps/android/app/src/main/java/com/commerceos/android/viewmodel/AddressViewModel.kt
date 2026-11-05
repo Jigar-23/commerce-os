@@ -273,9 +273,31 @@ class AddressViewModel(
         )
     }
 
+    private var requestGeneration = 0
+    private var loadProfileJob: kotlinx.coroutines.Job? = null
+    private var loadAddressesJob: kotlinx.coroutines.Job? = null
+
     fun init(customerId: String, force: Boolean = false) {
-        val idChanged = this.customerId != customerId
-        this.customerId = customerId
+        val targetId = customerId.trim()
+        val idChanged = this.customerId != targetId
+        this.customerId = targetId
+        if (idChanged) {
+            requestGeneration++
+            loadProfileJob?.cancel()
+            loadAddressesJob?.cancel()
+            addresses = emptyList()
+            selectedAddress = null
+            profile = null
+            cachedDraftAddress = null
+            errorMessage = null
+        }
+        if (targetId.isBlank()) {
+            addresses = emptyList()
+            selectedAddress = null
+            profile = null
+            isLoading = false
+            return
+        }
         if (idChanged || force || addresses.isEmpty()) {
             loadProfile()
             loadAddresses()
@@ -283,23 +305,39 @@ class AddressViewModel(
     }
 
     fun loadProfile() {
-        if (customerId.isBlank()) return
-        viewModelScope.launch {
-            when (val result = repository.getCustomerProfile(customerId)) {
-                is ApiResult.Success -> profile = result.data
+        val targetId = customerId.trim()
+        if (targetId.isBlank()) return
+        val gen = requestGeneration
+        loadProfileJob?.cancel()
+        loadProfileJob = viewModelScope.launch {
+            when (val result = repository.getCustomerProfile(targetId)) {
+                is ApiResult.Success -> {
+                    if (gen == requestGeneration && customerId.trim() == targetId) {
+                        profile = result.data
+                    }
+                }
                 is ApiResult.Failure -> {
-                    if (profile == null) errorMessage = result.error.message
+                    if (gen == requestGeneration && profile == null) errorMessage = result.error.message
                 }
             }
         }
     }
 
     fun loadAddresses() {
-        if (customerId.isBlank()) return
-        viewModelScope.launch {
+        val targetId = customerId.trim()
+        if (targetId.isBlank()) {
+            addresses = emptyList()
+            selectedAddress = null
+            isLoading = false
+            return
+        }
+        val gen = requestGeneration
+        loadAddressesJob?.cancel()
+        loadAddressesJob = viewModelScope.launch {
             isLoading = true
-            when (val result = repository.getAddresses(customerId)) {
+            when (val result = repository.getAddresses(targetId)) {
                 is ApiResult.Success -> {
+                    if (gen != requestGeneration || customerId.trim() != targetId) return@launch
                     addresses = result.data
                     val live = liveGpsLocation
                     if (live != null) {
@@ -308,16 +346,19 @@ class AddressViewModel(
                         val currentId = selectedAddress?.id
                         selectedAddress = result.data.firstOrNull { it.id == currentId }
                             ?: result.data.firstOrNull { it.isDefault }
-                            ?: result.data.firstOrNull()
                         useCurrentGpsLocationAndMatchSaved()
                     }
                     errorMessage = if (result.data.isEmpty()) "No saved addresses yet" else null
                 }
                 is ApiResult.Failure -> {
-                    errorMessage = result.error.message
+                    if (gen == requestGeneration) {
+                        errorMessage = result.error.message
+                    }
                 }
             }
-            isLoading = false
+            if (gen == requestGeneration) {
+                isLoading = false
+            }
         }
     }
 
@@ -687,7 +728,13 @@ class AddressViewModel(
         viewModelScope.launch {
             isLoading = true
             val targetCustId = customerId.ifBlank {
-                profile?.id?.takeIf { it.isNotBlank() } ?: "cust_9991416180"
+                profile?.id?.takeIf { it.isNotBlank() } ?: ""
+            }
+            if (targetCustId.isBlank()) {
+                errorMessage = "Authentication required"
+                isLoading = false
+                platformUiState = platformUiState.copy(saveState = SaveState.Error("Authentication required"))
+                return@launch
             }
             if (platformUiState.isEditingExisting && !platformUiState.editingAddressId.isNullOrBlank()) {
                 val addressId = platformUiState.editingAddressId!!
@@ -841,7 +888,11 @@ class AddressViewModel(
         // 2. Server Synchronization
         viewModelScope.launch {
             val targetCustId = customerId.ifBlank {
-                profile?.id?.takeIf { it.isNotBlank() } ?: "cust_9991416180"
+                profile?.id?.takeIf { it.isNotBlank() } ?: ""
+            }
+            if (targetCustId.isBlank()) {
+                errorMessage = "Authentication required"
+                return@launch
             }
             when (val result = repository.deleteAddress(targetCustId, addressId)) {
                 is ApiResult.Success -> {

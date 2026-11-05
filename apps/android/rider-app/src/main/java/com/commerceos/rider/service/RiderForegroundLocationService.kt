@@ -43,6 +43,8 @@ class RiderForegroundLocationService : Service(), LocationListener {
     private var connectivityManager: ConnectivityManager? = null
     private var dbHelper: RiderTelemetryDbHelper? = null
     private var locationWakeLock: android.os.PowerManager.WakeLock? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var lastDispatchedTime: Long = 0L
 
     companion object {
         private const val CHANNEL_ID = "rider_location_channel"
@@ -81,6 +83,12 @@ class RiderForegroundLocationService : Service(), LocationListener {
             if (riderId.isNotBlank()) activeRiderId = riderId
             if (baseUrl.isNotBlank()) apiBaseUrl = baseUrl
             if (token.isNotBlank()) authToken = token
+            if (deliveryId.isNotBlank()) {
+                val maxSeq = staticDbHelper?.getMaxSequenceNumber(deliveryId) ?: 0L
+                if (maxSeq > currentSequenceNumber) {
+                    currentSequenceNumber = maxSeq
+                }
+            }
         }
 
         fun clearDeliverySession() {
@@ -124,16 +132,22 @@ class RiderForegroundLocationService : Service(), LocationListener {
             replayOfflineQueueLoop()
         }
 
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+        val savedDelivery = sessionMgr.getActiveDeliveryId()
+        if (savedDelivery.isNotBlank()) {
+            activeDeliveryId = savedDelivery
+            val maxSeq = dbHelper?.getMaxSequenceNumber(savedDelivery) ?: 0L
+            if (maxSeq > currentSequenceNumber) {
+                currentSequenceNumber = maxSeq
+            }
+        }
+
         serviceScope.launch {
             listenRiderSseLoop()
         }
-
-        serviceScope.launch {
-            pollActiveOffersLoop()
-        }
     }
 
-    private suspend fun pollActiveOffersLoop() {
+    private suspend fun deprecatedPollActiveOffersLoop() {
         var lastSeenOfferId = ""
         while (serviceScope.isActive) {
             try {
@@ -202,7 +216,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
             val request = NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .build()
-            connectivityManager?.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+            val cb = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     _isNetworkAvailable.value = true
                 }
@@ -211,7 +225,9 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     _isNetworkAvailable.value = false
                     _isStale.value = true
                 }
-            })
+            }
+            networkCallback = cb
+            connectivityManager?.registerNetworkCallback(request, cb)
         } catch (e: Exception) {
             _isNetworkAvailable.value = true
         }
@@ -359,18 +375,24 @@ class RiderForegroundLocationService : Service(), LocationListener {
             return
         }
 
-        // Anti-jitter: ignore micro movements (< 1.0m) if stationary
+        // Anti-jitter & Movement Sampling: 3.0m threshold & 15s stationary heartbeat
         val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0.0f
-        if (lastDispatchedLat != 0.0 && lastDispatchedLng != 0.0 && speedKmh < 1.0f) {
+        var isStationaryHeartbeat = false
+        if (lastDispatchedLat != 0.0 && lastDispatchedLng != 0.0 && speedKmh < 1.5f) {
             val distResults = FloatArray(1)
             Location.distanceBetween(lastDispatchedLat, lastDispatchedLng, location.latitude, location.longitude, distResults)
-            if (distResults[0] < 1.0f && _lastLocation.value != null) {
-                return
+            if (distResults[0] < 3.0f) {
+                if (now - lastDispatchedTime >= 15000L) {
+                    isStationaryHeartbeat = true
+                } else if (_lastLocation.value != null) {
+                    return
+                }
             }
         }
 
         lastDispatchedLat = location.latitude
         lastDispatchedLng = location.longitude
+        lastDispatchedTime = now
 
         currentSequenceNumber++
         val headingValue: Float? = if (location.hasBearing()) location.bearing else null
@@ -398,6 +420,12 @@ class RiderForegroundLocationService : Service(), LocationListener {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+                val isShiftOnline = sessionMgr.isShiftOnline()
+                // Shift Offline Guard: strictly avoid transmitting coordinates or reporting online if shift is offline and no active delivery
+                if (!isShiftOnline && activeDeliveryId.isBlank()) {
+                    return@launch
+                }
+
                 val baseUrl = sessionMgr.getBaseUrl()
                 val token = sessionMgr.getAuthToken()
                 if (baseUrl.isNotBlank() && token.isNotBlank()) {
@@ -422,7 +450,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                             put("heading", location.bearing)
                         }
                         put("accuracyMeters", accuracy)
-                        put("isOnline", true)
+                        put("isOnline", isShiftOnline)
                     }
                     conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
                     conn.responseCode // execute
@@ -515,9 +543,9 @@ class RiderForegroundLocationService : Service(), LocationListener {
                         val responseStr = retryConn.inputStream.bufferedReader().use { it.readText() }
                         val respJson = JSONObject(responseStr)
                         val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
-                        val accepted = respJson.optBoolean("accepted", true)
+                        val accepted = respJson.optBoolean("accepted", false)
                         val isDuplicate = respJson.optBoolean("duplicate", false)
-                        if (ackSeq >= nextUpdate.sequenceNumber || accepted || isDuplicate) {
+                        if (ackSeq >= nextUpdate.sequenceNumber || isDuplicate) {
                             _lastServerAckSeq.value = ackSeq
                             _lastServerAckTimestamp.value = System.currentTimeMillis()
                             _isStale.value = false
@@ -533,11 +561,11 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val respJson = JSONObject(responseStr)
                 val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
-                val accepted = respJson.optBoolean("accepted", true)
+                val accepted = respJson.optBoolean("accepted", false)
                 val isDuplicate = respJson.optBoolean("duplicate", false)
 
-                // Atomic Dequeue upon ACK (Requirements 42, 43, 50)
-                if (ackSeq >= nextUpdate.sequenceNumber || accepted || isDuplicate) {
+                // Atomic Dequeue upon explicit sequence ACK
+                if (ackSeq >= nextUpdate.sequenceNumber || isDuplicate) {
                     _lastServerAckSeq.value = ackSeq
                     _lastServerAckTimestamp.value = System.currentTimeMillis()
                     _isStale.value = false
@@ -563,6 +591,12 @@ class RiderForegroundLocationService : Service(), LocationListener {
         super.onDestroy()
         releaseWakeLock()
         locationManager?.removeUpdates(this)
+        networkCallback?.let {
+            try {
+                connectivityManager?.unregisterNetworkCallback(it)
+            } catch (_: Exception) {}
+        }
+        networkCallback = null
         serviceScope.cancel()
     }
 

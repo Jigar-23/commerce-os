@@ -45,10 +45,11 @@ public struct LocationMapViewport: UIViewRepresentable {
 
         context.coordinator.mapView = mapView
 
-        let initialCoord = centerCoordinate ?? CLLocationCoordinate2D(latitude: 28.191944, longitude: 76.608042)
-        let span = MKCoordinateSpan(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
-        let region = MKCoordinateRegion(center: initialCoord, span: span)
-        mapView.setRegion(region, animated: false)
+        if let initialCoord = centerCoordinate {
+            let span = MKCoordinateSpan(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
+            let region = MKCoordinateRegion(center: initialCoord, span: span)
+            mapView.setRegion(region, animated: false)
+        }
 
         return mapView
     }

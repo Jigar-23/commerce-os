@@ -123,22 +123,42 @@ class RiderSessionManager private constructor(context: Context) {
                 } catch (_: Exception) {}
             }
         } else if (newStore != oldStore) {
-            // Store changed to a new store
-            saveStoreId(newStore)
+            // Store changed to a new store: unsubscribe from old store topic before registering new store
             if (oldStore.isNotBlank()) {
                 try {
                     com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$oldStore")
-                } catch (_: Exception) {}
-            }
-            if (isOnline) {
-                try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
-                } catch (_: Exception) {}
+                        .addOnCompleteListener {
+                            saveStoreId(newStore)
+                            if (isOnline) {
+                                try {
+                                    com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
+                                } catch (_: Exception) {}
+                            }
+                        }
+                } catch (_: Exception) {
+                    saveStoreId(newStore)
+                    if (isOnline) {
+                        try {
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
+                        } catch (_: Exception) {}
+                    }
+                }
+            } else {
+                saveStoreId(newStore)
+                if (isOnline) {
+                    try {
+                        com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
+                    } catch (_: Exception) {}
+                }
             }
         } else {
-            // Store confirmed unchanged
+            // Store confirmed unchanged: presence-gated topic subscription
             saveStoreId(newStore)
-            if (isOnline) {
+            if (!isOnline) {
+                try {
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("riders_store_$newStore")
+                } catch (_: Exception) {}
+            } else {
                 try {
                     com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("riders_store_$newStore")
                 } catch (_: Exception) {}
@@ -200,6 +220,14 @@ class RiderSessionManager private constructor(context: Context) {
         }
     }
 
+    fun getActiveDeliveryId(): String {
+        return prefs.getString(KEY_ACTIVE_DELIVERY_ID, "") ?: ""
+    }
+
+    fun saveActiveDeliveryId(deliveryId: String) {
+        prefs.edit().putString(KEY_ACTIVE_DELIVERY_ID, deliveryId).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "commerce_rider_session_config"
         private const val KEY_AUTH_TOKEN = "rider_jwt_access_token_secure"
@@ -210,6 +238,7 @@ class RiderSessionManager private constructor(context: Context) {
         private const val KEY_STORE_ID = "rider_assigned_store_id"
         private const val KEY_IS_ONLINE = "rider_shift_is_online"
         private const val KEY_PENDING_OFFER_ID = "rider_pending_intent_offer_id"
+        private const val KEY_ACTIVE_DELIVERY_ID = "rider_active_delivery_id"
 
         @Volatile
         private var INSTANCE: RiderSessionManager? = null

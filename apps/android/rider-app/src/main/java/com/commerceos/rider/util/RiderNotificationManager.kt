@@ -176,6 +176,13 @@ object RiderNotificationManager {
             val earningsText = "₹${offer.earningsAmount.toInt()}"
             val orderTag = if (offer.orderId.isNotBlank()) " #${offer.orderId}" else ""
 
+            val publicNotification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(com.commerceos.rider.R.drawable.ic_rider_notification_small)
+                .setColor(0xFF0E675E.toInt())
+                .setContentTitle("🚀 ORDER" + orderTag + " · " + earningsText)
+                .setContentText("New delivery job offer available")
+                .build()
+
             val builder = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(com.commerceos.rider.R.drawable.ic_rider_notification_small)
                 .setColor(0xFF0E675E.toInt())
@@ -187,7 +194,8 @@ object RiderNotificationManager {
                 )
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicNotification)
                 .setSound(soundUri)
                 .setVibrate(longArrayOf(0, 400, 200, 400))
                 .setDefaults(NotificationCompat.DEFAULT_ALL)

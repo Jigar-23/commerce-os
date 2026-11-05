@@ -1137,6 +1137,7 @@ class RiderDeliveryRepository(
         try {
             val conn = createConnection("/api/v1/delivery/rider/stream", "GET")
             conn.setRequestProperty("Accept", "text/event-stream")
+            conn.readTimeout = 60000
             if (conn.responseCode == 200) {
                 val reader = conn.inputStream.bufferedReader()
                 var line: String?
