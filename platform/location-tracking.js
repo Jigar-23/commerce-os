@@ -309,6 +309,8 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     speed_kmh: telemetry ? Number(telemetry.speedKmh || telemetry.speed || 0) : 0,
     etaMinutes: etaMins,
     eta_minutes: etaMins,
+    etaUpdatedAt: etaMins != null ? now : null,
+    etaTimestamp: etaMins != null ? now : null,
     telemetrySource,
     liveRiderTelemetry: (isAssigned && telemetry) ? {
       latitude: mapMatched.snappedLat, // Snapped road latitude

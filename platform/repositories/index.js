@@ -3517,12 +3517,16 @@ class TransactionalDeliveryRepository {
       } catch (_) {}
     }
     const ordTot = Number(row.total_amount || row.cod_amount || 0);
+    const etaUpdatedMs = row.updated_at ? new Date(row.updated_at).getTime() : Date.now();
     return {
       ...row,
       customer_address: fullCustomerAddress,
       customerAddress: fullCustomerAddress,
       orderTotal: ordTot,
-      totalAmount: ordTot
+      totalAmount: ordTot,
+      estimatedTimeMins: Number(row.remaining_duration_mins || 0) || null,
+      etaUpdatedAt: etaUpdatedMs,
+      etaTimestamp: etaUpdatedMs
     };
   }
 

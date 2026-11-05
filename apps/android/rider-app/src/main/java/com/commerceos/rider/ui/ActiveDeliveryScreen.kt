@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -116,16 +117,43 @@ fun ActiveDeliveryScreen(
     var routeDistanceKm by remember { mutableStateOf<Double?>(null) }
     var routeDurationMins by remember { mutableStateOf<Int?>(null) }
     var isRouteLoading by remember { mutableStateOf(false) }
+    var routeUnavailable by remember { mutableStateOf(false) }
 
     var lastRoutedOriginLat by remember { mutableStateOf<Double?>(null) }
     var lastRoutedOriginLng by remember { mutableStateOf<Double?>(null) }
     var lastRoutedPhase by remember { mutableStateOf(isPhase1) }
+    var lastRoutedTargetLat by remember { mutableStateOf<Double?>(null) }
+    var lastRoutedTargetLng by remember { mutableStateOf<Double?>(null) }
+    var routeRetryTrigger by remember { mutableIntStateOf(0) }
+
+    // Active 5-second ticker for accurate countdown of server ETA
+    var currentClockMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(5000L)
+            currentClockMs = System.currentTimeMillis()
+        }
+    }
 
     // Authoritative OSRM road route fetching
     // Strictly requires a valid, fresh rider GPS fix; never synthesizes an origin or uses stale/invented coordinates.
-    LaunchedEffect(riderLat, riderLng, isStale, targetLat, targetLng, isPhase1) {
+    // Keys cached route by phase and destination: invalidates old leg route when phase or destination changes.
+    LaunchedEffect(riderLat, riderLng, isStale, targetLat, targetLng, isPhase1, routeRetryTrigger) {
         val hasTarget = com.commerceos.rider.model.OfferPayloadValidator.isValidLat(targetLat) &&
             com.commerceos.rider.model.OfferPayloadValidator.isValidLng(targetLng)
+
+        val isPhaseOrTargetChanged = (isPhase1 != lastRoutedPhase) ||
+            (lastRoutedTargetLat != null && targetLat != lastRoutedTargetLat) ||
+            (lastRoutedTargetLng != null && targetLng != lastRoutedTargetLng)
+
+        if (isPhaseOrTargetChanged) {
+            waypoints = emptyList()
+            routeDistanceKm = null
+            routeDurationMins = null
+            lastRoutedOriginLat = null
+            lastRoutedOriginLng = null
+            routeUnavailable = false
+        }
 
         if (!hasValidFreshRiderGps || !hasTarget) {
             // Clear stale route & ETA data when fresh rider GPS or destination is unavailable
@@ -143,7 +171,7 @@ fun ActiveDeliveryScreen(
 
         val prevLat = lastRoutedOriginLat
         val prevLng = lastRoutedOriginLng
-        if (waypoints.size >= 2 && isPhase1 == lastRoutedPhase && prevLat != null && prevLng != null) {
+        if (!isPhaseOrTargetChanged && waypoints.size >= 2 && isPhase1 == lastRoutedPhase && prevLat != null && prevLng != null) {
             val distArr = FloatArray(1)
             android.location.Location.distanceBetween(prevLat, prevLng, originLat, originLng, distArr)
             if (distArr[0] < 40.0f) {
@@ -152,6 +180,7 @@ fun ActiveDeliveryScreen(
         }
 
         isRouteLoading = true
+        routeUnavailable = false
         val res = repository.fetchRoute(originLat, originLng, targetLat, targetLng)
         res.onSuccess { routeResult ->
             if (routeResult.waypoints.size >= 2) {
@@ -159,9 +188,20 @@ fun ActiveDeliveryScreen(
                 lastRoutedOriginLat = originLat
                 lastRoutedOriginLng = originLng
                 lastRoutedPhase = isPhase1
+                lastRoutedTargetLat = targetLat
+                lastRoutedTargetLng = targetLng
+                routeUnavailable = false
             }
             routeDistanceKm = routeResult.distanceKm
             routeDurationMins = routeResult.durationMins
+        }.onFailure {
+            // Failed reroute: clear old leg's waypoints and ETA, visibly mark unavailable, provide retry state
+            waypoints = emptyList()
+            routeDistanceKm = null
+            routeDurationMins = null
+            lastRoutedOriginLat = null
+            lastRoutedOriginLng = null
+            routeUnavailable = true
         }
         isRouteLoading = false
     }
@@ -177,21 +217,40 @@ fun ActiveDeliveryScreen(
     }
     val isWithinStoreArrivalRadius = distanceToStoreMeters != null && distanceToStoreMeters <= 200.0
 
-    val serverEtaTimestamp = session.etaTimestamp
-        ?: session.telemetry?.serverTimestamp?.takeIf { it > 0L }
-        ?: session.telemetry?.clientTimestamp?.takeIf { it > 0L }
-        ?: session.history.lastOrNull()?.timestamp?.takeIf { it.isNotBlank() }
+    val etaUpdatedAt = session.etaUpdatedAt ?: session.etaTimestamp
+    val rawServerEtaMins = session.estimatedTimeMins
 
-    val hasTimestampedServerEta = session.estimatedTimeMins != null &&
-        session.estimatedTimeMins > 0 &&
-        serverEtaTimestamp != null
+    // Server ETA countdown calculation & validation:
+    // Reject future timestamps (>30s) or stale timestamps (>60m or elapsed >= duration).
+    // Count down remaining minutes from authoritative ETA timestamp; expire to null when reached.
+    val validServerRemainingEtaMins: Int? = remember(etaUpdatedAt, rawServerEtaMins, currentClockMs) {
+        if (etaUpdatedAt == null || etaUpdatedAt <= 0L || rawServerEtaMins == null || rawServerEtaMins <= 0) {
+            null
+        } else {
+            val nowMs = currentClockMs
+            val ageMs = nowMs - etaUpdatedAt
+            if (ageMs < -30_000L) {
+                null
+            } else {
+                val elapsedMinutes = (maxOf(0L, ageMs) / 60_000L).toInt()
+                val remaining = rawServerEtaMins - elapsedMinutes
+                if (remaining <= 0 || elapsedMinutes >= 60) {
+                    null
+                } else {
+                    remaining
+                }
+            }
+        }
+    }
 
+    val hasTimestampedServerEta = validServerRemainingEtaMins != null
     val isUsingServerEta = routeDurationMins == null && hasTimestampedServerEta
     val isWaitingForRiderGps = !hasValidFreshRiderGps
 
     val displayEtaText: String = when {
         routeDurationMins != null -> "${routeDurationMins} MIN"
-        hasTimestampedServerEta -> "${session.estimatedTimeMins} MIN"
+        validServerRemainingEtaMins != null -> "${validServerRemainingEtaMins} MIN"
+        routeUnavailable -> "Unavailable"
         else -> "-- MIN"
     }
 
@@ -250,7 +309,36 @@ fun ActiveDeliveryScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                if (isWaitingForRiderGps) {
+                if (routeUnavailable) {
+                    Surface(
+                        color = Color(0xFF0F172A).copy(alpha = 0.92f),
+                        border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.8f)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .clickable { routeRetryTrigger++ }
+                            .padding(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Retry Route",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Route unavailable • Tap to retry",
+                                fontSize = 12.sp,
+                                color = Color(0xFFFCA5A5),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else if (isWaitingForRiderGps) {
                     Surface(
                         color = Color(0xFF0F172A).copy(alpha = 0.90f),
                         border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
@@ -330,7 +418,33 @@ fun ActiveDeliveryScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            if (isWaitingForRiderGps) {
+                            if (routeUnavailable) {
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Surface(
+                                    color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.clickable { routeRetryTrigger++ }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = null,
+                                            tint = Color(0xFFEF4444),
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Route failed • Tap to retry",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFEF4444)
+                                        )
+                                    }
+                                }
+                            } else if (isWaitingForRiderGps) {
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = if (isUsingServerEta) "Waiting for rider location • Server estimate" else "Waiting for rider location",
@@ -347,7 +461,7 @@ fun ActiveDeliveryScreen(
                                 text = displayEtaText,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
-                                color = if (isWaitingForRiderGps && !isUsingServerEta) Color(0xFF94A3B8) else stageBadgeColor
+                                color = if (routeUnavailable) Color(0xFFEF4444) else if (isWaitingForRiderGps && !isUsingServerEta) Color(0xFF94A3B8) else stageBadgeColor
                             )
                             if (isUsingServerEta) {
                                 Surface(

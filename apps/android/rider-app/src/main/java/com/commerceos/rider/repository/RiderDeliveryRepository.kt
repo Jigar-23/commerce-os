@@ -466,7 +466,8 @@ class RiderDeliveryRepository(
                                 payoutFormatted = session.payoutFormatted ?: "₹${fallbackOffer.earningsAmount.toInt()}",
                                 distanceKm = session.distanceKm ?: fallbackOffer.totalDistanceKm,
                                 estimatedTimeMins = session.estimatedTimeMins ?: fallbackOffer.estimatedDurationMins,
-                                etaTimestamp = session.etaTimestamp ?: fallbackOffer.offerCreatedAt,
+                                etaUpdatedAt = session.etaUpdatedAt ?: System.currentTimeMillis(),
+                                etaTimestamp = session.etaTimestamp ?: System.currentTimeMillis(),
                                 isCod = session.isCod || fallbackOffer.isCod,
                                 codAmount = session.codAmount ?: (if (fallbackOffer.isCod) fallbackOffer.codAmount else null),
                                 orderTotal = session.orderTotal ?: fallbackOffer.orderTotal,
@@ -1060,9 +1061,7 @@ class RiderDeliveryRepository(
 
         val distKm = json.optDoubleOrNull("distanceKm", "distance_km", "total_distance_km")
         val estMins = json.optIntOrNull("estimatedTimeMins", "estimated_time_mins", "estimated_duration_mins", "remaining_duration_mins")
-        val etaTs = json.optLongOrNull("etaTimestamp", "eta_timestamp", "serverTime", "server_time", "serverTimestamp", "server_timestamp")
-            ?: telemObj?.optLong("serverTimestamp", 0L)?.takeIf { it > 0 }
-            ?: telemObj?.optLong("clientTimestamp", 0L)?.takeIf { it > 0 }
+        val etaUpdatedAt = json.optLongOrNull("etaUpdatedAt", "eta_updated_at", "etaTimestamp", "eta_timestamp")
 
         val deliveryId = json.optStringFirst("deliveryId", "delivery_id", "id").ifEmpty { "del_active" }
         val orderId = json.optStringFirst("orderId", "order_id").ifEmpty { "ord_active" }
@@ -1094,7 +1093,8 @@ class RiderDeliveryRepository(
             payoutFormatted = json.optStringFirst("payoutFormatted", "payout_formatted", "payout", "earnings").takeIf { it.isNotBlank() },
             distanceKm = distKm,
             estimatedTimeMins = estMins,
-            etaTimestamp = etaTs,
+            etaUpdatedAt = etaUpdatedAt,
+            etaTimestamp = etaUpdatedAt,
             state = stateStr,
             otpAttemptsLeft = json.optIntOrNull("otpAttemptsLeft", "otp_attempts_left") ?: 3,
             otpVerified = json.optBoolean("otpVerified", json.optBoolean("otp_verified", false)),
