@@ -46,7 +46,7 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
 
     public func syncPendingToken() {
         if let unregisterToken = UserDefaults.standard.string(forKey: "pending_apns_unregister_token"), !unregisterToken.isEmpty {
-            let pendingAuth = UserDefaults.standard.string(forKey: "pending_unregister_auth_token") ?? KeychainHelper.shared.get(key: "auth_token")
+            let pendingAuth = KeychainHelper.shared.get(key: "pending_unregister_auth_token") ?? KeychainHelper.shared.get(key: "auth_token")
             Task {
                 await self.unregisterTokenWithBackend(explicitToken: unregisterToken, authToken: pendingAuth)
             }
@@ -111,16 +111,18 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
                 body: data,
                 headers: headers
             )
-            // Clear pending retry markers strictly upon backend confirmation (Finding 5)
+            // Clear pending retry markers strictly upon backend confirmation (Finding 2)
             UserDefaults.standard.removeObject(forKey: "pending_apns_unregister_token")
+            KeychainHelper.shared.delete(key: "pending_unregister_auth_token")
             UserDefaults.standard.removeObject(forKey: "pending_unregister_auth_token")
         } catch {
-            // Persist failed unregister token and auth context for reliable retry on next sync (Finding 5)
+            // Persist failed unregister token and auth context for reliable retry on next sync (Finding 2)
+            // Bearer auth tokens are stored strictly in Keychain with device-only accessibility, NEVER in UserDefaults
             if let t = tokenToUnregister {
                 UserDefaults.standard.set(t, forKey: "pending_apns_unregister_token")
             }
-            if let a = effectiveAuth {
-                UserDefaults.standard.set(a, forKey: "pending_unregister_auth_token")
+            if let a = effectiveAuth, !a.isEmpty {
+                KeychainHelper.shared.save(key: "pending_unregister_auth_token", data: a)
             }
         }
     }

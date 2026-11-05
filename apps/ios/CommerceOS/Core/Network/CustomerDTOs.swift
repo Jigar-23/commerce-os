@@ -461,6 +461,7 @@ public struct AddressDto: Codable, Identifiable, Hashable {
     public let latitude: Double
     public let longitude: Double
     public let recipientName: String?
+    public let contactName: String?
     public let recipientPhone: String?
     public let contactPhone: String?
     public let isDefault: Bool
@@ -480,6 +481,7 @@ public struct AddressDto: Codable, Identifiable, Hashable {
         latitude: Double,
         longitude: Double,
         recipientName: String? = nil,
+        contactName: String? = nil,
         recipientPhone: String? = nil,
         contactPhone: String? = nil,
         isDefault: Bool = false
@@ -497,7 +499,8 @@ public struct AddressDto: Codable, Identifiable, Hashable {
         self.landmark = landmark
         self.latitude = latitude
         self.longitude = longitude
-        self.recipientName = recipientName
+        self.recipientName = recipientName ?? contactName
+        self.contactName = contactName ?? recipientName
         self.recipientPhone = recipientPhone ?? contactPhone
         self.contactPhone = contactPhone ?? recipientPhone
         self.isDefault = isDefault

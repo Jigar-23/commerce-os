@@ -169,6 +169,9 @@ if (DATABASE_URL) {
   pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS upi_ref_id VARCHAR(128);`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
   pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);`).catch(() => {});
+  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS state VARCHAR(100);`).catch(() => {});
+  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS landmark TEXT;`).catch(() => {});
+  pool.query(`ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_name VARCHAR(128);`).catch(() => {});
   pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_summary JSONB;`).catch(() => {});
   pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS short_order_id VARCHAR(16);`).catch(() => {});
   pool.query(`CREATE SEQUENCE IF NOT EXISTS order_code_seq START WITH 1000000001;`).catch(() => {});
@@ -4678,7 +4681,7 @@ const server = http.createServer(async (req, res) => {
       if (pool) {
         if (searchPhone10) {
           resAddresses = await pool.query(
-            `SELECT id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at
+            `SELECT id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at
              FROM customer_addresses 
              WHERE customer_id = ANY($1) OR contact_phone LIKE '%' || $2 
              ORDER BY is_default DESC, created_at DESC`,
@@ -4686,7 +4689,7 @@ const server = http.createServer(async (req, res) => {
           );
         } else {
           resAddresses = await pool.query(
-            `SELECT id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at
+            `SELECT id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at
              FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC`,
             [customerId]
           );
@@ -4703,8 +4706,9 @@ const server = http.createServer(async (req, res) => {
         state: r.state || '',
         postalCode: r.postal_code || '',
         country: r.country || 'India',
-        landmark: r.landmark || null,
-        contactName: r.contact_name || 'Customer',
+        landmark: r.landmark || '',
+        contactName: r.contact_name || '',
+        recipientName: r.contact_name || '',
         contactPhone: r.contact_phone || '',
         latitude: r.latitude != null ? Number(r.latitude) : null,
         longitude: r.longitude != null ? Number(r.longitude) : null,
@@ -4742,10 +4746,12 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, city, postalCode, and valid legal non-zero coordinates [-90, 90] and [-180, 180] are mandatory; (0,0) placeholder coordinates are strictly rejected.' });
       }
 
-      const cityCheckWords = city.split(/\s+/);
-      const GEOGRAPHIC_INDICATORS = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
-      if ((cityCheckWords.length === 1 || (cityCheckWords.length >= 2 && cityCheckWords.every(w => /^[a-z]+$/i.test(w)))) && !GEOGRAPHIC_INDICATORS.test(city)) {
-        return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
+      if (city.length < 2 || city.length > 60 || !/^[a-zA-Z\s.,'-]{2,60}$/.test(city)) {
+        return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city name is strictly required.' });
+      }
+
+      if (postalCode.length < 3 || postalCode.length > 10) {
+        return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required.' });
       }
 
       let rawPhone = String(body.contactPhone || body.phone || body.recipientPhone || '').trim();
@@ -4793,6 +4799,9 @@ const server = http.createServer(async (req, res) => {
 
       const addrId = `addr_${crypto.randomUUID()}`;
       const isDefault = Boolean(body.isDefault);
+      const state = String(body.state || '').trim();
+      const landmark = String(body.landmark || '').trim();
+      const contactName = String(body.contactName || body.recipientName || '').trim();
 
       let r;
       if (pool) {
@@ -4807,10 +4816,10 @@ const server = http.createServer(async (req, res) => {
             );
           }
           const insRes = await client.query(
-            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
              RETURNING *`,
-            [addrId, effectiveDbCustomerId, body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'), addrLine, city, postalCode, lat, lng, isDefault, formattedPhone]
+            [addrId, effectiveDbCustomerId, body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'), addrLine, city, state, postalCode, landmark, contactName, lat, lng, isDefault, formattedPhone]
           );
           await client.query('COMMIT');
           r = insRes.rows[0];
@@ -4827,7 +4836,10 @@ const server = http.createServer(async (req, res) => {
           address_type: body.addressType || (body.tag ? body.tag.toUpperCase() : 'HOME'),
           address_line: addrLine,
           city,
+          state,
           postal_code: postalCode,
+          landmark,
+          contact_name: contactName,
           latitude: lat,
           longitude: lng,
           is_default: isDefault,
@@ -4842,11 +4854,12 @@ const server = http.createServer(async (req, res) => {
         addressType: r.address_type,
         addressLine: r.address_line,
         city: r.city,
-        state: body.state || 'Haryana',
+        state: r.state || state || '',
         postalCode: r.postal_code,
         country: body.country || 'India',
-        landmark: body.landmark || '',
-        contactName: body.contactName || 'Customer',
+        landmark: r.landmark || landmark || '',
+        contactName: r.contact_name || contactName || '',
+        recipientName: r.contact_name || contactName || '',
         latitude: Number(r.latitude),
         longitude: Number(r.longitude),
         isDefault: Boolean(r.is_default),
@@ -4951,14 +4964,30 @@ const server = http.createServer(async (req, res) => {
             `UPDATE customer_addresses
              SET address_line = COALESCE($1, address_line),
                  city = COALESCE($2, city),
-                 postal_code = COALESCE($3, postal_code),
-                 latitude = COALESCE($4, latitude),
-                 longitude = COALESCE($5, longitude),
-                 is_default = COALESCE($6, is_default),
-                 contact_phone = COALESCE($7, contact_phone)
-             WHERE id = $8 AND (customer_id = $9 OR customer_id IS NULL)
+                 state = COALESCE($3, state),
+                 postal_code = COALESCE($4, postal_code),
+                 landmark = COALESCE($5, landmark),
+                 contact_name = COALESCE($6, contact_name),
+                 latitude = COALESCE($7, latitude),
+                 longitude = COALESCE($8, longitude),
+                 is_default = COALESCE($9, is_default),
+                 contact_phone = COALESCE($10, contact_phone)
+             WHERE id = $11 AND (customer_id = $12 OR customer_id IS NULL)
              RETURNING *`,
-            [body.addressLine, body.city, body.postalCode, body.latitude, body.longitude, body.isDefault, body.contactPhone || body.phone, addressId, customerId]
+            [
+              body.addressLine,
+              body.city,
+              body.state != null ? String(body.state).trim() : null,
+              body.postalCode,
+              body.landmark != null ? String(body.landmark).trim() : null,
+              (body.contactName != null ? String(body.contactName).trim() : (body.recipientName != null ? String(body.recipientName).trim() : null)),
+              body.latitude,
+              body.longitude,
+              body.isDefault,
+              body.contactPhone || body.phone,
+              addressId,
+              customerId
+            ]
           );
           if (updRes.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -4973,7 +5002,21 @@ const server = http.createServer(async (req, res) => {
           client.release();
         }
       } else {
-        r = { id: addressId, customer_id: customerId, address_type: 'HOME', address_line: body.addressLine || 'Mock', city: body.city || 'City', postal_code: body.postalCode || '123456', latitude: body.latitude || 28.2, longitude: body.longitude || 76.6, is_default: Boolean(body.isDefault), contact_phone: body.contactPhone };
+        r = {
+          id: addressId,
+          customer_id: customerId,
+          address_type: 'HOME',
+          address_line: body.addressLine || 'Mock',
+          city: body.city || 'City',
+          state: body.state || '',
+          postal_code: body.postalCode || '123456',
+          landmark: body.landmark || '',
+          contact_name: body.contactName || body.recipientName || '',
+          latitude: body.latitude || 28.2,
+          longitude: body.longitude || 76.6,
+          is_default: Boolean(body.isDefault),
+          contact_phone: body.contactPhone
+        };
       }
       return sendJson(res, 200, {
         id: r.id,
@@ -4981,7 +5024,12 @@ const server = http.createServer(async (req, res) => {
         addressType: r.address_type,
         addressLine: r.address_line,
         city: r.city,
+        state: r.state || '',
         postalCode: r.postal_code,
+        country: 'India',
+        landmark: r.landmark || '',
+        contactName: r.contact_name || '',
+        recipientName: r.contact_name || '',
         latitude: Number(r.latitude),
         longitude: Number(r.longitude),
         isDefault: Boolean(r.is_default),
@@ -5087,9 +5135,21 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_LOCATION', message: 'Valid legal latitude [-90, 90] and longitude [-180, 180] are required.' });
       }
 
+      const itemsList = body.items || [];
+      if (itemsList.length > 0) {
+        // Finding 6: Reject any item without a canonical SKU in serviceability requests
+        const missingSkuItem = itemsList.find(i => !(i.sku || i.productId || i.id));
+        if (missingSkuItem) {
+          return sendJson(res, 400, {
+            error: 'INVALID_ITEM_SKU',
+            message: 'Every item in serviceability request must specify a canonical SKU or product identifier.'
+          });
+        }
+      }
+
       const fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
         address: { latitude: lat, longitude: lng },
-        items: body.items || [],
+        items: itemsList,
         preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || null) : DEFAULT_STORE_ID,
         pool
       });
@@ -5103,59 +5163,66 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      const itemsList = body.items || [];
       let authoritativeSubtotal = 0;
       let containsColdChain = false;
 
       if (itemsList.length > 0 && pool) {
         const skus = itemsList.map(i => i.sku || i.productId || i.id).filter(Boolean);
-        if (skus.length > 0) {
-          try {
-            const pRes = await pool.query(
-              `SELECT sku, id, price, discounted_price, mrp, rx_requirement, cold_chain_required 
-               FROM products 
-               WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
-              [skus]
-            );
-            const pMap = new Map();
-            for (const row of pRes.rows) {
-              pMap.set(row.sku, row);
-              pMap.set(row.id, row);
-            }
-            for (const it of itemsList) {
-              const sku = it.sku || it.productId || it.id;
-              const product = pMap.get(sku);
-              const qty = Math.max(1, Number(it.quantity || 1));
-              const unitPrice = product ? Number(product.discounted_price || product.price || product.mrp || 15) : (Number(it.price || it.unitPrice || 0) || 15);
-              authoritativeSubtotal += (unitPrice * qty);
-              if (product ? Boolean(product.cold_chain_required) : Boolean(it.coldChain)) {
-                containsColdChain = true;
-              }
-            }
-          } catch (_) {}
+        const pRes = await pool.query(
+          `SELECT sku, id, price, discounted_price, mrp, rx_requirement, cold_chain_required 
+           FROM products 
+           WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
+          [skus]
+        );
+        const pMap = new Map();
+        for (const row of pRes.rows) {
+          pMap.set(row.sku, row);
+          pMap.set(row.id, row);
         }
-      } else {
+        for (const it of itemsList) {
+          const sku = it.sku || it.productId || it.id;
+          const product = pMap.get(sku);
+          if (!product) {
+            // Fail closed if authoritative price resolution fails (Finding 6)
+            return sendJson(res, 400, {
+              error: 'UNKNOWN_SKU',
+              message: `Authoritative catalog product not found for SKU: ${sku}`
+            });
+          }
+          const qty = Math.max(1, Number(it.quantity || 1));
+          const unitPrice = Number(product.discounted_price || product.price || product.mrp);
+          authoritativeSubtotal += (unitPrice * qty);
+          if (product.cold_chain_required) {
+            containsColdChain = true;
+          }
+        }
+      } else if (itemsList.length > 0) {
         authoritativeSubtotal = itemsList.reduce((acc, it) => acc + (Number(it.price || it.unitPrice || 0) * (Number(it.quantity) || 1)), 0);
         containsColdChain = itemsList.some(it => it.coldChain);
       }
 
       const coldChainFee = containsColdChain ? 15.0 : 0.0;
       const deliveryFee = authoritativeSubtotal >= 199.0 ? 0.0 : (itemsList.length > 0 ? 2.0 : 0.0);
-      const estMins = Number(fulfillmentDecision.decision.slaMinutes || Math.max(10, Math.ceil(fulfillmentDecision.decision.distanceKm * 3)));
+      const estMins = Number(fulfillmentDecision.decision?.slaMinutes || fulfillmentDecision.slaMinutes || Math.max(10, Math.ceil(fulfillmentDecision.distanceKm * 3)));
+      const isApprox = Boolean(fulfillmentDecision.decision?.isApproximateEta ?? fulfillmentDecision.isApproximateEta);
+      const etaConfidence = fulfillmentDecision.decision?.etaConfidence || (isApprox ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE');
+      const etaRange = fulfillmentDecision.decision?.etaRange || { min: Math.max(8, estMins - 2), max: estMins + 3 };
 
       return sendJson(res, 200, {
         serviceable: true,
         eligible: true,
         storeId: fulfillmentDecision.storeId,
-        storeName: fulfillmentDecision.decision.storeName,
-        distanceKm: fulfillmentDecision.decision.distanceKm,
+        storeName: fulfillmentDecision.decision?.storeName || fulfillmentDecision.store?.store_name || 'Fulfillment Hub',
+        distanceKm: fulfillmentDecision.decision?.distanceKm || fulfillmentDecision.distanceKm,
         deliveryFee: deliveryFee,
         coldChainFee: coldChainFee,
         itemsSubtotal: authoritativeSubtotal,
         slaMinutes: estMins,
         estimatedDeliveryMins: estMins,
         etaLabel: `${estMins} mins`,
-        isApproximateEta: Boolean(fulfillmentDecision.decision.isApproximateEta)
+        isApproximateEta: isApprox,
+        etaConfidence,
+        etaRange
       });
     }
 
@@ -5383,7 +5450,7 @@ const server = http.createServer(async (req, res) => {
 
       if (requestedAddrId && !requestedAddrId.startsWith('temp_')) {
         const addrCheck = await pool.query(
-          `SELECT id, address_line, city, postal_code, latitude, longitude FROM customer_addresses WHERE customer_id = $1 AND id = $2`,
+          `SELECT id, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, contact_phone FROM customer_addresses WHERE customer_id = $1 AND id = $2`,
           [authenticatedCustomerId, requestedAddrId]
         );
         if (addrCheck.rows.length > 0) {
@@ -5414,15 +5481,10 @@ const server = http.createServer(async (req, res) => {
           }
           const city = String(d.city || '').trim();
           const postalCode = String(d.postalCode || d.postal_code || '').trim();
-          if (!city || city.length < 2) {
+          if (!city || city.length < 2 || city.length > 60 || !/^[a-zA-Z\s.,'-]{2,60}$/.test(city)) {
             return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city is strictly required for delivery address.' });
           }
-          const cityWords = city.split(/\s+/);
-          const GEOGRAPHIC_INDICATORS_LOCAL = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
-          if ((cityWords.length === 1 || (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)))) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
-            return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
-          }
-          if (!postalCode || postalCode.length < 3) {
+          if (!postalCode || postalCode.length < 3 || postalCode.length > 10) {
             return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
           }
           const phone = String(customerCheck.rows[0].phone || '').trim();
@@ -5456,17 +5518,17 @@ const server = http.createServer(async (req, res) => {
           );
 
           const insRes = await pool.query(
-            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
-             VALUES ($1, $2, 'HOME', $3, $4, $5, $6, $7, TRUE, $8, NOW())
-             RETURNING id, address_line, city, postal_code, latitude, longitude`,
-            [addrId, authenticatedCustomerId, line, city, postalCode, lat, lng, phone]
+            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at)
+             VALUES ($1, $2, 'HOME', $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11, NOW())
+             RETURNING id, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, contact_phone`,
+            [addrId, authenticatedCustomerId, line, city, String(d.state || '').trim(), postalCode, String(d.landmark || '').trim(), String(d.contactName || d.recipientName || '').trim(), lat, lng, phone]
           );
           customerAddr = insRes.rows[0];
           body.addressId = customerAddr.id;
         } else {
           // Fallback to customer's latest or default saved address in address book
           const defAddr = await pool.query(
-            `SELECT id, address_line, city, postal_code, latitude, longitude FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC LIMIT 1`,
+            `SELECT id, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, contact_phone FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC LIMIT 1`,
             [authenticatedCustomerId]
           );
           if (defAddr.rows.length > 0) {
@@ -6087,7 +6149,7 @@ const server = http.createServer(async (req, res) => {
 
       if (requestedAddrId && !requestedAddrId.startsWith('temp_')) {
         const addrCheck = await pool.query(
-          `SELECT id, address_line, city, postal_code, latitude, longitude FROM customer_addresses WHERE customer_id = $1 AND id = $2`,
+          `SELECT id, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, contact_phone FROM customer_addresses WHERE customer_id = $1 AND id = $2`,
           [customerId, requestedAddrId]
         );
         if (addrCheck.rows.length > 0) {
@@ -6110,15 +6172,10 @@ const server = http.createServer(async (req, res) => {
           }
           const city = String(d.city || '').trim();
           const postalCode = String(d.postalCode || d.postal_code || '').trim();
-          if (!city || city.length < 2) {
+          if (!city || city.length < 2 || city.length > 60 || !/^[a-zA-Z\s.,'-]{2,60}$/.test(city)) {
             return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city is strictly required for delivery address.' });
           }
-          const cityWords = city.split(/\s+/);
-          const GEOGRAPHIC_INDICATORS_LOCAL = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
-          if ((cityWords.length === 1 || (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)))) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
-            return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
-          }
-          if (!postalCode || postalCode.length < 3) {
+          if (!postalCode || postalCode.length < 3 || postalCode.length > 10) {
             return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
           }
           const custRes = await pool.query(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
@@ -6146,16 +6203,16 @@ const server = http.createServer(async (req, res) => {
           );
 
           const insRes = await pool.query(
-            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, postal_code, latitude, longitude, is_default, contact_phone, created_at)
-             VALUES ($1, $2, 'HOME', $3, $4, $5, $6, $7, TRUE, $8, NOW())
-             RETURNING id, address_line, city, postal_code, latitude, longitude`,
-            [addrId, customerId, line, city, postalCode, lat, lng, phone]
+            `INSERT INTO customer_addresses (id, customer_id, address_type, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, is_default, contact_phone, created_at)
+             VALUES ($1, $2, 'HOME', $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11, NOW())
+             RETURNING id, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, contact_phone`,
+            [addrId, customerId, line, city, String(d.state || '').trim(), postalCode, String(d.landmark || '').trim(), String(d.contactName || d.recipientName || '').trim(), lat, lng, phone]
           );
           customerAddr = insRes.rows[0];
           body.addressId = customerAddr.id;
         } else {
           const defAddr = await pool.query(
-            `SELECT id, address_line, city, postal_code, latitude, longitude FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC LIMIT 1`,
+            `SELECT id, address_line, city, state, postal_code, landmark, contact_name, latitude, longitude, contact_phone FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC LIMIT 1`,
             [customerId]
           );
           if (defAddr.rows.length > 0) {
@@ -8615,7 +8672,9 @@ const server = http.createServer(async (req, res) => {
             estimatedTimeMins: Number(o.estimated_duration_mins || o.total_duration_mins || 15),
             isCod: Boolean(o.is_cod),
             codAmountToCollect: Boolean(o.is_cod) ? Number(o.total_amount || 0) : 0,
-            waypoints: (typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || [],
+            waypoints: isAssignedToCaller ? ((typeof o.waypoints === 'string' ? JSON.parse(o.waypoints) : o.waypoints) || []) : [],
+            routeGeometry: isAssignedToCaller ? (o.route_geometry || o.routeGeometry || null) : null,
+            polyline: isAssignedToCaller ? (o.polyline || null) : null,
             offerCreatedAt: Number(o.offer_created_at || (o.created_at ? new Date(o.created_at).getTime() : now)),
             offerExpiresAt: expMs,
             expiresAt: new Date(expMs).toISOString(),
@@ -8717,18 +8776,40 @@ const server = http.createServer(async (req, res) => {
 
       const isAssignedToCaller = isDirectlyAssigned && ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'DELIVERED'].includes(offer.status);
 
-      // Sanitize response: redact customer PII if caller is not assigned or admin
+      // Sanitize response: redact customer PII, precise coordinates, and route geometry if caller is not assigned or admin (Finding 1)
       if (!isAssignedToCaller && !isAdminCaller) {
         const rawAddr = offer.customerAddress || offer.deliveryAddress || '';
         const coarseLocality = extractCoarseLocality(rawAddr, offer.deliveryAddress);
+        const {
+          waypoints,
+          routeGeometry,
+          route_geometry,
+          polyline,
+          destination,
+          customerLat,
+          customerLng,
+          customer_lat,
+          customer_lng,
+          dropLatitude,
+          dropLongitude,
+          ...sanitizedOffer
+        } = offer;
         return sendJson(res, 200, {
-          ...offer,
+          ...sanitizedOffer,
           customerName: 'Customer',
           customerPhone: '',
           customerAddress: coarseLocality,
           deliveryAddress: coarseLocality,
           customerLat: null,
-          customerLng: null
+          customerLng: null,
+          customer_lat: null,
+          customer_lng: null,
+          dropLatitude: null,
+          dropLongitude: null,
+          waypoints: [],
+          routeGeometry: null,
+          route_geometry: null,
+          polyline: null
         });
       }
 

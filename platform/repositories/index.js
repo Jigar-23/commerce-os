@@ -1202,6 +1202,8 @@ class FulfillmentDecision {
     slaMinutes = 10,
     predictedEtaMinutes = null,
     isApproximateEta = false,
+    etaConfidence = null,
+    etaRange = null,
     decisionSource = 'SERVICEABILITY_ENGINE',
     deterministicRank = 1,
     resolvedItems = []
@@ -1216,6 +1218,11 @@ class FulfillmentDecision {
     this.slaMinutes = Number(slaMinutes);
     this.predictedEtaMinutes = predictedEtaMinutes != null ? Number(predictedEtaMinutes) : this.slaMinutes;
     this.isApproximateEta = Boolean(isApproximateEta);
+    this.etaConfidence = etaConfidence || (this.isApproximateEta ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE');
+    this.etaRange = etaRange || {
+      min: Math.max(8, Math.round(this.predictedEtaMinutes * 0.85)),
+      max: Math.max(this.predictedEtaMinutes + 2, Math.round(this.predictedEtaMinutes * 1.25))
+    };
     this.decisionSource = decisionSource;
     this.deterministicRank = deterministicRank;
     this.resolvedItems = resolvedItems;
@@ -1413,7 +1420,19 @@ class ServiceabilityService {
     }
 
     // 3. Batched Catalog Eligibility and Inventory Availability (Finding 6)
-    const normalizedItems = (items || []).map(i => ({
+    const rawItemsList = items || [];
+    if (rawItemsList.length > 0) {
+      const hasMissingSku = rawItemsList.some(i => !(i && (i.sku || i.productId || i.id)));
+      if (hasMissingSku) {
+        return {
+          ok: false,
+          error: 'INVALID_ITEM_SKU',
+          message: 'Every item in serviceability request must specify a canonical SKU or product identifier.'
+        };
+      }
+    }
+
+    const normalizedItems = rawItemsList.map(i => ({
       sku: i.sku || i.productId || i.id,
       quantity: Math.max(1, Number(i.quantity || 1))
     }));
@@ -1442,8 +1461,8 @@ class ServiceabilityService {
         productByIdentifier.set(p.id, p);
       }
 
-      // If any requested item is not in global catalog, fail closed across network
-      const allItemsInCatalog = normalizedItems.every(i => !i.sku || productByIdentifier.has(i.sku));
+      // If any requested item is not in global catalog, fail closed across network (Finding 6)
+      const allItemsInCatalog = normalizedItems.every(i => i.sku && productByIdentifier.has(i.sku));
       if (!allItemsInCatalog) {
         return {
           ok: false,
@@ -1512,8 +1531,8 @@ class ServiceabilityService {
     const totalItemCount = normalizedItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
     const pickPackMinutes = totalItemCount > 5 ? 4 : (totalItemCount > 2 ? 3 : 2);
 
-    // Limit live routing calls to top 4 nearest candidates to bound concurrency and avoid routing tail-latency (Finding 4)
-    const storesToRoute = fulfillableStores.slice().sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 4);
+    // Bounded route matrix estimation for up to 10 candidate stores to optimize SLA accuracy (Finding 7)
+    const storesToRoute = fulfillableStores.slice().sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 10);
     const storesToRouteSet = new Set(storesToRoute.map(s => s.id));
 
     await Promise.all(fulfillableStores.map(async (candidateStore) => {
@@ -1600,6 +1619,13 @@ class ServiceabilityService {
       }
     }
 
+    const isApprox = Boolean(selectedStore.isApproximateEta);
+    const etaConfidence = isApprox ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE';
+    const etaRange = {
+      min: Math.max(8, Math.round(selectedStore.predictedEtaMinutes * 0.85)),
+      max: Math.max(selectedStore.predictedEtaMinutes + 2, Math.round(selectedStore.predictedEtaMinutes * 1.25))
+    };
+
     const decision = new FulfillmentDecision({
       storeId: selectedStore.id,
       storeName: selectedStore.store_name,
@@ -1609,7 +1635,9 @@ class ServiceabilityService {
       distanceKm: selectedStore.distanceKm,
       slaMinutes: selectedStore.predictedEtaMinutes,
       predictedEtaMinutes: selectedStore.predictedEtaMinutes,
-      isApproximateEta: selectedStore.isApproximateEta,
+      isApproximateEta: isApprox,
+      etaConfidence,
+      etaRange,
       activeOrders: selectedStore.activeOrders || 0,
       surgeMode: Boolean(selectedStore.surge_mode),
       decisionSource,
@@ -1625,7 +1653,9 @@ class ServiceabilityService {
       distanceKm: decision.distanceKm,
       slaMinutes: decision.slaMinutes,
       predictedEtaMinutes: decision.predictedEtaMinutes,
-      isApproximateEta: decision.isApproximateEta
+      isApproximateEta: decision.isApproximateEta,
+      etaConfidence: decision.etaConfidence,
+      etaRange: decision.etaRange
     };
   }
 
@@ -6856,6 +6886,7 @@ class DispatchService {
 
     // 2. Resolve Candidate Rider from authoritative presence & fleet
     let selectedRiderId = targetRiderId;
+    let selectedCandidate = null;
     if (selectedRiderId) {
       if (this.presenceRepo) {
         const presence = await this.presenceRepo.getPresence(selectedRiderId);
@@ -6876,31 +6907,84 @@ class DispatchService {
         ? await this.presenceRepo.getEligibleOnlineRiders(storeId || store?.id)
         : [];
       if (eligibleRiders.length > 0) {
-        // Neutral, SLA-optimal Quick-Commerce Dispatch Ranking Engine (Finding 14):
-        // 1. Projected pickup route duration (based on road travel to store)
+        // Neutral, SLA-optimal Quick-Commerce Dispatch Ranking Engine with Bounded Route Matrix (Findings 7 & 14):
+        // 1. Projected pickup route duration (live road route where fresh location available, bounded to top candidates)
         // 2. Active delivery queue load penalty (+4 mins per active delivery)
-        // 3. Stable rider ID lexicographical as deterministic tie-breaker
-        const rankedRiders = eligibleRiders.map(r => {
+        // 3. Heartbeat freshness tie-breaker (fresher presence preferred)
+        // 4. Stable rider ID lexicographical as final deterministic tie-breaker
+        const candidatePool = eligibleRiders.map(r => {
           const rLat = Number(r.lastKnownLat != null ? r.lastKnownLat : (r.last_known_lat != null ? r.last_known_lat : r.latitude));
           const rLng = Number(r.lastKnownLng != null ? r.lastKnownLng : (r.last_known_lng != null ? r.last_known_lng : r.longitude));
-          const distKm = (!isNaN(rLat) && !isNaN(rLng)) ? haversineDistanceKm(rLat, rLng, mLat, mLng) : 99.0;
-          const pickupEtaMins = Math.max(2, Math.ceil((distKm / 20) * 60));
+          const hasLocation = !isNaN(rLat) && !isNaN(rLng) && (Math.abs(rLat) > 0.001 || Math.abs(rLng) > 0.001);
+          const distKm = hasLocation ? haversineDistanceKm(rLat, rLng, mLat, mLng) : 99.0;
+          return { ...r, rLat, rLng, hasLocation, distKm };
+        }).sort((a, b) => a.distKm - b.distKm);
+
+        // Bounded route matrix estimation for top 5 candidates to prevent routing tail latency
+        const topCandidates = candidatePool.slice(0, 5);
+        const routedRiders = await Promise.all(topCandidates.map(async (r) => {
+          let routedPickupMins = null;
+          let routedPickupDistKm = null;
+          let isApproximate = false;
+
+          if (r.hasLocation && typeof this.routeResolver === 'function') {
+            try {
+              const route = await this.routeResolver(r.rLat, r.rLng, mLat, mLng);
+              if (route && route.ok && route.durationMins != null) {
+                routedPickupMins = Math.max(1, Math.round(Number(route.durationMins)));
+                routedPickupDistKm = Number(route.distanceKm);
+              }
+            } catch (_) {}
+          }
+
+          if (routedPickupMins == null) {
+            isApproximate = true;
+            routedPickupMins = Math.max(2, Math.ceil((r.distKm / 20) * 60));
+          }
+
           const activeWorkload = Number(r.activeOrdersCount || r.activeDeliveries || r.active_deliveries || 0);
           const workloadPenaltyMins = activeWorkload * 4;
-          const projectedPickupEta = pickupEtaMins + workloadPenaltyMins;
-          return { ...r, distKm, pickupEtaMins, activeWorkload, projectedPickupEta };
+          const projectedPickupEta = routedPickupMins + workloadPenaltyMins;
+
+          return {
+            ...r,
+            pickupEtaMins: routedPickupMins,
+            routedPickupDistKm,
+            isApproximate,
+            activeWorkload,
+            projectedPickupEta
+          };
+        }));
+
+        const remainingRiders = candidatePool.slice(5).map(r => {
+          const fallbackMins = Math.max(2, Math.ceil((r.distKm / 20) * 60));
+          const activeWorkload = Number(r.activeOrdersCount || r.activeDeliveries || r.active_deliveries || 0);
+          return {
+            ...r,
+            pickupEtaMins: fallbackMins,
+            isApproximate: true,
+            activeWorkload,
+            projectedPickupEta: fallbackMins + (activeWorkload * 4)
+          };
         });
 
-        rankedRiders.sort((a, b) => {
+        const allRankedRiders = [...routedRiders, ...remainingRiders].sort((a, b) => {
           if (a.projectedPickupEta !== b.projectedPickupEta) {
             return a.projectedPickupEta - b.projectedPickupEta;
           }
           if (a.activeWorkload !== b.activeWorkload) {
             return a.activeWorkload - b.activeWorkload;
           }
+          const aTime = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+          const bTime = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0);
+          if (bTime !== aTime) {
+            return bTime - aTime;
+          }
           return String(a.riderId || a.rider_id || '').localeCompare(String(b.riderId || b.rider_id || ''));
         });
-        selectedRiderId = rankedRiders[0].riderId || rankedRiders[0].rider_id;
+
+        selectedCandidate = allRankedRiders[0];
+        selectedRiderId = selectedCandidate.riderId || selectedCandidate.rider_id;
       }
     }
 
@@ -6917,9 +7001,9 @@ class DispatchService {
     const storeToCustomerDurMins = Number(deliveryRoute.durationMins);
 
     // 4. Resolve Rider -> Store Route if presence available
-    let riderToStoreDistKm = null;
-    let riderToStoreDurMins = 0;
-    if (this.presenceRepo) {
+    let riderToStoreDistKm = selectedCandidate?.routedPickupDistKm != null ? selectedCandidate.routedPickupDistKm : null;
+    let riderToStoreDurMins = selectedCandidate?.pickupEtaMins != null ? selectedCandidate.pickupEtaMins : 0;
+    if (riderToStoreDistKm == null && this.presenceRepo) {
       const rPres = await this.presenceRepo.getPresence(selectedRiderId);
       const rLat = rPres ? (rPres.lastKnownLat != null ? rPres.lastKnownLat : (rPres.last_known_lat != null ? rPres.last_known_lat : rPres.latitude)) : null;
       const rLng = rPres ? (rPres.lastKnownLng != null ? rPres.lastKnownLng : (rPres.last_known_lng != null ? rPres.last_known_lng : rPres.longitude)) : null;
@@ -6999,6 +7083,9 @@ class DispatchService {
       waypoints: deliveryRoute.waypoints || [],
       riderToStoreMins: riderToStoreDurMins,
       storeToCustomerMins: storeToCustomerDurMins,
+      etaConfidence: selectedCandidate?.isApproximate ? 'APPROXIMATE_FALLBACK' : 'ROUTED_HIGH_CONFIDENCE',
+      etaRange: { min: Math.max(8, totalDurationMins - 2), max: totalDurationMins + 3 },
+      isApproximateEta: Boolean(selectedCandidate?.isApproximate),
       offerCreatedAt: now,
       offerExpiresAt: offerExpiresAt,
       history: [{ status: 'CREATED', timestamp: new Date().toISOString(), riderId: selectedRiderId }]

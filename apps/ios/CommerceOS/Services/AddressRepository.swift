@@ -87,7 +87,10 @@ public final class AddressRepository: ObservableObject {
             let addressType: String
             let addressLine: String
             let city: String
+            let state: String?
             let postalCode: String
+            let landmark: String?
+            let contactName: String?
             let latitude: Double
             let longitude: Double
             let isDefault: Bool
@@ -106,7 +109,10 @@ public final class AddressRepository: ObservableObject {
             addressType: address.addressType ?? "HOME",
             addressLine: cleanLine,
             city: cleanCity,
+            state: address.state,
             postalCode: cleanPostal,
+            landmark: address.landmark,
+            contactName: address.recipientName ?? address.contactName,
             latitude: cleanLat,
             longitude: cleanLng,
             isDefault: address.isDefault,

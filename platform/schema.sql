@@ -212,13 +212,21 @@ CREATE TABLE IF NOT EXISTS customer_addresses (
     address_type VARCHAR(32) NOT NULL DEFAULT 'HOME', -- 'HOME', 'WORK', 'OTHER'
     address_line TEXT NOT NULL,
     city VARCHAR(100) NOT NULL,
+    state VARCHAR(100),
     postal_code VARCHAR(32) NOT NULL,
+    landmark TEXT,
+    contact_name VARCHAR(128),
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
     contact_phone VARCHAR(32),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Migration safety: ensure newly supported address columns exist on existing databases (Finding 5)
+ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS state VARCHAR(100);
+ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS landmark TEXT;
+ALTER TABLE customer_addresses ADD COLUMN IF NOT EXISTS contact_name VARCHAR(128);
 
 CREATE INDEX IF NOT EXISTS idx_addresses_customer ON customer_addresses(customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_default ON customer_addresses(customer_id) WHERE is_default = TRUE;

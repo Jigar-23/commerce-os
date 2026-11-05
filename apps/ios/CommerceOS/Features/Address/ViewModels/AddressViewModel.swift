@@ -491,7 +491,10 @@ public final class AddressViewModel: ObservableObject {
                     struct UpdateBody: Codable {
                         let addressLine: String
                         let city: String
+                        let state: String?
                         let postalCode: String
+                        let landmark: String?
+                        let contactName: String?
                         let latitude: Double
                         let longitude: Double
                         let isDefault: Bool
@@ -499,8 +502,11 @@ public final class AddressViewModel: ObservableObject {
                     }
                     let body = UpdateBody(
                         addressLine: dto.addressLine,
-                        city: dto.city ?? "Gurugram",
+                        city: dto.city ?? "",
+                        state: dto.state,
                         postalCode: dto.postalCode ?? "",
+                        landmark: dto.landmark,
+                        contactName: dto.recipientName ?? dto.contactName,
                         latitude: dto.latitude,
                         longitude: dto.longitude,
                         isDefault: dto.isDefault,

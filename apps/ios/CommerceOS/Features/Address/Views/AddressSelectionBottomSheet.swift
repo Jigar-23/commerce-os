@@ -421,7 +421,7 @@ public struct AddressSelectionBottomSheet: View {
             tag: "Selected Location",
             addressType: "OTHER",
             addressLine: place.fullAddress,
-            city: place.secondaryText.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "Gurugram",
+            city: place.secondaryText.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "",
             postalCode: "",
             latitude: coord.latitude,
             longitude: coord.longitude,
