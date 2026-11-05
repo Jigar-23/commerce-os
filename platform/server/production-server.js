@@ -4742,6 +4742,12 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, city, postalCode, and valid legal latitude [-90, 90] and longitude [-180, 180] are mandatory.' });
       }
 
+      const cityCheckWords = city.split(/\s+/);
+      const GEOGRAPHIC_INDICATORS = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
+      if (cityCheckWords.length >= 2 && cityCheckWords.every(w => /^[a-z]+$/i.test(w)) && !GEOGRAPHIC_INDICATORS.test(city)) {
+        return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
+      }
+
       let rawPhone = String(body.contactPhone || body.phone || body.recipientPhone || '').trim();
       let phoneDigits = rawPhone.replace(/\D/g, '').slice(-10);
       if (phoneDigits.length !== 10) {
@@ -5118,121 +5124,148 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/v1/pricing/quote' && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
       const body = await parseJsonBody(req);
-      const itemsInput = Array.isArray(body.items) ? body.items : (Array.isArray(body.orderItems) ? body.orderItems : []);
+
+      // Security: Do not allow unauthorized callers to probe other customers' surge context (Finding 7)
+      if (body.customerId) {
+        if (!authClaims || !authClaims.sub) {
+          return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is strictly required to query customer pricing context.' });
+        }
+        const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
+        if (body.customerId !== authClaims.sub && !isAdmin) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Cannot request pricing quotes for another customer.' });
+        }
+      }
+
+      const authenticatedCustomerId = authClaims?.sub || null;
+      let itemsInput = Array.isArray(body.items) ? body.items : (Array.isArray(body.orderItems) ? body.orderItems : []);
+
+      // If authenticated customer provided no items in body, populate from their server-side cart
+      if (authenticatedCustomerId && itemsInput.length === 0 && appRepositories?.cartRepo) {
+        try {
+          const userCart = await appRepositories.cartRepo.getCart(authenticatedCustomerId);
+          if (userCart && Array.isArray(userCart.items)) {
+            itemsInput = userCart.items;
+          }
+        } catch (_) {}
+      }
+
       let authoritativeSubtotal = 0;
       const resolvedItems = [];
 
       if (itemsInput.length > 0 && pool) {
         const skus = itemsInput.map(i => i.sku || i.productId || i.id).filter(Boolean);
         if (skus.length > 0) {
-          try {
-            const pRes = await pool.query(
-              `SELECT sku, id, price, discounted_price, mrp, rx_requirement, cold_chain_required 
-               FROM products 
-               WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
-              [skus]
-            );
-            const pMap = new Map();
-            for (const row of pRes.rows) {
-              pMap.set(row.sku, row);
-              pMap.set(row.id, row);
+          const pRes = await pool.query(
+            `SELECT sku, id, price, discounted_price, mrp, rx_requirement, cold_chain_required 
+             FROM products 
+             WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
+            [skus]
+          );
+          const pMap = new Map();
+          for (const row of pRes.rows) {
+            pMap.set(row.sku, row);
+            pMap.set(row.id, row);
+          }
+          for (const item of itemsInput) {
+            const sku = item.sku || item.productId || item.id;
+            if (!sku) {
+              return sendJson(res, 400, { error: 'INVALID_ITEM', message: 'Item SKU is strictly required.' });
             }
-            for (const item of itemsInput) {
-              const sku = item.sku || item.productId || item.id;
-              const product = pMap.get(sku);
-              const qty = Math.max(1, Number(item.quantity || 1));
-              const unitPrice = product ? Number(product.discounted_price || product.price || product.mrp || 15) : 15;
-              const mrp = product ? Number(product.mrp || product.price || unitPrice) : unitPrice;
-              authoritativeSubtotal += (unitPrice * qty);
-              resolvedItems.push({
-                sku,
-                quantity: qty,
-                unitPrice,
-                price: unitPrice,
-                discountedPrice: unitPrice,
-                mrp,
-                coldChain: product ? Boolean(product.cold_chain_required) : false
+            const product = pMap.get(sku);
+            if (!product) {
+              return sendJson(res, 400, {
+                error: 'UNKNOWN_SKU',
+                message: `Item with SKU or ID '${sku}' was not found in the active product catalog.`
               });
             }
-          } catch (_) {}
+            const qty = Math.max(1, Number(item.quantity || 1));
+            const unitPrice = Number(product.discounted_price || product.price || product.mrp || 15);
+            const mrp = Number(product.mrp || product.price || unitPrice);
+            authoritativeSubtotal += (unitPrice * qty);
+            resolvedItems.push({
+              sku,
+              quantity: qty,
+              unitPrice,
+              price: unitPrice,
+              discountedPrice: unitPrice,
+              mrp,
+              coldChain: Boolean(product.cold_chain_required)
+            });
+          }
         }
       }
 
-      if (resolvedItems.length === 0) {
-        if (body.itemsSubtotal && typeof body.itemsSubtotal === 'number' && itemsInput.length === 0) {
+      // For authenticated callers, require valid items from body or cart; reject forged subtotal overrides
+      if (authenticatedCustomerId) {
+        if (resolvedItems.length === 0) {
+          return sendJson(res, 400, {
+            error: 'ITEMS_REQUIRED',
+            message: 'Active cart items or order items are strictly required to calculate pricing quote.'
+          });
+        }
+      } else {
+        // Unauthenticated advisory check: only accept itemsSubtotal if no items were provided
+        if (resolvedItems.length === 0 && body.itemsSubtotal && typeof body.itemsSubtotal === 'number') {
           authoritativeSubtotal = Math.max(0, Number(body.itemsSubtotal));
         }
       }
 
-      // Check customer store context for store-specific surge pricing (Finding 6)
-      const authClaims = verifyAndDecodeJwt(req);
-      const customerId = (authClaims && authClaims.sub) || body.customerId || null;
-      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, resolvedItems);
+      // Authoritative Distance & Serviceability: derive from customer address and store route
+      let authoritativeDistanceKm = null;
+      if (authenticatedCustomerId && pool) {
+        try {
+          let addrRow = null;
+          if (body.addressId || body.address_id) {
+            const addrRes = await pool.query(
+              `SELECT latitude, longitude FROM customer_addresses WHERE id = $1 AND customer_id = $2 LIMIT 1`,
+              [body.addressId || body.address_id, authenticatedCustomerId]
+            );
+            if (addrRes.rows.length > 0) addrRow = addrRes.rows[0];
+          }
+          if (!addrRow) {
+            const defRes = await pool.query(
+              `SELECT latitude, longitude FROM customer_addresses WHERE customer_id = $1 AND is_default = TRUE LIMIT 1`,
+              [authenticatedCustomerId]
+            );
+            if (defRes.rows.length > 0) addrRow = defRes.rows[0];
+          }
+          if (addrRow && addrRow.latitude != null && addrRow.longitude != null) {
+            const servRes = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+              address: { latitude: Number(addrRow.latitude), longitude: Number(addrRow.longitude) },
+              items: resolvedItems,
+              pool
+            });
+            if (servRes.ok && servRes.distanceKm != null) {
+              authoritativeDistanceKm = servRes.distanceKm;
+            }
+          }
+        } catch (_) {}
+      }
+
+      const effectiveDistance = authoritativeDistanceKm != null 
+        ? authoritativeDistanceKm 
+        : (!authenticatedCustomerId && body.distanceKm && typeof body.distanceKm === 'number' ? Math.max(0.5, Number(body.distanceKm)) : 1.0);
+
+      // Check customer store context for store-specific surge pricing (never leak via foreign body.customerId)
+      const surgeContext = await resolveCustomerCartSurgeAndContext(authenticatedCustomerId, resolvedItems);
       const surgeFee = surgeContext.isSurge ? 25.0 : 0.0;
 
       const pricing = pricingEngine.calculateCustomerOrderPricing({
         itemsSubtotal: authoritativeSubtotal,
         items: resolvedItems,
-        distanceKm: body.distanceKm || 1.0,
+        distanceKm: effectiveDistance,
         surgeFee,
         isCod: true
       });
 
       return sendJson(res, 200, {
         ...pricing,
-        isProvisional: surgeContext.isProvisional,
-        isQuoteProvisional: surgeContext.isProvisional
+        distanceKm: effectiveDistance,
+        isProvisional: surgeContext.isProvisional || !authenticatedCustomerId,
+        isQuoteProvisional: surgeContext.isProvisional || !authenticatedCustomerId
       });
-    }
-
-    const orderCustMatch = pathname.match(/^\/api\/v1\/orders\/customer(?:\/([^/]+))?$/);
-    if (orderCustMatch && method === 'GET') {
-      const authClaims = verifyAndDecodeJwt(req);
-      const customerId = orderCustMatch[1] || (authClaims && (authClaims.sub || authClaims.id || authClaims.userId)) || req.headers['x-customer-id'] || 'cust_9991416180';
-      if (!customerId) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or customerId path param is required.' });
-      }
-      const ordersRes = await pool.query(
-        `SELECT id, order_id, short_order_id, customer_id, store_id, status, total_amount, tax_amount, delivery_fee, payment_method, is_cod, cod_amount, items, delivery_address, created_at
-         FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`,
-        [customerId]
-      );
-      return sendJson(res, 200, ordersRes.rows.map(o => {
-        const oid = o.order_id || o.id;
-        const shortId = o.short_order_id || OrderCodeCodec.fromUuid(oid);
-        return {
-          id: oid,
-          orderId: oid,
-          order_id: oid,
-          shortOrderId: shortId,
-          short_order_id: shortId,
-          displayOrderId: OrderCodeCodec.formatDisplay(shortId),
-          display_order_id: OrderCodeCodec.formatDisplay(shortId),
-          numericOrderId: Number(shortId),
-          numeric_order_id: Number(shortId),
-          customerId: o.customer_id,
-          customer_id: o.customer_id,
-          status: o.status,
-          orderStatus: o.status,
-          order_status: o.status,
-          totalAmount: Number(o.total_amount),
-          total_amount: Number(o.total_amount),
-          taxAmount: Number(o.tax_amount || 0),
-          tax_amount: Number(o.tax_amount || 0),
-          deliveryFee: Number(o.delivery_fee || 0),
-          delivery_fee: Number(o.delivery_fee || 0),
-          paymentMethod: o.payment_method,
-          payment_method: o.payment_method,
-          isCod: Boolean(o.is_cod),
-          is_cod: Boolean(o.is_cod),
-          codAmount: Number(o.cod_amount || 0),
-          cod_amount: Number(o.cod_amount || 0),
-          createdAt: o.created_at,
-          created_at: o.created_at,
-          items: Array.isArray(o.items) ? o.items : []
-        };
-      }));
     }
 
     const orderCancelPolicyMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/cancellation-policy$/);
@@ -5328,6 +5361,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      let preDecision = null;
       const rawDeliveryAddr = body.deliveryAddress || body.delivery_address;
       if (!customerAddr) {
         if (rawDeliveryAddr && (rawDeliveryAddr.addressLine || rawDeliveryAddr.address_line || rawDeliveryAddr.latitude != null)) {
@@ -5347,6 +5381,11 @@ const server = http.createServer(async (req, res) => {
           if (!city || city.length < 2) {
             return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city is strictly required for delivery address.' });
           }
+          const cityWords = city.split(/\s+/);
+          const GEOGRAPHIC_INDICATORS_LOCAL = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
+          if (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
+            return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
+          }
           if (!postalCode || postalCode.length < 3) {
             return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
           }
@@ -5361,7 +5400,7 @@ const server = http.createServer(async (req, res) => {
             sku: i.sku || i.productId || i.id,
             quantity: Math.max(1, Number(i.quantity || 1))
           }));
-          const preDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+          preDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
             address: candidateAddr,
             items: candidateItems,
             preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || body.store_id || null) : DEFAULT_STORE_ID,
@@ -5413,7 +5452,8 @@ const server = http.createServer(async (req, res) => {
       }));
 
       // Server-Authoritative Fulfillment Store Resolution via ServiceabilityService
-      const fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
+      // Reuse preDecision if already evaluated during inline address creation (Finding 6)
+      const fulfillmentDecision = preDecision || await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
         address: customerAddr,
         items: orderItems,
         preferredStoreId: MULTI_STORE_ENABLED ? (body.storeId || body.store_id || null) : DEFAULT_STORE_ID,
@@ -5515,15 +5555,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------------------------------------
-    // Customer Orders Query: GET /api/v1/orders/customer/:customerId
+    // Customer Orders Query: GET /api/v1/orders/customer & /api/v1/orders/customer/:customerId (Finding 1 BOLA Protection)
     // -------------------------------------------------------------
-    const customerOrdersMatch = pathname.match(/^\/api\/v1\/orders\/customer\/([^/]+)$/);
+    const customerOrdersMatch = pathname.match(/^\/api\/v1\/orders\/customer(?:\/([^/]+))?$/);
     if (customerOrdersMatch && method === 'GET') {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Valid Bearer JWT is required.' });
       }
-      const requestedCustomerId = customerOrdersMatch[1];
+      const requestedCustomerId = customerOrdersMatch[1] || authClaims.sub;
       const authenticatedCustomerId = authClaims.sub;
       const isAdmin = authClaims.role === 'ROLE_ADMIN' || (authClaims.roles && authClaims.roles.includes('ROLE_ADMIN'));
 
@@ -6036,6 +6076,11 @@ const server = http.createServer(async (req, res) => {
           const postalCode = String(d.postalCode || d.postal_code || '').trim();
           if (!city || city.length < 2) {
             return sendJson(res, 400, { error: 'INVALID_CITY', message: 'Valid city is strictly required for delivery address.' });
+          }
+          const cityWords = city.split(/\s+/);
+          const GEOGRAPHIC_INDICATORS_LOCAL = /\b(sector|phase|block|colony|nagar|enclave|vihar|pur|puri|road|marg|bazaar|market|layout|extension|extn|hills|heights|town|city|cantt|west|east|north|south|central|park|place|circle|society|apartments|complex|valley|woods|gardens|estate|drive|avenue|lane|street|gali|mohalla|lines|delhi|mumbai|bangalore|bengaluru|gurgaon|gurugram|noida|rewari|pune|hyderabad|chennai|kolkata|jaipur|chandigarh|faridabad|ghaziabad|connaught|whitefield|indiranagar|koramangala|bandra|andheri)\b/i;
+          if (cityWords.length >= 2 && cityWords.every(w => /^[a-z]+$/i.test(w)) && !GEOGRAPHIC_INDICATORS_LOCAL.test(city)) {
+            return sendJson(res, 400, { error: 'INVALID_CITY', message: 'City must be a valid geographic locality, not a personal name.' });
           }
           if (!postalCode || postalCode.length < 3) {
             return sendJson(res, 400, { error: 'INVALID_POSTAL_CODE', message: 'Valid postal code is strictly required for delivery address.' });
@@ -8972,26 +9017,32 @@ const server = http.createServer(async (req, res) => {
     if ((pathname === '/api/v1/customer/device-token' && method === 'DELETE') ||
         (pathname === '/api/v1/customer/device-token/unregister' && (method === 'POST' || method === 'DELETE'))) {
       const authClaims = verifyAndDecodeJwt(req);
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for customer token unregistration.' });
-      }
       let token = null;
       try {
         const body = await parseJsonBody(req);
         token = body.deviceToken || body.fcmToken || body.token || body.apnsToken || null;
       } catch (_) {}
 
+      if (!authClaims && !token) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT or deviceToken is required for customer token unregistration.' });
+      }
+
       if (pool && !isLocalMode) {
         try {
-          if (token) {
+          if (authClaims && authClaims.sub && token) {
             await pool.query(
               `DELETE FROM customer_device_tokens WHERE customer_id = $1 AND token = $2`,
               [authClaims.sub, token]
             );
-          } else {
+          } else if (authClaims && authClaims.sub) {
             await pool.query(
               `DELETE FROM customer_device_tokens WHERE customer_id = $1`,
               [authClaims.sub]
+            );
+          } else if (token) {
+            await pool.query(
+              `DELETE FROM customer_device_tokens WHERE token = $1`,
+              [token]
             );
           }
         } catch (dbErr) {
@@ -8999,7 +9050,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 500, { error: 'INTERNAL_SERVER_ERROR', message: 'Failed to unregister customer device token.' });
         }
       }
-      return sendJson(res, 200, { ok: true, unregistered: true, customerId: authClaims.sub });
+      return sendJson(res, 200, { ok: true, unregistered: true, customerId: authClaims?.sub || null });
     }
 
     // GET /api/v1/delivery/rider/notifications

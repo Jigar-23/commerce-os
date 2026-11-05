@@ -113,9 +113,24 @@ public final class AppContainer: ObservableObject {
     }
     
     public func logout() {
+        let currentAuthToken = apiClient.authToken ?? KeychainHelper.shared.get(key: "auth_token")
         Task {
-            await CustomerPushNotificationManager.shared.unregisterTokenWithBackend()
+            await CustomerPushNotificationManager.shared.unregisterTokenWithBackend(authToken: currentAuthToken)
         }
+        UserDefaults.standard.removeObject(forKey: "customer_id")
+        UserDefaults.standard.removeObject(forKey: "customer_phone")
+        UserDefaults.standard.removeObject(forKey: "auth_token")
+        UserDefaults.standard.removeObject(forKey: "customer_name")
+        KeychainHelper.shared.delete(key: "auth_token")
+        apiClient.clearAuth()
+        AddressViewModel.shared.reset()
+        self.customerSession = nil
+        self.isAuthenticated = false
+    }
+
+    public func logoutAsync() async {
+        let currentAuthToken = apiClient.authToken ?? KeychainHelper.shared.get(key: "auth_token")
+        await CustomerPushNotificationManager.shared.unregisterTokenWithBackend(authToken: currentAuthToken)
         UserDefaults.standard.removeObject(forKey: "customer_id")
         UserDefaults.standard.removeObject(forKey: "customer_phone")
         UserDefaults.standard.removeObject(forKey: "auth_token")

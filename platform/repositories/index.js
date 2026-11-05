@@ -1200,6 +1200,8 @@ class FulfillmentDecision {
     storeLongitude = null,
     distanceKm = 0,
     slaMinutes = 10,
+    predictedEtaMinutes = null,
+    isApproximateEta = false,
     decisionSource = 'SERVICEABILITY_ENGINE',
     deterministicRank = 1,
     resolvedItems = []
@@ -1212,6 +1214,8 @@ class FulfillmentDecision {
     this.storeLongitude = storeLongitude != null ? Number(storeLongitude) : null;
     this.distanceKm = Number(distanceKm);
     this.slaMinutes = Number(slaMinutes);
+    this.predictedEtaMinutes = predictedEtaMinutes != null ? Number(predictedEtaMinutes) : this.slaMinutes;
+    this.isApproximateEta = Boolean(isApproximateEta);
     this.decisionSource = decisionSource;
     this.deterministicRank = deterministicRank;
     this.resolvedItems = resolvedItems;
@@ -1315,8 +1319,10 @@ class ServiceabilityService {
     const now = new Date();
     const currentUtcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
     const candidateStores = [];
+    const geographicallyEligibleStores = [];
 
     for (const store of allActiveStores) {
+      if (store.latitude == null || store.longitude == null) continue;
       // 2a. Operational Status Guard (fail-closed if closed or temporarily offline)
       if (store.is_open === false || store.is_offline === true) {
         continue;
@@ -1336,43 +1342,61 @@ class ServiceabilityService {
         }
       }
 
-      // 2c. Store-Configured Service Radius Enforcement (Finding 8: never rely solely on global 20km)
+      // 2c. Store-Configured Service Radius Enforcement (never rely solely on global 20km)
       const storeConfiguredRadius = isProd ? Number(store.service_radius_km || 10.0) : 25000.0;
       const dist = ServiceabilityService.calculateDistanceKm(cLat, cLng, store.latitude, store.longitude);
       if (dist == null || dist > storeConfiguredRadius) {
         continue;
       }
 
-      // 2d. Surge & Active Order Capacity Guard (Count all nonterminal orders)
-      let activeOrderCount = 0;
-      if (pool) {
-        try {
-          const capRes = await pool.query(
-            `SELECT COUNT(*) FROM orders 
-             WHERE store_id = $1 AND status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')`,
-            [store.id]
-          );
-          activeOrderCount = Number(capRes.rows[0]?.count || 0);
-          if (store.max_active_orders) {
-            let effectiveMaxOrders = Number(store.max_active_orders);
-            if (store.surge_mode) {
-              // Finding 6: When surge mode is active, reduce capacity threshold by 30%
-              effectiveMaxOrders = Math.floor(effectiveMaxOrders * 0.7);
-            }
-            if (activeOrderCount >= effectiveMaxOrders) {
-              continue;
-            }
-          }
-        } catch (err) {
-          // Fail closed when store capacity cannot be verified (Finding 2)
+      geographicallyEligibleStores.push({
+        ...store,
+        distanceKm: isProd ? dist : Math.min(dist, 2.5)
+      });
+    }
+
+    // 2d. Batched Surge & Active Order Capacity Guard (Finding 6)
+    const storeActiveCounts = new Map();
+    let capacityQueryFailed = false;
+    if (pool && geographicallyEligibleStores.length > 0) {
+      try {
+        const eligibleStoreIds = geographicallyEligibleStores.map(s => s.id);
+        const capRes = await pool.query(
+          `SELECT store_id, COUNT(*)::int as count 
+           FROM orders 
+           WHERE store_id = ANY($1) AND status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')
+           GROUP BY store_id`,
+          [eligibleStoreIds]
+        );
+        for (const row of capRes.rows) {
+          storeActiveCounts.set(row.store_id, Number(row.count || 0));
+        }
+      } catch (err) {
+        console.error('[Serviceability] Batched store capacity query failed:', err.message);
+        capacityQueryFailed = true;
+      }
+    }
+
+    if (capacityQueryFailed) {
+      return { ok: false, error: 'STORE_NOT_SERVICEABLE', message: 'Unable to safely verify operational capacity across fulfillment nodes.' };
+    }
+
+    for (const store of geographicallyEligibleStores) {
+      const activeOrderCount = storeActiveCounts.get(store.id) || 0;
+      if (store.max_active_orders) {
+        let effectiveMaxOrders = Number(store.max_active_orders);
+        if (store.surge_mode) {
+          // When surge mode is active, reduce capacity threshold by 30%
+          effectiveMaxOrders = Math.floor(effectiveMaxOrders * 0.7);
+        }
+        if (activeOrderCount >= effectiveMaxOrders) {
           continue;
         }
       }
 
       candidateStores.push({
         ...store,
-        activeOrders: activeOrderCount,
-        distanceKm: isProd ? dist : Math.min(dist, 2.5)
+        activeOrders: activeOrderCount
       });
     }
 
@@ -1380,6 +1404,7 @@ class ServiceabilityService {
       if (!isProd && allActiveStores.length > 0) {
         candidateStores.push({
           ...allActiveStores[0],
+          activeOrders: 0,
           distanceKm: 1.8
         });
       } else {
@@ -1387,7 +1412,7 @@ class ServiceabilityService {
       }
     }
 
-    // 3. For each candidate store, verify product catalog eligibility and inventory availability
+    // 3. Batched Catalog Eligibility and Inventory Availability (Finding 6)
     const normalizedItems = (items || []).map(i => ({
       sku: i.sku || i.productId || i.id,
       quantity: Math.max(1, Number(i.quantity || 1))
@@ -1395,47 +1420,84 @@ class ServiceabilityService {
 
     const fulfillableStores = [];
 
-    for (const store of candidateStores) {
-      let isStoreFulfillable = true;
+    if (normalizedItems.length === 0) {
+      fulfillableStores.push(...candidateStores);
+    } else if (pool) {
+      const itemSkus = [...new Set(normalizedItems.map(i => i.sku).filter(Boolean))];
+      let catalogProducts = [];
+      try {
+        const prodRes = await pool.query(
+          `SELECT id, sku, is_active FROM products 
+           WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
+          [itemSkus]
+        );
+        catalogProducts = prodRes.rows;
+      } catch (err) {
+        console.error('[Serviceability] Batched product catalog query failed:', err.message);
+      }
 
-      if (normalizedItems.length > 0 && pool) {
+      const productByIdentifier = new Map();
+      for (const p of catalogProducts) {
+        productByIdentifier.set(p.sku, p);
+        productByIdentifier.set(p.id, p);
+      }
+
+      // If any requested item is not in global catalog, fail closed across network
+      const allItemsInCatalog = normalizedItems.every(i => !i.sku || productByIdentifier.has(i.sku));
+      if (!allItemsInCatalog) {
+        return {
+          ok: false,
+          error: 'OUT_OF_STOCK_ACROSS_NETWORK',
+          message: 'None of the nearby serviceable fulfillment nodes have available inventory for the requested items.'
+        };
+      }
+
+      const candidateStoreIds = candidateStores.map(s => s.id);
+      const uniqueProductIds = [...new Set([...productByIdentifier.values()].map(p => p.id))];
+
+      const inventoryAvailabilityMap = new Map();
+      if (candidateStoreIds.length > 0 && uniqueProductIds.length > 0) {
+        try {
+          const invRes = await pool.query(
+            `SELECT store_id, product_id, sku, stock_count, reserved_count, (stock_count - reserved_count)::int as available_count 
+             FROM inventory 
+             WHERE store_id = ANY($1) AND product_id = ANY($2)`,
+            [candidateStoreIds, uniqueProductIds]
+          );
+          for (const row of invRes.rows) {
+            const avail = Number(row.available_count || 0);
+            inventoryAvailabilityMap.set(`${row.store_id}:${row.product_id}`, avail);
+            if (row.sku) {
+              inventoryAvailabilityMap.set(`${row.store_id}:${row.sku}`, avail);
+            }
+          }
+        } catch (err) {
+          console.error('[Serviceability] Batched inventory query failed:', err.message);
+        }
+      }
+
+      for (const store of candidateStores) {
+        let isStoreFulfillable = true;
         for (const item of normalizedItems) {
           if (!item.sku) continue;
-          // 3a. Resolve GLOBAL product identity first (products is the global catalog; store_id is advisory only)
-          const globalProductRes = await pool.query(
-            `SELECT id, sku, is_active FROM products 
-             WHERE (sku = $1 OR id = $1) AND is_active = TRUE 
-             LIMIT 1`,
-            [item.sku]
-          );
-          if (globalProductRes.rows.length === 0) {
+          const product = productByIdentifier.get(item.sku);
+          if (!product) {
             isStoreFulfillable = false;
             break;
           }
-          const product = globalProductRes.rows[0];
-
-          // 3b. Verify EXACT store-scoped inventory row using the canonical triple (store_id, product_id, sku)
-          const invCheck = await pool.query(
-            `SELECT stock_count, reserved_count, (stock_count - reserved_count) as available_count 
-             FROM inventory 
-             WHERE store_id = $1 AND product_id = $2 AND sku = $3`,
-            [store.id, product.id, product.sku]
-          );
-          if (invCheck.rows.length === 0) {
-            isStoreFulfillable = false;
-            break;
-          }
-          const available = Number(invCheck.rows[0].available_count);
+          const available = inventoryAvailabilityMap.get(`${store.id}:${product.id}`) ?? 
+                            inventoryAvailabilityMap.get(`${store.id}:${product.sku}`) ?? 0;
           if (available < item.quantity) {
             isStoreFulfillable = false;
             break;
           }
         }
+        if (isStoreFulfillable) {
+          fulfillableStores.push(store);
+        }
       }
-
-      if (isStoreFulfillable) {
-        fulfillableStores.push(store);
-      }
+    } else {
+      fulfillableStores.push(...candidateStores);
     }
 
     if (fulfillableStores.length === 0) {
@@ -1446,74 +1508,90 @@ class ServiceabilityService {
       };
     }
 
-    // 4. Decision Policy: Deterministic neutral store ranking
+    // 4. Dynamic Traffic-Aware ETA derived for all candidate stores (Finding 5)
+    const totalItemCount = normalizedItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+    const pickPackMinutes = totalItemCount > 5 ? 4 : (totalItemCount > 2 ? 3 : 2);
+
+    await Promise.all(fulfillableStores.map(async (candidateStore) => {
+      let routedTravelMinutes = null;
+      let routedDistanceKm = null;
+      let isApproximateEta = false;
+
+      if (typeof routeResolver === 'function') {
+        try {
+          const routeRes = await routeResolver(Number(candidateStore.latitude), Number(candidateStore.longitude), cLat, cLng, false);
+          if (routeRes && routeRes.ok && routeRes.durationMins != null) {
+            routedTravelMinutes = Math.max(1, Math.round(Number(routeRes.durationMins)));
+            if (routeRes.distanceKm != null) routedDistanceKm = Number(routeRes.distanceKm);
+          }
+        } catch (_) {}
+      } else if (process.env.OSRM_BASE_URL) {
+        try {
+          const baseUrl = process.env.OSRM_BASE_URL.replace(/\/+$/, '');
+          const osrmUrl = `${baseUrl}/route/v1/driving/${cLng},${cLat};${candidateStore.longitude},${candidateStore.latitude}?overview=false`;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 2000);
+          const oRes = await fetch(osrmUrl, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
+          clearTimeout(timeout);
+          if (oRes.ok) {
+            const oData = await oRes.json();
+            if (oData.routes && oData.routes.length > 0) {
+              routedTravelMinutes = Math.max(1, Math.round(oData.routes[0].duration / 60));
+              routedDistanceKm = Math.round((oData.routes[0].distance / 1000) * 10) / 10;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (routedTravelMinutes == null) {
+        isApproximateEta = true;
+        const effDist = routedDistanceKm != null ? routedDistanceKm : candidateStore.distanceKm;
+        routedTravelMinutes = Math.ceil((Number(effDist || 1.5) / 20) * 60);
+      }
+
+      const loadMinutes = Math.min(10, Math.ceil(Number(candidateStore.activeOrders || 0) * 0.5));
+      const surgeBufferMinutes = candidateStore.surge_mode ? 5 : 0;
+      const predictedEtaMinutes = Math.max(
+        Number(candidateStore.sla_minutes || 10),
+        pickPackMinutes + routedTravelMinutes + loadMinutes + surgeBufferMinutes
+      );
+
+      candidateStore.routedTravelMinutes = routedTravelMinutes;
+      candidateStore.routedDistanceKm = routedDistanceKm != null ? routedDistanceKm : candidateStore.distanceKm;
+      candidateStore.isApproximateEta = isApproximateEta;
+      candidateStore.predictedEtaMinutes = predictedEtaMinutes;
+      candidateStore.loadMinutes = loadMinutes;
+      candidateStore.surgeBufferMinutes = surgeBufferMinutes;
+      candidateStore.pickPackMinutes = pickPackMinutes;
+    }));
+
+    // 5. Decision Policy: Deterministic store ranking by predicted delivery ETA (Finding 5)
     fulfillableStores.sort((a, b) => {
-      // Primary: Distance ascending (shortest road travel)
+      // Primary: Predicted customer delivery ETA ascending (fastest real-world arrival)
+      if (a.predictedEtaMinutes !== b.predictedEtaMinutes) {
+        return a.predictedEtaMinutes - b.predictedEtaMinutes;
+      }
+      // Secondary: Distance ascending (shortest road travel)
       if (a.distanceKm !== b.distanceKm) {
         return a.distanceKm - b.distanceKm;
-      }
-      // Secondary: SLA minutes ascending (fastest delivery promise)
-      if ((a.sla_minutes || 10) !== (b.sla_minutes || 10)) {
-        return (a.sla_minutes || 10) - (b.sla_minutes || 10);
       }
       // Stable tie-breaker: store ID lexicographical
       return String(a.id).localeCompare(String(b.id));
     });
 
     let selectedStore = fulfillableStores[0];
-    let decisionSource = 'OPTIMAL_SLA_PROXIMITY_RANK';
+    let decisionSource = 'OPTIMAL_PREDICTED_ETA_PROXIMITY_RANK';
 
     if (preferredStoreId) {
       const preferred = fulfillableStores.find(s => s.id === preferredStoreId);
-      if (preferred && preferred.distanceKm <= selectedStore.distanceKm + ServiceabilityService.PREFERRED_STORE_DISTANCE_TOLERANCE_KM) {
+      if (preferred && (
+        preferred.predictedEtaMinutes <= selectedStore.predictedEtaMinutes ||
+        preferred.distanceKm <= selectedStore.distanceKm + ServiceabilityService.PREFERRED_STORE_DISTANCE_TOLERANCE_KM
+      )) {
         selectedStore = preferred;
         decisionSource = 'CLIENT_PREFERENCE_SERVICEABLE_APPROVED';
       }
     }
-
-    // Finding 7: Dynamic Traffic-Aware ETA derived from authoritative routed road network duration,
-    // partner pick/pack duration (2-4 mins based on basket), store workload, and surge buffer
-    let routedTravelMinutes = null;
-    let routedDistanceKm = null;
-    if (typeof routeResolver === 'function') {
-      try {
-        const routeRes = await routeResolver(Number(selectedStore.latitude), Number(selectedStore.longitude), cLat, cLng, false);
-        if (routeRes && routeRes.ok && routeRes.durationMins != null) {
-          routedTravelMinutes = Math.max(1, Math.round(Number(routeRes.durationMins)));
-          if (routeRes.distanceKm != null) routedDistanceKm = Number(routeRes.distanceKm);
-        }
-      } catch (_) {}
-    } else if (process.env.OSRM_BASE_URL) {
-      try {
-        const baseUrl = process.env.OSRM_BASE_URL.replace(/\/+$/, '');
-        const osrmUrl = `${baseUrl}/route/v1/driving/${cLng},${cLat};${selectedStore.longitude},${selectedStore.latitude}?overview=false`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2000);
-        const oRes = await fetch(osrmUrl, { signal: controller.signal, headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
-        clearTimeout(timeout);
-        if (oRes.ok) {
-          const oData = await oRes.json();
-          if (oData.routes && oData.routes.length > 0) {
-            routedTravelMinutes = Math.max(1, Math.round(oData.routes[0].duration / 60));
-            routedDistanceKm = Math.round((oData.routes[0].distance / 1000) * 10) / 10;
-          }
-        }
-      } catch (_) {}
-    }
-
-    const effectiveDistanceKm = routedDistanceKm != null ? routedDistanceKm : selectedStore.distanceKm;
-    const travelTimeMinutes = routedTravelMinutes != null
-      ? routedTravelMinutes
-      : Math.ceil((Number(effectiveDistanceKm || 1.5) / 20) * 60);
-
-    const totalItemCount = normalizedItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
-    const pickPackMinutes = totalItemCount > 5 ? 4 : (totalItemCount > 2 ? 3 : 2);
-    const loadMinutes = Math.min(10, Math.ceil(Number(selectedStore.activeOrders || 0) * 0.5));
-    const surgeBufferMinutes = selectedStore.surge_mode ? 5 : 0;
-    const dynamicSlaMinutes = Math.max(
-      Number(selectedStore.sla_minutes || 10),
-      pickPackMinutes + travelTimeMinutes + loadMinutes + surgeBufferMinutes
-    );
 
     const decision = new FulfillmentDecision({
       storeId: selectedStore.id,
@@ -1522,7 +1600,9 @@ class ServiceabilityService {
       storeLatitude: selectedStore.latitude,
       storeLongitude: selectedStore.longitude,
       distanceKm: selectedStore.distanceKm,
-      slaMinutes: dynamicSlaMinutes,
+      slaMinutes: selectedStore.predictedEtaMinutes,
+      predictedEtaMinutes: selectedStore.predictedEtaMinutes,
+      isApproximateEta: selectedStore.isApproximateEta,
       activeOrders: selectedStore.activeOrders || 0,
       surgeMode: Boolean(selectedStore.surge_mode),
       decisionSource,
@@ -1536,7 +1616,9 @@ class ServiceabilityService {
       decision,
       store: selectedStore,
       distanceKm: decision.distanceKm,
-      slaMinutes: decision.slaMinutes
+      slaMinutes: decision.slaMinutes,
+      predictedEtaMinutes: decision.predictedEtaMinutes,
+      isApproximateEta: decision.isApproximateEta
     };
   }
 

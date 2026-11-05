@@ -45,6 +45,11 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
     }
 
     public func syncPendingToken() {
+        if let unregisterToken = UserDefaults.standard.string(forKey: "pending_apns_unregister_token"), !unregisterToken.isEmpty {
+            Task {
+                await self.unregisterTokenWithBackend()
+            }
+        }
         guard let token = UserDefaults.standard.string(forKey: "pending_apns_device_token"), !token.isEmpty else {
             return
         }
@@ -70,7 +75,7 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
         }
     }
 
-    public func unregisterTokenWithBackend() async {
+    public func unregisterTokenWithBackend(authToken: String? = nil) async {
         let tokenToUnregister = self.deviceToken ?? UserDefaults.standard.string(forKey: "pending_apns_device_token")
         self.deviceToken = nil
         self.isRegisteredForRemoteNotifications = false
@@ -82,13 +87,27 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
             let platform: String
         }
         let body = UnregisterPayload(deviceToken: tokenToUnregister, platform: "IOS")
+
+        var headers: [String: String] = [:]
+        if let token = authToken, !token.isEmpty {
+            headers["Authorization"] = "Bearer \(token)"
+        }
+
         do {
-            let _: [String: AnyCodable] = try await APIClient.shared.delete(
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            let data = try encoder.encode(body)
+            let _: [String: AnyCodable] = try await APIClient.shared.request(
                 endpoint: "/api/v1/customer/device-token",
-                body: body
+                method: "DELETE",
+                body: data,
+                headers: headers
             )
+            UserDefaults.standard.removeObject(forKey: "pending_apns_unregister_token")
         } catch {
-            // Best effort token disassociation on logout
+            if let t = tokenToUnregister {
+                UserDefaults.standard.set(t, forKey: "pending_apns_unregister_token")
+            }
         }
     }
 

@@ -31,14 +31,14 @@ function sanitizeSegment(segment) {
     return '';
   }
 
-  // Reject personal name segments (e.g. 'Asha Mehta', 'Dr. Ramesh Gupta') without geographic indicators
+  // Reject personal name segments (e.g. 'Asha Mehta', 'ramesh kumar', 'Dr. Ramesh Gupta') without geographic indicators
   if (NAME_TITLES.test(s) && !GEOGRAPHIC_INDICATORS.test(s)) {
     return '';
   }
   const words = s.split(/\s+/);
-  if (words.length >= 2 && words.length <= 3) {
-    const allTitleCased = words.every(w => /^[A-Z][a-z]+$/.test(w));
-    if (allTitleCased && !GEOGRAPHIC_INDICATORS.test(s)) {
+  if (words.length >= 2 && words.length <= 4) {
+    const allAlphabetic = words.every(w => /^[a-z]+$/i.test(w));
+    if (allAlphabetic && !GEOGRAPHIC_INDICATORS.test(s)) {
       return '';
     }
   }
