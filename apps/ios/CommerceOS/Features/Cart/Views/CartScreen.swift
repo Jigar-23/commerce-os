@@ -30,6 +30,7 @@ public struct CartScreen: View {
         }
     }
     @State private var activeCartSheet: CartSheetDestination? = nil
+    @State private var activeCheckoutKey: String? = nil
     @State private var isPrescriptionAttached: Bool = true
     @State private var savedPrescriptions: [PrescriptionItem] = []
     @State private var attachedPrescription: PrescriptionItem? = nil
@@ -979,8 +980,10 @@ public struct CartScreen: View {
                     latitude: safeLat,
                     longitude: safeLng
                 )
+                let checkoutKey = activeCheckoutKey ?? "ios_order_\(UUID().uuidString)"
+                activeCheckoutKey = checkoutKey
                 let payload = PlaceOrderRequest(
-                    idempotencyKey: "ios_order_\(UUID().uuidString)",
+                    idempotencyKey: checkoutKey,
                     paymentMethod: "COD",
                     addressId: authoritativeId,
                     deliveryAddress: addressPayload,
@@ -1000,6 +1003,7 @@ public struct CartScreen: View {
                     }
                     self.cartStore.clear()
                     self.isPlacingOrder = false
+                    self.activeCheckoutKey = nil
                     self.orderError = nil
                     self.onCheckoutSuccess(orderRes.id)
                 }

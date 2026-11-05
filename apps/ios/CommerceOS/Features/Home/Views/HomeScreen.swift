@@ -181,7 +181,7 @@ public struct HomeScreen: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(Color(hex: "0F172A"))
 
-                    Text("Delivered in 10 mins")
+                    Text("Express Delivery")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "64748B"))
 

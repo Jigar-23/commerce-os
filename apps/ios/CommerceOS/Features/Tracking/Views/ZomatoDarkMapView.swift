@@ -110,10 +110,15 @@ struct GoogleOrderTrackingWebView: UIViewRepresentable {
         context.coordinator.webView = webView
         onCoordinatorCreated(context.coordinator)
 
-        let initialLat = customerCoordinate?.latitude ?? merchantCoordinate?.latitude ?? riderCoordinate?.latitude ?? 28.1920
-        let initialLng = customerCoordinate?.longitude ?? merchantCoordinate?.longitude ?? riderCoordinate?.longitude ?? 76.6080
-        let html = generateGoogleMapsLiveTrackingHtml(initLat: initialLat, initLng: initialLng)
-        webView.loadHTMLString(html, baseURL: URL(string: "https://maps.googleapis.com"))
+        let validLat = customerCoordinate?.latitude ?? merchantCoordinate?.latitude ?? riderCoordinate?.latitude
+        let validLng = customerCoordinate?.longitude ?? merchantCoordinate?.longitude ?? riderCoordinate?.longitude
+        if let lat = validLat, let lng = validLng {
+            let html = generateGoogleMapsLiveTrackingHtml(initLat: lat, initLng: lng)
+            webView.loadHTMLString(html, baseURL: URL(string: "https://maps.googleapis.com"))
+        } else {
+            let unavailableHtml = generateUnavailableTrackingHtml()
+            webView.loadHTMLString(unavailableHtml, baseURL: URL(string: "https://commerceos.local"))
+        }
 
         return webView
     }
@@ -239,6 +244,33 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
             }
         }
     }
+}
+
+// MARK: - Unavailable Map Pin Template
+private func generateUnavailableTrackingHtml() -> String {
+    return #"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: #F8F9FA; color: #64748B;
+            display: flex; align-items: center; justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <p style="font-size: 15px; font-weight: 600; color: #1E293B; margin-bottom: 4px;">Live Map Pin Unavailable</p>
+        <p style="font-size: 13px; color: #94A3B8; margin: 0;">Waiting for verified delivery address coordinates</p>
+    </div>
+</body>
+</html>
+"""#
 }
 
 // MARK: - Zepto/Blinkit Light Google Maps HTML Template

@@ -92,9 +92,14 @@ struct RiderDarkMapWebView: UIViewRepresentable {
         context.coordinator.webView = webView
         onCoordinatorCreated(context.coordinator)
 
-        let initialLat = riderCoordinate?.latitude ?? merchantCoordinate?.latitude ?? 28.191944
-        let initialLng = riderCoordinate?.longitude ?? merchantCoordinate?.longitude ?? 76.608042
-        let html = generateDarkMapHtml(initLat: initialLat, initLng: initialLng)
+        let validLat = riderCoordinate?.latitude ?? merchantCoordinate?.latitude
+        let validLng = riderCoordinate?.longitude ?? merchantCoordinate?.longitude
+        let html: String
+        if let lat = validLat, let lng = validLng {
+            html = generateDarkMapHtml(initLat: lat, initLng: lng)
+        } else {
+            html = generateUnavailableRiderMapHtml()
+        }
         webView.loadHTMLString(html, baseURL: URL(string: "https://commerceos.local"))
 
         return webView
@@ -205,6 +210,33 @@ final class RiderDarkMapCoordinator: NSObject, WKNavigationDelegate {
             }
         }
     }
+}
+
+// MARK: - Unavailable Dark Map Template
+private func generateUnavailableRiderMapHtml() -> String {
+    return #"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: #050811; color: #94A3B8;
+            display: flex; align-items: center; justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <p style="font-size: 16px; font-weight: 600; color: #E2E8F0; margin-bottom: 4px;">Location Pin Unavailable</p>
+        <p style="font-size: 13px; color: #64748B; margin: 0;">Waiting for verified GPS coordinates...</p>
+    </div>
+</body>
+</html>
+"""#
 }
 
 // MARK: - Dark Obsidian HTML Template

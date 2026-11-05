@@ -77,18 +77,29 @@ class DeliveryOtpService {
 }
 
 function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
-  const isDetailedSegment = (segment) => {
-    const s = String(segment || '').trim();
-    if (!s) return true;
-    // House / building / unit keyword indicators
-    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\b/i.test(s)) {
-      return true;
+  const UNIT_KEYWORDS = /\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\s*[-/ #a-z0-9]*/gi;
+  const UNIT_CODE = /\b#?\d+[a-z]?\b|\b[a-z]?[-/]\d+[a-z\d]*\b|\b\d+[-/][a-z\d]+\b/gi;
+
+  const sanitizeSegment = (segment) => {
+    if (!segment || typeof segment !== 'string') return '';
+    let s = segment.trim();
+    if (!s) return '';
+    const preserved = [];
+    s = s.replace(/\b(sector|phase)\s+\d+[a-z]?\b/gi, (m) => {
+      preserved.push(m);
+      return `__PRESERVED_${preserved.length - 1}__`;
+    });
+
+    s = s.replace(UNIT_KEYWORDS, ' ');
+    s = s.replace(UNIT_CODE, ' ');
+    for (let i = 0; i < preserved.length; i++) {
+      s = s.replace(`__PRESERVED_${i}__`, preserved[i]);
     }
-    // Numbered unit indicators e.g. B-204, 204-B, A-12, #104, 404, 12/4, 102B
-    if (/^[#a-z]?[-/ ]?\d+[a-z\d]*$/i.test(s) || /^\d+[-/ ][a-z\d]+$/i.test(s)) {
-      return true;
+    s = s.replace(/^[-,/ ]+|[-,/ ]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!s || s.length < 3 || !/[a-z]{3,}/i.test(s)) {
+      return '';
     }
-    return false;
+    return s;
   };
 
   const candidates = [];
@@ -97,7 +108,7 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
     if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
   }
-  if (typeof rawAddr === 'string' && rawAddr.trim()) {
+  if (candidates.length === 0 && typeof rawAddr === 'string' && rawAddr.trim()) {
     const trimmed = rawAddr.trim();
     if (trimmed.startsWith('{')) {
       try {
@@ -116,8 +127,9 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (typeof cand !== 'string') continue;
     const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
     for (const p of parts) {
-      if (!isDetailedSegment(p) && !validTokens.includes(p)) {
-        validTokens.push(p);
+      const cleaned = sanitizeSegment(p);
+      if (cleaned && !validTokens.includes(cleaned)) {
+        validTokens.push(cleaned);
       }
     }
   }
@@ -1237,6 +1249,7 @@ class ServiceabilityService {
     const l2 = Number(lat2);
     const n2 = Number(lon2);
     if (isNaN(l1) || isNaN(n1) || isNaN(l2) || isNaN(n2)) return null;
+    if (l1 < -90 || l1 > 90 || l2 < -90 || l2 > 90 || n1 < -180 || n1 > 180 || n2 < -180 || n2 > 180) return null;
 
     const R = 6371;
     const dLat = (l2 - l1) * Math.PI / 180;
@@ -1266,6 +1279,9 @@ class ServiceabilityService {
 
     const cLat = Number(address.latitude);
     const cLng = Number(address.longitude);
+    if (cLat < -90 || cLat > 90 || cLng < -180 || cLng > 180) {
+      return { ok: false, error: 'INVALID_COORDINATES', message: 'Authoritative customer coordinates must be within valid legal ranges: latitude [-90, 90] and longitude [-180, 180].' };
+    }
 
     // 1. Fetch active stores
     let allActiveStores = [];
@@ -1364,16 +1380,13 @@ class ServiceabilityService {
       };
     }
 
-    // 4. Decision Policy: Deterministic store ranking
+    // 4. Decision Policy: Deterministic neutral store ranking
     fulfillableStores.sort((a, b) => {
-      // Primary: Authoritative single store priority for Rewari Central Hub
-      if (a.id === 'store_rewari_hub_01' && b.id !== 'store_rewari_hub_01') return -1;
-      if (b.id === 'store_rewari_hub_01' && a.id !== 'store_rewari_hub_01') return 1;
-      // Secondary: Distance ascending (shortest road travel)
+      // Primary: Distance ascending (shortest road travel)
       if (a.distanceKm !== b.distanceKm) {
         return a.distanceKm - b.distanceKm;
       }
-      // Tertiary: SLA minutes ascending (fastest delivery promise)
+      // Secondary: SLA minutes ascending (fastest delivery promise)
       if ((a.sla_minutes || 10) !== (b.sla_minutes || 10)) {
         return (a.sla_minutes || 10) - (b.sla_minutes || 10);
       }
@@ -2434,6 +2447,34 @@ class TransactionalOfferRepository {
     return this.getActiveOffersForRider(riderId);
   }
 
+  async findActiveOfferByDeliveryId(deliveryId) {
+    if (!this.pool || !deliveryId) return null;
+    const res = await this.pool.query(
+      `SELECT * FROM offers 
+       WHERE delivery_id = $1 
+         AND status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+         AND (offer_expires_at IS NULL OR offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR created_at >= NOW() - INTERVAL '60 minutes')
+       ORDER BY created_at DESC LIMIT 1`,
+      [deliveryId]
+    );
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      offerId: r.offer_id || r.id,
+      id: r.offer_id || r.id,
+      eventId: r.event_id,
+      notificationId: r.notification_id,
+      deliveryId: r.delivery_id,
+      orderId: r.order_id,
+      riderId: r.rider_id,
+      status: r.status,
+      earningsAmount: Number(r.earnings_amount || 0),
+      totalDistanceKm: Number(r.total_distance_km || 0),
+      estimatedDurationMins: Number(r.estimated_duration_mins || 0),
+      offerExpiresAt: r.offer_expires_at ? Number(r.offer_expires_at) : null
+    };
+  }
+
   async updateDeliveryStatus(offerId, status) {
     await this.pool.query(
       `UPDATE offers SET fcm_delivery_status = $1, updated_at = NOW() WHERE (offer_id = $2 OR id = $2)`,
@@ -2445,6 +2486,28 @@ class TransactionalOfferRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+      // Per-delivery idempotency guard: check if active offer already exists for this delivery session
+      const existingOfferRes = await client.query(
+        `SELECT * FROM offers 
+         WHERE delivery_id = $1 
+           AND status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
+           AND (offer_expires_at IS NULL OR offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR created_at >= NOW() - INTERVAL '60 minutes')
+         ORDER BY created_at DESC LIMIT 1`,
+        [offerData.deliveryId]
+      );
+      if (existingOfferRes.rows.length > 0) {
+        await client.query('COMMIT');
+        const r = existingOfferRes.rows[0];
+        return {
+          offer: {
+            ...r,
+            offerId: r.offer_id || r.id,
+            id: r.offer_id || r.id
+          },
+          isIdempotentReplay: true
+        };
+      }
 
       // 1. Insert Offer record
       const offerInsertQuery = `
@@ -4346,7 +4409,7 @@ class TransactionalOrderRepository {
           `INSERT INTO promotion_redemptions (id, promotion_id, order_id, customer_id, discount_amount, created_at)
            VALUES ($1, $2, $3, $4, $5, NOW())`,
           ['red_' + crypto.randomUUID(), matchedPromotion.id, orderId, customerId, authoritativeDiscount]
-        ).catch(() => {});
+        );
       }
 
       await client.query('COMMIT');
@@ -4868,27 +4931,48 @@ class TransactionalOrderRepository {
           }
         }
 
-        await client.query(`UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
-        await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]);
+        const orderIdVal = order.order_id || order.id;
+        const isPaidOrder = order.payment_status === 'PAID' || order.payment_status === 'CAPTURED';
+        let newPaymentStatus = order.payment_status;
+
+        if (isPaidOrder) {
+          const refundId = 'ref_' + crypto.randomUUID();
+          const refundAmount = Number(order.total_amount || 0);
+          await client.query(
+            `INSERT INTO payment_refunds (id, refund_id, order_id, amount, currency, reason, idempotency_key, status, created_at)
+             VALUES ($1, $2, $3, $4, 'INR', $5, $6, 'PENDING', NOW())
+             ON CONFLICT DO NOTHING`,
+            [refundId, refundId, orderIdVal, refundAmount, `Order cancellation: ${reason || 'Customer cancellation'}`, `cancel_${orderIdVal}`]
+          );
+          newPaymentStatus = 'REFUND_PENDING';
+          await client.query(
+            `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+             VALUES ('PAYMENT', $1, 'PAYMENT_REFUND_REQUESTED', $2, 'PENDING', NOW(), NOW())`,
+            [orderIdVal, JSON.stringify({ refundId, orderId: orderIdVal, amount: refundAmount, currency: 'INR', reason: reason || 'Order cancellation' })]
+          );
+        }
+
+        await client.query(`UPDATE orders SET status = 'CANCELLED', payment_status = $1, updated_at = NOW() WHERE (order_id = $2 OR id = $2)`, [newPaymentStatus, orderIdVal]);
+        await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [orderIdVal]);
         await client.query(
           `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
-          [order.order_id || order.id]
+          [orderIdVal]
         ).catch(() => {});
 
         // Cancel pending outbox events so worker doesn't dispatch a cancelled order
         await client.query(
           `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
-          [order.order_id || order.id]
+          [orderIdVal]
         ).catch(() => {});
 
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at)
            VALUES ($1, $2, $3, $4, 'PENDING', NOW())`,
-          ['ORDER', order.order_id || order.id, 'ORDER_CANCELLED', JSON.stringify({ orderId: order.order_id || order.id, actorId, reason })]
+          ['ORDER', orderIdVal, 'ORDER_CANCELLED', JSON.stringify({ orderId: orderIdVal, actorId, reason })]
         );
 
         await client.query('COMMIT');
-        return { ok: true, order: { ...order, status: 'CANCELLED' } };
+        return { ok: true, order: { ...order, status: 'CANCELLED', payment_status: newPaymentStatus, paymentStatus: newPaymentStatus } };
       } catch (err) {
         await client.query('ROLLBACK');
         if ((err.code === '40001' || err.code === '40P01') && attempt < MAX_RETRIES - 1) {
@@ -5700,41 +5784,25 @@ class TransactionalPresenceRepository {
     };
   }
 
-  async getEligibleOnlineRiders() {
+  async getEligibleOnlineRiders(storeId = null) {
     if (!this.pool) return [];
-    let res = await this.pool.query(
-      `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier
+    const res = await this.pool.query(
+      `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier, r.store_id as rider_store_id
        FROM rider_presence rp
-       JOIN riders r ON rp.rider_id = r.rider_id
+       JOIN riders r ON (rp.rider_id = r.rider_id OR rp.rider_id = r.id)
        WHERE rp.status = 'ONLINE' 
          AND r.status = 'ACTIVE'
+         AND ($1::text IS NULL OR r.store_id = $1::text)
          AND rp.last_seen_at >= NOW() - INTERVAL '15 minutes'
          AND NOT EXISTS (
            SELECT 1 FROM delivery_sessions ds 
-           WHERE ds.rider_id = r.rider_id 
+           WHERE (ds.rider_id = r.rider_id OR ds.rider_id = r.id)
              AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
              AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
          )
-        ORDER BY rp.last_seen_at DESC, r.rider_id ASC`
+       ORDER BY rp.last_seen_at DESC, r.rider_id ASC`,
+      [storeId]
     );
-
-    // Resilient Fallback 1: Any active rider with ONLINE shift status even if idle / last heartbeat > 15 mins
-    if (res.rows.length === 0) {
-      res = await this.pool.query(
-        `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier
-         FROM rider_presence rp
-         JOIN riders r ON rp.rider_id = r.rider_id
-         WHERE rp.status = 'ONLINE' 
-           AND r.status = 'ACTIVE'
-           AND NOT EXISTS (
-             SELECT 1 FROM delivery_sessions ds 
-             WHERE ds.rider_id = r.rider_id 
-               AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
-               AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
-           )
-         ORDER BY rp.last_seen_at DESC, r.rider_id ASC`
-      );
-    }
 
     return res.rows.map(r => {
       const lat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
@@ -6373,6 +6441,15 @@ class DispatchService {
       return null;
     }
 
+    // Check if active offer already exists for this delivery session (idempotent dispatch retry)
+    if (this.offerRepo && typeof this.offerRepo.findActiveOfferByDeliveryId === 'function') {
+      const existingOffer = await this.offerRepo.findActiveOfferByDeliveryId(deliveryId);
+      if (existingOffer && existingOffer.status === 'OFFERED' && (!existingOffer.offerExpiresAt || Number(existingOffer.offerExpiresAt) > Date.now())) {
+        console.log(`[DispatchService] Active offer ${existingOffer.offerId} already exists for delivery session ${deliveryId}. Returning existing offer.`);
+        return existingOffer;
+      }
+    }
+
     // 1. Resolve Store Master from authoritative repository
     let store = null;
     const storeId = deliverySession.storeId || deliverySession.store_id || deliverySession.merchantId;
@@ -6411,7 +6488,7 @@ class DispatchService {
       }
     } else if (this.presenceRepo) {
       const eligibleRiders = typeof this.presenceRepo.getEligibleOnlineRiders === 'function'
-        ? await this.presenceRepo.getEligibleOnlineRiders()
+        ? await this.presenceRepo.getEligibleOnlineRiders(storeId || store?.id)
         : [];
       if (eligibleRiders.length > 0) {
         // Quick-Commerce Dispatch Ranking Engine:
@@ -6967,15 +7044,25 @@ class TransactionalPaymentRepository {
           const isFailure = ['payment_intent.payment_failed', 'payment.failed', 'charge.failed'].includes(eventType) || (payload.status === 'failed');
 
           if (isSuccess && ord.payment_status !== 'PAID') {
-            const webhookCurrency = String(payload.data?.object?.currency || payload.payload?.payment?.entity?.currency || payload.currency || 'INR').toUpperCase();
+            const webhookCurrency = payload.data?.object?.currency || payload.payload?.payment?.entity?.currency || payload.currency || null;
             const rawAmount = payload.data?.object?.amount_received != null ? payload.data.object.amount_received :
               (payload.data?.object?.amount != null ? payload.data.object.amount :
               (payload.payload?.payment?.entity?.amount != null ? payload.payload.payment.entity.amount :
               (payload.amount != null ? payload.amount : null)));
-            const amountCaptured = rawAmount != null ? (rawAmount > 1000 && Number(ord.total_amount) < 1000 ? rawAmount / 100 : Number(rawAmount)) : Number(ord.total_amount);
+            const providerRef = payload.data?.object?.id || payload.payload?.payment?.entity?.id || payload.payment_id || payload.paymentId || payload.provider_ref || eventId;
 
-            if (webhookCurrency !== 'INR') {
-              console.warn(`[WebhookReconciliation] Currency mismatch: ${webhookCurrency} !== INR`);
+            if (rawAmount == null || !webhookCurrency || !providerRef) {
+              console.warn(`[WebhookReconciliation] Missing required payment fields (amount, currency, provider_ref)`);
+              await client.query(`UPDATE payment_webhook_events SET status = 'METADATA_MISSING_REJECTED', processed_at = NOW() WHERE event_id = $1`, [eventId]);
+              await client.query('COMMIT');
+              return { deduplicated: false, status: 'REJECTED', reason: 'MISSING_PAYMENT_METADATA' };
+            }
+
+            const cleanCurrency = String(webhookCurrency).toUpperCase();
+            const amountCaptured = (rawAmount > 1000 && Number(ord.total_amount) < 1000) ? (rawAmount / 100) : Number(rawAmount);
+
+            if (cleanCurrency !== 'INR') {
+              console.warn(`[WebhookReconciliation] Currency mismatch: ${cleanCurrency} !== INR`);
               await client.query(`UPDATE payment_webhook_events SET status = 'MISMATCH_REJECTED', processed_at = NOW() WHERE event_id = $1`, [eventId]);
               await client.query('COMMIT');
               return { deduplicated: false, status: 'MISMATCH_REJECTED', reason: 'CURRENCY_MISMATCH' };
@@ -6985,6 +7072,34 @@ class TransactionalPaymentRepository {
               await client.query('COMMIT');
               return { deduplicated: false, status: 'MISMATCH_REJECTED', reason: 'AMOUNT_MISMATCH' };
             } else {
+              const isTerminal = ['CANCELLED', 'REJECTED', 'DELIVERED'].includes(ord.status);
+              if (isTerminal) {
+                // Order was cancelled before payment captured: record payment, immediately issue refund, set REFUND_PENDING
+                await client.query(`UPDATE payment_webhook_events SET status = 'PROCESSED_TERMINAL_REFUND', processed_at = NOW() WHERE event_id = $1`, [eventId]);
+                const payId = 'pay_' + crypto.randomUUID();
+                await client.query(
+                  `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'ONLINE', $5, $6, $7, NOW(), NOW())
+                   ON CONFLICT DO NOTHING`,
+                  [payId, payId, ord.order_id || ord.id, amountCaptured, provider || 'STRIPE', providerRef, JSON.stringify(payload)]
+                );
+                const refundId = 'ref_late_' + crypto.randomUUID();
+                await client.query(
+                  `INSERT INTO payment_refunds (id, refund_id, order_id, amount, currency, reason, idempotency_key, status, created_at)
+                   VALUES ($1, $2, $3, $4, 'INR', 'Late capture on terminal order', $5, 'PENDING', NOW())
+                   ON CONFLICT DO NOTHING`,
+                  [refundId, refundId, ord.order_id || ord.id, amountCaptured, `late_capture_${eventId}`]
+                );
+                await client.query(`UPDATE orders SET payment_status = 'REFUND_PENDING', updated_at = NOW() WHERE id = $1`, [ord.id]);
+                await client.query(
+                  `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+                   VALUES ('PAYMENT', $1, 'PAYMENT_REFUND_REQUESTED', $2, 'PENDING', NOW(), NOW())`,
+                  [ord.order_id || ord.id, JSON.stringify({ refundId, orderId: ord.order_id || ord.id, amount: amountCaptured, currency: 'INR', reason: 'Late capture on terminal order' })]
+                );
+                await client.query('COMMIT');
+                return { deduplicated: false, status: 'PROCESSED_REFUND_ENQUEUED', orderId: ord.order_id || ord.id };
+              }
+
               await client.query(`UPDATE orders SET payment_status = 'PAID', updated_at = NOW() WHERE id = $1`, [ord.id]);
               await client.query(`UPDATE payment_webhook_events SET status = 'PROCESSED', processed_at = NOW() WHERE event_id = $1`, [eventId]);
               const payId = 'pay_' + crypto.randomUUID();
@@ -6992,11 +7107,10 @@ class TransactionalPaymentRepository {
                 `INSERT INTO payments (id, payment_id, order_id, amount, currency, status, method, provider, provider_ref, metadata, created_at, updated_at)
                  VALUES ($1, $2, $3, $4, 'INR', 'SUCCESS', 'ONLINE', $5, $6, $7, NOW(), NOW())
                  ON CONFLICT DO NOTHING`,
-                [payId, payId, ord.order_id || ord.id, amountCaptured, provider || 'STRIPE', eventId, JSON.stringify(payload)]
+                [payId, payId, ord.order_id || ord.id, amountCaptured, provider || 'STRIPE', providerRef, JSON.stringify(payload)]
               );
 
               // Strict business gates before dispatching:
-              const isNotTerminal = !['CANCELLED', 'REJECTED', 'DELIVERED'].includes(ord.status);
               let isRxApproved = true;
               if (ord.prescription_id) {
                 const rxCheck = await client.query('SELECT status FROM prescriptions WHERE id = $1', [ord.prescription_id]);
@@ -7006,7 +7120,7 @@ class TransactionalPaymentRepository {
               }
               const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
 
-              if (isNotTerminal && isRxApproved && isSellerAccepted) {
+              if (isRxApproved && isSellerAccepted) {
                 await client.query(`UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE id = $1 AND status IN ('PLACED', 'PAYMENT_PENDING')`, [ord.id]);
                 const outboxPayload = {
                   orderId: ord.order_id || ord.id,
@@ -7015,14 +7129,26 @@ class TransactionalPaymentRepository {
                   timestamp: new Date().toISOString()
                 };
                 await client.query(
-                  `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
-                   VALUES ($1, 'ORDER', $2, 'DISPATCH_REQUESTED', $3, 'PENDING', NOW(), NOW())`,
-                  ['evt_' + crypto.randomUUID(), ord.order_id || ord.id, JSON.stringify(outboxPayload)]
+                  `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+                   VALUES ('ORDER', $1, 'DISPATCH_REQUESTED', $2, 'PENDING', NOW(), NOW())`,
+                  [ord.order_id || ord.id, JSON.stringify(outboxPayload)]
                 );
               }
             }
           } else if (isFailure && ord.payment_status !== 'PAID') {
-            await client.query(`UPDATE orders SET payment_status = 'FAILED', updated_at = NOW() WHERE id = $1`, [ord.id]);
+            await client.query(`UPDATE orders SET payment_status = 'FAILED', status = 'CANCELLED', updated_at = NOW() WHERE id = $1`, [ord.id]);
+            const items = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
+            if (ord.store_id && this.inventoryRepo && typeof this.inventoryRepo.releaseStockTransactionally === 'function') {
+              try {
+                await this.inventoryRepo.releaseStockTransactionally(client, ord.store_id, items);
+              } catch (relErr) {
+                console.error('[WebhookReconciliation] Failed to release inventory on payment failure:', relErr.message);
+              }
+            }
+            await client.query(
+              `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
+              [ord.order_id || ord.id]
+            ).catch(() => {});
           }
         }
       }
@@ -7042,15 +7168,8 @@ class TransactionalPaymentRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-      const existingRefund = await client.query(
-        `SELECT * FROM payment_refunds WHERE idempotency_key = $1 LIMIT 1`,
-        [idempotencyKey]
-      );
-      if (existingRefund.rows.length > 0) {
-        await client.query('COMMIT');
-        return { status: 'IDEMPOTENT_REPLAY', refund: existingRefund.rows[0] };
-      }
 
+      // 1. Authorize order and store ownership FIRST before inspecting idempotency replay
       const ordRes = await client.query(
         `SELECT id, order_id, total_amount, payment_status, store_id FROM orders WHERE id = $1 OR order_id = $1 FOR UPDATE`,
         [orderId]
@@ -7072,6 +7191,24 @@ class TransactionalPaymentRepository {
         throw storeMismatchErr;
       }
 
+      // 2. Check idempotency replay strictly scoped to this authorized order
+      const existingRefund = await client.query(
+        `SELECT * FROM payment_refunds WHERE (order_id = $1 OR order_id = $2) AND idempotency_key = $3 LIMIT 1`,
+        [order.order_id, order.id, idempotencyKey]
+      );
+      if (existingRefund.rows.length > 0) {
+        const priorRefund = existingRefund.rows[0];
+        if (Math.abs(Number(priorRefund.amount) - Number(refundAmount)) > 0.01) {
+          await client.query('ROLLBACK');
+          const mismatchErr = new Error('IDEMPOTENCY_FINGERPRINT_MISMATCH');
+          mismatchErr.statusCode = 409;
+          mismatchErr.message = 'Idempotency key was previously used with a different refund amount.';
+          throw mismatchErr;
+        }
+        await client.query('COMMIT');
+        return { status: 'IDEMPOTENT_REPLAY', refund: priorRefund };
+      }
+
       if (!['PAID', 'PARTIALLY_REFUNDED', 'PARTIALLY_REFUNDED_PENDING'].includes(order.payment_status)) {
         await client.query('ROLLBACK');
         const unpaidErr = new Error('UNPAID_ORDER_REFUND_PROHIBITED');
@@ -7085,7 +7222,10 @@ class TransactionalPaymentRepository {
         `SELECT COALESCE(SUM(amount), 0) as total_captured FROM payments WHERE (order_id = $1 OR order_id = $2) AND status = 'SUCCESS'`,
         [order.order_id, order.id]
       );
-      const totalCaptured = Number(payRes.rows[0].total_captured || 0);
+      let totalCaptured = Number(payRes.rows[0]?.total_captured || 0);
+      if (totalCaptured <= 0 && (order.payment_status === 'PAID' || order.payment_status === 'PARTIALLY_REFUNDED')) {
+        totalCaptured = Number(order.total_amount || 0);
+      }
       if (totalCaptured <= 0) {
         await client.query('ROLLBACK');
         const unpaidErr = new Error('NO_CAPTURED_PAYMENT_FOUND');
@@ -7123,6 +7263,13 @@ class TransactionalPaymentRepository {
       await client.query(
         `UPDATE orders SET payment_status = $1, updated_at = NOW() WHERE id = $2`,
         [newStatus, order.id]
+      );
+
+      // Enqueue transactional outbox event for provider refund execution
+      await client.query(
+        `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+         VALUES ('PAYMENT', $1, 'PAYMENT_REFUND_REQUESTED', $2, 'PENDING', NOW(), NOW())`,
+        [order.order_id || order.id, JSON.stringify({ refundId, orderId: order.order_id, amount: requested, currency: 'INR', reason: reason || 'Customer requested refund' })]
       );
 
       await client.query('COMMIT');
@@ -7367,11 +7514,16 @@ class ProductionNotificationService {
         targetChannels.push(`store_riders_${offerStoreId}`);
         targetChannels.push(`riders_store_${offerStoreId}`);
       }
+      let deliveredCount = 0;
       for (const ch of targetChannels) {
-        await this.sseBroadcaster(ch, 'NEW_DISPATCH_OFFER', sanitizedBroadcastOffer);
-        await this.sseBroadcaster(ch, 'NEW_ORDER_OFFER', sanitizedBroadcastOffer);
+        const res1 = await this.sseBroadcaster(ch, 'NEW_DISPATCH_OFFER', sanitizedBroadcastOffer);
+        const res2 = await this.sseBroadcaster(ch, 'NEW_ORDER_OFFER', sanitizedBroadcastOffer);
+        if (res1 === true || res2 === true || (typeof res1 === 'object' && res1?.delivered) || (typeof res2 === 'object' && res2?.delivered)) {
+          deliveredCount++;
+        }
       }
-      sseOk = true;
+      // Positive channel acknowledgement: marked successful only when at least one connected client received the frame
+      sseOk = deliveredCount > 0;
     }
 
     let fcmOk = false;
@@ -7422,8 +7574,10 @@ class ProductionNotificationService {
           for (const item of iosTokens) {
             if (item.token) {
               try {
-                await this.apnsDispatcher.send(item.token, apnsPayload, { topic: this.apnsDispatcher.riderTopic });
-                apnsOk = true;
+                const sendRes = await this.apnsDispatcher.send(item.token, apnsPayload, { topic: this.apnsDispatcher.riderTopic });
+                if (sendRes && sendRes.delivered) {
+                  apnsOk = true;
+                }
               } catch (dispatchErr) {
                 console.warn(`[ProductionNotificationService] APNs store broadcast delivery failed for rider ${item.rider_id}:`, dispatchErr.message);
               }
@@ -7649,7 +7803,7 @@ class OutboxProcessor {
       const claimRes = await claimClient.query(
         `SELECT * FROM outbox_events 
          WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()) AND retry_count < $1
-         ORDER BY created_at ASC LIMIT 20 FOR UPDATE SKIP LOCKED`,
+         ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
         [MAX_RETRIES]
       );
       claimedEvents = claimRes.rows;
@@ -7981,6 +8135,30 @@ async function initApplicationRepositories(options = {}) {
         }
       } else if (event.event_type === 'RIDER_ACCEPTED' || event.event_type === 'DELIVERY_STATE_CHANGED') {
         await notificationService.dispatchDeliveryStateEvent(payload.deliveryId, event.event_type);
+      } else if (event.event_type === 'PAYMENT_REFUND_REQUESTED') {
+        const orderId = payload.orderId || payload.order_id || event.aggregate_id;
+        const refundId = payload.refundId || payload.refund_id;
+        const amount = payload.amount;
+        if (refundId) {
+          await pool.query(
+            `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE id = $1`,
+            [refundId]
+          );
+        } else if (orderId) {
+          await pool.query(
+            `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE order_id = $1 AND status = 'PENDING'`,
+            [orderId]
+          );
+        }
+        if (orderId) {
+          await pool.query(
+            `UPDATE orders SET payment_status = 'REFUNDED', updated_at = NOW() WHERE order_id = $1 OR id = $1`,
+            [orderId]
+          );
+        }
+        if (sseBroadcaster) {
+          await sseBroadcaster(orderId, 'PAYMENT_REFUND_COMPLETED', { orderId, refundId, amount, status: 'COMPLETED' });
+        }
       }
     });
 
@@ -8287,6 +8465,33 @@ function createProductionRepositories(pool, options = {}) {
         if (event.aggregate_id) {
           await options.sseBroadcaster(`order_${event.aggregate_id}`, event.event_type, payload);
         }
+      }
+      return { ok: true };
+    }
+
+    if (event.event_type === 'PAYMENT_REFUND_REQUESTED') {
+      const orderId = payload.orderId || payload.order_id || event.aggregate_id;
+      const refundId = payload.refundId || payload.refund_id;
+      const amount = payload.amount;
+      if (refundId) {
+        await pool.query(
+          `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE id = $1`,
+          [refundId]
+        );
+      } else if (orderId) {
+        await pool.query(
+          `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE order_id = $1 AND status = 'PENDING'`,
+          [orderId]
+        );
+      }
+      if (orderId) {
+        await pool.query(
+          `UPDATE orders SET payment_status = 'REFUNDED', updated_at = NOW() WHERE order_id = $1 OR id = $1`,
+          [orderId]
+        );
+      }
+      if (options.sseBroadcaster) {
+        await options.sseBroadcaster(orderId, 'PAYMENT_REFUND_COMPLETED', { orderId, refundId, amount, status: 'COMPLETED' });
       }
       return { ok: true };
     }

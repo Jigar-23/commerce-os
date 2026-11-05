@@ -101,10 +101,23 @@ function calculateCustomerOrderPricing({
   const discount = Math.max(0, Math.round(Number(discountAmount || 0) * 100) / 100);
   const deliveryFee = customDeliveryFee !== null ? Math.max(0, Number(customDeliveryFee)) : (subtotal >= 199.0 ? 0.0 : 2.0);
   const handlingFee = Math.max(0, Number(packagingFee || 0));
-  const tax = Math.max(0, Number(taxAmount || 0));
   const tipAmount = Math.max(0, Number(tip) || 0);
   const codFee = 0.0;
-  const totalAmount = Math.max(0, Math.round((subtotal - discount + deliveryFee + handlingFee + tax + tipAmount + codFee) * 100) / 100);
+
+  // Authoritative GST Tax Calculation:
+  // Catalog item prices in quick-commerce pharmacy are tax-inclusive (5% GST for medicines, 18% for delivery & handling).
+  let computedTax = Number(taxAmount || 0);
+  if (computedTax <= 0 && subtotal > 0) {
+    const medicineGst = Math.round((subtotal - (subtotal / 1.05)) * 100) / 100;
+    const feeGst = (deliveryFee + handlingFee) > 0 ? Math.round(((deliveryFee + handlingFee) - ((deliveryFee + handlingFee) / 1.18)) * 100) / 100 : 0.0;
+    computedTax = Math.round((medicineGst + feeGst) * 100) / 100;
+  }
+  const tax = Math.max(0, computedTax);
+  const cgst = Math.round((tax / 2) * 100) / 100;
+  const sgst = Math.round((tax - cgst) * 100) / 100;
+
+  // Subtotal is tax-inclusive of medicine GST; delivery/handling fees are tax-inclusive of service GST.
+  const totalAmount = Math.max(0, Math.round((subtotal - discount + deliveryFee + handlingFee + tipAmount + codFee) * 100) / 100);
 
   return {
     itemsSubtotal: subtotal,
@@ -112,6 +125,13 @@ function calculateCustomerOrderPricing({
     deliveryFee,
     handlingFee,
     taxAmount: tax,
+    taxBreakdown: {
+      cgst,
+      sgst,
+      totalTax: tax,
+      gstRatePercent: 5,
+      isTaxInclusive: true
+    },
     tipAmount,
     codFee,
     totalAmount

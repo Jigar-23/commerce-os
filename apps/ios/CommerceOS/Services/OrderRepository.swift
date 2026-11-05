@@ -551,6 +551,7 @@ public class OrderRepository: ObservableObject {
     @Published public var isLoadingOrders: Bool = false
     @Published public var orderError: String? = nil
     @Published public var lastPlacedOrder: ServerOrderResponse? = nil
+    @Published public var activeIdempotencyKey: String? = nil
 
     public init(apiClient: APIClient = .shared) {
         self.apiClient = apiClient
@@ -561,7 +562,8 @@ public class OrderRepository: ObservableObject {
         address: DeliveryAddressPayload,
         addressId: String? = nil,
         paymentMethod: String = "COD",
-        prescriptionId: String? = nil
+        prescriptionId: String? = nil,
+        idempotencyKey: String? = nil
     ) async throws -> ServerOrderResponse {
         await MainActor.run {
             self.isPlacingOrder = true
@@ -569,8 +571,13 @@ public class OrderRepository: ObservableObject {
         }
 
         let itemPayloads = items.map { OrderItemPayload(sku: $0.product.sku, quantity: $0.quantity) }
+        let effectiveKey = idempotencyKey ?? self.activeIdempotencyKey ?? "ios_order_\(UUID().uuidString)"
+        await MainActor.run {
+            self.activeIdempotencyKey = effectiveKey
+        }
+
         let request = PlaceOrderRequest(
-            idempotencyKey: "ios_order_\(UUID().uuidString)",
+            idempotencyKey: effectiveKey,
             paymentMethod: paymentMethod,
             addressId: addressId,
             deliveryAddress: address,
@@ -586,6 +593,7 @@ public class OrderRepository: ObservableObject {
                     self.customerOrders.insert(response, at: 0)
                 }
                 self.isPlacingOrder = false
+                self.activeIdempotencyKey = nil
             }
             Task {
                 await self.fetchCustomerOrders()

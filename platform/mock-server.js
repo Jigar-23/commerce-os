@@ -546,18 +546,29 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 }
 
 function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
-  const isDetailedSegment = (segment) => {
-    const s = String(segment || '').trim();
-    if (!s) return true;
-    // House / building / unit keyword indicators
-    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\b/i.test(s)) {
-      return true;
+  const UNIT_KEYWORDS = /\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\s*[-/ #a-z0-9]*/gi;
+  const UNIT_CODE = /\b#?\d+[a-z]?\b|\b[a-z]?[-/]\d+[a-z\d]*\b|\b\d+[-/][a-z\d]+\b/gi;
+
+  const sanitizeSegment = (segment) => {
+    if (!segment || typeof segment !== 'string') return '';
+    let s = segment.trim();
+    if (!s) return '';
+    const preserved = [];
+    s = s.replace(/\b(sector|phase)\s+\d+[a-z]?\b/gi, (m) => {
+      preserved.push(m);
+      return `__PRESERVED_${preserved.length - 1}__`;
+    });
+
+    s = s.replace(UNIT_KEYWORDS, ' ');
+    s = s.replace(UNIT_CODE, ' ');
+    for (let i = 0; i < preserved.length; i++) {
+      s = s.replace(`__PRESERVED_${i}__`, preserved[i]);
     }
-    // Numbered unit indicators e.g. B-204, 204-B, A-12, #104, 404, 12/4, 102B
-    if (/^[#a-z]?[-/ ]?\d+[a-z\d]*$/i.test(s) || /^\d+[-/ ][a-z\d]+$/i.test(s)) {
-      return true;
+    s = s.replace(/^[-,/ ]+|[-,/ ]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!s || s.length < 3 || !/[a-z]{3,}/i.test(s)) {
+      return '';
     }
-    return false;
+    return s;
   };
 
   const candidates = [];
@@ -566,7 +577,7 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
     if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
   }
-  if (typeof rawAddr === 'string' && rawAddr.trim()) {
+  if (candidates.length === 0 && typeof rawAddr === 'string' && rawAddr.trim()) {
     const trimmed = rawAddr.trim();
     if (trimmed.startsWith('{')) {
       try {
@@ -585,8 +596,9 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (typeof cand !== 'string') continue;
     const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
     for (const p of parts) {
-      if (!isDetailedSegment(p) && !validTokens.includes(p)) {
-        validTokens.push(p);
+      const cleaned = sanitizeSegment(p);
+      if (cleaned && !validTokens.includes(cleaned)) {
+        validTokens.push(cleaned);
       }
     }
   }

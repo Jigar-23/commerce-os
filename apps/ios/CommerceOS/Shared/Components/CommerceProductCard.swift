@@ -119,9 +119,11 @@ public struct CommerceProductCard: View {
                     .foregroundColor(Color(hex: "64748B"))
                     .lineLimit(1)
                 
-                Text(model.etaLabel ?? "⚡ In 10 mins")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(Color(hex: "059669"))
+                if let eta = model.etaLabel, !eta.isEmpty {
+                    Text(eta)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(Color(hex: "059669"))
+                }
                 
                 // Status Badges (Rx, Cold Chain)
                 if model.rxRequired || model.coldChain {
@@ -259,9 +261,11 @@ public struct CommerceProductCard: View {
                     .foregroundColor(Color(hex: "64748B"))
                     .lineLimit(1)
                 
-                Text(model.etaLabel ?? "⚡ In 10 mins")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(Color(hex: "059669"))
+                if let eta = model.etaLabel, !eta.isEmpty {
+                    Text(eta)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(Color(hex: "059669"))
+                }
             }
             
             Spacer(minLength: 4)

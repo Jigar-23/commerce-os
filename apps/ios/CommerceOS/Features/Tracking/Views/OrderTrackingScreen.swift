@@ -1229,11 +1229,7 @@ public struct OrderTrackingScreen: View {
         if let lat = trackingData?.merchantLat, let lng = trackingData?.merchantLng, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
-        if let cust = resolvedCustomerCoordinate {
-            // Dark Store Hub offset (~1 km north-east of delivery point)
-            return CLLocationCoordinate2D(latitude: cust.latitude + 0.0075, longitude: cust.longitude + 0.0065)
-        }
-        return CLLocationCoordinate2D(latitude: 28.1995, longitude: 76.6145)
+        return nil
     }
     
     private var resolvedCustomerCoordinate: CLLocationCoordinate2D? {
@@ -1243,7 +1239,7 @@ public struct OrderTrackingScreen: View {
         if let lat = orderDetail?.deliveryAddress?.latitude, let lng = orderDetail?.deliveryAddress?.longitude, lat != 0.0, lng != 0.0 {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
-        return CLLocationCoordinate2D(latitude: 28.1920, longitude: 76.6080)
+        return nil
     }
     
     private func copyOrderIdToClipboard() {

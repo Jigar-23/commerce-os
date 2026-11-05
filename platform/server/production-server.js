@@ -114,6 +114,10 @@ function validateProductionConfiguration(env = process.env) {
     console.error('FATAL_CONFIGURATION_ERROR: FCM_ENDPOINT_URL is strictly required for Commerce OS Production Server.');
     process.exit(1);
   }
+  if (!env.MERCHANT_UPI_VPA) {
+    console.error('FATAL_CONFIGURATION_ERROR: MERCHANT_UPI_VPA is strictly required for Commerce OS Production Server.');
+    process.exit(1);
+  }
 }
 
 if (require.main === module) {
@@ -881,18 +885,29 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
 }
 
 function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
-  const isDetailedSegment = (segment) => {
-    const s = String(segment || '').trim();
-    if (!s) return true;
-    // House / building / unit keyword indicators
-    if (/\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\b/i.test(s)) {
-      return true;
+  const UNIT_KEYWORDS = /\b(flat|apt|apartment|house|room|plot|door|bldg|building|tower|floor|lane|street|road|block|no\.?|secret|unit|suite|shop|villa)\s*[-/ #a-z0-9]*/gi;
+  const UNIT_CODE = /\b#?\d+[a-z]?\b|\b[a-z]?[-/]\d+[a-z\d]*\b|\b\d+[-/][a-z\d]+\b/gi;
+
+  const sanitizeSegment = (segment) => {
+    if (!segment || typeof segment !== 'string') return '';
+    let s = segment.trim();
+    if (!s) return '';
+    const preserved = [];
+    s = s.replace(/\b(sector|phase)\s+\d+[a-z]?\b/gi, (m) => {
+      preserved.push(m);
+      return `__PRESERVED_${preserved.length - 1}__`;
+    });
+
+    s = s.replace(UNIT_KEYWORDS, ' ');
+    s = s.replace(UNIT_CODE, ' ');
+    for (let i = 0; i < preserved.length; i++) {
+      s = s.replace(`__PRESERVED_${i}__`, preserved[i]);
     }
-    // Numbered unit indicators e.g. B-204, 204-B, A-12, #104, 404, 12/4, 102B
-    if (/^[#a-z]?[-/ ]?\d+[a-z\d]*$/i.test(s) || /^\d+[-/ ][a-z\d]+$/i.test(s)) {
-      return true;
+    s = s.replace(/^[-,/ ]+|[-,/ ]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!s || s.length < 3 || !/[a-z]{3,}/i.test(s)) {
+      return '';
     }
-    return false;
+    return s;
   };
 
   const candidates = [];
@@ -901,7 +916,7 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (deliveryAddrObj.area) candidates.push(deliveryAddrObj.area);
     if (deliveryAddrObj.city) candidates.push(deliveryAddrObj.city);
   }
-  if (typeof rawAddr === 'string' && rawAddr.trim()) {
+  if (candidates.length === 0 && typeof rawAddr === 'string' && rawAddr.trim()) {
     const trimmed = rawAddr.trim();
     if (trimmed.startsWith('{')) {
       try {
@@ -920,8 +935,9 @@ function extractCoarseLocality(rawAddr, deliveryAddrObj = null) {
     if (typeof cand !== 'string') continue;
     const parts = cand.split(',').map(p => p.trim()).filter(Boolean);
     for (const p of parts) {
-      if (!isDetailedSegment(p) && !validTokens.includes(p)) {
-        validTokens.push(p);
+      const cleaned = sanitizeSegment(p);
+      if (cleaned && !validTokens.includes(cleaned)) {
+        validTokens.push(cleaned);
       }
     }
   }
@@ -4619,8 +4635,8 @@ const server = http.createServer(async (req, res) => {
       const lat = Number(body.latitude || (body.geoLocation && body.geoLocation.latitude));
       const lng = Number(body.longitude || (body.geoLocation && body.geoLocation.longitude));
 
-      if (!addrLine || isNaN(lat) || isNaN(lng)) {
-        return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, latitude, and longitude are mandatory.' });
+      if (!addrLine || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return sendJson(res, 400, { error: 'INVALID_ADDRESS', message: 'addressLine, and valid legal latitude [-90, 90] and longitude [-180, 180] are mandatory.' });
       }
 
       let rawPhone = String(body.contactPhone || body.phone || body.recipientPhone || '').trim();
@@ -4958,8 +4974,8 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      if (isNaN(lat) || isNaN(lng)) {
-        return sendJson(res, 400, { error: 'INVALID_LOCATION', message: 'Valid latitude and longitude are required.' });
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return sendJson(res, 400, { error: 'INVALID_LOCATION', message: 'Valid legal latitude [-90, 90] and longitude [-180, 180] are required.' });
       }
 
       const fulfillmentDecision = await ServiceabilityService.resolveAuthoritativeFulfillmentStore({
@@ -5158,8 +5174,8 @@ const server = http.createServer(async (req, res) => {
           const addrId = `addr_${crypto.randomUUID()}`;
           const lat = Number(d.latitude);
           const lng = Number(d.longitude);
-          if (isNaN(lat) || isNaN(lng)) {
-            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude and longitude are strictly required.' });
+          if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude [-90, 90] and longitude [-180, 180] are strictly required.' });
           }
           const line = String(d.addressLine || d.address_line || d.formattedAddress || d.formatted_address || '').trim();
           if (!line) {
@@ -5234,8 +5250,19 @@ const server = http.createServer(async (req, res) => {
         ...safeOrderPayload
       } = body;
 
-      // Idempotency Key Handling
-      const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
+      // Idempotency Key Handling: require client key or derive deterministic key from customer and payload
+      let idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
+      if (!idempotencyKey || !String(idempotencyKey).trim()) {
+        const sortedItemsForIdem = (orderItems || []).map(i => ({ sku: i.sku || i.productId, qty: i.quantity })).sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
+        const idemFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+          customerId: authenticatedCustomerId,
+          addressId: customerAddr.id,
+          storeId: authoritativeStoreId,
+          items: sortedItemsForIdem,
+          method: requestedMethod
+        })).digest('hex').substring(0, 32);
+        idempotencyKey = `auto_idem_${authenticatedCustomerId}_${idemFingerprint}`;
+      }
 
       // Authoritative Transactional Order Placement (Single Execution Path)
       const placeResult = await appRepositories.orderRepo.placeOrderTransactionally(authenticatedCustomerId, {
@@ -5298,6 +5325,9 @@ const server = http.createServer(async (req, res) => {
         store_id: placeResult.order.store_id,
         createdAt: placeResult.order.created_at,
         created_at: placeResult.order.created_at,
+        estimatedDeliveryMinutes: Number(placeResult.order.sla_minutes || placeResult.session?.estimated_duration_mins || fulfillmentDecision.decision?.slaMinutes || 12),
+        slaMinutes: Number(placeResult.order.sla_minutes || fulfillmentDecision.decision?.slaMinutes || 12),
+        estimatedDeliveryTime: new Date(Date.now() + (Number(placeResult.order.sla_minutes || fulfillmentDecision.decision?.slaMinutes || 12) * 60000)).toISOString(),
         items: placeResult.order.items || [],
         isIdempotentReplay: Boolean(placeResult.isIdempotentReplay)
       };
@@ -5719,8 +5749,8 @@ const server = http.createServer(async (req, res) => {
           const addrId = `addr_${crypto.randomUUID()}`;
           const lat = Number(d.latitude);
           const lng = Number(d.longitude);
-          if (isNaN(lat) || isNaN(lng)) {
-            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude and longitude are strictly required.' });
+          if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+            return sendJson(res, 400, { error: 'INVALID_DELIVERY_COORDINATES', message: 'Valid delivery latitude [-90, 90] and longitude [-180, 180] are strictly required.' });
           }
           const line = String(d.addressLine || d.formattedAddress || '').trim();
           if (!line) {
@@ -6235,7 +6265,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, alreadyPaid: true, orderId: order.order_id || order.id, paymentStatus: 'PAID' });
       }
 
-      const merchantVpa = process.env.MERCHANT_UPI_VPA || 'commerceos@okaxis';
+      const merchantVpa = process.env.MERCHANT_UPI_VPA;
+      if (!merchantVpa) {
+        return sendJson(res, 500, { error: 'CONFIGURATION_ERROR', message: 'MERCHANT_UPI_VPA is strictly required.' });
+      }
       const merchantName = process.env.MERCHANT_UPI_NAME || 'CommerceOS Store';
       const orderIdVal = order.order_id || order.id;
       const formattedAmount = Number(order.total_amount).toFixed(2);
@@ -8103,7 +8136,7 @@ const server = http.createServer(async (req, res) => {
            FROM offers o
            LEFT JOIN orders ord ON (ord.order_id = o.order_id OR ord.id = o.order_id)
            LEFT JOIN stores s ON s.id = ord.store_id
-           WHERE (o.rider_id = $1 OR (o.is_broadcast = TRUE AND ord.store_id = $2))
+           WHERE ((o.rider_id = $1 AND ($2::text IS NULL OR ord.store_id = $2)) OR (o.is_broadcast = TRUE AND ord.store_id = $2 AND $2::text IS NOT NULL))
              AND o.status IN ('CREATED', 'OFFERED', 'DISPATCHED', 'NOTIFIED', 'DELIVERED_TO_DEVICE', 'DISPLAYED')
              AND (o.offer_expires_at IS NULL OR o.offer_expires_at > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint OR o.created_at >= NOW() - INTERVAL '60 minutes')
            ORDER BY o.created_at DESC LIMIT 5`,

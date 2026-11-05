@@ -610,7 +610,8 @@ CREATE TABLE IF NOT EXISTS promotion_redemptions (
     order_id VARCHAR(64) NOT NULL,
     customer_id VARCHAR(64) NOT NULL,
     discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_promotion_order UNIQUE (promotion_id, order_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_promo_redemptions_cust ON promotion_redemptions(promotion_id, customer_id);
