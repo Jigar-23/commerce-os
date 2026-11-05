@@ -5662,6 +5662,17 @@ async function handleRequest(port, req, res) {
         order.sellerApprovedAt = Date.now();
         order.sellerApprovedBy = authClaims.sub;
 
+        const cAddr = order.deliveryAddress || order.delivery_address || (order.deliveryAddressObj && (order.deliveryAddressObj.addressLine || order.deliveryAddressObj.address_line));
+        const cLat = order.deliveryLat != null ? Number(order.deliveryLat) : (order.deliveryAddressObj?.latitude != null ? Number(order.deliveryAddressObj.latitude) : null);
+        const cLng = order.deliveryLng != null ? Number(order.deliveryLng) : (order.deliveryAddressObj?.longitude != null ? Number(order.deliveryAddressObj.longitude) : null);
+
+        if (!cAddr || cLat == null || cLng == null || isNaN(cLat) || isNaN(cLng) || (Math.abs(cLat) < 0.0001 && Math.abs(cLng) < 0.0001)) {
+          return sendJson(res, 422, {
+            error: 'LOCATION_UNAVAILABLE',
+            message: 'Valid delivery location and coordinates are strictly required. Cannot create offer for unavailable location.'
+          });
+        }
+
         let offerRecord = Object.values(db.offers || {}).find(o => o.orderId === orderId);
         const totalAmt = Number(order.totalAmount || order.payableAmount || 150);
         const estimatedEarn = Math.max(35, Math.round(totalAmt * 0.15));
@@ -5680,12 +5691,12 @@ async function handleRequest(port, req, res) {
             deliveryId,
             orderId: order.id,
             state: 'LOOKING_FOR_RIDER',
-            merchantAddress: order.merchantAddress || '3126/21D Company Bagh, Circular Road, Rewari, Haryana 123401',
-            merchantLat: order.merchantLat || 28.202218,
-            merchantLng: order.merchantLng || 76.615403,
-            customerAddress: order.deliveryAddress || 'Company Bagh, Rewari',
-            customerLat: order.deliveryLat || 28.1970,
-            customerLng: order.deliveryLng || 76.6190,
+            merchantAddress: order.merchantAddress || (order.store && order.store.address) || 'Store Fulfillment Hub',
+            merchantLat: order.merchantLat || (order.store && order.store.latitude) || 28.202218,
+            merchantLng: order.merchantLng || (order.store && order.store.longitude) || 76.615403,
+            customerAddress: cAddr,
+            customerLat: cLat,
+            customerLng: cLng,
             createdAt: Date.now(),
           };
           db.deliverySessions = db.deliverySessions || {};
@@ -5703,7 +5714,7 @@ async function handleRequest(port, req, res) {
             pickupAddress: deliverySession.merchantAddress,
             pickupLatitude: deliverySession.merchantLat,
             pickupLongitude: deliverySession.merchantLng,
-            merchantName: 'Rewari Central Fulfillment Hub',
+            merchantName: order.storeName || order.merchantName || 'Store Fulfillment Hub',
             merchantAddress: deliverySession.merchantAddress,
             merchantLat: deliverySession.merchantLat,
             merchantLng: deliverySession.merchantLng,
@@ -5781,14 +5792,14 @@ async function handleRequest(port, req, res) {
             deliveryId: String(offerRecord.deliveryId),
             orderId: String(order.id || order.orderId),
             riderId: 'ALL',
-            merchantName: String(order.storeName || order.merchantName || 'Rewari Central Hub'),
-            merchantAddress: String(offerRecord.pickupAddress || order.merchantAddress || 'Circular Road, Rewari'),
-            merchantLat: String(offerRecord.pickupLatitude || 28.202224),
-            merchantLng: String(offerRecord.pickupLongitude || 76.615418),
+            merchantName: String(order.storeName || order.merchantName || 'Store Fulfillment Hub'),
+            merchantAddress: String(offerRecord.pickupAddress || order.merchantAddress || ''),
+            merchantLat: String(offerRecord.pickupLatitude || ''),
+            merchantLng: String(offerRecord.pickupLongitude || ''),
             customerName: String(order.customerName || 'Customer'),
-            customerAddress: String(offerRecord.deliveryAddress || order.deliveryAddress || 'Rewari'),
-            customerLat: String(offerRecord.customerLat || 28.1918),
-            customerLng: String(offerRecord.customerLng || 76.6081),
+            customerAddress: extractCoarseLocality(offerRecord.deliveryAddress || order.deliveryAddress || ''),
+            customerLat: String(offerRecord.customerLat || ''),
+            customerLng: String(offerRecord.customerLng || ''),
             orderTotal: String(displayBill),
             totalAmount: String(displayBill),
             earningsAmount: String(offerRecord.estimatedEarnings || estimatedEarn || 35),

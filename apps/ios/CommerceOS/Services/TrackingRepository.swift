@@ -546,14 +546,24 @@ public class TrackingRepository: ObservableObject {
             }
         }
 
-        // 3. High-frequency 2-second live telemetry polling (RunLoop-independent Task loop)
+        // 3. Fallback polling loop: active ONLY when SSE stream is unavailable or reconnecting (Finding 14)
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
+            var pollBackoffAttempt = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if Task.isCancelled { break }
                 guard let self = self else { break }
-                await self.fetchActiveDelivery(orderId: orderId)
+                // Use SSE as primary path; poll with backoff only while stream is reconnecting or unavailable
+                if self.isStreamReconnecting || !self.isLiveStreaming {
+                    let delay = self.calculateBackoffDelay(attempt: pollBackoffAttempt)
+                    pollBackoffAttempt += 1
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if Task.isCancelled { break }
+                    await self.fetchActiveDelivery(orderId: orderId)
+                } else {
+                    pollBackoffAttempt = 0
+                    // Idle while live SSE stream is healthy and active
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
                 if let status = self.activeTracking?.status.uppercased(), status == "DELIVERED" || status == "CANCELLED" {
                     await MainActor.run {
                         self.stopLiveTracking()

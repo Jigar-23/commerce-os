@@ -6352,61 +6352,10 @@ const server = http.createServer(async (req, res) => {
     // Direct Zero-Fee UPI Payment: Initiate Intent URI: POST /api/v1/payments/upi/initiate
     // -------------------------------------------------------------
     if (pathname === '/api/v1/payments/upi/initiate' && method === 'POST') {
-      const authClaims = verifyAndDecodeJwt(req);
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for UPI initiation.' });
-      }
-
-      const body = await parseJsonBody(req);
-      const targetOrderId = body.orderId || body.order_id;
-      if (!targetOrderId) {
-        return sendJson(res, 400, { error: 'ORDER_ID_REQUIRED', message: 'orderId is required to initiate UPI payment.' });
-      }
-
-      let order = null;
-      if (pool) {
-        const orderRes = await pool.query(
-          `SELECT id, order_id, customer_id, store_id, total_amount, payment_method, payment_status, status FROM orders WHERE (order_id = $1 OR id = $1) LIMIT 1`,
-          [targetOrderId]
-        );
-        if (orderRes.rows.length === 0) {
-          return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
-        }
-        order = orderRes.rows[0];
-      } else {
-        const list = appRepositories.orderRepo.db?.orders || [];
-        order = list.find(o => o.orderId === targetOrderId || o.id === targetOrderId);
-        if (!order) return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
-      }
-
-      if (order.customer_id && order.customer_id !== authClaims.sub && authClaims.role !== 'ROLE_ADMIN') {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Authenticated customer does not own this order.' });
-      }
-
-      if (order.payment_status === 'PAID') {
-        return sendJson(res, 200, { ok: true, alreadyPaid: true, orderId: order.order_id || order.id, paymentStatus: 'PAID' });
-      }
-
-      const merchantVpa = process.env.MERCHANT_UPI_VPA;
-      if (!merchantVpa) {
-        return sendJson(res, 500, { error: 'CONFIGURATION_ERROR', message: 'MERCHANT_UPI_VPA is strictly required.' });
-      }
-      const merchantName = process.env.MERCHANT_UPI_NAME || 'CommerceOS Store';
-      const orderIdVal = order.order_id || order.id;
-      const formattedAmount = Number(order.total_amount).toFixed(2);
-      const encodedMerchantName = encodeURIComponent(merchantName);
-      const upiUri = `upi://pay?pa=${merchantVpa}&pn=${encodedMerchantName}&am=${formattedAmount}&tr=${orderIdVal}&tn=Order%20${orderIdVal}&cu=INR`;
-
-      return sendJson(res, 200, {
-        ok: true,
-        orderId: orderIdVal,
-        amount: Number(formattedAmount),
-        currency: 'INR',
-        merchantVpa,
-        merchantName,
-        upiUri,
-        qrPayload: upiUri,
-        expiryMinutes: 15
+      return sendJson(res, 400, {
+        error: 'PREPAID_PAYMENTS_DISABLED',
+        code: 'PREPAID_PAYMENTS_DISABLED',
+        message: 'Prepaid online payment initiation is disabled for this release. Only Cash on Delivery (COD) / Pay on Delivery is supported.'
       });
     }
 
@@ -7175,6 +7124,14 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 404, { error: 'ORDER_NOT_FOUND', message: 'Order not found.' });
           }
           const ord = ordRes.rows[0];
+          const isAdmin = authClaims.role?.includes('ADMIN') || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.sub === 'admin';
+          if (!isAdmin) {
+            if (!authorizedStoreId || !ord.store_id || ord.store_id !== authorizedStoreId) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
+            }
+          }
+
           if (['CANCELLED', 'REJECTED'].includes(ord.status)) {
             await client.query('ROLLBACK');
             return sendJson(res, 409, { error: 'ORDER_CANCELLED', message: 'Cannot collect COD for a cancelled order.' });
@@ -7205,14 +7162,6 @@ const server = http.createServer(async (req, res) => {
               error: 'ORDER_NOT_DELIVERED',
               message: `Cannot collect COD for order in status '${ord.status}'. Order must be DELIVERED before merchant settlement.`
             });
-          }
-
-          const isAdmin = authClaims.role?.includes('ADMIN') || authClaims.roles?.includes('ROLE_ADMIN') || authClaims.sub === 'admin';
-          if (!isAdmin) {
-            if (!authorizedStoreId || !ord.store_id || ord.store_id !== authorizedStoreId) {
-              await client.query('ROLLBACK');
-              return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Order does not belong to authorized store.' });
-            }
           }
           if (!ord.is_cod) {
             await client.query('ROLLBACK');
