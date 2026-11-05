@@ -194,7 +194,7 @@ object LocalPrescriptionManager {
                 prefs.edit().remove(KEY_PREFIX + safeId).commit()
                 true
             } else {
-                Log.e(TAG, "Failed to securely save prescription for $safeId")
+                Log.e(TAG, "Failed to securely save prescription")
                 false
             }
         } catch (e: Exception) {

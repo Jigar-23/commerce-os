@@ -336,9 +336,61 @@ class CheckoutViewModel(
         checkoutJob?.cancel()
         checkoutJob = viewModelScope.launch {
             mutationGate?.lockMutations()
-            mutationGate?.awaitMutationsIdle()
+            val settledCart = mutationGate?.awaitMutationsIdle() ?: uiState.items
 
-            // Re-read and revalidate state after mutation barrier
+            val currentItems = settledCart.toList()
+            val currentSubtotal = itemsSubtotal(currentItems)
+            val currentDiscount = uiState.couponDiscount.min(currentSubtotal)
+
+            uiState = uiState.copy(
+                items = currentItems,
+                itemsSubtotal = currentSubtotal,
+                couponDiscount = currentDiscount,
+                grandTotal = currentSubtotal
+                    .add(uiState.deliveryFee)
+                    .add(uiState.coldChainFee)
+                    .subtract(currentDiscount)
+                    .coerceAtLeast(BigDecimal.ZERO)
+            )
+
+            val address = uiState.address
+            if (address == null || address.id.isBlank()) {
+                failCheckout("CHECKOUT_NOT_READY", "Select a delivery address")
+                return@launch
+            }
+            if (currentItems.isEmpty()) {
+                failCheckout("CHECKOUT_NOT_READY", "Cart is empty")
+                return@launch
+            }
+
+            // Rerun server serviceability check against settled cart items & address
+            val requestItems = currentItems.map { ServiceabilityItem(it.sku, it.quantity, it.coldChain) }
+            when (val srvResult = repository.getServiceability(customerIdSnapshot, address.id, requestItems)) {
+                is ApiResult.Success -> {
+                    if (!srvResult.data.eligible) {
+                        failCheckout("UNSERVICEABLE", "Selected address is currently outside our delivery zone.")
+                        return@launch
+                    }
+                    val deliveryFee = BigDecimal.valueOf(srvResult.data.deliveryFee)
+                    val coldChainFee = BigDecimal.valueOf(srvResult.data.coldChainFee)
+                    uiState = uiState.copy(
+                        serviceability = ServiceabilityState.Success(address.id, srvResult.data),
+                        deliveryFee = deliveryFee,
+                        coldChainFee = coldChainFee,
+                        grandTotal = currentSubtotal
+                            .add(deliveryFee)
+                            .add(coldChainFee)
+                            .subtract(currentDiscount)
+                            .coerceAtLeast(BigDecimal.ZERO)
+                    )
+                }
+                is ApiResult.Failure -> {
+                    failCheckout("SERVICEABILITY_ERROR", srvResult.error.message)
+                    return@launch
+                }
+            }
+
+            // Re-read and revalidate state after mutation barrier & serviceability refresh
             val freshSnapshot = uiState
             if (!freshSnapshot.readyForPayment) {
                 val reason = when {
@@ -350,12 +402,6 @@ class CheckoutViewModel(
                     else -> "Checkout is not ready for payment"
                 }
                 failCheckout("CHECKOUT_NOT_READY", reason)
-                return@launch
-            }
-
-            val address = freshSnapshot.address
-            if (address == null) {
-                failCheckout("CHECKOUT_NOT_READY", "Select a delivery address")
                 return@launch
             }
 

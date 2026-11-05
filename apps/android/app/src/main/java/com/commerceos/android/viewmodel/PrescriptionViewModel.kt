@@ -179,6 +179,9 @@ class PrescriptionViewModel(
             errorMessage = "Attach at least one prescription image"
             return
         }
+        if (isUploading && activeCustomerId == safeCustomerId) {
+            return
+        }
         if (activeCustomerId != safeCustomerId) {
             activeCustomerId = safeCustomerId
             loadGeneration++
@@ -206,8 +209,9 @@ class PrescriptionViewModel(
                     is ApiResult.Success -> {
                         if (requestGeneration == uploadGeneration && activeCustomerId == safeCustomerId) {
                             val serverRx = result.data.copy(attachments = attachments)
+                            var localCacheSaved = true
                             if (appContext != null) {
-                                LocalPrescriptionManager.savePrescription(appContext, serverRx)
+                                localCacheSaved = LocalPrescriptionManager.savePrescription(appContext, serverRx)
                                 com.commerceos.android.notifications.LocalNotificationStorage.saveNotification(
                                     appContext,
                                     com.commerceos.android.notifications.InAppNotificationItem(
@@ -219,7 +223,11 @@ class PrescriptionViewModel(
                                 )
                             }
                             prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
-                            errorMessage = null
+                            if (!localCacheSaved) {
+                                errorMessage = "Prescription uploaded to server, but offline encrypted cache could not be saved."
+                            } else {
+                                errorMessage = null
+                            }
                             onUploaded?.invoke(serverRx)
                         }
                     }

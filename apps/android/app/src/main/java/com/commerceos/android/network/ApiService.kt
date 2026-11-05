@@ -515,7 +515,7 @@ object NetworkClient {
     /** Authoritative Server-Sent Events (SSE) Stream Call for Live Order Telemetry */
     fun openOrderSseCall(orderId: String): okhttp3.Call {
         val token = authTokenProvider()
-        val streamUrl = "$baseUrl/api/v1/delivery/order/$orderId/stream${if (token.isNotBlank()) "?token=${java.net.URLEncoder.encode(token, "UTF-8")}" else ""}"
+        val streamUrl = "$baseUrl/api/v1/delivery/order/$orderId/stream"
         val request = Request.Builder()
             .url(streamUrl)
             .header("Accept", "text/event-stream")
