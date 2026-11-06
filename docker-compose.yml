@@ -35,6 +35,9 @@ services:
       retries: 5
 
   osrm-backend:
+    build:
+      context: .
+      dockerfile: platform/docker/Dockerfile.osrm
     image: osrm/osrm-backend:v5.27.1
     container_name: commerceos-osrm
     restart: unless-stopped

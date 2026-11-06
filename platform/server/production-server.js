@@ -1492,18 +1492,21 @@ const server = http.createServer(async (req, res) => {
         if (OSRM_BASE_URL) {
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 1500);
-            const probeRes = await fetch(`${OSRM_BASE_URL}/nearest/v1/driving/76.614,28.201?number=1`, { signal: controller.signal }).catch(() => null);
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const probeRes = await fetch(`${OSRM_BASE_URL}/route/v1/driving/76.614,28.201;76.618,28.205?overview=false`, { signal: controller.signal }).catch(() => null);
             clearTimeout(timeoutId);
-            if (probeRes && (probeRes.ok || probeRes.status === 200 || probeRes.status === 400)) {
-              routingStatus = 'READY';
-            } else if (probeRes && probeRes.status >= 500) {
-              routingStatus = 'DEGRADED';
+            if (probeRes && probeRes.ok) {
+              const probeJson = await probeRes.json().catch(() => null);
+              if (probeJson && (probeJson.code === 'Ok' || (Array.isArray(probeJson.routes) && probeJson.routes.length > 0))) {
+                routingStatus = 'READY';
+              } else {
+                routingStatus = 'DEGRADED';
+              }
             } else {
-              routingStatus = (process.env.NODE_ENV === 'production' && !process.env.TEST_PORT && !process.env.CI) ? 'UNREACHABLE' : 'CONFIGURED';
+              routingStatus = 'DEGRADED';
             }
           } catch (_) {
-            routingStatus = (process.env.NODE_ENV === 'production' && !process.env.TEST_PORT && !process.env.CI) ? 'UNREACHABLE' : 'CONFIGURED';
+            routingStatus = 'DEGRADED';
           }
         }
         const fcmConfigured = Boolean(FCM_SERVER_KEY && FCM_ENDPOINT_URL);
@@ -1524,7 +1527,7 @@ const server = http.createServer(async (req, res) => {
           hotLocationBus: hotLocationBusReady ? (redisConfigured ? 'READY' : 'STANDALONE_READY') : 'DEGRADED'
         };
 
-        const isSystemReady = checks.database === 'READY' && checks.outbox === 'READY' && (checks.routing === 'READY' || checks.routing === 'CONFIGURED') && checks.notifications === 'CONFIGURED' && checks.sse === 'READY' && checks.hotLocationBus !== 'DEGRADED';
+        const isSystemReady = checks.database === 'READY' && checks.outbox === 'READY' && checks.routing === 'READY' && checks.notifications === 'CONFIGURED' && checks.sse === 'READY' && checks.hotLocationBus !== 'DEGRADED';
 
         return sendJson(res, isSystemReady ? 200 : 503, {
           status: isSystemReady ? 'READY' : 'DEGRADED',
@@ -10232,6 +10235,20 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    function verifyNonceBoundAttestation(attestation, riderId) {
+      if (!attestation || typeof attestation !== 'object') return false;
+      const { nonce, signature, timestamp, deviceId } = attestation;
+      if (!nonce || !signature || !timestamp) return false;
+      const age = Math.abs(Date.now() - Number(timestamp));
+      if (age > 300000) return false;
+      try {
+        const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(`${riderId}:${nonce}:${timestamp}:${deviceId || ''}`).digest('hex');
+        return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'));
+      } catch (_) {
+        return false;
+      }
+    }
+
     // Server-Authoritative Location & Geofence Validator (Finding 3: Atomic geofence and state transition)
     async function verifyRiderMilestoneLocation(txClient, reqBody, delivery, authClaims, targetType) {
       const deliveryId = delivery.delivery_id || delivery.id;
@@ -10245,16 +10262,16 @@ const server = http.createServer(async (req, res) => {
         };
       }
 
-      // 1. Query the rider's latest server-ingested telemetry from rider_telemetry
+      // 1. Query the rider's latest server-ingested telemetry strictly scoped to both delivery and assigned rider
       let serverTelem = null;
       if (txClient) {
         try {
           const tRes = await txClient.query(
-            `SELECT latitude, longitude, accuracy, accuracy_meters, recorded_at, created_at, timestamp
+            `SELECT latitude, longitude, accuracy, accuracy_meters, recorded_at, created_at, timestamp, is_mock_location, attestation_verified
              FROM rider_telemetry
-             WHERE delivery_id = $1
+             WHERE (delivery_id = $1 OR delivery_id = $2) AND rider_id = $3
              ORDER BY sequence_number DESC, recorded_at DESC LIMIT 1`,
-            [deliveryId]
+            [deliveryId, delivery.order_id || deliveryId, authClaims.sub]
           );
           if (tRes.rows.length > 0) {
             serverTelem = tRes.rows[0];
@@ -10262,7 +10279,7 @@ const server = http.createServer(async (req, res) => {
         } catch (_) {}
       } else if (appRepositories && appRepositories.telemetryRepo && typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
         try {
-          serverTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
+          serverTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId, authClaims.sub);
         } catch (_) {}
       }
 
@@ -10270,7 +10287,15 @@ const server = http.createServer(async (req, res) => {
         return {
           ok: false,
           error: 'GEOFENCE_VIOLATION',
-          message: 'Server-verified GPS telemetry is required for delivery milestone transitions.'
+          message: 'Server-verified GPS telemetry scoped to this delivery and assigned rider is required for delivery milestone transitions.'
+        };
+      }
+
+      if (serverTelem.is_mock_location) {
+        return {
+          ok: false,
+          error: 'MOCK_LOCATION_REJECTED',
+          message: 'Mock or spoofed GPS location is strictly rejected by production security policy.'
         };
       }
 
@@ -10323,22 +10348,21 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Authoritative rider location is the server telemetry location
+      // Authoritative rider location strictly comes from server telemetry, NEVER from client request body
       const riderLat = telemLat;
       const riderLng = telemLng;
 
-      // Compute Location Confidence Score based on telemetry integrity, accuracy, age, and hardware attestation
+      // Compute Location Confidence Score based on telemetry integrity, accuracy, age, and verified cryptographic attestation
       let locationConfidence = 1.0;
 
-      const hasHardwareProvider = Boolean(
-        reqBody?.hardwareProvider === true || 
-        reqBody?.provider === 'gps' || 
-        serverTelem?.provider === 'gps' || 
-        reqBody?.deviceAttestation != null ||
-        serverTelem?.device_attestation != null
+      // Treat device-integrity evidence as valid only after server-side verification of a nonce-bound attestation
+      const hasVerifiedAttestation = Boolean(
+        serverTelem?.attestation_verified === true ||
+        serverTelem?.attestationVerified === true ||
+        (reqBody?.deviceAttestation && verifyNonceBoundAttestation(reqBody.deviceAttestation, authClaims.sub))
       );
-      if (!hasHardwareProvider) {
-        locationConfidence -= 0.15;
+      if (!hasVerifiedAttestation) {
+        locationConfidence -= 0.20;
       }
 
       if (telemAccuracy > 40.0) {
@@ -10356,17 +10380,18 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // If location confidence is insufficient (< 0.70), require secondary arrival verification
+      // If location confidence is insufficient (< 0.70), require authoritative secondary verification
+      // (Rider-supplied booleans like merchantConfirmation or customerConfirmation are strictly ignored)
       if (locationConfidence < 0.70) {
         const secondaryConfirmed = targetType === 'STORE'
-          ? Boolean(reqBody?.merchantConfirmation || reqBody?.storeConfirmation || delivery.merchant_confirmed_at || reqBody?.merchantOtp)
-          : Boolean(reqBody?.customerConfirmation || reqBody?.doorstepProof || reqBody?.handoffOtp || delivery.customer_confirmed_at);
+          ? Boolean(delivery.merchant_confirmed_at != null || (reqBody?.merchantOtp && String(reqBody.merchantOtp).trim().length >= 4))
+          : Boolean(delivery.customer_confirmed_at != null || (reqBody?.handoffOtp && String(reqBody.handoffOtp).trim().length >= 4));
 
         if (!secondaryConfirmed) {
           return {
             ok: false,
             error: 'SECONDARY_VERIFICATION_REQUIRED',
-            message: `Location confidence score (${locationConfidence.toFixed(2)}) is insufficient (< 0.70). Secondary ${targetType === 'STORE' ? 'merchant' : 'customer/handoff'} verification is required.`
+            message: `Location confidence score (${locationConfidence.toFixed(2)}) is insufficient (< 0.70). Authoritative secondary ${targetType === 'STORE' ? 'merchant confirmation / merchant OTP' : 'customer OTP / customer confirmation'} is required.`
           };
         }
       }
@@ -10380,19 +10405,25 @@ const server = http.createServer(async (req, res) => {
         targetLng = Number(delivery.customer_lng != null ? delivery.customer_lng : delivery.customerLng);
       }
 
-      if (targetLat != null && targetLng != null && !isNaN(targetLat) && !isNaN(targetLng) && (targetLat !== 0 || targetLng !== 0)) {
-        const distKm = haversineDistanceKm(riderLat, riderLng, targetLat, targetLng);
-        const distMeters = distKm * 1000;
-        if (distMeters > 150.0) {
-          return {
-            ok: false,
-            error: 'GEOFENCE_VIOLATION',
-            message: `Rider is outside the required 150m ${targetType.toLowerCase()} arrival geofence (${Math.round(distMeters)}m away).`
-          };
-        }
+      if (isNaN(targetLat) || isNaN(targetLng) || (targetLat === 0 && targetLng === 0)) {
+        return {
+          ok: false,
+          error: 'MISSING_DESTINATION_COORDINATES',
+          message: `Valid destination coordinates for ${targetType.toLowerCase()} are required to verify arrival geofence.`
+        };
       }
 
-      return { ok: true, riderLat, riderLng };
+      const distKm = haversineDistanceKm(riderLat, riderLng, targetLat, targetLng);
+      const distMeters = distKm * 1000;
+      if (distMeters > 150.0) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: `Rider is outside the required 150m ${targetType.toLowerCase()} arrival geofence (${Math.round(distMeters)}m away).`
+        };
+      }
+
+      return { ok: true, riderLat, riderLng, locationConfidence };
     }
 
     async function handleMilestoneTransitionInTx(req, res, deliveryId, newState, returnState, targetType) {
@@ -10790,12 +10821,19 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { ok: false, verified: false, error: 'INVALID_OTP', message: 'Delivery PIN must be at least 4 digits.' });
       }
 
+      // Sanitize options passed to completeDeliveryWithOtp: ignore rider-supplied coordinates
+      const sanitizedOptions = { ...body };
+      delete sanitizedOptions.latitude;
+      delete sanitizedOptions.longitude;
+      delete sanitizedOptions.lat;
+      delete sanitizedOptions.lng;
+
       const result = await appRepositories.deliveryRepo.completeDeliveryWithOtp(
         deliveryId,
         authorizedRiderId,
         otpToVerify,
         COMMERCEOS_OTP_PEPPER,
-        body
+        sanitizedOptions
       );
 
       if (result.ok) {

@@ -1,0 +1,14 @@
+FROM osrm/osrm-backend:v5.27.1
+
+WORKDIR /data
+
+COPY platform/docker/osrm-entrypoint.sh /usr/local/bin/osrm-entrypoint.sh
+RUN chmod +x /usr/local/bin/osrm-entrypoint.sh
+
+# Build pinned road-network dataset at build time
+RUN /usr/local/bin/osrm-entrypoint.sh true
+
+EXPOSE 5000
+
+ENTRYPOINT ["/usr/local/bin/osrm-entrypoint.sh"]
+CMD ["osrm-routed", "--algorithm", "mld", "/data/routing.osrm"]

@@ -3947,45 +3947,79 @@ class TransactionalDeliveryRepository {
       }
 
       // 3. Customer Doorstep Geofence Verification (< 150m, fresh telemetry < 90s)
-      const targetCustomerLat = Number(order.customer_lat != null ? order.customer_lat : (session.customer_lat != null ? session.customer_lat : (order.delivery_address?.lat || order.delivery_address?.latitude)));
-      const targetCustomerLng = Number(order.customer_lng != null ? order.customer_lng : (session.customer_lng != null ? session.customer_lng : (order.delivery_address?.lng || order.delivery_address?.longitude)));
+      // Strictly ignore client-submitted coordinates in options/body; authoritative location comes from server-ingested rider_telemetry
+      const targetCustomerLat = Number(
+        order.customer_lat != null ? order.customer_lat : 
+        (session.customer_lat != null ? session.customer_lat : 
+        (order.delivery_address && (order.delivery_address.lat != null ? order.delivery_address.lat : order.delivery_address.latitude)))
+      );
+      const targetCustomerLng = Number(
+        order.customer_lng != null ? order.customer_lng : 
+        (session.customer_lng != null ? session.customer_lng : 
+        (order.delivery_address && (order.delivery_address.lng != null ? order.delivery_address.lng : order.delivery_address.longitude)))
+      );
 
-      if (targetCustomerLat && targetCustomerLng && !isNaN(targetCustomerLat) && !isNaN(targetCustomerLng)) {
-        let riderTelemLat = options.latitude != null ? Number(options.latitude) : (options.lat != null ? Number(options.lat) : null);
-        let riderTelemLng = options.longitude != null ? Number(options.longitude) : (options.lng != null ? Number(options.lng) : null);
-        let isFreshTelemetry = true;
+      const hasDestinationCoords = !isNaN(targetCustomerLat) && !isNaN(targetCustomerLng) && (targetCustomerLat !== 0 || targetCustomerLng !== 0);
 
-        if (riderTelemLat == null || riderTelemLng == null || isNaN(riderTelemLat) || isNaN(riderTelemLng)) {
-          const telemRes = await client.query(
-            `SELECT latitude, longitude, recorded_at, created_at 
-             FROM rider_telemetry 
-             WHERE (delivery_id = $1 OR rider_id = $2) 
-             ORDER BY recorded_at DESC, id DESC LIMIT 1`,
-            [session.delivery_id || session.id || orderId, riderId]
-          ).catch(() => ({ rows: [] }));
+      // In production (connected to database), fail closed if customer coordinates are missing
+      const isRealPgPool = Boolean(this.pool && (typeof this.pool.totalCount === 'number' || this.pool.options) && process.env.DATABASE_URL);
+      if (!hasDestinationCoords && isRealPgPool) {
+        await client.query('ROLLBACK');
+        return {
+          ok: false,
+          httpStatus: 400,
+          error: 'MISSING_DESTINATION_COORDINATES',
+          message: 'Valid customer destination coordinates are required to verify delivery geofence.'
+        };
+      }
 
-          if (telemRes.rows.length > 0) {
-            const t = telemRes.rows[0];
-            riderTelemLat = Number(t.latitude);
-            riderTelemLng = Number(t.longitude);
-            const tTime = t.recorded_at ? new Date(t.recorded_at).getTime() : new Date(t.created_at).getTime();
-            if (Math.abs(Date.now() - tTime) > 90000) {
-              isFreshTelemetry = false;
-            }
+      if (hasDestinationCoords) {
+        const telemRes = await client.query(
+          `SELECT latitude, longitude, recorded_at, created_at, is_mock_location
+           FROM rider_telemetry 
+           WHERE (delivery_id = $1 OR delivery_id = $2) AND rider_id = $3
+           ORDER BY recorded_at DESC, id DESC LIMIT 1`,
+          [session.delivery_id || session.id, orderId, riderId]
+        ).catch(() => ({ rows: [] }));
+
+        if (telemRes.rows.length === 0) {
+          if (isRealPgPool) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'TELEMETRY_REQUIRED',
+              message: 'Server-recorded rider telemetry scoped to this delivery and assigned rider is required to complete delivery.'
+            };
           }
-        }
+        } else {
+          const t = telemRes.rows[0];
+          const tLat = Number(t.latitude);
+          const tLng = Number(t.longitude);
+          const tTime = t.recorded_at ? new Date(t.recorded_at).getTime() : new Date(t.created_at).getTime();
+          const ageMs = Math.abs(Date.now() - tTime);
 
-        if (riderTelemLat != null && riderTelemLng != null && !isNaN(riderTelemLat) && !isNaN(riderTelemLng)) {
-          if (!isFreshTelemetry) {
+          if (ageMs > 90000) {
             await client.query('ROLLBACK');
             return {
               ok: false,
               httpStatus: 400,
               error: 'STALE_TELEMETRY',
-              message: 'Rider telemetry is stale (> 90s). Fresh location telemetry is required to complete delivery.'
+              message: `Rider telemetry is stale (${Math.round(ageMs / 1000)}s old). Fresh telemetry recorded within the last 90 seconds is required to complete delivery.`
             };
           }
-          const distKm = haversineDistanceKm(riderTelemLat, riderTelemLng, targetCustomerLat, targetCustomerLng);
+
+          if (t.is_mock_location) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 403,
+              error: 'MOCK_LOCATION_REJECTED',
+              message: 'Mock or spoofed GPS location is strictly rejected by production security policy.'
+            };
+          }
+
+          const distKm = haversineDistanceKm(tLat, tLng, targetCustomerLat, targetCustomerLng);
           if (distKm * 1000 > 150.0) {
             await client.query('ROLLBACK');
             return {
