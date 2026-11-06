@@ -73,6 +73,11 @@ public struct OrderTrackingScreen: View {
         return !isPost
     }
 
+    private var isCurrentHeadingToCustomer: Bool {
+        let st = (trackingData?.status ?? orderDetail?.orderStatus ?? orderDetail?.status ?? "").uppercased()
+        return ["PICKED_UP", "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU", "NEARBY"].contains(st)
+    }
+
     private var hasAssignedRider: Bool {
         let name = trackingData?.riderName ?? orderDetail?.riderName
         if let n = name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty,
