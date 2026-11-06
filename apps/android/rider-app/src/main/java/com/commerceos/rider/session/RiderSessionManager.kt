@@ -2,6 +2,8 @@ package com.commerceos.rider.session
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.commerceos.rider.model.ActiveOfferResult
+import com.commerceos.rider.repository.RiderDeliveryRepository
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -335,6 +337,28 @@ class RiderSessionManager private constructor(context: Context) {
 
     fun saveStoreId(storeId: String) {
         prefs.edit().putString(KEY_STORE_ID, storeId).apply()
+    }
+
+    fun createRepository(): RiderDeliveryRepository {
+        return RiderDeliveryRepository(
+            baseUrlProvider = { getBaseUrl() },
+            authTokenProvider = { getAuthToken() }
+        )
+    }
+
+    suspend fun fetchActiveOffer(): ActiveOfferResult {
+        if (!isLoggedIn() || !isShiftOnline()) {
+            return ActiveOfferResult.None
+        }
+        return createRepository().getActiveOffer()
+    }
+
+    fun isStoreEligible(targetStoreId: String?): Boolean {
+        val currentStore = getStoreId().trim()
+        val cleanTarget = targetStoreId?.trim() ?: ""
+        if (cleanTarget.isBlank()) return true
+        if (currentStore.isBlank()) return false
+        return currentStore.equals(cleanTarget, ignoreCase = true)
     }
 
     fun getCachedDeviceToken(): String {

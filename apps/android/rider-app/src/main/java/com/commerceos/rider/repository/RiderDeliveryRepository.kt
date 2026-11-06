@@ -340,6 +340,8 @@ class RiderDeliveryRepository(
         }
     }
 
+    suspend fun getActiveOffer(): ActiveOfferResult = fetchActiveOffer()
+
     suspend fun fetchActiveOffer(): ActiveOfferResult = withContext(Dispatchers.IO) {
         try {
             val conn = createConnection("/api/v1/delivery/offers/active", "GET")
