@@ -1458,39 +1458,18 @@ public struct OrderTrackingScreen: View {
         }
         
         guard needsRecalc, !isCalculatingRoute else { return }
-        guard data.routePolyline == nil || data.routePolyline!.isEmpty else { return }
         
-        let destCoord: CLLocationCoordinate2D? = {
-            if isHeadingToStore {
-                if let mLat = data.merchantLat, let mLng = data.merchantLng, mLat != 0.0 {
-                    return CLLocationCoordinate2D(latitude: mLat, longitude: mLng)
-                }
-                return resolvedMerchantCoordinate
-            } else {
-                if let cLat = data.customerLat, let cLng = data.customerLng, cLat != 0.0 {
-                    return CLLocationCoordinate2D(latitude: cLat, longitude: cLng)
-                }
-                return resolvedCustomerCoordinate
-            }
-        }()
-        
-        guard let targetDest = destCoord else { return }
-        
-        isCalculatingRoute = true
-        let req = MKDirections.Request()
-        req.source = MKMapItem(placemark: MKPlacemark(coordinate: currentRiderCoord))
-        req.destination = MKMapItem(placemark: MKPlacemark(coordinate: targetDest))
-        req.transportType = .automobile
-        
-        let directions = MKDirections(request: req)
-        directions.calculate { response, _ in
+        // Routes strictly originate from authenticated backend route gateway.
+        // Direct unauthenticated MKDirections and external OSRM queries that bypass backend route gateway are strictly prohibited.
+        if let poly = data.routePolyline, !poly.isEmpty {
+            let points = decodePolyline(poly)
             DispatchQueue.main.async {
-                self.isCalculatingRoute = false
-                guard let route = response?.routes.first else { return }
-                var points = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
-                route.polyline.getCoordinates(&points, range: NSRange(location: 0, length: route.polyline.pointCount))
                 self.localRoadRoute = points
                 self.lastCalculatedRiderCoord = currentRiderCoord
+            }
+        } else {
+            DispatchQueue.main.async {
+                self.localRoadRoute = []
             }
         }
     }

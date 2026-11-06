@@ -990,7 +990,7 @@ class TransactionalPrescriptionRepository {
     const res = await this.pool.query(
       `UPDATE prescriptions 
        SET status = $1, pharmacist_id = $2, license_no = $3, reviewed_at = NOW(), rejection_reason = $4, updated_at = NOW()
-       WHERE id = $5
+       WHERE id = $5 AND status = 'PENDING'
        RETURNING *`,
       [
         verificationData.status,
@@ -1048,12 +1048,23 @@ class LocalDevelopmentPrescriptionRepository {
     }
     const rx = (this.db.prescriptions || []).find((p) => p.id === rxId);
     if (rx) {
+      if (rx.status && rx.status !== 'PENDING') {
+        return rx;
+      }
       rx.status = verificationData.status;
       rx.pharmacistId = verificationData.pharmacistId;
       rx.licenseNo = verificationData.licenseNo || null;
       rx.reviewedAt = new Date().toISOString();
       rx.rejectionReason = verificationData.rejectionReason || null;
       rx.updatedAt = new Date().toISOString();
+      if (verificationData.authorizedItems) {
+        rx.authorizedItems = verificationData.authorizedItems.map(it => ({
+          ...it,
+          approvedQuantity: it.quantity,
+          remainingQuantity: it.quantity,
+          consumedQuantity: 0
+        }));
+      }
       this.saveDb();
       return rx;
     }
@@ -3176,6 +3187,11 @@ class TransactionalOfferRepository {
         orderStoreId = testStore;
       }
 
+      if (!riderStoreId && orderStoreId && (offer.rider_id === riderId || offer.riderId === riderId)) {
+        riderStoreId = orderStoreId;
+        await client.query('UPDATE riders SET store_id = $1 WHERE (rider_id = $2 OR id = $2) AND (store_id IS NULL OR store_id = \'\')', [orderStoreId, riderId]).catch(() => {});
+      }
+
       const isAdminClaim = Boolean(riderProfile?.isAdmin);
       if (!isAdminClaim) {
         if (!riderStoreId || !orderStoreId || riderStoreId !== orderStoreId) {
@@ -3447,6 +3463,12 @@ class LocalDevelopmentOfferRepository {
       const mockStore = 'STORE_DEV_MOCK';
       riderStoreId = mockStore;
       orderStoreId = mockStore;
+    }
+
+    if (!riderStoreId && orderStoreId && (offer.riderId === riderId || offer.rider_id === riderId)) {
+      riderStoreId = orderStoreId;
+      const r = Array.isArray(this.db.riders) ? this.db.riders.find(x => x.id === riderId || x.riderId === riderId) : this.db.riders?.[riderId];
+      if (r) r.storeId = orderStoreId;
     }
 
     const isAdminClaim = Boolean(riderProfile?.isAdmin);
@@ -3896,15 +3918,15 @@ class TransactionalDeliveryRepository {
         return { ok: false, httpStatus: 409, error: 'TERMINAL_STATE', message: `Cannot complete delivery in terminal state '${session.state}'.` };
       }
 
-      // Enforce valid prior state: order must be picked up and in transit to customer
-      const validPreDeliveryStates = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+      // Enforce valid prior state: rider must have arrived at customer destination before verifying delivery OTP
+      const validPreDeliveryStates = ['ARRIVED_CUSTOMER', 'HANDOFF_STARTED', 'ARRIVED_AT_DESTINATION', 'CUSTOMER_REACHED'];
       if (!validPreDeliveryStates.includes(session.state)) {
         await client.query('ROLLBACK');
         return {
           ok: false,
           httpStatus: 409,
-          error: 'INVALID_DELIVERY_STATE',
-          message: `Cannot complete delivery from state '${session.state}'. Order must be picked up before completing delivery.`
+          error: 'ARRIVAL_AT_CUSTOMER_REQUIRED',
+          message: `Cannot complete delivery from state '${session.state}'. Rider must arrive at customer destination before verifying delivery OTP.`
         };
       }
 
@@ -3924,7 +3946,59 @@ class TransactionalDeliveryRepository {
         return { ok: false, httpStatus: 409, error: 'ORDER_CANCELLED', message: 'Cannot deliver a cancelled order.' };
       }
 
-      // 3. Secure OTP Verification against orders.delivery_otp_hash with Expiry Guard
+      // 3. Customer Doorstep Geofence Verification (< 150m, fresh telemetry < 90s)
+      const targetCustomerLat = Number(order.customer_lat != null ? order.customer_lat : (session.customer_lat != null ? session.customer_lat : (order.delivery_address?.lat || order.delivery_address?.latitude)));
+      const targetCustomerLng = Number(order.customer_lng != null ? order.customer_lng : (session.customer_lng != null ? session.customer_lng : (order.delivery_address?.lng || order.delivery_address?.longitude)));
+
+      if (targetCustomerLat && targetCustomerLng && !isNaN(targetCustomerLat) && !isNaN(targetCustomerLng)) {
+        let riderTelemLat = options.latitude != null ? Number(options.latitude) : (options.lat != null ? Number(options.lat) : null);
+        let riderTelemLng = options.longitude != null ? Number(options.longitude) : (options.lng != null ? Number(options.lng) : null);
+        let isFreshTelemetry = true;
+
+        if (riderTelemLat == null || riderTelemLng == null || isNaN(riderTelemLat) || isNaN(riderTelemLng)) {
+          const telemRes = await client.query(
+            `SELECT latitude, longitude, recorded_at, created_at 
+             FROM rider_telemetry 
+             WHERE (delivery_id = $1 OR rider_id = $2) 
+             ORDER BY recorded_at DESC, id DESC LIMIT 1`,
+            [session.delivery_id || session.id || orderId, riderId]
+          ).catch(() => ({ rows: [] }));
+
+          if (telemRes.rows.length > 0) {
+            const t = telemRes.rows[0];
+            riderTelemLat = Number(t.latitude);
+            riderTelemLng = Number(t.longitude);
+            const tTime = t.recorded_at ? new Date(t.recorded_at).getTime() : new Date(t.created_at).getTime();
+            if (Math.abs(Date.now() - tTime) > 90000) {
+              isFreshTelemetry = false;
+            }
+          }
+        }
+
+        if (riderTelemLat != null && riderTelemLng != null && !isNaN(riderTelemLat) && !isNaN(riderTelemLng)) {
+          if (!isFreshTelemetry) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'STALE_TELEMETRY',
+              message: 'Rider telemetry is stale (> 90s). Fresh location telemetry is required to complete delivery.'
+            };
+          }
+          const distKm = haversineDistanceKm(riderTelemLat, riderTelemLng, targetCustomerLat, targetCustomerLng);
+          if (distKm * 1000 > 150.0) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'GEOFENCE_VIOLATION',
+              message: `Rider is outside the required 150m customer doorstep geofence (${Math.round(distKm * 1000)}m away).`
+            };
+          }
+        }
+      }
+
+      // 4. Secure OTP Verification against orders.delivery_otp_hash with Expiry Guard
       const expectedOtpHash = order.delivery_otp_hash;
       const isExpired = order.otp_expires_at ? (new Date() > new Date(order.otp_expires_at)) : false;
       const cumulativeAttempts = Number(order.cumulative_otp_attempts || 0);
@@ -3988,7 +4062,7 @@ class TransactionalDeliveryRepository {
         } else {
           // Authoritative verification of locked, reconciled ledger for the assigned rider during OTP completion
           const existingLedger = await client.query(
-            `SELECT * FROM cod_ledger WHERE (order_id = $1 OR id = $1) FOR UPDATE`,
+            `SELECT * FROM cod_ledger WHERE order_id = $1 FOR UPDATE`,
             [order.order_id || order.id]
           );
           const ledgerRow = existingLedger.rows[0];
@@ -4136,9 +4210,14 @@ class LocalDevelopmentDeliveryRepository {
     if (order && ['CANCELLED', 'REJECTED'].includes(order.status || order.orderStatus)) {
       return { ok: false, httpStatus: 409, error: 'ORDER_CANCELLED', message: 'Cannot deliver a cancelled order.' };
     }
-    const validPreDelivery = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION'];
+    const validPreDelivery = ['ARRIVED_CUSTOMER', 'ARRIVED_AT_DESTINATION', 'HANDOFF_STARTED', 'CUSTOMER_REACHED'];
     if (session.state && !validPreDelivery.includes(session.state)) {
-      return { ok: false, httpStatus: 409, error: 'INVALID_DELIVERY_STATE', message: 'Order must be picked up before completing delivery.' };
+      return {
+        ok: false,
+        httpStatus: 409,
+        error: 'ARRIVAL_AT_CUSTOMER_REQUIRED',
+        message: `Cannot complete delivery from state '${session.state}'. Rider must arrive at customer destination before verifying delivery OTP.`
+      };
     }
     
     const isExpired = (order?.otpExpiresAt || order?.otp_expires_at) ? new Date() > new Date(order.otpExpiresAt || order.otp_expires_at) : false;
@@ -4847,7 +4926,7 @@ class TransactionalOrderRepository {
                 message: `Prescription does not authorize item '${rxItem.name || rxItem.sku}'.`
               };
             }
-            const maxAllowedQty = Number(matched.quantity != null ? matched.quantity : (matched.qty != null ? matched.qty : 0));
+            const maxAllowedQty = Number(matched.remainingQuantity != null ? matched.remainingQuantity : (matched.quantity != null ? matched.quantity : (matched.qty != null ? matched.qty : 0)));
             const orderedQty = Number(rxItem.quantity || 1);
             if (orderedQty > maxAllowedQty) {
               await client.query('ROLLBACK');
@@ -4858,8 +4937,10 @@ class TransactionalOrderRepository {
                 message: `Requested quantity (${orderedQty}) for '${rxItem.name || rxItem.sku}' exceeds approved limit (${maxAllowedQty}).`
               };
             }
-            // Atomically decrement remaining quantity on the prescription
-            matched.quantity = maxAllowedQty - orderedQty;
+            // Atomically decrement remaining quantity and increment consumed quantity on the prescription
+            matched.remainingQuantity = maxAllowedQty - orderedQty;
+            matched.consumedQuantity = (Number(matched.consumedQuantity) || 0) + orderedQty;
+            matched.quantity = matched.remainingQuantity;
           }
 
           await client.query(
@@ -5700,7 +5781,10 @@ class TransactionalOrderRepository {
                     (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
                   );
                   if (matched) {
-                    matched.quantity = Number(matched.quantity || matched.qty || 0) + Number(rxItem.quantity || 1);
+                    const restoredQty = Number(rxItem.quantity || 1);
+                    matched.remainingQuantity = Number(matched.remainingQuantity != null ? matched.remainingQuantity : (matched.quantity || 0)) + restoredQty;
+                    matched.consumedQuantity = Math.max(0, Number(matched.consumedQuantity || 0) - restoredQty);
+                    matched.quantity = matched.remainingQuantity;
                   }
                 }
                 await client.query(

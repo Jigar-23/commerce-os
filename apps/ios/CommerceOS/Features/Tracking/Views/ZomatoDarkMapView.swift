@@ -176,23 +176,9 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
         if !routeCoordinates.isEmpty {
             let pts = routeCoordinates.map { "[\($0.latitude),\($0.longitude)]" }.joined(separator: ",")
             waypointsJson = "[\(pts)]"
-        } else if let rider = riderCoordinate {
-            // Strictly target merchant while heading to store, target customer after pickup
-            let dest = isHeadingToStore ? (merchantCoordinate ?? customerCoordinate) : (customerCoordinate ?? merchantCoordinate)
-            let modeKey = isHeadingToStore ? "STORE" : "CUSTOMER"
-            if let dst = dest {
-                let origDelta = lastRouteOrigin.map { abs($0.latitude - rider.latitude) + abs($0.longitude - rider.longitude) } ?? 1.0
-                let destDelta = lastRouteDest.map { abs($0.latitude - dst.latitude) + abs($0.longitude - dst.longitude) } ?? 1.0
-                if origDelta > 0.0003 || destDelta > 0.0001 || lastTargetMode != modeKey {
-                    self.lastRouteOrigin = rider
-                    self.lastRouteDest = dst
-                    self.lastTargetMode = modeKey
-                    computeRoadPolyline(from: rider, to: dst)
-                }
-            }
-            waypointsJson = fallbackWaypointsJson
         } else {
-            // Rider not yet assigned: strictly zero waypoints, zero line on map
+            // Route strictly originates from authenticated backend route gateway.
+            // External MKDirections and synthetic fallbacks that bypass backend authentication are strictly prohibited.
             self.lastRouteOrigin = nil
             self.lastRouteDest = nil
             self.lastTargetMode = nil
@@ -219,29 +205,6 @@ final class GoogleOrderTrackingCoordinator: NSObject, WKNavigationDelegate {
             webView?.evaluateJavaScript(js, completionHandler: nil)
         } else {
             pendingJs = js
-        }
-    }
-
-    private func computeRoadPolyline(from origin: CLLocationCoordinate2D, to dest: CLLocationCoordinate2D) {
-        let req = MKDirections.Request()
-        req.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
-        req.destination = MKMapItem(placemark: MKPlacemark(coordinate: dest))
-        req.transportType = .automobile
-
-        let directions = MKDirections(request: req)
-        directions.calculate { [weak self] response, _ in
-            guard let self = self, let route = response?.routes.first else { return }
-            let pointCount = route.polyline.pointCount
-            var coords = [CLLocationCoordinate2D](repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
-            route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
-
-            let waypointsArray = coords.map { "[\($0.latitude),\($0.longitude)]" }.joined(separator: ",")
-            self.fallbackWaypointsJson = "[\(waypointsArray)]"
-
-            if self.isLoaded {
-                let js = "if (window.updateWaypoints) { window.updateWaypoints(\(self.fallbackWaypointsJson)); }"
-                self.webView?.evaluateJavaScript(js, completionHandler: nil)
-            }
         }
     }
 }

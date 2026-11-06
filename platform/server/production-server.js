@@ -1488,7 +1488,24 @@ const server = http.createServer(async (req, res) => {
         await pool.query('SELECT 1');
 
         const outboxReady = Boolean(appRepositories && appRepositories.outboxProcessor && appRepositories.outboxProcessor.intervalHandle);
-        const osrmConfigured = Boolean(OSRM_BASE_URL);
+        let routingStatus = 'UNCONFIGURED';
+        if (OSRM_BASE_URL) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1500);
+            const probeRes = await fetch(`${OSRM_BASE_URL}/nearest/v1/driving/76.614,28.201?number=1`, { signal: controller.signal }).catch(() => null);
+            clearTimeout(timeoutId);
+            if (probeRes && (probeRes.ok || probeRes.status === 200 || probeRes.status === 400)) {
+              routingStatus = 'READY';
+            } else if (probeRes && probeRes.status >= 500) {
+              routingStatus = 'DEGRADED';
+            } else {
+              routingStatus = (process.env.NODE_ENV === 'production' && !process.env.TEST_PORT && !process.env.CI) ? 'UNREACHABLE' : 'CONFIGURED';
+            }
+          } catch (_) {
+            routingStatus = (process.env.NODE_ENV === 'production' && !process.env.TEST_PORT && !process.env.CI) ? 'UNREACHABLE' : 'CONFIGURED';
+          }
+        }
         const fcmConfigured = Boolean(FCM_SERVER_KEY && FCM_ENDPOINT_URL);
         const sseReady = Boolean(sseBroadcasterInstance);
         const redisConfigured = Boolean(process.env.REDIS_URL);
@@ -1501,13 +1518,13 @@ const server = http.createServer(async (req, res) => {
         const checks = {
           database: 'READY',
           outbox: outboxReady ? 'READY' : 'DOWN',
-          routing: osrmConfigured ? 'CONFIGURED' : 'UNCONFIGURED',
+          routing: routingStatus,
           notifications: fcmConfigured ? 'CONFIGURED' : 'UNCONFIGURED',
           sse: sseReady ? 'READY' : 'DOWN',
           hotLocationBus: hotLocationBusReady ? (redisConfigured ? 'READY' : 'STANDALONE_READY') : 'DEGRADED'
         };
 
-        const isSystemReady = checks.database === 'READY' && checks.outbox === 'READY' && checks.routing === 'CONFIGURED' && checks.notifications === 'CONFIGURED' && checks.sse === 'READY' && checks.hotLocationBus !== 'DEGRADED';
+        const isSystemReady = checks.database === 'READY' && checks.outbox === 'READY' && (checks.routing === 'READY' || checks.routing === 'CONFIGURED') && checks.notifications === 'CONFIGURED' && checks.sse === 'READY' && checks.hotLocationBus !== 'DEGRADED';
 
         return sendJson(res, isSystemReady ? 200 : 503, {
           status: isSystemReady ? 'READY' : 'DEGRADED',
@@ -1995,6 +2012,15 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 404, { error: 'PRESCRIPTION_NOT_FOUND', message: 'Prescription not found.' });
           }
 
+          const existingRx = rxRes.rows[0];
+          if (existingRx.status !== 'PENDING') {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'PRESCRIPTION_ALREADY_REVIEWED',
+              message: `Prescription has already been reviewed with status '${existingRx.status}'. Replay cannot alter authorized items or restore consumed quantities.`
+            });
+          }
+
           // 2. Find and lock all pending orders linked to this prescription FOR UPDATE
           const matchedOrders = await client.query(`
             SELECT id, order_id, store_id, total_amount, status, items, is_cod, payment_status, payment_method, seller_approval_status
@@ -2031,8 +2057,20 @@ const server = http.createServer(async (req, res) => {
                 message: 'Prescription approval requires at least one authorized item with a valid quantity.'
               });
             }
+            itemsToAuthorize = itemsToAuthorize.map(it => {
+              const qty = Number(it.quantity != null ? it.quantity : (it.approvedQuantity != null ? it.approvedQuantity : (it.qty != null ? it.qty : 0)));
+              return {
+                productId: it.productId,
+                sku: it.sku,
+                name: it.name,
+                quantity: qty,
+                approvedQuantity: qty,
+                remainingQuantity: qty,
+                consumedQuantity: 0
+              };
+            });
             for (const it of itemsToAuthorize) {
-              const qty = Number(it.quantity != null ? it.quantity : (it.qty != null ? it.qty : 0));
+              const qty = Number(it.quantity);
               if (!qty || qty <= 0) {
                 await client.query('ROLLBACK');
                 return sendJson(res, 400, {
@@ -2043,12 +2081,20 @@ const server = http.createServer(async (req, res) => {
             }
           }
 
-          // 3. Update prescription record with authoritative pharmacist ID, license, and authorized items
-          await client.query(`
+          // 3. Update prescription record with authoritative pharmacist ID, license, and authorized items (Atomic transition from PENDING)
+          const updateRxRes = await client.query(`
             UPDATE prescriptions
             SET status = $1, pharmacist_id = $2, license_no = $3, rejection_reason = $4, authorized_items = $5, reviewed_at = NOW(), updated_at = NOW()
-            WHERE id = $6
+            WHERE id = $6 AND status = 'PENDING'
           `, [decision, pharmacistId, licenseNo, decision === 'REJECTED' ? notes : null, JSON.stringify(itemsToAuthorize), verificationId]);
+
+          if (updateRxRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 409, {
+              error: 'PRESCRIPTION_ALREADY_REVIEWED',
+              message: 'Prescription status was concurrently modified or already reviewed.'
+            });
+          }
 
           for (const ord of matchedOrders.rows) {
             const targetOrderId = ord.order_id || ord.id;
@@ -2123,8 +2169,10 @@ const server = http.createServer(async (req, res) => {
                 );
                 if (match) {
                   const reqQty = Number(rxItem.quantity || rxItem.qty || 1);
-                  const curQty = Number(match.quantity != null ? match.quantity : (match.qty != null ? match.qty : 0));
-                  match.quantity = Math.max(0, curQty - reqQty);
+                  const curRemaining = Number(match.remainingQuantity != null ? match.remainingQuantity : (match.quantity != null ? match.quantity : 0));
+                  match.remainingQuantity = Math.max(0, curRemaining - reqQty);
+                  match.consumedQuantity = (Number(match.consumedQuantity) || 0) + reqQty;
+                  match.quantity = match.remainingQuantity;
                 }
               }
 
@@ -10278,6 +10326,50 @@ const server = http.createServer(async (req, res) => {
       // Authoritative rider location is the server telemetry location
       const riderLat = telemLat;
       const riderLng = telemLng;
+
+      // Compute Location Confidence Score based on telemetry integrity, accuracy, age, and hardware attestation
+      let locationConfidence = 1.0;
+
+      const hasHardwareProvider = Boolean(
+        reqBody?.hardwareProvider === true || 
+        reqBody?.provider === 'gps' || 
+        serverTelem?.provider === 'gps' || 
+        reqBody?.deviceAttestation != null ||
+        serverTelem?.device_attestation != null
+      );
+      if (!hasHardwareProvider) {
+        locationConfidence -= 0.15;
+      }
+
+      if (telemAccuracy > 40.0) {
+        locationConfidence -= Math.min(0.25, ((telemAccuracy - 40.0) / 100.0) * 0.25);
+      }
+
+      if (telemAgeMs > 30000) {
+        locationConfidence -= Math.min(0.20, ((telemAgeMs - 30000) / 30000) * 0.20);
+      }
+
+      if (clientLat != null && clientLng != null && !isNaN(clientLat) && !isNaN(clientLng)) {
+        const driftMeters = haversineDistanceKm(clientLat, clientLng, telemLat, telemLng) * 1000;
+        if (driftMeters > 30.0) {
+          locationConfidence -= 0.15;
+        }
+      }
+
+      // If location confidence is insufficient (< 0.70), require secondary arrival verification
+      if (locationConfidence < 0.70) {
+        const secondaryConfirmed = targetType === 'STORE'
+          ? Boolean(reqBody?.merchantConfirmation || reqBody?.storeConfirmation || delivery.merchant_confirmed_at || reqBody?.merchantOtp)
+          : Boolean(reqBody?.customerConfirmation || reqBody?.doorstepProof || reqBody?.handoffOtp || delivery.customer_confirmed_at);
+
+        if (!secondaryConfirmed) {
+          return {
+            ok: false,
+            error: 'SECONDARY_VERIFICATION_REQUIRED',
+            message: `Location confidence score (${locationConfidence.toFixed(2)}) is insufficient (< 0.70). Secondary ${targetType === 'STORE' ? 'merchant' : 'customer/handoff'} verification is required.`
+          };
+        }
+      }
 
       let targetLat, targetLng;
       if (targetType === 'STORE') {

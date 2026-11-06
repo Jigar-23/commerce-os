@@ -252,61 +252,58 @@ public struct CustomerLiveMapTrackingView: View {
     }
 
     private func fetchRoadGeometry() {
-        guard !isOrderPlaced, let riderCoord = effectiveRiderCoord else {
+        guard !isOrderPlaced, let poly = liveTracking?.routePolyline, !poly.isEmpty else {
             dynamicRoadPoints = []
             return
         }
 
-        let origin = riderCoord
-        let dest = isHeadingToStore
-            ? CLLocationCoordinate2D(latitude: merchantLat, longitude: merchantLng)
-            : CLLocationCoordinate2D(latitude: customerLat, longitude: customerLng)
-
-        // Throttle route queries if displacement is < 40m
-        if let prev = lastRoutedOrigin, lastRoutedStage == activeStage, !dynamicRoadPoints.isEmpty {
-            let locPrev = CLLocation(latitude: prev.latitude, longitude: prev.longitude)
-            let locNow = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
-            if locNow.distance(from: locPrev) < 40.0 {
-                return
-            }
+        let pts = decodePolyline(poly)
+        if pts.count >= 2 {
+            self.dynamicRoadPoints = pts
+        } else {
+            self.dynamicRoadPoints = []
         }
+    }
 
-        Task {
-            // Direct OSRM driving route query
-            let urlStr = "https://router.project-osrm.org/route/v1/driving/\(origin.longitude),\(origin.latitude);\(dest.longitude),\(dest.latitude)?overview=full&geometries=geojson"
-            guard let url = URL(string: urlStr) else { return }
+    private func decodePolyline(_ encoded: String) -> [CLLocationCoordinate2D] {
+        var coordinates: [CLLocationCoordinate2D] = []
+        var index = encoded.startIndex
+        var lat: Int32 = 0
+        var lng: Int32 = 0
 
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let routes = json["routes"] as? [[String: Any]],
-                      let firstRoute = routes.first,
-                      let geometry = firstRoute["geometry"] as? [String: Any],
-                      let coords = geometry["coordinates"] as? [[Double]] else {
-                    return
-                }
+        while index < encoded.endIndex {
+            var b: Int32 = 0
+            var shift: UInt32 = 0
+            var result: Int32 = 0
+            repeat {
+                guard index < encoded.endIndex else { break }
+                let scalar = encoded[index].utf8.first ?? 0
+                index = encoded.index(after: index)
+                b = Int32(scalar) - 63
+                result |= (b & 0x1f) << shift
+                shift += 5
+            } while b >= 0x20
+            let dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1))
+            lat += dlat
 
-                let pts = coords.compactMap { c -> CLLocationCoordinate2D? in
-                    guard c.count >= 2 else { return nil }
-                    return CLLocationCoordinate2D(latitude: c[1], longitude: c[0])
-                }
+            shift = 0
+            result = 0
+            repeat {
+                guard index < encoded.endIndex else { break }
+                let scalar = encoded[index].utf8.first ?? 0
+                index = encoded.index(after: index)
+                b = Int32(scalar) - 63
+                result |= (b & 0x1f) << shift
+                shift += 5
+            } while b >= 0x20
+            let dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1))
+            lng += dlng
 
-                if pts.count >= 2 {
-                    await MainActor.run {
-                        self.dynamicRoadPoints = pts
-                        self.lastRoutedOrigin = origin
-                        self.lastRoutedStage = activeStage
-                    }
-                }
-            } catch {
-                // Fallback straight line
-                await MainActor.run {
-                    self.dynamicRoadPoints = [origin, dest]
-                    self.lastRoutedOrigin = origin
-                    self.lastRoutedStage = activeStage
-                }
-            }
+            let latitude = Double(lat) / 1e5
+            let longitude = Double(lng) / 1e5
+            coordinates.append(CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
         }
+        return coordinates
     }
 }
 

@@ -97,3 +97,17 @@ services:
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
+  # -------------------------------------------------------------
+  # 5. Private OSRM Routing Engine
+  # -------------------------------------------------------------
+  - type: pserv
+    name: osrm-backend
+    runtime: image
+    image:
+      url: osrm/osrm-backend:v5.27.1
+    plan: starter
+    region: singapore
+    envVars:
+      - key: PORT
+        value: 5000
+
