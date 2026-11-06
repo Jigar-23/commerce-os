@@ -3974,13 +3974,19 @@ class TransactionalDeliveryRepository {
       }
 
       if (hasDestinationCoords) {
-        const telemRes = await client.query(
-          `SELECT latitude, longitude, recorded_at, created_at, is_mock_location
-           FROM rider_telemetry 
-           WHERE (delivery_id = $1 OR delivery_id = $2) AND rider_id = $3
-           ORDER BY recorded_at DESC, id DESC LIMIT 1`,
-          [session.delivery_id || session.id, orderId, riderId]
-        ).catch(() => ({ rows: [] }));
+        let telemRes;
+        try {
+          telemRes = await client.query(
+            `SELECT latitude, longitude, recorded_at, created_at, is_mock_location, attestation_verified
+             FROM rider_telemetry 
+             WHERE (delivery_id = $1 OR delivery_id = $2) AND rider_id = $3
+             ORDER BY recorded_at DESC, id DESC LIMIT 1`,
+            [session.delivery_id || session.id, orderId, riderId]
+          );
+        } catch (err) {
+          console.error('[deliverWithOtpTransactionally] Failed to query rider telemetry:', err);
+          throw err;
+        }
 
         if (telemRes.rows.length === 0) {
           if (isRealPgPool) {
@@ -4016,6 +4022,16 @@ class TransactionalDeliveryRepository {
               httpStatus: 403,
               error: 'MOCK_LOCATION_REJECTED',
               message: 'Mock or spoofed GPS location is strictly rejected by production security policy.'
+            };
+          }
+
+          if (isRealPgPool && t.attestation_verified !== true && !order.customer_confirmed_at && !session.customer_confirmed_at) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 403,
+              error: 'UNVERIFIED_TELEMETRY',
+              message: 'Verified device attestation bound to destination telemetry is required to complete delivery.'
             };
           }
 
@@ -7138,15 +7154,22 @@ class TransactionalTelemetryRepository {
     const speed = Number(data.speedKmh || data.speed || 0);
     const accuracy = Number(data.accuracy || data.accuracyMeters || 10);
     const sequenceNumber = Number(data.sequenceNumber || data.sequence_number || data.seq || 1);
+    const isMockLocation = Boolean(data.isMockLocation || data.is_mock_location || data.mockLocation || false);
+    const attestationVerified = Boolean(data.attestationVerified || data.attestation_verified || false);
+    const attestationPayload = (data.attestationPayload || data.attestation_payload)
+      ? (typeof (data.attestationPayload || data.attestation_payload) === 'string'
+          ? (data.attestationPayload || data.attestation_payload)
+          : JSON.stringify(data.attestationPayload || data.attestation_payload))
+      : null;
 
-    if (!this.pool) return { ok: true, accepted: true, duplicate: false, sequenceNumber };
+    if (!this.pool) return { ok: true, accepted: true, duplicate: false, sequenceNumber, isMockLocation, attestationVerified };
 
     const result = await this.pool.query(
-      `INSERT INTO rider_telemetry (rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      `INSERT INTO rider_telemetry (rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at, is_mock_location, attestation_verified, attestation_payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11)
        ON CONFLICT (delivery_id, sequence_number) DO NOTHING
-       RETURNING id`,
-      [riderId, deliveryId, sequenceNumber, lat, lng, heading, speed, accuracy]
+       RETURNING id, is_mock_location, attestation_verified`,
+      [riderId, deliveryId, sequenceNumber, lat, lng, heading, speed, accuracy, isMockLocation, attestationVerified, attestationPayload]
     );
 
     const isInserted = Boolean(result.rows && result.rows.length > 0);
@@ -7154,14 +7177,16 @@ class TransactionalTelemetryRepository {
       ok: true,
       accepted: isInserted,
       duplicate: !isInserted,
-      sequenceNumber
+      sequenceNumber,
+      isMockLocation,
+      attestationVerified
     };
   }
 
   async getLatestTelemetryForDelivery(deliveryId) {
     if (!this.pool || !deliveryId) return null;
     const res = await this.pool.query(
-      `SELECT rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at
+      `SELECT rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at, is_mock_location, attestation_verified, attestation_payload
        FROM rider_telemetry 
        WHERE delivery_id = $1 
        ORDER BY sequence_number DESC, recorded_at DESC 
@@ -7181,6 +7206,11 @@ class TransactionalTelemetryRepository {
       speedKmh: Number(row.speed || 0),
       speed: Number(row.speed || 0),
       accuracyMeters: Number(row.accuracy || 10),
+      isMockLocation: Boolean(row.is_mock_location),
+      is_mock_location: Boolean(row.is_mock_location),
+      attestationVerified: Boolean(row.attestation_verified),
+      attestation_verified: Boolean(row.attestation_verified),
+      attestationPayload: row.attestation_payload,
       recordedAt: ts,
       serverTimestamp: ts,
       isStale: (Date.now() - ts) > 15000
@@ -7193,7 +7223,7 @@ class TransactionalTelemetryRepository {
     if (byDelivery) return byDelivery;
 
     const res = await this.pool.query(
-      `SELECT rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at
+      `SELECT rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at, is_mock_location, attestation_verified, attestation_payload
        FROM rider_telemetry 
        WHERE rider_id = $1 
        ORDER BY recorded_at DESC 
@@ -7213,6 +7243,11 @@ class TransactionalTelemetryRepository {
       speedKmh: Number(row.speed || 0),
       speed: Number(row.speed || 0),
       accuracyMeters: Number(row.accuracy || 10),
+      isMockLocation: Boolean(row.is_mock_location),
+      is_mock_location: Boolean(row.is_mock_location),
+      attestationVerified: Boolean(row.attestation_verified),
+      attestation_verified: Boolean(row.attestation_verified),
+      attestationPayload: row.attestation_payload,
       recordedAt: ts,
       serverTimestamp: ts,
       isStale: (Date.now() - ts) > 15000
@@ -7270,6 +7305,11 @@ class LocalDevelopmentTelemetryRepository {
       speed,
       accuracy,
       sequenceNumber: seq,
+      isMockLocation: Boolean(data.isMockLocation || data.is_mock_location || false),
+      is_mock_location: Boolean(data.isMockLocation || data.is_mock_location || false),
+      attestationVerified: Boolean(data.attestationVerified || data.attestation_verified || false),
+      attestation_verified: Boolean(data.attestationVerified || data.attestation_verified || false),
+      attestationPayload: data.attestationPayload || data.attestation_payload || null,
       recordedAt: now,
       serverTimestamp: now,
       isStale: false

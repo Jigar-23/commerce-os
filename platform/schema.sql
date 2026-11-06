@@ -574,6 +574,9 @@ CREATE TABLE IF NOT EXISTS rider_telemetry (
     speed REAL,
     accuracy REAL,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_mock_location BOOLEAN NOT NULL DEFAULT FALSE,
+    attestation_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    attestation_payload JSONB DEFAULT NULL,
     CONSTRAINT uq_telemetry_delivery_seq UNIQUE(delivery_id, sequence_number)
 );
 

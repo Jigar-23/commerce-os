@@ -150,6 +150,27 @@ public struct OrderTrackingScreen: View {
                         isHeadingToStore: isCurrentHeadingToStore
                     )
                     .edgesIgnoringSafeArea(.all)
+
+                    if (isCurrentHeadingToStore || isCurrentHeadingToCustomer) && buildRouteCoordinates(trackingData).isEmpty {
+                        VStack {
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color(hex: "F59E0B"))
+                                    .frame(width: 6, height: 6)
+                                Text("Route unavailable • Live tracking")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(Color(hex: "0F172A"))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.95))
+                            .cornerRadius(14)
+                            .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+                            .padding(.bottom, 24)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                     
                     Button(action: { isMapExpanded = false }) {
                         Circle()
@@ -355,6 +376,26 @@ public struct OrderTrackingScreen: View {
                 isHeadingToStore: isCurrentHeadingToStore
             )
             .frame(height: 300)
+
+            if (isCurrentHeadingToStore || isCurrentHeadingToCustomer) && buildRouteCoordinates(trackingData).isEmpty {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: "F59E0B"))
+                            .frame(width: 6, height: 6)
+                        Text("Route unavailable • Live tracking")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.95))
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.12), radius: 3, x: 0, y: 1)
+                    .padding(.bottom, 12)
+                }
+            }
             
             // Top Navigation Overlay
             HStack(alignment: .center) {
@@ -1176,6 +1217,9 @@ public struct OrderTrackingScreen: View {
     
     // MARK: - Helpers & Presentation Logic
     private var statusBadgeTitle: String {
+        if (isCurrentHeadingToStore || isCurrentHeadingToCustomer) && buildRouteCoordinates(trackingData).isEmpty {
+            return "Route unavailable • Live tracking"
+        }
         switch effectiveStatus.uppercased() {
         case "OUT_FOR_DELIVERY", "EN_ROUTE_CUSTOMER", "REACHING_YOU":
             return "ON THE WAY"

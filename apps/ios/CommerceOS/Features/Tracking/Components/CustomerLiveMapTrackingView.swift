@@ -145,12 +145,6 @@ public struct CustomerLiveMapTrackingView: View {
         if !dynamicRoadPoints.isEmpty && lastRoutedStage == activeStage {
             return dynamicRoadPoints
         }
-        if isHeadingToCustomer && customerLat != 0.0 && effectiveRiderCoord != nil {
-            return [effectiveRiderCoord!, CLLocationCoordinate2D(latitude: customerLat, longitude: customerLng)]
-        }
-        if isHeadingToStore && merchantLat != 0.0 && effectiveRiderCoord != nil {
-            return [effectiveRiderCoord!, CLLocationCoordinate2D(latitude: merchantLat, longitude: merchantLng)]
-        }
         return []
     }
 
@@ -207,7 +201,7 @@ public struct CustomerLiveMapTrackingView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(OrderStatusPresentationMapper.present(rawStatus: activeStage).presentedLabel)
+                            Text((isHeadingToStore || isHeadingToCustomer) && dynamicRoadPoints.isEmpty ? "Route unavailable • Live tracking" : OrderStatusPresentationMapper.present(rawStatus: activeStage).presentedLabel)
                                 .font(.system(size: 15, weight: .bold))
                                 .foregroundColor(Color(hex: "0F172A"))
                             Text("Order #\(String(order.id.suffix(6)).uppercased())")
@@ -226,6 +220,27 @@ public struct CustomerLiveMapTrackingView: View {
                     .padding(.top, 44)
 
                     Spacer()
+                }
+            }
+
+            // Inline Route Unavailable Overlay Banner
+            if !isFullscreen && (isHeadingToStore || isHeadingToCustomer) && dynamicRoadPoints.isEmpty {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: "F59E0B"))
+                            .frame(width: 6, height: 6)
+                        Text("Route unavailable • Live tracking")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(hex: "0F172A"))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.95))
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.12), radius: 3, x: 0, y: 1)
+                    .padding(.bottom, 12)
                 }
             }
         }
