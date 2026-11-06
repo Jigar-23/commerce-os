@@ -290,6 +290,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     pharmacist_id VARCHAR(64),
     license_no VARCHAR(100),
     rejection_reason TEXT,
+    authorized_items JSONB NOT NULL DEFAULT '[]'::jsonb,
     reviewed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

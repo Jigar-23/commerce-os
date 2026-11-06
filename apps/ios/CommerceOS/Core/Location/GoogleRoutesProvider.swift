@@ -66,6 +66,9 @@ public final class GoogleRoutesProvider {
         do {
             var request = URLRequest(url: backendUrl)
             request.timeoutInterval = 3.5
+            if let token = APIClient.shared.authToken ?? KeychainHelper.shared.get(key: "auth_token") {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
             let (data, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, http.statusCode == 200,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

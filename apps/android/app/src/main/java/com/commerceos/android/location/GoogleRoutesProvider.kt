@@ -64,11 +64,17 @@ class GoogleRoutesProvider(
         try {
             val backendBase = baseUrlProvider().trimEnd('/')
             val backendUrl = "$backendBase/api/v1/delivery/route?originLat=$originLat&originLng=$originLng&destLat=$destLat&destLng=$destLng"
-            val req = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(backendUrl)
                 .get()
                 .header("User-Agent", "CommerceOS-Customer/2.0")
-                .build()
+
+            val token = NetworkClient.authTokenProvider()
+            if (token.isNotBlank()) {
+                reqBuilder.header("Authorization", "Bearer $token")
+            }
+
+            val req = reqBuilder.build()
 
             val response = executeCancellable(req)
             val body = response.body?.string()

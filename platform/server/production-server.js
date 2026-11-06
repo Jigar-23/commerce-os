@@ -76,7 +76,7 @@ try {
     process.exit(1);
   }
 }
-const { createProductionRepositories, initApplicationRepositories, DeliveryOtpService, ServiceabilityService, InternalDispatchCommand, FulfillmentDecision, NotificationDeliveryResult, TransactionalSellerRepository } = require('../repositories');
+const { createProductionRepositories, initApplicationRepositories, DeliveryOtpService, ServiceabilityService, InternalDispatchCommand, FulfillmentDecision, NotificationDeliveryResult, TransactionalSellerRepository, generateCanonicalOrderFingerprint } = require('../repositories');
 const { buildEnrichedTrackingDTO, detectRouteDeviation, mapMatchRiderToRoute } = require('../location-tracking');
 
 // 1. Production Configuration & Mandatory Fail-Fast Preconditions (Zero Source Code Fallback Strings)
@@ -135,8 +135,13 @@ const DEFAULT_STORE_ID = process.env.DEFAULT_STORE_ID || 'store_rewari_hub_01';
 // In-Flight Route Lock & Telemetry Reroute Debounce Sets
 const inFlightRouteCalculations = new Set();
 const lastRerouteTimes = new Map();
+const routeGatewayRateLimitMap = new Map();
 
 const REQUIRED_DATABASE_MIGRATIONS = [
+  `ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS authorized_items JSONB DEFAULT '[]'::jsonb;`,
+  `ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);`,
+  `ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;`,
   `ALTER TABLE offers ADD COLUMN IF NOT EXISTS waypoints JSONB NOT NULL DEFAULT '[]'::jsonb;`,
   `ALTER TABLE offers ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;`,
   `ALTER TABLE offers ADD COLUMN IF NOT EXISTS is_broadcast BOOLEAN NOT NULL DEFAULT FALSE;`,
@@ -440,16 +445,29 @@ class ProductionFcmSender {
       throw new Error('FCM_CONFIGURATION_MISSING: FCM endpoint URL is strictly required for push delivery in production.');
     }
 
-    const payloadDataMap = {
-      title: String(messagePayload.title || ''),
-      body: String(messagePayload.body || ''),
-      notificationId: String(messagePayload.notificationId || ''),
-      offerId: String(messagePayload.offerId || ''),
-      orderId: String(messagePayload.orderId || ''),
-      deliveryId: String(messagePayload.deliveryId || ''),
-      riderId: String(messagePayload.riderId || (messagePayload.data && messagePayload.data.riderId) || 'broadcast'),
-      ...(messagePayload.data || {})
-    };
+    const isTopicTarget = typeof deviceToken === 'string' && (deviceToken.startsWith('/topics/') || deviceToken.startsWith('riders_store_'));
+    let payloadDataMap;
+    if (isTopicTarget) {
+      // Finding 4: Strictly generic static constants for public FCM store topics (zero PII, zero earnings, zero addresses, zero order totals)
+      payloadDataMap = {
+        title: 'New Delivery Offer',
+        body: 'New offer available for pickup',
+        type: 'NEW_OFFER_AVAILABLE',
+        storeId: String((messagePayload.data && messagePayload.data.storeId) || messagePayload.storeId || ''),
+        serverTime: String(Date.now())
+      };
+    } else {
+      payloadDataMap = {
+        title: String(messagePayload.title || ''),
+        body: String(messagePayload.body || ''),
+        notificationId: String(messagePayload.notificationId || ''),
+        offerId: String(messagePayload.offerId || ''),
+        orderId: String(messagePayload.orderId || ''),
+        deliveryId: String(messagePayload.deliveryId || ''),
+        riderId: String(messagePayload.riderId || (messagePayload.data && messagePayload.data.riderId) || 'broadcast'),
+        ...(messagePayload.data || {})
+      };
+    }
     for (const [k, v] of Object.entries(payloadDataMap)) {
       payloadDataMap[k] = String(v);
     }
@@ -458,7 +476,6 @@ class ProductionFcmSender {
     const oauthRes = await getProductionFcmOAuthToken();
     if (oauthRes && oauthRes.token && oauthRes.projectId) {
       const fcmV1Url = `https://fcm.googleapis.com/v1/projects/${oauthRes.projectId}/messages:send`;
-      const isTopicTarget = deviceToken.startsWith('/topics/');
       const v1MessageObj = {
         android: {
           priority: 'high'
@@ -497,14 +514,7 @@ class ProductionFcmSender {
       to: deviceToken,
       priority: 'high',
       data: {
-        title: String(messagePayload.title || ''),
-        body: String(messagePayload.body || ''),
-        notificationId: String(messagePayload.notificationId || ''),
-        offerId: String(messagePayload.offerId || ''),
-        orderId: String(messagePayload.orderId || ''),
-        deliveryId: String(messagePayload.deliveryId || ''),
-        riderId: String(messagePayload.riderId || (messagePayload.data && messagePayload.data.riderId) || 'broadcast'),
-        ...(messagePayload.data || {})
+        ...payloadDataMap
       }
     };
 
@@ -1886,13 +1896,13 @@ const server = http.createServer(async (req, res) => {
       const statusRaw = String(body.status || 'VERIFIED').toUpperCase();
       const decision = (statusRaw === 'VERIFIED' || statusRaw === 'APPROVED') ? 'APPROVED' : 'REJECTED';
       
-      // Authoritative Pharmacist Identity & License Resolution (Finding 4: untrusted caller-supplied license numbers forbidden)
+      // Authoritative Pharmacist Identity & License Resolution (Finding 4 & 7: fail-closed if no verified license in DB)
       const pharmacistId = authClaims.sub;
       let authoritativeLicenseNo = null;
       if (pool) {
         try {
           const pharmCheck = await pool.query(
-            `SELECT license_no, license_number FROM pharmacists WHERE id = $1 OR user_id = $1 LIMIT 1`,
+            `SELECT license_no, license_number FROM pharmacists WHERE (id = $1 OR user_id = $1) AND (status = 'ACTIVE' OR status IS NULL) LIMIT 1`,
             [pharmacistId]
           );
           if (pharmCheck.rows.length > 0) {
@@ -1912,7 +1922,10 @@ const server = http.createServer(async (req, res) => {
         }
       }
       if (!authoritativeLicenseNo) {
-        authoritativeLicenseNo = `LIC-${pharmacistId}`;
+        return sendJson(res, 403, {
+          error: 'PHARMACIST_LICENSE_REQUIRED',
+          message: 'Pharmacist has no verified active license.'
+        });
       }
       const licenseNo = authoritativeLicenseNo;
       const notes = body.notes || (decision === 'APPROVED' ? 'Approved by Licensed Pharmacist' : 'Rejected');
@@ -1925,9 +1938,6 @@ const server = http.createServer(async (req, res) => {
         const client = await pool.connect();
         try {
           await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-
-          // Ensure column authorized_items exists on prescriptions (Finding 3)
-          await client.query(`ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS authorized_items JSONB DEFAULT '[]'::jsonb`).catch(() => {});
 
           // 1. Lock prescription row FOR UPDATE
           const rxRes = await client.query(`SELECT * FROM prescriptions WHERE id = $1 FOR UPDATE`, [verificationId]);
@@ -1944,7 +1954,7 @@ const server = http.createServer(async (req, res) => {
             FOR UPDATE
           `, [verificationId]);
 
-          // Scope approved items and quantities (Finding 3)
+          // Scope approved items and quantities (Finding 3 & 5)
           let itemsToAuthorize = [];
           if (Array.isArray(body.approvedItems) && body.approvedItems.length > 0) {
             itemsToAuthorize = body.approvedItems;
@@ -1953,7 +1963,7 @@ const server = http.createServer(async (req, res) => {
           } else {
             for (const ord of matchedOrders.rows) {
               const ordItems = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
-              for (const it of ordItems.filter(i => i.rxRequired)) {
+              for (const it of ordItems.filter(i => i.rxRequired || i.requiresPrescription || i.rx_requirement === 'RX_REQUIRED' || i.rx_requirement === 'SCHEDULE_H')) {
                 itemsToAuthorize.push({
                   productId: it.productId,
                   sku: it.sku,
@@ -1973,7 +1983,69 @@ const server = http.createServer(async (req, res) => {
 
           for (const ord of matchedOrders.rows) {
             const targetOrderId = ord.order_id || ord.id;
+            const ordItems = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
+
             if (decision === 'APPROVED') {
+              // Finding 5: Inspect all items requiring prescription in this order and verify EVERY item is approved with sufficient quantity
+              const rxItemsInOrder = ordItems.filter(it => 
+                it.rxRequired === true || 
+                it.requiresPrescription === true || 
+                it.rx_required === true || 
+                it.rx_requirement === 'RX_REQUIRED' || 
+                it.rx_requirement === 'SCHEDULE_H' || 
+                it.schedule_h === true || 
+                it.scheduleH === true
+              );
+
+              let allRxItemsApproved = true;
+              let unapprovedReason = null;
+
+              for (const rxItem of rxItemsInOrder) {
+                const match = itemsToAuthorize.find(a => 
+                  (a.productId && (a.productId === rxItem.productId || a.productId === rxItem.id)) ||
+                  (a.sku && (a.sku === rxItem.sku || a.sku === rxItem.productId))
+                );
+                const reqQty = Number(rxItem.quantity || rxItem.qty || 1);
+                if (!match) {
+                  allRxItemsApproved = false;
+                  unapprovedReason = `Item '${rxItem.name || rxItem.sku || rxItem.productId}' was not approved by the pharmacist.`;
+                  break;
+                }
+                const appQty = Number(match.quantity != null ? match.quantity : (match.qty != null ? match.qty : 0));
+                if (appQty < reqQty) {
+                  allRxItemsApproved = false;
+                  unapprovedReason = `Approved quantity (${appQty}) for '${rxItem.name || rxItem.sku}' is less than ordered quantity (${reqQty}).`;
+                  break;
+                }
+              }
+
+              if (!allRxItemsApproved) {
+                // Partial approval: do NOT advance this order. Cancel order, release inventory, and void COD ledger
+                if (appRepositories && appRepositories.inventoryRepo && appRepositories.inventoryRepo.releaseStockTransactionally && ord.store_id && ordItems.length > 0) {
+                  const relRes = await appRepositories.inventoryRepo.releaseStockTransactionally(client, ord.store_id, ordItems);
+                  if (relRes && relRes.ok === false) {
+                    await client.query('ROLLBACK');
+                    return sendJson(res, 500, { error: 'INVENTORY_RELEASE_FAILED', message: relRes.message || 'Failed to release inventory on unapproved prescription item.' });
+                  }
+                }
+
+                await client.query(`
+                  UPDATE orders
+                  SET status = 'CANCELLED', cancellation = $2::jsonb, updated_at = NOW()
+                  WHERE id = $1
+                `, [ord.id, JSON.stringify({ reason: 'PRESCRIPTION_ITEM_NOT_APPROVED', detail: unapprovedReason, actor: 'PHARMACIST' })]);
+                await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [targetOrderId]).catch(() => {});
+                await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [targetOrderId]).catch(() => {});
+                await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [targetOrderId]).catch(() => {});
+                await client.query(
+                  `UPDATE cod_ledger 
+                   SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [VOIDED: Unapproved prescription items]', updated_at = NOW() 
+                   WHERE (order_id = $1 OR id = $1) AND status != 'COLLECTED_RECONCILED'`,
+                  [targetOrderId]
+                ).catch(() => {});
+                continue;
+              }
+
               const isPaidOrCod = Boolean(ord.is_cod || ord.payment_status === 'PAID' || ord.payment_method === 'COD');
               const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
 
@@ -2006,7 +2078,6 @@ const server = http.createServer(async (req, res) => {
               }
             } else {
               // REJECTED: Release stock in the same transaction and mark order cancelled
-              const ordItems = Array.isArray(ord.items) ? ord.items : (typeof ord.items === 'string' ? JSON.parse(ord.items) : (ord.items || []));
               if (appRepositories && appRepositories.inventoryRepo && appRepositories.inventoryRepo.releaseStockTransactionally && ord.store_id && ordItems.length > 0) {
                 const relRes = await appRepositories.inventoryRepo.releaseStockTransactionally(client, ord.store_id, ordItems);
                 if (relRes && relRes.ok === false) {
@@ -2017,9 +2088,9 @@ const server = http.createServer(async (req, res) => {
 
               await client.query(`
                 UPDATE orders
-                SET status = 'CANCELLED', updated_at = NOW()
+                SET status = 'CANCELLED', cancellation = $2::jsonb, updated_at = NOW()
                 WHERE id = $1
-              `, [ord.id]);
+              `, [ord.id, JSON.stringify({ reason: 'PRESCRIPTION_REJECTED', detail: notes, actor: 'PHARMACIST' })]);
               await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [targetOrderId]).catch(() => {});
               await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [targetOrderId]).catch(() => {});
               await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [targetOrderId]).catch(() => {});
@@ -4166,12 +4237,6 @@ const server = http.createServer(async (req, res) => {
       })).digest('hex') : null;
 
       if (idempotencyKey && pool) {
-        await pool.query(`
-          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
-          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);
-          CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency
-            ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-        `).catch(() => {});
         const existingRxRes = await pool.query(
           `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
           [customerId, idempotencyKey]
@@ -4241,7 +4306,6 @@ const server = http.createServer(async (req, res) => {
             [customerId, safePhone]
           );
         } catch (_) {}
-        await pool.query('ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);').catch(() => {});
         let row;
         try {
           const insertRes = await pool.query(
@@ -6231,24 +6295,19 @@ const server = http.createServer(async (req, res) => {
         if (existingOrderRes.rows.length > 0) {
           const row = existingOrderRes.rows[0];
 
-          // Finding 5: Validate incoming request against canonical SHA-256 request_hash and field fingerprint
+          // Finding 9: Validate incoming request against canonical SHA-256 request_hash using shared generator
           const cartItems = await appRepositories.cartRepo.getCart(customerId);
           if (cartItems && cartItems.length > 0 && row.request_hash) {
-            const sortedItems = cartItems.map(i => ({
-              productId: i.productId || i.product_id,
-              quantity: Number(i.quantity)
-            })).sort((a, b) => String(a.productId).localeCompare(String(b.productId)));
-
-            const incomingFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+            const incomingFingerprint = generateCanonicalOrderFingerprint({
               customerId,
               addressId: body.addressId || body.address_id || null,
-              orderType: (body.orderType || 'QUICK_COMMERCE_10MIN').toUpperCase(),
-              paymentMethod: (body.paymentMethod || body.payment_method || 'COD').toUpperCase(),
-              couponCode: body.couponCode ? String(body.couponCode).trim().toUpperCase() : null,
-              tip: Number(body.tip || body.tipAmount || 0),
-              prescriptionId: body.prescriptionId || null,
-              items: sortedItems
-            })).digest('hex');
+              orderType: body.orderType,
+              paymentMethod: body.paymentMethod || body.payment_method,
+              couponCode: body.couponCode,
+              tip: body.tip || body.tipAmount,
+              prescriptionId: body.prescriptionId,
+              items: cartItems
+            });
 
             if (row.request_hash !== incomingFingerprint) {
               return sendJson(res, 409, {
@@ -7519,10 +7578,12 @@ const server = http.createServer(async (req, res) => {
                 const genericTopicPing = {
                   notificationId: newNotifId,
                   storeId: String(targetStoreId),
-                  title: '⚡ New Delivery Available',
-                  body: 'A new delivery offer is ready for pickup',
+                  title: 'New Delivery Offer',
+                  body: 'New offer available for pickup',
                   data: {
                     type: 'NEW_OFFER_AVAILABLE',
+                    title: 'New Delivery Offer',
+                    body: 'New offer available for pickup',
                     storeId: String(targetStoreId),
                     serverTime: String(Date.now())
                   }
@@ -9833,8 +9894,25 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // GET /api/v1/delivery/route (OSRM Route Engine)
+    // GET /api/v1/delivery/route (Authorized Road Route Engine - Finding 3)
     if (pathname.startsWith('/api/v1/delivery/route') && method === 'GET') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer authentication is strictly required for routing gateway.' });
+      }
+
+      // Rate limiting: max 60 requests per 60 seconds per caller
+      const callerId = authClaims.sub;
+      const nowMs = Date.now();
+      let callerHistory = routeGatewayRateLimitMap.get(callerId) || [];
+      callerHistory = callerHistory.filter(ts => nowMs - ts < 60000);
+      if (callerHistory.length >= 60) {
+        routeGatewayRateLimitMap.set(callerId, callerHistory);
+        return sendJson(res, 429, { error: 'RATE_LIMIT_EXCEEDED', message: 'Route requests exceed allowed rate limit (maximum 60 requests per minute).' });
+      }
+      callerHistory.push(nowMs);
+      routeGatewayRateLimitMap.set(callerId, callerHistory);
+
       const u = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const originLat = parseFloat(u.searchParams.get('originLat') || '');
       const originLng = parseFloat(u.searchParams.get('originLng') || '');
@@ -9845,11 +9923,96 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_ROUTE_COORDINATES', message: 'Valid origin and destination coordinates are required.' });
       }
 
-      if (!OSRM_BASE_URL) {
+      let deliveryId = u.searchParams.get('deliveryId') || u.searchParams.get('delivery_id');
+      let orderId = u.searchParams.get('orderId') || u.searchParams.get('order_id');
+
+      // If not passed explicitly in query params, resolve active delivery or order for this caller
+      if (!deliveryId && !orderId && pool && !isLocalMode) {
+        try {
+          const activeSes = await pool.query(
+            `SELECT ds.delivery_id, ds.order_id 
+             FROM delivery_sessions ds
+             LEFT JOIN orders o ON (o.id = ds.order_id OR o.order_id = ds.order_id)
+             WHERE (ds.rider_id = $1 OR ds.customer_id = $1 OR o.customer_id = $1)
+               AND ds.state NOT IN ('DELIVERED', 'CANCELLED', 'FAILED', 'RETURNED')
+             ORDER BY ds.updated_at DESC LIMIT 1`,
+            [callerId]
+          );
+          if (activeSes.rows.length > 0) {
+            deliveryId = activeSes.rows[0].delivery_id;
+            orderId = activeSes.rows[0].order_id;
+          }
+        } catch (_) {}
+      }
+
+      if (!deliveryId && !orderId) {
+        return sendJson(res, 400, {
+          error: 'DELIVERY_OR_ORDER_REQUIRED',
+          message: 'Either deliveryId or orderId is required for route gateway calculation.'
+        });
+      }
+
+      // Query session and verify authorization
+      let sessionRow = null;
+      if (pool && !isLocalMode) {
+        try {
+          const sRes = await pool.query(
+            `SELECT ds.*, o.customer_id AS order_customer_id, o.store_id AS order_store_id
+             FROM delivery_sessions ds
+             LEFT JOIN orders o ON (o.id = ds.order_id OR o.order_id = ds.order_id)
+             WHERE (ds.delivery_id = $1 OR ds.order_id = $2 OR o.id = $2 OR o.order_id = $2)
+             LIMIT 1`,
+            [deliveryId || '', orderId || '']
+          );
+          if (sRes.rows.length > 0) {
+            sessionRow = sRes.rows[0];
+          }
+        } catch (_) {}
+      }
+
+      const role = String(authClaims.role || '').toUpperCase();
+      const roles = Array.isArray(authClaims.roles) ? authClaims.roles.map(r => String(r).toUpperCase()) : [];
+      const isAdmin = role === 'ROLE_ADMIN' || role === 'ADMIN' || roles.includes('ROLE_ADMIN') || roles.includes('ADMIN');
+      const isRiderOfSession = sessionRow && (sessionRow.rider_id === callerId);
+      const isCustomerOfSession = sessionRow && (sessionRow.customer_id === callerId || sessionRow.order_customer_id === callerId);
+
+      if (sessionRow && !isRiderOfSession && !isCustomerOfSession && !isAdmin) {
+        return sendJson(res, 403, {
+          error: 'FORBIDDEN',
+          message: 'Not authorized to calculate route for this delivery or order session.'
+        });
+      }
+
+      // Ensure coordinates match the session store or customer destination (reject arbitrary coordinates)
+      if (sessionRow) {
+        const mLat = Number(sessionRow.merchant_lat != null ? sessionRow.merchant_lat : (sessionRow.merchantLat != null ? sessionRow.merchantLat : sessionRow.store_lat));
+        const mLng = Number(sessionRow.merchant_lng != null ? sessionRow.merchant_lng : (sessionRow.merchantLng != null ? sessionRow.merchantLng : sessionRow.store_lng));
+        const cLat = Number(sessionRow.customer_lat != null ? sessionRow.customer_lat : sessionRow.customerLat);
+        const cLng = Number(sessionRow.customer_lng != null ? sessionRow.customer_lng : sessionRow.customerLng);
+
+        const coordsNear = (lat1, lng1, lat2, lng2, maxDistMeters = 350) => {
+          if (lat1 == null || lng1 == null || lat2 == null || lng2 == null || isNaN(lat1) || isNaN(lng1) || isNaN(lat2) || isNaN(lng2)) return false;
+          return (haversineDistanceKm(lat1, lng1, lat2, lng2) * 1000) <= maxDistMeters;
+        };
+
+        const destNearStore = coordsNear(destLat, destLng, mLat, mLng);
+        const destNearCustomer = coordsNear(destLat, destLng, cLat, cLng);
+        const originNearStore = coordsNear(originLat, originLng, mLat, mLng);
+        const originNearCustomer = coordsNear(originLat, originLng, cLat, cLng);
+
+        if (!destNearStore && !destNearCustomer && !originNearStore && !originNearCustomer) {
+          return sendJson(res, 400, {
+            error: 'ARBITRARY_COORDINATES_REJECTED',
+            message: 'Coordinates must correspond to the store or customer destination of this delivery session.'
+          });
+        }
+      }
+
+      if (!OSRM_BASE_URL || OSRM_BASE_URL.includes('project-osrm.org')) {
         return sendJson(res, 503, {
           ok: false,
           error: 'OSRM_BASE_URL_UNCONFIGURED',
-          message: 'Road network routing requires OSRM_BASE_URL to be configured.'
+          message: 'Private road network routing requires OSRM_BASE_URL to be configured.'
         });
       }
 
@@ -9878,80 +10041,95 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Server-Authoritative Location & Geofence Validator (Finding 5)
+    // Server-Authoritative Location & Geofence Validator (Finding 2 & 5)
     async function verifyRiderMilestoneLocation(req, delivery, authClaims, targetType) {
-      let riderLat = null;
-      let riderLng = null;
-      let accuracy = null;
-      let locationTimestamp = null;
+      const deliveryId = delivery.delivery_id || delivery.id;
 
+      // 1. Query the rider's latest server-ingested telemetry from rider_telemetry
+      let serverTelem = null;
+      if (appRepositories && appRepositories.telemetryRepo && typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
+        try {
+          serverTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
+        } catch (_) {}
+      }
+      if (!serverTelem && pool) {
+        try {
+          const tRes = await pool.query(
+            `SELECT latitude, longitude, accuracy, accuracy_meters, recorded_at, created_at, timestamp
+             FROM rider_telemetry
+             WHERE delivery_id = $1
+             ORDER BY sequence_number DESC, recorded_at DESC LIMIT 1`,
+            [deliveryId]
+          );
+          if (tRes.rows.length > 0) {
+            serverTelem = tRes.rows[0];
+          }
+        } catch (_) {}
+      }
+
+      if (!serverTelem || serverTelem.latitude == null || serverTelem.longitude == null) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: 'Server-verified GPS telemetry is required for delivery milestone transitions.'
+        };
+      }
+
+      const telemLat = Number(serverTelem.latitude);
+      const telemLng = Number(serverTelem.longitude);
+      const telemAccuracy = Number(serverTelem.accuracy != null ? serverTelem.accuracy : (serverTelem.accuracy_meters != null ? serverTelem.accuracy_meters : (serverTelem.accuracyMeters != null ? serverTelem.accuracyMeters : 999.0)));
+      const telemTime = serverTelem.recorded_at ? new Date(serverTelem.recorded_at).getTime() : (serverTelem.timestamp ? new Date(serverTelem.timestamp).getTime() : (serverTelem.created_at ? new Date(serverTelem.created_at).getTime() : 0));
+      const now = Date.now();
+      const telemAgeMs = Math.abs(now - telemTime);
+
+      // Verify telemetry recorded within the last 60 seconds
+      if (telemAgeMs > 60000) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: `Server telemetry is stale (${Math.round(telemAgeMs / 1000)}s old). Fresh telemetry recorded within the last 60 seconds is required.`
+        };
+      }
+
+      // Verify GPS accuracy <= 100m
+      if (telemAccuracy > 100.0) {
+        return {
+          ok: false,
+          error: 'GEOFENCE_VIOLATION',
+          message: `Server telemetry GPS accuracy (${telemAccuracy.toFixed(1)}m) is insufficient. Accuracy <= 100m is required.`
+        };
+      }
+
+      // If client submits coordinates in body, verify they match recent server telemetry within 50m
+      let clientLat = null;
+      let clientLng = null;
       try {
         const body = await parseJsonBody(req);
         if (body) {
           if (body.latitude != null && body.longitude != null) {
-            riderLat = Number(body.latitude);
-            riderLng = Number(body.longitude);
-            accuracy = body.accuracy != null ? Number(body.accuracy) : (body.accuracyMeters != null ? Number(body.accuracyMeters) : 10.0);
-            locationTimestamp = body.timestamp ? new Date(body.timestamp).getTime() : Date.now();
+            clientLat = Number(body.latitude);
+            clientLng = Number(body.longitude);
           } else if (body.lat != null && body.lng != null) {
-            riderLat = Number(body.lat);
-            riderLng = Number(body.lng);
-            accuracy = body.accuracy != null ? Number(body.accuracy) : 10.0;
-            locationTimestamp = body.timestamp ? new Date(body.timestamp).getTime() : Date.now();
+            clientLat = Number(body.lat);
+            clientLng = Number(body.lng);
           }
         }
       } catch (_) {}
 
-      if (riderLat == null || riderLng == null) {
-        let latestTelem = null;
-        if (appRepositories && appRepositories.telemetryRepo && typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
-          try {
-            latestTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(delivery.delivery_id || delivery.id);
-          } catch (_) {}
-        }
-        if (latestTelem && latestTelem.latitude != null && latestTelem.longitude != null) {
-          riderLat = Number(latestTelem.latitude);
-          riderLng = Number(latestTelem.longitude);
-          accuracy = latestTelem.accuracy != null ? Number(latestTelem.accuracy) : (latestTelem.accuracyMeters != null ? Number(latestTelem.accuracyMeters) : 15.0);
-          locationTimestamp = latestTelem.timestamp ? new Date(latestTelem.timestamp).getTime() : (latestTelem.serverTimestamp || Date.now());
-        } else if (appRepositories && appRepositories.presenceRepo && typeof appRepositories.presenceRepo.findPresence === 'function') {
-          try {
-            const pres = await appRepositories.presenceRepo.findPresence(authClaims.sub);
-            if (pres && pres.latitude != null && pres.longitude != null) {
-              riderLat = Number(pres.latitude);
-              riderLng = Number(pres.longitude);
-              accuracy = 20.0;
-              locationTimestamp = pres.lastSeenAt ? new Date(pres.lastSeenAt).getTime() : (pres.updated_at ? new Date(pres.updated_at).getTime() : Date.now());
-            }
-          } catch (_) {}
+      if (clientLat != null && clientLng != null && !isNaN(clientLat) && !isNaN(clientLng)) {
+        const driftMeters = haversineDistanceKm(clientLat, clientLng, telemLat, telemLng) * 1000;
+        if (driftMeters > 50.0) {
+          return {
+            ok: false,
+            error: 'GEOFENCE_VIOLATION',
+            message: `Client-submitted location deviates from server telemetry by ${Math.round(driftMeters)}m (maximum allowed deviation is 50m).`
+          };
         }
       }
 
-      if (riderLat == null || riderLng == null || isNaN(riderLat) || isNaN(riderLng)) {
-        return {
-          ok: false,
-          error: 'GEOFENCE_VIOLATION',
-          message: 'Active location fix is required to verify milestone arrival.'
-        };
-      }
-
-      const now = Date.now();
-      const ageMs = Math.abs(now - (locationTimestamp || now));
-      if (ageMs > 180000) {
-        return {
-          ok: false,
-          error: 'GEOFENCE_VIOLATION',
-          message: `Location fix is stale (${Math.round(ageMs / 1000)}s old). Fresh location (< 3 minutes) is required.`
-        };
-      }
-
-      if (accuracy != null && accuracy > 100.0) {
-        return {
-          ok: false,
-          error: 'GEOFENCE_VIOLATION',
-          message: `Location accuracy (${accuracy.toFixed(1)}m) is insufficient. Accuracy <= 100m is required.`
-        };
-      }
+      // Authoritative rider location is the server telemetry location
+      const riderLat = telemLat;
+      const riderLng = telemLng;
 
       let targetLat, targetLng;
       if (targetType === 'STORE') {

@@ -2,6 +2,13 @@ import Foundation
 import UserNotifications
 import UIKit
 
+public struct DeviceTokenResponse: Codable {
+    public let ok: Bool?
+    public let registered: Bool?
+    public let unregistered: Bool?
+    public let customerId: String?
+}
+
 @MainActor
 public final class CustomerPushNotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     public static let shared = CustomerPushNotificationManager()
@@ -65,7 +72,7 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
                     let platform: String
                 }
                 let body = CustomerDeviceTokenPayload(deviceToken: token, platform: "IOS")
-                let _: [String: AnyCodable] = try await APIClient.shared.post(
+                let _: DeviceTokenResponse = try await APIClient.shared.post(
                     endpoint: "/api/v1/customer/device-token",
                     body: body
                 )
@@ -105,7 +112,7 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
             let encoder = JSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
             let data = try encoder.encode(body)
-            let _: [String: AnyCodable] = try await APIClient.shared.request(
+            let _: DeviceTokenResponse = try await APIClient.shared.request(
                 endpoint: "/api/v1/customer/device-token",
                 method: "DELETE",
                 body: data,
@@ -127,7 +134,7 @@ public final class CustomerPushNotificationManager: NSObject, ObservableObject, 
         }
     }
 
-    public func userNotificationCenter(
+    nonisolated public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void

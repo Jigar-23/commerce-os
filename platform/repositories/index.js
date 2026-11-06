@@ -78,6 +78,50 @@ class DeliveryOtpService {
 
 const { extractCoarseLocality, sanitizeSegment } = require('../services/locality-sanitizer');
 
+/**
+ * Shared Canonical Order Idempotency Fingerprint Generator (Finding 9)
+ * Normalizes payment method (CASH_ON_DELIVERY -> COD) and items to [{ sku, quantity }]
+ */
+function generateCanonicalOrderFingerprint({
+  customerId,
+  addressId,
+  orderType,
+  paymentMethod,
+  couponCode,
+  tip,
+  prescriptionId,
+  items
+}) {
+  let normalizedMethod = String(paymentMethod || 'COD').toUpperCase().trim();
+  if (['CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY', 'POD'].includes(normalizedMethod)) {
+    normalizedMethod = 'COD';
+  }
+
+  const normalizedOrderType = String(orderType || 'QUICK_COMMERCE_10MIN').toUpperCase().trim();
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map(it => {
+      const skuVal = String(it.sku || it.productId || it.product_id || it.id || '').trim();
+      const qtyVal = Number(it.quantity != null ? it.quantity : (it.qty != null ? it.qty : 1));
+      return { sku: skuVal, quantity: qtyVal };
+    })
+    .filter(it => it.sku !== '')
+    .sort((a, b) => a.sku.localeCompare(b.sku));
+
+  const payload = {
+    customerId: String(customerId || ''),
+    addressId: addressId ? String(addressId) : null,
+    orderType: normalizedOrderType,
+    paymentMethod: normalizedMethod,
+    couponCode: couponCode ? String(couponCode).trim().toUpperCase() : null,
+    tip: Number(tip || 0),
+    prescriptionId: prescriptionId ? String(prescriptionId) : null,
+    items: normalizedItems
+  };
+
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
 class TransactionalCatalogRepository {
   constructor(dbPool) {
     this.pool = dbPool;
@@ -4288,24 +4332,16 @@ class TransactionalOrderRepository {
         // Fast-path Idempotency Replay Check: Return winning order immediately if already placed
         const idempotencyKey = data.idempotencyKey || data.idempotency_key || null;
         if (idempotencyKey) {
-          const rawItems = Array.isArray(data.items) ? data.items : [];
-          const sortedItems = [...rawItems]
-            .map(it => ({
-              sku: String(it.sku || it.productId || ''),
-              qty: Number(it.quantity || it.qty || 1)
-            }))
-            .sort((a, b) => a.sku.localeCompare(b.sku));
-
-          requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+          requestFingerprint = generateCanonicalOrderFingerprint({
             customerId,
             addressId: data.addressId || null,
-            orderType: (data.orderType || 'QUICK_COMMERCE_10MIN').toUpperCase(),
-            paymentMethod: (data.paymentMethod || 'COD').toUpperCase(),
-            couponCode: data.couponCode ? String(data.couponCode).trim().toUpperCase() : null,
-            tip: Number(data.tip || data.tipAmount || 0),
-            prescriptionId: data.prescriptionId || null,
-            items: sortedItems
-          })).digest('hex');
+            orderType: authoritativeOrderType || data.orderType,
+            paymentMethod: data.paymentMethod,
+            couponCode: data.couponCode,
+            tip: data.tip || data.tipAmount,
+            prescriptionId: data.prescriptionId,
+            items: data.items
+          });
 
           const existingOrderRes = await client.query(
             `SELECT id, order_id, customer_id, store_id, status, total_amount, payment_status, request_hash, items, delivery_address
@@ -4585,21 +4621,17 @@ class TransactionalOrderRepository {
         };
       }
 
-      // 10. Canonical Request Fingerprint Hash (Covers all material request inputs)
-      const sortedItemsForHash = resolvedItemSnapshots
-        .map(it => ({ sku: String(it.sku || it.productId || ''), qty: Number(it.quantity || it.qty || 1) }))
-        .sort((a, b) => a.sku.localeCompare(b.sku));
-
-      requestFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+      // 10. Canonical Request Fingerprint Hash (Finding 9: shared canonical generator)
+      requestFingerprint = generateCanonicalOrderFingerprint({
         customerId,
         addressId: data.addressId || null,
-        orderType: (authoritativeOrderType || 'QUICK_COMMERCE_10MIN').toUpperCase(),
-        paymentMethod: (requestedMethod || 'COD').toUpperCase(),
-        couponCode: data.couponCode ? String(data.couponCode).trim().toUpperCase() : null,
-        tip: Number(data.tip || data.tipAmount || 0),
-        prescriptionId: data.prescriptionId || null,
-        items: sortedItemsForHash
-      })).digest('hex');
+        orderType: authoritativeOrderType || data.orderType,
+        paymentMethod: data.paymentMethod,
+        couponCode: data.couponCode,
+        tip: data.tip || data.tipAmount,
+        prescriptionId: data.prescriptionId,
+        items: data.items
+      });
 
       // 11. Idempotency Check with Request Hash Binding
       if (idempotencyKey) {
@@ -8608,10 +8640,12 @@ class ProductionNotificationService {
         const genericTopicPayload = {
           notificationId: notifId,
           storeId: String(offerStoreId),
-          title: notifRecord.title,
-          body: notifRecord.body,
+          title: 'New Delivery Offer',
+          body: 'New offer available for pickup',
           data: {
             type: 'NEW_OFFER_AVAILABLE',
+            title: 'New Delivery Offer',
+            body: 'New offer available for pickup',
             storeId: String(offerStoreId),
             serverTime: String(Date.now())
           }
@@ -9015,7 +9049,18 @@ class OutboxProcessor {
       for (const expOrd of expiredDispatchesRes.rows) {
         const expItems = Array.isArray(expOrd.items) ? expOrd.items : (typeof expOrd.items === 'string' ? JSON.parse(expOrd.items) : (expOrd.items || []));
         if (this.inventoryRepo && typeof this.inventoryRepo.releaseStockTransactionally === 'function' && expOrd.store_id && expItems.length > 0) {
-          await this.inventoryRepo.releaseStockTransactionally(client, expOrd.store_id, expItems).catch(() => {});
+          try {
+            const relRes = await this.inventoryRepo.releaseStockTransactionally(client, expOrd.store_id, expItems);
+            if (relRes && relRes.ok === false) {
+              await client.query('ROLLBACK');
+              console.error(`[OutboxProcessor] Aborting dispatch expiry for order ${expOrd.id}: stock release failed: ${relRes.message || 'unknown error'}`);
+              return redrivenCount;
+            }
+          } catch (relErr) {
+            await client.query('ROLLBACK');
+            console.error(`[OutboxProcessor] Aborting dispatch expiry for order ${expOrd.id}: stock release threw error: ${relErr.message}`);
+            return redrivenCount;
+          }
         }
         await client.query(
           `UPDATE orders 
@@ -9983,5 +10028,6 @@ module.exports = {
   createProductionRepositories,
   createLocalDevelopmentRepositories,
   initApplicationRepositories,
-  extractCoarseLocality
+  extractCoarseLocality,
+  generateCanonicalOrderFingerprint
 };
