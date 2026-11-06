@@ -2020,27 +2020,30 @@ async function resolveAuthoritativeRoute(originLat, originLng, destLat, destLng)
     // Google Directions API fallback
   }
 
-  // 2. High-performance OSRM fallback
-  try {
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-    const osrmRes = await fetch(osrmUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (osrmRes.ok) {
-      const osrmData = await osrmRes.json();
-      if (osrmData.routes && osrmData.routes.length > 0) {
-        const route = osrmData.routes[0];
-        const waypoints = (route.geometry && route.geometry.coordinates)
-          ? route.geometry.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }))
-          : [];
-        const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
-        const durationMins = Math.max(1, Math.round(route.duration / 60));
-        return { ok: true, distanceKm, durationMins, waypoints, provider: 'OSRM_ROAD_NETWORK' };
+  // 2. High-performance private internal OSRM
+  const osrmBase = process.env.OSRM_BASE_URL || 'http://osrm-backend:5000';
+  if (osrmBase && !osrmBase.includes('project-osrm.org')) {
+    try {
+      const osrmUrl = `${osrmBase.replace(/\/+$/, '')}/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const osrmRes = await fetch(osrmUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (osrmRes.ok) {
+        const osrmData = await osrmRes.json();
+        if (osrmData.routes && osrmData.routes.length > 0) {
+          const route = osrmData.routes[0];
+          const waypoints = (route.geometry && route.geometry.coordinates)
+            ? route.geometry.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }))
+            : [];
+          const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
+          const durationMins = Math.max(1, Math.round(route.duration / 60));
+          return { ok: true, distanceKm, durationMins, waypoints, provider: 'OSRM_ROAD_NETWORK' };
+        }
       }
+    } catch (e) {
+      // Network or OSRM unavailable
     }
-  } catch (e) {
-    // Network or OSRM unavailable
   }
 
   // Pure strict failure: do NOT invent fake multipliers

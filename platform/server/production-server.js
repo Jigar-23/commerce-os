@@ -135,9 +135,63 @@ const DEFAULT_STORE_ID = process.env.DEFAULT_STORE_ID || 'store_rewari_hub_01';
 // In-Flight Route Lock & Telemetry Reroute Debounce Sets
 const inFlightRouteCalculations = new Set();
 const lastRerouteTimes = new Map();
-const routeGatewayRateLimitMap = new Map();
+
+class BoundedRateLimiter {
+  constructor(maxEntries = 5000, windowMs = 60000, maxRequests = 60) {
+    this.maxEntries = maxEntries;
+    this.windowMs = windowMs;
+    this.maxRequests = maxRequests;
+    this.map = new Map();
+  }
+
+  isRateLimited(key) {
+    const now = Date.now();
+    let timestamps = this.map.get(key);
+    if (!timestamps) {
+      if (this.map.size >= this.maxEntries) {
+        const cutoff = now - this.windowMs;
+        for (const [k, v] of this.map.entries()) {
+          if (!v.length || v[v.length - 1] < cutoff) {
+            this.map.delete(k);
+          }
+        }
+        if (this.map.size >= this.maxEntries) {
+          const firstKey = this.map.keys().next().value;
+          this.map.delete(firstKey);
+        }
+      }
+      timestamps = [];
+    } else {
+      this.map.delete(key);
+      timestamps = timestamps.filter(ts => now - ts < this.windowMs);
+    }
+
+    if (timestamps.length >= this.maxRequests) {
+      this.map.set(key, timestamps);
+      return true;
+    }
+
+    timestamps.push(now);
+    this.map.set(key, timestamps);
+    return false;
+  }
+}
+const routeGatewayRateLimiter = new BoundedRateLimiter(5000, 60000, 60);
 
 const REQUIRED_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS pharmacists (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64),
+    license_no VARCHAR(100) NOT NULL,
+    license_number VARCHAR(100),
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_pharmacists_user ON pharmacists(user_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_pharmacists_status ON pharmacists(status);`,
   `ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS authorized_items JSONB DEFAULT '[]'::jsonb;`,
   `ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);`,
   `ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);`,
@@ -1896,35 +1950,30 @@ const server = http.createServer(async (req, res) => {
       const statusRaw = String(body.status || 'VERIFIED').toUpperCase();
       const decision = (statusRaw === 'VERIFIED' || statusRaw === 'APPROVED') ? 'APPROVED' : 'REJECTED';
       
-      // Authoritative Pharmacist Identity & License Resolution (Finding 4 & 7: fail-closed if no verified license in DB)
+      // Authoritative Pharmacist Identity & License Resolution (Finding 8: require strict status='ACTIVE', is_verified=true, not expired, zero unverified user fallback)
       const pharmacistId = authClaims.sub;
       let authoritativeLicenseNo = null;
       if (pool) {
         try {
           const pharmCheck = await pool.query(
-            `SELECT license_no, license_number FROM pharmacists WHERE (id = $1 OR user_id = $1) AND (status = 'ACTIVE' OR status IS NULL) LIMIT 1`,
+            `SELECT license_no, license_number, is_verified, status, expires_at 
+             FROM pharmacists 
+             WHERE (id = $1 OR user_id = $1) 
+               AND status = 'ACTIVE' 
+               AND is_verified = TRUE 
+               AND (expires_at IS NULL OR expires_at > NOW()) 
+             LIMIT 1`,
             [pharmacistId]
           );
           if (pharmCheck.rows.length > 0) {
             authoritativeLicenseNo = pharmCheck.rows[0].license_no || pharmCheck.rows[0].license_number;
           }
         } catch (_) {}
-        if (!authoritativeLicenseNo) {
-          try {
-            const userCheck = await pool.query(
-              `SELECT license_no FROM users WHERE id = $1 LIMIT 1`,
-              [pharmacistId]
-            );
-            if (userCheck.rows.length > 0 && userCheck.rows[0].license_no) {
-              authoritativeLicenseNo = userCheck.rows[0].license_no;
-            }
-          } catch (_) {}
-        }
       }
       if (!authoritativeLicenseNo) {
         return sendJson(res, 403, {
           error: 'PHARMACIST_LICENSE_REQUIRED',
-          message: 'Pharmacist has no verified active license.'
+          message: 'Pharmacist has no verified active license or license has expired.'
         });
       }
       const licenseNo = authoritativeLicenseNo;
@@ -1954,7 +2003,7 @@ const server = http.createServer(async (req, res) => {
             FOR UPDATE
           `, [verificationId]);
 
-          // Scope approved items and quantities (Finding 3 & 5)
+          // Scope approved items and quantities (Finding 2: Require non-empty item-and-quantity scope on verification approval)
           let itemsToAuthorize = [];
           if (Array.isArray(body.approvedItems) && body.approvedItems.length > 0) {
             itemsToAuthorize = body.approvedItems;
@@ -1969,6 +2018,26 @@ const server = http.createServer(async (req, res) => {
                   sku: it.sku,
                   name: it.name,
                   quantity: Number(it.quantity || 1)
+                });
+              }
+            }
+          }
+
+          if (decision === 'APPROVED') {
+            if (!itemsToAuthorize || itemsToAuthorize.length === 0) {
+              await client.query('ROLLBACK');
+              return sendJson(res, 400, {
+                error: 'EMPTY_PRESCRIPTION_SCOPE',
+                message: 'Prescription approval requires at least one authorized item with a valid quantity.'
+              });
+            }
+            for (const it of itemsToAuthorize) {
+              const qty = Number(it.quantity != null ? it.quantity : (it.qty != null ? it.qty : 0));
+              if (!qty || qty <= 0) {
+                await client.query('ROLLBACK');
+                return sendJson(res, 400, {
+                  error: 'INVALID_PRESCRIPTION_ITEM_QUANTITY',
+                  message: `Authorized item '${it.name || it.sku || it.productId}' must have a positive quantity.`
                 });
               }
             }
@@ -2046,6 +2115,19 @@ const server = http.createServer(async (req, res) => {
                 continue;
               }
 
+              // Consume approved prescription quantity for this accepted order
+              for (const rxItem of rxItemsInOrder) {
+                const match = itemsToAuthorize.find(a => 
+                  (a.productId && (a.productId === rxItem.productId || a.productId === rxItem.id)) ||
+                  (a.sku && (a.sku === rxItem.sku || a.sku === rxItem.productId))
+                );
+                if (match) {
+                  const reqQty = Number(rxItem.quantity || rxItem.qty || 1);
+                  const curQty = Number(match.quantity != null ? match.quantity : (match.qty != null ? match.qty : 0));
+                  match.quantity = Math.max(0, curQty - reqQty);
+                }
+              }
+
               const isPaidOrCod = Boolean(ord.is_cod || ord.payment_status === 'PAID' || ord.payment_method === 'COD');
               const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
 
@@ -2103,6 +2185,14 @@ const server = http.createServer(async (req, res) => {
                 [targetOrderId]
               ).catch(() => {});
             }
+          }
+
+          if (decision === 'APPROVED') {
+            await client.query(`
+              UPDATE prescriptions
+              SET authorized_items = $1, updated_at = NOW()
+              WHERE id = $2
+            `, [JSON.stringify(itemsToAuthorize), verificationId]);
           }
 
           await client.query(`
@@ -6304,8 +6394,8 @@ const server = http.createServer(async (req, res) => {
               orderType: body.orderType,
               paymentMethod: body.paymentMethod || body.payment_method,
               couponCode: body.couponCode,
-              tip: body.tip || body.tipAmount,
-              prescriptionId: body.prescriptionId,
+              tip: body.tip != null ? body.tip : (body.selectedTip != null ? body.selectedTip : body.tipAmount),
+              prescriptionId: body.prescriptionId || body.prescription_id || null,
               items: cartItems
             });
 
@@ -6317,15 +6407,21 @@ const server = http.createServer(async (req, res) => {
             }
           }
 
-          // Field-level verification for replayed requests
+          // Field-level verification for replayed requests (Finding 6: normalize payment method aliases and include selectedTip)
           const storedAddr = typeof row.delivery_address === 'string' ? JSON.parse(row.delivery_address) : (row.delivery_address || {});
           const storedAddressId = storedAddr.id || storedAddr.addressId || storedAddr.address_id || null;
           const incomingAddressId = body.addressId || body.address_id || null;
-          const incomingMethod = String(body.paymentMethod || body.payment_method || 'COD').toUpperCase();
-          const storedMethod = String(row.payment_method || 'COD').toUpperCase();
-          const incomingTip = Number(body.tip || body.tipAmount || 0);
-          const storedTip = Number(row.tip || row.tip_amount || row.bill_summary?.tip || 0);
-          const incomingRx = body.prescriptionId || null;
+          
+          const normalizeCodMethod = (m) => {
+            const up = String(m || 'COD').toUpperCase().trim();
+            return ['CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY', 'POD'].includes(up) ? 'COD' : up;
+          };
+          const incomingMethod = normalizeCodMethod(body.paymentMethod || body.payment_method);
+          const storedMethod = normalizeCodMethod(row.payment_method);
+          
+          const incomingTip = Number(body.tip != null ? body.tip : (body.selectedTip != null ? body.selectedTip : (body.tipAmount || 0)));
+          const storedTip = Number(row.tip != null ? row.tip : (row.tip_amount != null ? row.tip_amount : (row.bill_summary?.tip || 0)));
+          const incomingRx = body.prescriptionId || body.prescription_id || null;
           const storedRx = row.prescription_id || null;
           const incomingCoupon = body.couponCode ? String(body.couponCode).trim().toUpperCase() : null;
           const storedCoupon = row.bill_summary?.couponCode ? String(row.bill_summary.couponCode).trim().toUpperCase() : null;
@@ -6333,7 +6429,7 @@ const server = http.createServer(async (req, res) => {
           const addressMismatch = incomingAddressId && storedAddressId && incomingAddressId !== storedAddressId;
           const methodMismatch = incomingMethod && storedMethod && incomingMethod !== storedMethod;
           const tipMismatch = Math.abs(incomingTip - storedTip) > 0.01;
-          const rxMismatch = incomingRx !== null && storedRx !== null && incomingRx !== storedRx;
+          const rxMismatch = Boolean(incomingRx) !== Boolean(storedRx) || (incomingRx && storedRx && incomingRx !== storedRx);
           const couponMismatch = incomingCoupon !== null && storedCoupon !== null && incomingCoupon !== storedCoupon;
 
           if (addressMismatch || methodMismatch || tipMismatch || rxMismatch || couponMismatch) {
@@ -6496,6 +6592,7 @@ const server = http.createServer(async (req, res) => {
         idempotencyKey,
         cartCheckout: true,
         couponCode: body.couponCode || body.coupon_code || null,
+        prescriptionId: body.prescriptionId || body.prescription_id || null,
         tip: body.tip != null ? Math.max(0, Number(body.tip)) : (body.selectedTip != null ? Math.max(0, Number(body.selectedTip)) : 0)
       });
 
@@ -9682,10 +9779,52 @@ const server = http.createServer(async (req, res) => {
       }
 
       const body = await parseJsonBody(req);
+      if (body.isMockLocation === true || body.mockLocation === true || body.isFromMockProvider === true || body.mockProvider === true) {
+        return sendJson(res, 403, {
+          error: 'MOCK_LOCATION_REJECTED',
+          message: 'Mock or spoofed GPS location is strictly rejected by production security policy.'
+        });
+      }
       const lat = Number(body.latitude);
       const lng = Number(body.longitude);
       if (isNaN(lat) || isNaN(lng)) {
         return sendJson(res, 400, { error: 'INVALID_LOCATION', message: 'Latitude and longitude are required.' });
+      }
+      const speedKmh = Number(body.speedKmh != null ? body.speedKmh : (body.speed != null ? body.speed : 0));
+      if (speedKmh > 120.0) {
+        return sendJson(res, 400, {
+          error: 'KINEMATIC_LIMIT_EXCEEDED',
+          message: `Reported speed (${speedKmh} km/h) exceeds maximum plausible kinematic threshold (120 km/h).`
+        });
+      }
+      if (pool && !isLocalMode) {
+        try {
+          const prevTelemRes = await pool.query(
+            `SELECT latitude, longitude, recorded_at, created_at, sequence_number 
+             FROM rider_telemetry 
+             WHERE delivery_id = $1 
+             ORDER BY sequence_number DESC, recorded_at DESC LIMIT 1`,
+            [deliveryId]
+          );
+          if (prevTelemRes.rows.length > 0) {
+            const prev = prevTelemRes.rows[0];
+            const prevLat = Number(prev.latitude);
+            const prevLng = Number(prev.longitude);
+            const prevTime = prev.recorded_at ? new Date(prev.recorded_at).getTime() : new Date(prev.created_at).getTime();
+            const nowTime = Date.now();
+            const deltaSec = (nowTime - prevTime) / 1000;
+            if (deltaSec > 0 && deltaSec < 300) {
+              const distKm = haversineDistanceKm(prevLat, prevLng, lat, lng);
+              const impliedSpeedKmh = (distKm / deltaSec) * 3600;
+              if (impliedSpeedKmh > 150.0 && distKm > 0.5) {
+                return sendJson(res, 400, {
+                  error: 'KINEMATIC_LIMIT_EXCEEDED',
+                  message: `Kinematic jump detected: implied speed is ${Math.round(impliedSpeedKmh)} km/h across ${distKm.toFixed(2)} km.`
+                });
+              }
+            }
+          }
+        } catch (_) {}
       }
       if (body.sequenceNumber == null || isNaN(Number(body.sequenceNumber)) || Number(body.sequenceNumber) <= 0) {
         return sendJson(res, 400, { error: 'INVALID_TELEMETRY_SEQUENCE', message: 'A valid positive integer sequenceNumber is mandatory for telemetry packets.' });
@@ -9720,7 +9859,7 @@ const server = http.createServer(async (req, res) => {
         const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
         const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
 
-        if (!isNaN(destLat) && !isNaN(destLng)) {
+        if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL && !OSRM_BASE_URL.includes('project-osrm.org')) {
           try {
             const osrmUrl = `${OSRM_BASE_URL}/route/v1/driving/${lng},${lat};${destLng},${destLat}?overview=full&geometries=geojson`;
             const osrmRes = await fetch(osrmUrl);
@@ -9765,7 +9904,7 @@ const server = http.createServer(async (req, res) => {
           const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
           const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
 
-          if (!isNaN(destLat) && !isNaN(destLng)) {
+          if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL && !OSRM_BASE_URL.includes('project-osrm.org')) {
             try {
               const osrmUrl = `${OSRM_BASE_URL}/route/v1/driving/${lng},${lat};${destLng},${destLat}?overview=full&geometries=geojson`;
               const osrmRes = await fetch(osrmUrl);
@@ -9901,17 +10040,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer authentication is strictly required for routing gateway.' });
       }
 
-      // Rate limiting: max 60 requests per 60 seconds per caller
+      // Rate limiting: bounded LRU/TTL rate limiter (max 60 requests per 60 seconds per caller)
       const callerId = authClaims.sub;
-      const nowMs = Date.now();
-      let callerHistory = routeGatewayRateLimitMap.get(callerId) || [];
-      callerHistory = callerHistory.filter(ts => nowMs - ts < 60000);
-      if (callerHistory.length >= 60) {
-        routeGatewayRateLimitMap.set(callerId, callerHistory);
+      if (routeGatewayRateLimiter.isRateLimited(callerId)) {
         return sendJson(res, 429, { error: 'RATE_LIMIT_EXCEEDED', message: 'Route requests exceed allowed rate limit (maximum 60 requests per minute).' });
       }
-      callerHistory.push(nowMs);
-      routeGatewayRateLimitMap.set(callerId, callerHistory);
 
       const u = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const originLat = parseFloat(u.searchParams.get('originLat') || '');
@@ -9952,7 +10085,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Query session and verify authorization
+      // Query session and verify authorization (Finding 5: fail closed with 404 if session not found)
       let sessionRow = null;
       if (pool && !isLocalMode) {
         try {
@@ -9968,15 +10101,27 @@ const server = http.createServer(async (req, res) => {
             sessionRow = sRes.rows[0];
           }
         } catch (_) {}
+      } else if (isLocalMode && appRepositories && appRepositories.deliveryRepo) {
+        try {
+          const lSes = appRepositories.deliveryRepo.findSessionById(deliveryId || orderId);
+          if (lSes) sessionRow = lSes;
+        } catch (_) {}
+      }
+
+      if (!sessionRow) {
+        return sendJson(res, 404, {
+          error: 'DELIVERY_SESSION_NOT_FOUND',
+          message: 'Delivery session not found for the provided deliveryId or orderId.'
+        });
       }
 
       const role = String(authClaims.role || '').toUpperCase();
       const roles = Array.isArray(authClaims.roles) ? authClaims.roles.map(r => String(r).toUpperCase()) : [];
       const isAdmin = role === 'ROLE_ADMIN' || role === 'ADMIN' || roles.includes('ROLE_ADMIN') || roles.includes('ADMIN');
-      const isRiderOfSession = sessionRow && (sessionRow.rider_id === callerId);
-      const isCustomerOfSession = sessionRow && (sessionRow.customer_id === callerId || sessionRow.order_customer_id === callerId);
+      const isRiderOfSession = (sessionRow.rider_id === callerId || sessionRow.riderId === callerId);
+      const isCustomerOfSession = (sessionRow.customer_id === callerId || sessionRow.order_customer_id === callerId || sessionRow.customerId === callerId);
 
-      if (sessionRow && !isRiderOfSession && !isCustomerOfSession && !isAdmin) {
+      if (!isRiderOfSession && !isCustomerOfSession && !isAdmin) {
         return sendJson(res, 403, {
           error: 'FORBIDDEN',
           message: 'Not authorized to calculate route for this delivery or order session.'
@@ -9984,28 +10129,26 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Ensure coordinates match the session store or customer destination (reject arbitrary coordinates)
-      if (sessionRow) {
-        const mLat = Number(sessionRow.merchant_lat != null ? sessionRow.merchant_lat : (sessionRow.merchantLat != null ? sessionRow.merchantLat : sessionRow.store_lat));
-        const mLng = Number(sessionRow.merchant_lng != null ? sessionRow.merchant_lng : (sessionRow.merchantLng != null ? sessionRow.merchantLng : sessionRow.store_lng));
-        const cLat = Number(sessionRow.customer_lat != null ? sessionRow.customer_lat : sessionRow.customerLat);
-        const cLng = Number(sessionRow.customer_lng != null ? sessionRow.customer_lng : sessionRow.customerLng);
+      const mLat = Number(sessionRow.merchant_lat != null ? sessionRow.merchant_lat : (sessionRow.merchantLat != null ? sessionRow.merchantLat : sessionRow.store_lat));
+      const mLng = Number(sessionRow.merchant_lng != null ? sessionRow.merchant_lng : (sessionRow.merchantLng != null ? sessionRow.merchantLng : sessionRow.store_lng));
+      const cLat = Number(sessionRow.customer_lat != null ? sessionRow.customer_lat : sessionRow.customerLat);
+      const cLng = Number(sessionRow.customer_lng != null ? sessionRow.customer_lng : sessionRow.customerLng);
 
-        const coordsNear = (lat1, lng1, lat2, lng2, maxDistMeters = 350) => {
-          if (lat1 == null || lng1 == null || lat2 == null || lng2 == null || isNaN(lat1) || isNaN(lng1) || isNaN(lat2) || isNaN(lng2)) return false;
-          return (haversineDistanceKm(lat1, lng1, lat2, lng2) * 1000) <= maxDistMeters;
-        };
+      const coordsNear = (lat1, lng1, lat2, lng2, maxDistMeters = 350) => {
+        if (lat1 == null || lng1 == null || lat2 == null || lng2 == null || isNaN(lat1) || isNaN(lng1) || isNaN(lat2) || isNaN(lng2)) return false;
+        return (haversineDistanceKm(lat1, lng1, lat2, lng2) * 1000) <= maxDistMeters;
+      };
 
-        const destNearStore = coordsNear(destLat, destLng, mLat, mLng);
-        const destNearCustomer = coordsNear(destLat, destLng, cLat, cLng);
-        const originNearStore = coordsNear(originLat, originLng, mLat, mLng);
-        const originNearCustomer = coordsNear(originLat, originLng, cLat, cLng);
+      const destNearStore = coordsNear(destLat, destLng, mLat, mLng);
+      const destNearCustomer = coordsNear(destLat, destLng, cLat, cLng);
+      const originNearStore = coordsNear(originLat, originLng, mLat, mLng);
+      const originNearCustomer = coordsNear(originLat, originLng, cLat, cLng);
 
-        if (!destNearStore && !destNearCustomer && !originNearStore && !originNearCustomer) {
-          return sendJson(res, 400, {
-            error: 'ARBITRARY_COORDINATES_REJECTED',
-            message: 'Coordinates must correspond to the store or customer destination of this delivery session.'
-          });
-        }
+      if (!destNearStore && !destNearCustomer && !originNearStore && !originNearCustomer) {
+        return sendJson(res, 400, {
+          error: 'ARBITRARY_COORDINATES_REJECTED',
+          message: 'Coordinates must correspond to the store or customer destination of this delivery session.'
+        });
       }
 
       if (!OSRM_BASE_URL || OSRM_BASE_URL.includes('project-osrm.org')) {
@@ -10041,20 +10184,24 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Server-Authoritative Location & Geofence Validator (Finding 2 & 5)
-    async function verifyRiderMilestoneLocation(req, delivery, authClaims, targetType) {
+    // Server-Authoritative Location & Geofence Validator (Finding 3: Atomic geofence and state transition)
+    async function verifyRiderMilestoneLocation(txClient, reqBody, delivery, authClaims, targetType) {
       const deliveryId = delivery.delivery_id || delivery.id;
+
+      // Check mock location flags from request body
+      if (reqBody && (reqBody.isMockLocation === true || reqBody.mockLocation === true || reqBody.isFromMockProvider === true || reqBody.mockProvider === true)) {
+        return {
+          ok: false,
+          error: 'MOCK_LOCATION_REJECTED',
+          message: 'Mock or spoofed GPS location is strictly rejected by production security policy.'
+        };
+      }
 
       // 1. Query the rider's latest server-ingested telemetry from rider_telemetry
       let serverTelem = null;
-      if (appRepositories && appRepositories.telemetryRepo && typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
+      if (txClient) {
         try {
-          serverTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
-        } catch (_) {}
-      }
-      if (!serverTelem && pool) {
-        try {
-          const tRes = await pool.query(
+          const tRes = await txClient.query(
             `SELECT latitude, longitude, accuracy, accuracy_meters, recorded_at, created_at, timestamp
              FROM rider_telemetry
              WHERE delivery_id = $1
@@ -10064,6 +10211,10 @@ const server = http.createServer(async (req, res) => {
           if (tRes.rows.length > 0) {
             serverTelem = tRes.rows[0];
           }
+        } catch (_) {}
+      } else if (appRepositories && appRepositories.telemetryRepo && typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
+        try {
+          serverTelem = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
         } catch (_) {}
       }
 
@@ -10103,18 +10254,15 @@ const server = http.createServer(async (req, res) => {
       // If client submits coordinates in body, verify they match recent server telemetry within 50m
       let clientLat = null;
       let clientLng = null;
-      try {
-        const body = await parseJsonBody(req);
-        if (body) {
-          if (body.latitude != null && body.longitude != null) {
-            clientLat = Number(body.latitude);
-            clientLng = Number(body.longitude);
-          } else if (body.lat != null && body.lng != null) {
-            clientLat = Number(body.lat);
-            clientLng = Number(body.lng);
-          }
+      if (reqBody) {
+        if (reqBody.latitude != null && reqBody.longitude != null) {
+          clientLat = Number(reqBody.latitude);
+          clientLng = Number(reqBody.longitude);
+        } else if (reqBody.lat != null && reqBody.lng != null) {
+          clientLat = Number(reqBody.lat);
+          clientLng = Number(reqBody.lng);
         }
-      } catch (_) {}
+      }
 
       if (clientLat != null && clientLng != null && !isNaN(clientLat) && !isNaN(clientLng)) {
         const driftMeters = haversineDistanceKm(clientLat, clientLng, telemLat, telemLng) * 1000;
@@ -10155,82 +10303,90 @@ const server = http.createServer(async (req, res) => {
       return { ok: true, riderLat, riderLng };
     }
 
-    // POST /api/v1/delivery/(session/)?:id/arrive-merchant
-    const arriveMerchantMatch = pathname.match(/^\/api\/v1\/delivery\/(?:session\/)?([^/]+)\/arrive-merchant$/);
-    if (arriveMerchantMatch && method === 'POST') {
+    async function handleMilestoneTransitionInTx(req, res, deliveryId, newState, returnState, targetType) {
       const authClaims = verifyAndDecodeJwt(req);
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
       }
-      const deliveryId = arriveMerchantMatch[1];
-      const delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
-      if (!delivery) {
-        return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
+
+      const reqBody = await parseJsonBody(req).catch(() => null);
+
+      if (pool && !isLocalMode) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+          const sessionRes = await client.query(
+            `SELECT * FROM delivery_sessions WHERE (delivery_id = $1 OR id = $1 OR order_id = $1) FOR UPDATE`,
+            [deliveryId]
+          );
+          const delivery = sessionRes.rows[0];
+          if (!delivery) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
+          }
+          if (delivery.rider_id !== authClaims.sub) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
+          }
+
+          const locCheck = await verifyRiderMilestoneLocation(client, reqBody, delivery, authClaims, targetType);
+          if (!locCheck.ok) {
+            await client.query('ROLLBACK');
+            return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
+          }
+
+          const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, newState, authClaims.sub, {}, client);
+          if (!updated || !updated.ok) {
+            await client.query('ROLLBACK');
+            return sendJson(res, updated?.httpStatus || 400, { error: updated?.error || 'TRANSITION_FAILED', message: updated?.message });
+          }
+
+          await client.query('COMMIT');
+          sseBroadcasterInstance.broadcast(delivery.order_id, 'STATUS_UPDATE', { orderId: delivery.order_id, status: newState });
+          return sendJson(res, updated.httpStatus || 200, { ok: true, state: returnState, status: newState, deliveryId, session: updated.session, ...updated });
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error(`[MilestoneTransition] Failed for ${deliveryId} to ${newState}:`, err);
+          return sendJson(res, 500, { error: 'TRANSACTION_FAILED', message: err.message });
+        } finally {
+          client.release();
+        }
+      } else {
+        const delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
+        if (!delivery) {
+          return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
+        }
+        if (delivery.rider_id !== authClaims.sub) {
+          return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
+        }
+        const locCheck = await verifyRiderMilestoneLocation(null, reqBody, delivery, authClaims, targetType);
+        if (!locCheck.ok) {
+          return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
+        }
+        const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, newState, authClaims.sub);
+        if (updated && updated.ok) {
+          sseBroadcasterInstance.broadcast(delivery.order_id, 'STATUS_UPDATE', { orderId: delivery.order_id, status: newState });
+        }
+        return sendJson(res, updated.httpStatus || 200, { ok: true, state: returnState, status: newState, deliveryId, session: updated.session, ...updated });
       }
-      if (delivery.rider_id !== authClaims.sub) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
-      }
-      const locCheck = await verifyRiderMilestoneLocation(req, delivery, authClaims, 'STORE');
-      if (!locCheck.ok) {
-        return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
-      }
-      const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'ARRIVED_MERCHANT', authClaims.sub);
-      if (updated && updated.ok) {
-        sseBroadcasterInstance.broadcast(delivery.order_id, 'STATUS_UPDATE', { orderId: delivery.order_id, status: 'ARRIVED_MERCHANT' });
-      }
-      return sendJson(res, updated.httpStatus || 200, { ok: true, state: 'ARRIVED_PICKUP', status: 'ARRIVED_MERCHANT', deliveryId, session: updated.session, ...updated });
+    }
+
+    // POST /api/v1/delivery/(session/)?:id/arrive-merchant
+    const arriveMerchantMatch = pathname.match(/^\/api\/v1\/delivery\/(?:session\/)?([^/]+)\/arrive-merchant$/);
+    if (arriveMerchantMatch && method === 'POST') {
+      return handleMilestoneTransitionInTx(req, res, arriveMerchantMatch[1], 'ARRIVED_MERCHANT', 'ARRIVED_PICKUP', 'STORE');
     }
 
     // POST /api/v1/delivery/(session/)?:id/pickup
     const pickupMatch = pathname.match(/^\/api\/v1\/delivery\/(?:session\/)?([^/]+)\/pickup$/);
     if (pickupMatch && method === 'POST') {
-      const authClaims = verifyAndDecodeJwt(req);
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
-      }
-      const deliveryId = pickupMatch[1];
-      const delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
-      if (!delivery) {
-        return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
-      }
-      if (delivery.rider_id !== authClaims.sub) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
-      }
-      const locCheck = await verifyRiderMilestoneLocation(req, delivery, authClaims, 'STORE');
-      if (!locCheck.ok) {
-        return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
-      }
-      const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'OUT_FOR_DELIVERY', authClaims.sub);
-      if (updated && updated.ok) {
-        sseBroadcasterInstance.broadcast(delivery.order_id, 'STATUS_UPDATE', { orderId: delivery.order_id, status: 'OUT_FOR_DELIVERY' });
-      }
-      return sendJson(res, updated.httpStatus || 200, { ok: true, state: 'PICKED_UP', status: 'OUT_FOR_DELIVERY', deliveryId, session: updated.session, ...updated });
+      return handleMilestoneTransitionInTx(req, res, pickupMatch[1], 'OUT_FOR_DELIVERY', 'PICKED_UP', 'STORE');
     }
 
     // POST /api/v1/delivery/(session/)?:id/arrive-customer
     const arriveCustomerMatch = pathname.match(/^\/api\/v1\/delivery\/(?:session\/)?([^/]+)\/arrive-customer$/);
     if (arriveCustomerMatch && method === 'POST') {
-      const authClaims = verifyAndDecodeJwt(req);
-      if (!authClaims || !authClaims.sub) {
-        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
-      }
-      const deliveryId = arriveCustomerMatch[1];
-      const delivery = await appRepositories.deliveryRepo.findSessionById(deliveryId);
-      if (!delivery) {
-        return sendJson(res, 404, { error: 'DELIVERY_NOT_FOUND', message: 'Delivery session not found.' });
-      }
-      if (delivery.rider_id !== authClaims.sub) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Only the assigned rider can update delivery status.' });
-      }
-      const locCheck = await verifyRiderMilestoneLocation(req, delivery, authClaims, 'CUSTOMER');
-      if (!locCheck.ok) {
-        return sendJson(res, 400, { error: locCheck.error, message: locCheck.message });
-      }
-      const updated = await appRepositories.deliveryRepo.transitionStateTransactionally(deliveryId, 'ARRIVED_CUSTOMER', authClaims.sub);
-      if (updated && updated.ok) {
-        sseBroadcasterInstance.broadcast(delivery.order_id, 'STATUS_UPDATE', { orderId: delivery.order_id, status: 'ARRIVED_CUSTOMER' });
-      }
-      return sendJson(res, updated.httpStatus || 200, { ok: true, state: 'ARRIVED_CUSTOMER', status: 'ARRIVED_CUSTOMER', deliveryId, session: updated.session, ...updated });
+      return handleMilestoneTransitionInTx(req, res, arriveCustomerMatch[1], 'ARRIVED_CUSTOMER', 'ARRIVED_CUSTOMER', 'CUSTOMER');
     }
 
     // -------------------------------------------------------------

@@ -23,7 +23,7 @@ services:
           name: commerce-os-redis
           property: connectionString
       - key: OSRM_BASE_URL
-        value: https://router.project-osrm.org
+        value: http://osrm-backend:5000
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_ISSUER

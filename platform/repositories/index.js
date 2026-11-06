@@ -901,12 +901,6 @@ class TransactionalPrescriptionRepository {
     const client = await this.pool.connect();
     try {
       if (rx.idempotencyKey) {
-        await client.query(`
-          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
-          ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS request_payload_hash VARCHAR(64);
-          CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency
-            ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-        `).catch(() => {});
         const existing = await client.query(
           `SELECT * FROM prescriptions WHERE customer_id = $1 AND idempotency_key = $2 LIMIT 1`,
           [rx.customerId, rx.idempotencyKey]
@@ -4808,9 +4802,8 @@ class TransactionalOrderRepository {
             message: 'One or more items in the order require a prescription. Please provide a valid prescriptionId.'
           };
         }
-        await client.query(`ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS authorized_items JSONB DEFAULT '[]'::jsonb`).catch(() => {});
         const rxCheck = await client.query(
-          `SELECT id, customer_id, status, authorized_items FROM prescriptions WHERE id = $1 AND customer_id = $2`,
+          `SELECT id, customer_id, status, authorized_items FROM prescriptions WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
           [data.prescriptionId, customer.id]
         );
         if (rxCheck.rows.length === 0 || ['REJECTED', 'EXPIRED'].includes(rxCheck.rows[0].status)) {
@@ -4828,34 +4821,51 @@ class TransactionalOrderRepository {
         if (rxRow.status === 'APPROVED' && hasRxRequiredItem) {
           const authItemsRaw = rxRow.authorized_items;
           const authItems = Array.isArray(authItemsRaw) ? authItemsRaw : (typeof authItemsRaw === 'string' ? JSON.parse(authItemsRaw) : []);
-          if (authItems.length > 0) {
-            for (const rxItem of resolvedItemSnapshots.filter(item => item.rxRequired)) {
-              const matched = authItems.find(ai =>
-                (ai.sku && ai.sku === rxItem.sku) ||
-                (ai.productId && ai.productId === rxItem.productId) ||
-                (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
-              );
-              if (!matched) {
-                await client.query('ROLLBACK');
-                return {
-                  ok: false,
-                  httpStatus: 400,
-                  error: 'PRESCRIPTION_ITEM_UNAUTHORIZED',
-                  message: `Prescription does not authorize item '${rxItem.name || rxItem.sku}'.`
-                };
-              }
-              const maxAllowedQty = Number(matched.quantity || matched.qty || 999);
-              if (Number(rxItem.quantity || 1) > maxAllowedQty) {
-                await client.query('ROLLBACK');
-                return {
-                  ok: false,
-                  httpStatus: 400,
-                  error: 'PRESCRIPTION_QUANTITY_EXCEEDED',
-                  message: `Requested quantity (${rxItem.quantity}) for '${rxItem.name || rxItem.sku}' exceeds approved limit (${maxAllowedQty}).`
-                };
-              }
-            }
+          if (!authItems || authItems.length === 0) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 400,
+              error: 'PRESCRIPTION_EMPTY_SCOPE',
+              message: 'Prescription has no authorized items approved by a pharmacist.'
+            };
           }
+
+          const rxItemsInOrder = resolvedItemSnapshots.filter(item => item.rxRequired);
+          for (const rxItem of rxItemsInOrder) {
+            const matched = authItems.find(ai =>
+              (ai.sku && ai.sku === rxItem.sku) ||
+              (ai.productId && ai.productId === rxItem.productId) ||
+              (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
+            );
+            if (!matched) {
+              await client.query('ROLLBACK');
+              return {
+                ok: false,
+                httpStatus: 400,
+                error: 'PRESCRIPTION_ITEM_UNAUTHORIZED',
+                message: `Prescription does not authorize item '${rxItem.name || rxItem.sku}'.`
+              };
+            }
+            const maxAllowedQty = Number(matched.quantity != null ? matched.quantity : (matched.qty != null ? matched.qty : 0));
+            const orderedQty = Number(rxItem.quantity || 1);
+            if (orderedQty > maxAllowedQty) {
+              await client.query('ROLLBACK');
+              return {
+                ok: false,
+                httpStatus: 400,
+                error: 'PRESCRIPTION_QUANTITY_EXCEEDED',
+                message: `Requested quantity (${orderedQty}) for '${rxItem.name || rxItem.sku}' exceeds approved limit (${maxAllowedQty}).`
+              };
+            }
+            // Atomically decrement remaining quantity on the prescription
+            matched.quantity = maxAllowedQty - orderedQty;
+          }
+
+          await client.query(
+            `UPDATE prescriptions SET authorized_items = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(authItems), rxRow.id]
+          );
         } else if (rxRow.status === 'PENDING' && hasRxRequiredItem) {
           // Bind the order's Rx items to the prescription for pharmacist review
           const rxItemsToAuthorize = resolvedItemSnapshots.filter(item => item.rxRequired).map(it => ({
@@ -5669,6 +5679,39 @@ class TransactionalOrderRepository {
           [orderIdVal]
         ).catch(() => {});
 
+        // Restore consumed prescription quantities back to authorized_items (Finding 2)
+        if (order.prescription_id) {
+          try {
+            const rxCheck = await client.query(
+              `SELECT id, status, authorized_items FROM prescriptions WHERE id = $1 FOR UPDATE`,
+              [order.prescription_id]
+            );
+            if (rxCheck.rows.length > 0 && rxCheck.rows[0].status === 'APPROVED') {
+              const rxRow = rxCheck.rows[0];
+              const authItems = Array.isArray(rxRow.authorized_items)
+                ? rxRow.authorized_items
+                : (typeof rxRow.authorized_items === 'string' ? JSON.parse(rxRow.authorized_items) : []);
+              if (authItems.length > 0) {
+                const rxItemsInOrder = items.filter(it => it && (it.rxRequired || it.requiresPrescription || it.rx_required));
+                for (const rxItem of rxItemsInOrder) {
+                  const matched = authItems.find(ai =>
+                    (ai.sku && ai.sku === rxItem.sku) ||
+                    (ai.productId && ai.productId === rxItem.productId) ||
+                    (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
+                  );
+                  if (matched) {
+                    matched.quantity = Number(matched.quantity || matched.qty || 0) + Number(rxItem.quantity || 1);
+                  }
+                }
+                await client.query(
+                  `UPDATE prescriptions SET authorized_items = $1, updated_at = NOW() WHERE id = $2`,
+                  [JSON.stringify(authItems), rxRow.id]
+                );
+              }
+            }
+          } catch (_) {}
+        }
+
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at)
            VALUES ($1, $2, $3, $4, 'PENDING', NOW())`,
@@ -5976,6 +6019,18 @@ class LocalDevelopmentOrderRepository {
         codEntry.reconciled = true;
         codEntry.notes = (codEntry.notes || '') + ' [VOIDED: Order cancelled]';
         codEntry.updatedAt = new Date().toISOString();
+      }
+    }
+    if (order.prescriptionId && this.db.prescriptions) {
+      const rx = this.db.prescriptions.find(p => p.id === order.prescriptionId);
+      if (rx && rx.status === 'APPROVED' && Array.isArray(rx.authorizedItems)) {
+        const rxItemsInOrder = (order.items || []).filter(it => it && (it.rxRequired || it.requiresPrescription || it.rx_required));
+        for (const item of rxItemsInOrder) {
+          const match = rx.authorizedItems.find(ai => (ai.sku && ai.sku === item.sku) || (ai.productId && ai.productId === item.productId));
+          if (match) {
+            match.quantity = Number(match.quantity || match.qty || 0) + Number(item.quantity || 1);
+          }
+        }
       }
     }
     this.saveDb();

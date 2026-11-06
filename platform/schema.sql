@@ -300,6 +300,21 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_customer ON prescriptions(customer_
 CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
 CREATE UNIQUE INDEX IF NOT EXISTS unq_prescriptions_customer_idempotency ON prescriptions(customer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS pharmacists (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64),
+    license_no VARCHAR(100) NOT NULL,
+    license_number VARCHAR(100),
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'SUSPENDED', 'REVOKED'
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pharmacists_user ON pharmacists(user_id);
+CREATE INDEX IF NOT EXISTS idx_pharmacists_status ON pharmacists(status);
+
 -- -----------------------------------------------------------------------------
 -- 7. ORDERS & LINE ITEMS (TRANSACTIONAL SOURCE OF TRUTH)
 -- -----------------------------------------------------------------------------
