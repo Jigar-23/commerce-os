@@ -1,5 +1,6 @@
 package com.commerceos.android.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +34,7 @@ import com.commerceos.android.model.toProductCardModel
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceElevation
 import com.commerceos.android.ui.theme.CommerceTypography
+import com.commerceos.android.ui.theme.PlusJakartaSans
 import com.commerceos.android.ui.theme.Radius
 import com.commerceos.android.ui.theme.Spacing
 import com.commerceos.android.util.MoneyFormatter
@@ -197,14 +199,14 @@ fun formatHealthcareTitle(raw: String?): String {
     val trimmed = raw?.trim().orEmpty()
     if (trimmed.isBlank()) return "Medicine"
     if (trimmed.equals("para", ignoreCase = true)) return "Paracetamol 650mg Tablets"
-    if (trimmed.equals("crocin", ignoreCase = true)) return "Crocin 650 Advance Tablet"
-    if (trimmed.equals("dolo", ignoreCase = true) || trimmed.equals("dolo 650", ignoreCase = true) || trimmed.equals("dolo-650", ignoreCase = true)) return "Dolo 650mg Tablet"
+    if (trimmed.equals("crocin", ignoreCase = true)) return "Crocin 650 Advance Fast Action Tablets"
+    if (trimmed.equals("dolo", ignoreCase = true) || trimmed.equals("dolo 650", ignoreCase = true) || trimmed.equals("dolo-650", ignoreCase = true)) return "Dolo 650mg Paracetamol Tablets"
     if (trimmed.equals("augmentin", ignoreCase = true) || trimmed.contains("augmentin 625", ignoreCase = true)) return "Augmentin 625 Duo Tablet"
     if (trimmed.equals("pan-d", ignoreCase = true) || trimmed.equals("pand", ignoreCase = true) || trimmed.equals("pan d", ignoreCase = true)) return "Pan-D Capsule"
     if (trimmed.equals("glycomet", ignoreCase = true) || trimmed.contains("glycomet 500", ignoreCase = true)) return "Glycomet 500 SR Tablet"
-    if (trimmed.equals("becosules", ignoreCase = true) || trimmed.contains("becosules z", ignoreCase = true)) return "Becosules Z Capsule"
-    if (trimmed.equals("benadryl", ignoreCase = true)) return "Benadryl Cough Syrup"
-    if (trimmed.equals("digene", ignoreCase = true)) return "Digene Gel Acidity Relief"
+    if (trimmed.equals("becosules", ignoreCase = true) || trimmed.contains("becosules z", ignoreCase = true)) return "Becosules Z Multivitamin Capsule"
+    if (trimmed.equals("benadryl", ignoreCase = true)) return "Benadryl Cough Formula Syrup"
+    if (trimmed.equals("digene", ignoreCase = true)) return "Digene Gel Acidity Relief Mint"
     return if (trimmed == trimmed.lowercase()) {
         trimmed.split(" ").joinToString(" ") { word ->
             word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.US) else it.toString() }
@@ -212,24 +214,42 @@ fun formatHealthcareTitle(raw: String?): String {
     } else trimmed
 }
 
-fun formatHealthcareBrand(raw: String?, title: String? = ""): String {
-    val b = raw?.trim()
-    if (b.isNullOrBlank() || b.equals("Seller Brand", ignoreCase = true) || b.equals("Generic", ignoreCase = true)) {
-        val lower = (title ?: "").lowercase()
-        return when {
-            lower.contains("dolo") -> "Micro Labs Ltd"
-            lower.contains("crocin") -> "GlaxoSmithKline"
-            lower.contains("paracip") || lower.contains("cip") -> "Cipla Limited"
-            lower.contains("augmentin") -> "GlaxoSmithKline"
-            lower.contains("pan") -> "Alkem Laboratories"
-            lower.contains("glycomet") -> "USV Private Limited"
-            lower.contains("becosules") -> "Pfizer Limited"
-            lower.contains("benadryl") -> "Johnson & Johnson"
-            lower.contains("digene") -> "Abbott India"
-            else -> "Micro Labs Ltd"
-        }
+fun formatHealthcareBrand(raw: String?, title: String? = "", manufacturer: String? = null): String {
+    val m = manufacturer?.trim()
+    if (!m.isNullOrBlank() && !m.equals("Seller Brand", ignoreCase = true) && !m.equals("Generic", ignoreCase = true) && !m.equals("CommerceOS Health", ignoreCase = true)) {
+        return m
     }
-    return b
+    val b = raw?.trim()
+    if (!b.isNullOrBlank() && !b.equals("Seller Brand", ignoreCase = true) && !b.equals("Generic", ignoreCase = true)) {
+        return b
+    }
+    val lower = (title ?: "").lowercase()
+    return when {
+        lower.contains("dolo") -> "Micro Labs Ltd"
+        lower.contains("crocin") -> "GlaxoSmithKline"
+        lower.contains("combiflam") -> "Sanofi India Ltd"
+        lower.contains("paracip") || lower.contains("cip") -> "Cipla Limited"
+        lower.contains("augmentin") -> "GlaxoSmithKline"
+        lower.contains("pan") -> "Alkem Laboratories"
+        lower.contains("glycomet") -> "USV Private Limited"
+        lower.contains("becosules") -> "Pfizer Limited"
+        lower.contains("benadryl") -> "Johnson & Johnson"
+        lower.contains("digene") -> "Abbott India"
+        lower.contains("volini") -> "Sun Pharma"
+        lower.contains("ecosprin") -> "USV Private Limited"
+        lower.contains("telma") -> "Glenmark Pharmaceuticals"
+        lower.contains("limcee") -> "Abbott India"
+        lower.contains("shelcal") -> "Torrent Pharmaceuticals"
+        lower.contains("zincovit") -> "Apex Laboratories"
+        lower.contains("cheston") -> "Cipla Limited"
+        lower.contains("otrivin") -> "Haleon India"
+        lower.contains("vicks") -> "Procter & Gamble"
+        lower.contains("dettol") -> "Reckitt Benckiser"
+        lower.contains("hansaplast") -> "Beiersdorf AG"
+        lower.contains("eno") -> "Haleon India"
+        lower.contains("triphala") || lower.contains("baidyanath") -> "Shree Baidyanath Ayurveda"
+        else -> "CommerceOS Health"
+    }
 }
 
 fun formatPackSize(packSize: String?): String {
@@ -240,16 +260,38 @@ fun formatPackSize(packSize: String?): String {
 }
 
 fun formatHealthcareSalt(title: String?, rawSalt: String? = null): String {
-    if (!rawSalt.isNullOrBlank() && !rawSalt.equals("null", ignoreCase = true)) return rawSalt
+    val s = rawSalt?.trim()
+    if (!s.isNullOrBlank() && !s.equals("null", ignoreCase = true) && !s.equals("undefined", ignoreCase = true)) {
+        return s
+    }
     val lower = (title ?: "").lowercase()
     return when {
-        lower.contains("para") || lower.contains("dolo") || lower.contains("crocin") -> "Paracetamol (650mg)"
+        lower.contains("dolo") -> "Paracetamol (650mg)"
+        lower.contains("crocin") -> "Paracetamol (500mg) Fast Action"
+        lower.contains("combiflam") -> "Ibuprofen (400mg) + Paracetamol (325mg)"
+        lower.contains("para") -> "Paracetamol (500mg)"
         lower.contains("augmentin") || lower.contains("amox") -> "Amoxycillin (500mg) + Clavulanic Acid (125mg)"
-        lower.contains("pan") -> "Pantoprazole (40mg) + Domperidone (10mg)"
+        lower.contains("pan 40") || lower.contains("pan-40") || lower.contains("pan-d") -> "Pantoprazole (40mg)"
         lower.contains("glycomet") -> "Metformin Hydrochloride (500mg)"
         lower.contains("becosules") -> "Vitamin B-Complex + Vitamin C + Zinc"
         lower.contains("benadryl") -> "Diphenhydramine (14.08mg) + Ammonium Chloride"
         lower.contains("digene") -> "Magnesium Hydroxide + Aluminium Hydroxide"
+        lower.contains("volini") -> "Diclofenac Diethylamine + Menthol Gel"
+        lower.contains("ecosprin") -> "Aspirin / Acetylsalicylic Acid (75mg)"
+        lower.contains("telma") -> "Telmisartan (40mg)"
+        lower.contains("limcee") -> "Vitamin C (500mg) Chewable Tablets"
+        lower.contains("shelcal") -> "Calcium (500mg) + Vitamin D3 (250 IU)"
+        lower.contains("zincovit") -> "Multivitamin + Multimineral with Zinc"
+        lower.contains("cheston") -> "Cetirizine (5mg) + Paracetamol (325mg) + Phenylephrine (10mg)"
+        lower.contains("otrivin") -> "Xylometazoline Hydrochloride (0.1% w/v)"
+        lower.contains("vicks") -> "Camphor + Menthol + Eucalyptus Oil"
+        lower.contains("electral") -> "Oral Rehydration Salts (WHO Formula)"
+        lower.contains("dettol") -> "Chloroxylenol (4.8% w/v)"
+        lower.contains("hansaplast") -> "Antiseptic Medicated Dressing Strip"
+        lower.contains("eno") -> "Svarjiksara (5g) + Nimbukamlam (5g)"
+        lower.contains("triphala") -> "Amla + Haritaki + Bibhitaki Extract"
+        lower.contains("accu-chek") || lower.contains("accuchek") -> "Blood Glucose Test Strips (FAD-GDH)"
+        lower.contains("protinex") -> "Hydrolysed Peanut Protein + Minerals"
         else -> "Active Pharmaceutical Ingredient (IP Grade)"
     }
 }
@@ -266,21 +308,40 @@ private fun CompactProductCard(
     modifier: Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = modifier
     ) {
-        Row(modifier = Modifier.padding(Spacing.sm)) {
+        Row(
+            modifier = Modifier.padding(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box {
                 ProductImage(
                     imageUrl = model.image,
                     contentDescription = model.name,
                     contentScale = contentScale,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.size(92.dp)
+                    modifier = Modifier.size(96.dp)
                 )
+                if (model.discountPercent > 0) {
+                    Surface(
+                        color = Color(0xFF16A34A),
+                        shape = RoundedCornerShape(topStart = 10.dp, bottomEnd = 6.dp),
+                        modifier = Modifier.align(Alignment.TopStart)
+                    ) {
+                        Text(
+                            text = "${model.discountPercent}% OFF",
+                            color = Color.White,
+                            fontSize = 8.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 if (onWishlistToggle != null) {
                     WishlistHeartButton(
                         isWishlisted = model.isWishlisted,
@@ -293,47 +354,123 @@ private fun CompactProductCard(
             Spacer(modifier = Modifier.width(Spacing.sm))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    formatHealthcareTitle(model.name),
-                    style = CommerceTypography.ProductTitle,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                val brandFormatted = formatHealthcareBrand(model.brandName, model.name)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        formatHealthcareTitle(model.name),
+                        style = CommerceTypography.ProductTitle,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (model.rxRequired) {
+                        Surface(
+                            color = Color(0xFFFEE2E2),
+                            shape = RoundedCornerShape(3.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFFCA5A5))
+                        ) {
+                            Text(
+                                "Rx",
+                                color = Color(0xFFDC2626),
+                                fontSize = 8.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    if (model.coldChain) {
+                        Surface(
+                            color = Color(0xFFE0F2FE),
+                            shape = RoundedCornerShape(3.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFBAE6FD))
+                        ) {
+                            Text(
+                                "❄️",
+                                fontSize = 8.sp,
+                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Active Chemical Salt / Composition (Prominently displayed)
+                val salt = formatHealthcareSalt(model.name, model.saltComposition)
+                if (!salt.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Contains: $salt",
+                        fontSize = 10.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF0284C7),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Pack Size and Manufacturer
+                val manufacturerFormatted = formatHealthcareBrand(model.brandName, model.name, model.manufacturer)
                 val packFormatted = formatPackSize(model.packSize)
-                val packInfo = "$brandFormatted • $packFormatted"
                 Text(
-                    packInfo,
-                    style = CommerceTypography.Meta,
+                    text = "$packFormatted • By $manufacturerFormatted",
+                    fontSize = 10.sp,
+                    fontFamily = PlusJakartaSans,
                     color = Color(0xFF64748B),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    "⚡ Express eligible",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF059669)
-                )
-
-                StatusChips(model = model)
-
                 Spacer(modifier = Modifier.height(Spacing.xs))
-                PriceBlock(model = model)
 
-                Spacer(modifier = Modifier.height(Spacing.xs))
-                CardAddToCartButton(
-                    model = model,
-                    isReorderCard = isReorderCard,
-                    onAddToCart = onAddToCart,
-                    quantity = quantity,
-                    onQuantityChange = onQuantityChange,
-                    modifier = Modifier.align(Alignment.End).width(68.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            MoneyFormatter.format(model.sellingPrice),
+                            fontSize = 14.5.sp,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        if (model.discountPercent > 0 && model.price > model.sellingPrice) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    MoneyFormatter.format(model.price),
+                                    fontSize = 10.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    color = Color(0xFF94A3B8),
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    "${model.discountPercent}% OFF",
+                                    fontSize = 9.sp,
+                                    fontFamily = PlusJakartaSans,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF16A34A)
+                                )
+                            }
+                        }
+                    }
+
+                    CardAddToCartButton(
+                        model = model,
+                        isReorderCard = isReorderCard,
+                        onAddToCart = onAddToCart,
+                        quantity = quantity,
+                        onQuantityChange = onQuantityChange,
+                        modifier = Modifier.width(68.dp)
+                    )
+                }
             }
         }
     }
@@ -351,94 +488,166 @@ private fun GridProductCard(
     modifier: Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = modifier
     ) {
         Column(modifier = Modifier.fillMaxHeight()) {
+            // 1. Image Box with authentic pharma tags
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp)
+                    .height(125.dp)
             ) {
                 ProductImage(
                     imageUrl = model.image,
                     contentDescription = model.name,
                     contentScale = contentScale,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(6.dp)
                 )
-                // Discount chip anchored on the top-left of the image (Blinkit / Zepto signature benchmark)
-                if (model.discountPercent > 0) {
-                    Surface(
-                        color = Color(0xFF16A34A),
-                        shape = RoundedCornerShape(topStart = 10.dp, bottomEnd = 6.dp),
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(start = 6.dp, top = 6.dp)
-                    ) {
-                        Text(
-                            text = "${model.discountPercent}% OFF",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
+
+                // Top badges row: Discount + Rx badge + Cold Chain
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 6.dp, top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (model.discountPercent > 0) {
+                        Surface(
+                            color = Color(0xFF16A34A),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "${model.discountPercent}% OFF",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    if (model.rxRequired) {
+                        Surface(
+                            color = Color(0xFFFEE2E2),
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFFCA5A5))
+                        ) {
+                            Text(
+                                text = "Rx",
+                                color = Color(0xFFDC2626),
+                                fontSize = 9.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    if (model.coldChain) {
+                        Surface(
+                            color = Color(0xFFE0F2FE),
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFBAE6FD))
+                        ) {
+                            Text(
+                                text = "❄️",
+                                fontSize = 8.5.sp,
+                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
+
                 if (onWishlistToggle != null) {
                     WishlistHeartButton(
                         isWishlisted = model.isWishlisted,
                         onClick = { onWishlistToggle(model.id) },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
                     )
                 }
             }
 
+            // 2. Comprehensive Medicine Details Section
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
+                    // Medicine Title
                     Text(
-                        formatHealthcareTitle(model.name),
+                        text = formatHealthcareTitle(model.name),
                         style = CommerceTypography.ProductTitle,
+                        fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A),
                         maxLines = 2,
                         minLines = 2,
-                        lineHeight = 16.sp,
+                        lineHeight = 15.sp,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    val brandFormatted = formatHealthcareBrand(model.brandName, model.name)
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    // Active Chemical Salt / Composition (Prominently displayed)
+                    val salt = formatHealthcareSalt(model.name, model.saltComposition)
+                    if (!salt.isNullOrBlank()) {
+                        Surface(
+                            color = Color(0xFFF0F9FF),
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFBAE6FD)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = salt,
+                                fontSize = 9.5.sp,
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0284C7),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                    }
+
+                    // Pack Size & Presentation (e.g., Strip of 15 Tablets)
                     val packFormatted = formatPackSize(model.packSize)
-                    val packText = "$brandFormatted • $packFormatted"
                     Text(
-                        packText,
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B),
+                        text = packFormatted,
+                        fontSize = 10.5.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF475569),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Manufacturer / Marketer (e.g., By Micro Labs Ltd)
+                    val manufacturerFormatted = formatHealthcareBrand(model.brandName, model.name, model.manufacturer)
                     Text(
-                        "⚡ Express eligible",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
+                        text = "By $manufacturerFormatted",
+                        fontSize = 9.5.sp,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Normal,
+                        color = Color(0xFF94A3B8),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
+                // 3. Price & Add CTA Row
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -450,7 +659,8 @@ private fun GridProductCard(
                     ) {
                         Text(
                             MoneyFormatter.format(model.sellingPrice),
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
+                            fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color(0xFF0F172A),
                             maxLines = 1,
@@ -459,7 +669,8 @@ private fun GridProductCard(
                         if (model.discountPercent > 0 && model.price > model.sellingPrice) {
                             Text(
                                 MoneyFormatter.format(model.price),
-                                fontSize = 10.5.sp,
+                                fontSize = 10.sp,
+                                fontFamily = PlusJakartaSans,
                                 color = Color(0xFF94A3B8),
                                 textDecoration = TextDecoration.LineThrough,
                                 maxLines = 1

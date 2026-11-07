@@ -6,7 +6,9 @@ data class MedicineAttributes(
     val composition: String? = null,
     val manufacturer: String? = null,
     val coldChain: Boolean = false,
-    val packaging: String? = null
+    val packaging: String? = null,
+    val activeSalt: String? = null,
+    val saltComposition: String? = null
 )
 
 /** Grocery-specific product attributes. */
@@ -54,6 +56,13 @@ data class CommerceProduct(
     val packSize: String? = null,
     val rxRequirement: String? = null,
     val templateType: String? = null,
+    val manufacturer: String? = null,
+    @com.google.gson.annotations.SerializedName(value = "saltComposition", alternate = ["salt_composition"])
+    val saltComposition: String? = null,
+    @com.google.gson.annotations.SerializedName(value = "activeSalt", alternate = ["active_salt"])
+    val activeSalt: String? = null,
+    @com.google.gson.annotations.SerializedName(value = "coldChainRequired", alternate = ["cold_chain_required"])
+    val coldChainRequired: Boolean? = null,
     val medicineDetails: MedicineAttributes? = null,
     val groceryDetails: GroceryAttributes? = null,
     val fashionDetails: FashionAttributes? = null,
@@ -79,6 +88,18 @@ data class CommerceProduct(
         get() = if (displayPrice > effectiveSellingPrice && displayPrice > 0) {
             (((displayPrice - effectiveSellingPrice) / displayPrice) * 100).toInt()
         } else 0
+
+    val effectiveSalt: String?
+        get() = saltComposition ?: activeSalt ?: medicineDetails?.saltComposition ?: medicineDetails?.activeSalt ?: medicineDetails?.composition
+
+    val effectiveManufacturer: String?
+        get() = manufacturer ?: medicineDetails?.manufacturer ?: brandName ?: brand
+
+    val isRxRequired: Boolean
+        get() = (rxRequirement != null && rxRequirement != "OTC") || (medicineDetails?.prescriptionRequired ?: false)
+
+    val isColdChain: Boolean
+        get() = coldChainRequired ?: medicineDetails?.coldChain ?: false
 }
 
 /** Extension helper to map legacy ApiMedicine to universal CommerceProduct. */
@@ -111,11 +132,16 @@ fun ApiMedicine.toCommerceProduct(verticalId: String = "health"): CommerceProduc
         merchantId = null,
         categoryId = therapeuticCategory ?: "health",
         unitLabel = packSize,
+        brandName = brandName,
+        packSize = packSize,
+        rxRequirement = rxRequirement,
+        manufacturer = manufacturer,
+        coldChainRequired = coldChainRequired,
         medicineDetails = MedicineAttributes(
             prescriptionRequired = rxRequirement != "OTC",
             composition = null,
             manufacturer = manufacturer,
-            coldChain = coldChainRequired ?: false,
+            coldChain = coldChainRequired,
             packaging = packSize
         )
     )

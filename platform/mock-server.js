@@ -3391,14 +3391,23 @@ async function handleRequest(port, req, res) {
           manufacturingDate: p.manufacturingDate || p.manufacturing_date || '2024-05-15',
           batchNumber: p.batchNumber || p.batch_number || ('BAT-' + (p.sku || p.id || '0000').slice(-4).toUpperCase()),
           coldChainRequired: Boolean(p.coldChainRequired ?? p.cold_chain_required),
-          manufacturer: p.manufacturer || p.brandName || 'CommerceOS Health',
+          manufacturer: p.manufacturer || p.brandName || p.brand_name || 'CommerceOS Health',
           saltComposition: p.salt_composition || p.saltComposition || p.activeSalt || null,
           activeSalt: p.salt_composition || p.saltComposition || p.activeSalt || null,
           safetyAdvice: Array.isArray(p.safety_advice) ? p.safety_advice : (Array.isArray(p.safetyAdvice) ? p.safetyAdvice : (typeof (p.safety_advice || p.safetyAdvice) === 'string' && (p.safety_advice || p.safetyAdvice).startsWith('[') ? JSON.parse(p.safety_advice || p.safetyAdvice) : [])),
           storageCondition: p.storage_condition || p.storageCondition || (p.coldChainRequired ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C'),
           storageInstructions: p.storage_condition || p.storageCondition || (p.coldChainRequired ? 'Cold Chain (2°C - 8°C)' : 'Store in a cool, dry place below 25°C'),
           therapeuticClass: p.therapeutic_class || p.therapeuticClass || p.therapeuticCategory || null,
-          therapeuticCategory: p.therapeutic_class || p.therapeuticClass || p.therapeuticCategory || p.category || ''
+          therapeuticCategory: p.therapeutic_class || p.therapeuticClass || p.therapeuticCategory || p.category || '',
+          medicineDetails: {
+            prescriptionRequired: (p.rx_requirement || p.rxRequirement) === 'RX_REQUIRED' || (p.rx_requirement || p.rxRequirement) === 'SCHEDULE_H' || (p.rx_requirement || p.rxRequirement) === 'RX',
+            coldChain: Boolean(p.coldChainRequired ?? p.cold_chain_required),
+            saltComposition: p.salt_composition || p.saltComposition || p.activeSalt || null,
+            activeSalt: p.salt_composition || p.saltComposition || p.activeSalt || null,
+            composition: p.salt_composition || p.saltComposition || p.activeSalt || null,
+            manufacturer: p.manufacturer || p.brandName || p.brand_name || 'CommerceOS Health',
+            packaging: p.packSize || p.pack_size || ''
+          }
         };
       }
 

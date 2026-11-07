@@ -23,7 +23,9 @@ data class ProductCardModel(
     val rxRequired: Boolean = false,
     val coldChain: Boolean = false,
     val isWishlisted: Boolean = false,
-    val verticalId: String = "general"
+    val verticalId: String = "general",
+    val saltComposition: String? = null,
+    val manufacturer: String? = null
 )
 
 object MedicineImageResolver {
@@ -120,10 +122,12 @@ fun CommerceProduct.toProductCardModel(
         rating = rating,
         reviewCount = reviewCount,
         etaLabel = etaLabel, // Authentic fulfillment SLA; null if not available
-        rxRequired = (rxRequirement != null && rxRequirement != "OTC") || (medicineDetails?.prescriptionRequired ?: false),
-        coldChain = medicineDetails?.coldChain ?: false,
+        rxRequired = isRxRequired,
+        coldChain = isColdChain,
         isWishlisted = isWishlisted,
-        verticalId = verticalId ?: "general"
+        verticalId = verticalId ?: "general",
+        saltComposition = effectiveSalt,
+        manufacturer = effectiveManufacturer
     )
 }
 
@@ -145,8 +149,8 @@ fun ApiMedicine.toProductCardModel(
         id = id,
         sku = sku,
         name = name,
-        brandName = brandName ?: "",
-        packSize = packSize ?: "",
+        brandName = brandName,
+        packSize = packSize,
         price = effectivePrice,
         sellingPrice = effectiveSellingPrice,
         image = MedicineImageResolver.resolve(sku, name, image),
@@ -159,8 +163,10 @@ fun ApiMedicine.toProductCardModel(
         reviewCount = reviewCount,
         etaLabel = null, // No manufactured SLA
         rxRequired = rxRequirement != "OTC",
-        coldChain = coldChainRequired ?: false,
+        coldChain = coldChainRequired,
         isWishlisted = isWishlisted,
-        verticalId = "health"
+        verticalId = "health",
+        saltComposition = null,
+        manufacturer = manufacturer
     )
 }
