@@ -115,7 +115,10 @@ interface SearchApi {
 
 interface CartApi {
     @GET("/api/v1/cart/{customerId}")
-    suspend fun getCart(@Path("customerId") customerId: String): CartResponse
+    suspend fun getCart(
+        @Path("customerId") customerId: String,
+        @Query("couponCode") couponCode: String? = null
+    ): CartResponse
 
     @POST("/api/v1/cart/{customerId}/items")
     suspend fun addItem(

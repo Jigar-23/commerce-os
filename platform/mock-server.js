@@ -1558,6 +1558,63 @@ function grandTotal(items) {
   };
 }
 
+async function grandTotalWithCoupon(items, couponCode) {
+  const baseTotals = grandTotal(items);
+  if (!couponCode) return baseTotals;
+
+  const cleanCode = String(couponCode).trim().toUpperCase();
+  let couponDiscount = 0;
+  let invalidCouponReason = null;
+  let promo = null;
+
+  if (productionPgPool) {
+    try {
+      const dbRes = await productionPgPool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [cleanCode]);
+      if (dbRes.rows.length > 0) {
+        promo = dbRes.rows[0];
+      }
+    } catch (e) {
+      console.warn('[mock-server] grandTotalWithCoupon DB query error:', e.message);
+    }
+  }
+
+  if (!promo && db.promotions) {
+    promo = (db.promotions || []).find(p => String(p.code).trim().toUpperCase() === cleanCode);
+  }
+
+  if (!promo) {
+    invalidCouponReason = `Coupon '${cleanCode}' is invalid.`;
+  } else if (promo.status !== 'ACTIVE') {
+    invalidCouponReason = `Coupon '${cleanCode}' is currently ${String(promo.status).toLowerCase()}.`;
+  } else if (promo.valid_until && new Date(promo.valid_until) < new Date()) {
+    invalidCouponReason = `Coupon '${cleanCode}' has expired.`;
+  } else if (baseTotals.itemsSubtotal < Number(promo.min_order_value || promo.minOrderValue || 0)) {
+    const minVal = Number(promo.min_order_value || promo.minOrderValue || 0);
+    invalidCouponReason = `Add ₹${(minVal - baseTotals.itemsSubtotal).toFixed(2)} more to apply ${cleanCode}`;
+  } else {
+    if (promo.type === 'PERCENTAGE') {
+      const pct = Number(promo.discount_percent || promo.discountPercent || 0);
+      const calc = baseTotals.itemsSubtotal * (pct / 100);
+      const maxDisc = (promo.max_discount != null || promo.maxDiscount != null) ? Number(promo.max_discount ?? promo.maxDiscount) : null;
+      couponDiscount = maxDisc ? Math.min(maxDisc, calc) : calc;
+    } else {
+      const flat = Number(promo.flat_discount || promo.flatDiscount || 0);
+      couponDiscount = Math.min(flat, baseTotals.itemsSubtotal);
+    }
+    couponDiscount = Math.round(couponDiscount * 100) / 100;
+  }
+
+  const finalGrandTotal = Math.max(0, Math.round((baseTotals.grandTotal - couponDiscount) * 100) / 100);
+  return {
+    ...baseTotals,
+    discountAmount: couponDiscount,
+    couponCode: couponDiscount > 0 ? cleanCode : null,
+    invalidCouponReason: invalidCouponReason,
+    grandTotal: finalGrandTotal,
+    total: finalGrandTotal
+  };
+}
+
 global.riderSSEConnections = global.riderSSEConnections || new Map();
 
 function broadcastToRiderStream(riderId, eventType, data) {
@@ -2408,7 +2465,14 @@ async function newOrder(customerId, payload, cartItems) {
     payload.paymentMethod = 'COD';
   }
 
-  const t = grandTotal(items);
+  const requestedCouponCode = payload.couponCode || (payload.pricingSnapshot && payload.pricingSnapshot.couponCode) || null;
+  const t = await grandTotalWithCoupon(items, requestedCouponCode);
+  if (requestedCouponCode && t.invalidCouponReason) {
+    return {
+      error: t.invalidCouponReason,
+      isCouponError: true
+    };
+  }
   const isCod = ['COD', 'CASH_ON_DELIVERY', 'CASH'].includes((payload.paymentMethod || 'COD').toUpperCase());
   // SERVER-AUTHORITATIVE PRICING: ignore any client-supplied totalAmount; always
   // recompute from catalog-backed unit prices on the server.
@@ -9431,10 +9495,11 @@ async function handleRequest(port, req, res) {
       const cartMatch = path.match(/^\/api\/v1\/cart\/([^/]+)$/);
       if (cartMatch && req.method === 'GET') {
         const custId = cartMatch[1];
+        const couponCode = query.get('couponCode') || query.get('code') || null;
         if (appRepositories && appRepositories.cartRepo) {
           const items = await appRepositories.cartRepo.getCart(custId);
           const normalized = items.map(normalizeCartItem);
-          const t = grandTotal(normalized);
+          const t = await grandTotalWithCoupon(normalized, couponCode);
           return json(res, 200, { customerId: custId, items: normalized, ...t });
         } else if (appRepositories && appRepositories.isProduction) {
           return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
@@ -9442,7 +9507,7 @@ async function handleRequest(port, req, res) {
 
         const items = cartFor(custId);
         const normalized = items.map(normalizeCartItem);
-        const t = grandTotal(normalized);
+        const t = await grandTotalWithCoupon(normalized, couponCode);
         return json(res, 200, { customerId: custId, items: normalized, ...t });
       }
       return json(res, 404, { error: 'Not Found' });

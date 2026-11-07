@@ -555,6 +555,7 @@ fun CommerceOSApp(
                         viewModel = homeViewModel,
                         customerId = authenticatedCustomerId,
                         cartItems = cartViewModel.cartItems,
+                        availableCampaigns = cartViewModel.availableCampaigns,
                         selectedAddress = activeAddr,
                         calculatedEtaMinutes = addressViewModel.calculatedEtaMinutes,
                         locationHeaderLabel = addressViewModel.activeLocationHeaderLabel,
@@ -787,6 +788,9 @@ fun CommerceOSApp(
                     onAttachPrescription = { checkoutViewModel.attachPrescription(it) },
                     hasPendingSync = cartViewModel.hasPendingSync,
                     onRetrySync = { cartViewModel.retryPendingMutations() },
+                    priceChangeNotice = cartViewModel.priceChangeNotice,
+                    onClearPriceChangeNotice = { cartViewModel.clearPriceChangeNotice() },
+                    onRefreshPromotions = { cartViewModel.refreshDeliveryConfigAndPromotions() },
                     onProceedToAddress = {
                         val currentSelected = addressViewModel.selectedAddress
                             ?: addressViewModel.addresses.firstOrNull { it.isDefault }

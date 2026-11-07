@@ -82,7 +82,11 @@ class CartViewModel(
         isLockedForCheckout = false
     }
 
-    override suspend fun reconcileWithServer(cart: CartResponse) {
+    override suspend fun reconcileWithServer(
+        cart: CartResponse,
+        invalidatedCouponCode: String?,
+        changeNotice: String?
+    ) {
         val targetCustomerId = customerId.trim()
         if (targetCustomerId.isBlank()) return
         val authoritativeItems = sanitizeCartItems(cart.items ?: emptyList())
@@ -96,6 +100,22 @@ class CartViewModel(
                 cartItems = authoritativeItems
                 totals = cart
                 applied = true
+
+                if (invalidatedCouponCode != null || cart.invalidCouponReason != null || (appliedCouponCode != null && cart.couponCode == null)) {
+                    appliedCouponCode = null
+                    couponDiscountAmount = BigDecimal.ZERO
+                    couponFeedbackMessage = cart.invalidCouponReason ?: "Coupon '${invalidatedCouponCode ?: appliedCouponCode}' is no longer active and has been removed."
+                    isCouponError = true
+                } else if (cart.discount != null && cart.discount > BigDecimal.ZERO) {
+                    couponDiscountAmount = cart.discount
+                    if (!cart.couponCode.isNullOrBlank()) {
+                        appliedCouponCode = cart.couponCode
+                    }
+                }
+
+                if (changeNotice != null) {
+                    priceChangeNotice = changeNotice
+                }
             }
         }
 
@@ -219,6 +239,11 @@ class CartViewModel(
 
     var couponFeedbackMessage by mutableStateOf<String?>(null)
     var isCouponError by mutableStateOf(false)
+    var priceChangeNotice by mutableStateOf<String?>(null)
+
+    fun clearPriceChangeNotice() {
+        priceChangeNotice = null
+    }
 
     companion object {
         val DEFAULT_CAMPAIGNS = listOf(
@@ -364,7 +389,7 @@ class CartViewModel(
                 }
                 when (val result = repository.getPromotions()) {
                     is ApiResult.Success -> {
-                        availableCampaigns = result.data
+                        availableCampaigns = result.data.filter { it.status.equals("ACTIVE", ignoreCase = true) }
                         syncCouponDiscount()
                     }
                     is ApiResult.Failure -> {
@@ -1933,6 +1958,8 @@ class CartViewModel(
         if (campaign == null) {
             appliedCouponCode = null
             couponDiscountAmount = BigDecimal.ZERO
+            couponFeedbackMessage = "Coupon '$code' is no longer active and has been removed."
+            isCouponError = true
             return
         }
 
@@ -1996,6 +2023,30 @@ class CartViewModel(
         )
         couponFeedbackMessage = res.message
         isCouponError = false
+
+        // Real-time backend verification to guard against server-side status changes
+        viewModelScope.launch {
+            try {
+                when (val valRes = repository.validateCoupon(cleanCode, effectiveSubtotal.toDouble())) {
+                    is ApiResult.Success -> {
+                        if (!valRes.data.valid) {
+                            appliedCouponCode = null
+                            couponDiscountAmount = BigDecimal.ZERO
+                            couponFeedbackMessage = valRes.data.message ?: "Coupon '$cleanCode' is currently paused or inactive"
+                            isCouponError = true
+                        }
+                    }
+                    is ApiResult.Failure -> {
+                        val errMsg = valRes.error.message.ifBlank { "Coupon '$cleanCode' is currently paused or inactive" }
+                        appliedCouponCode = null
+                        couponDiscountAmount = BigDecimal.ZERO
+                        couponFeedbackMessage = errMsg
+                        isCouponError = true
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
         return res
     }
 

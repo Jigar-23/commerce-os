@@ -33,6 +33,8 @@ class KodexAuditBatch1RegressionTest {
     open class FakeAppRepository : AppRepository() {
         var defaultCartItems: List<CartItem> = emptyList()
         override suspend fun getPromotions(): ApiResult<List<CouponCampaign>> = ApiResult.Success(emptyList())
+        override suspend fun fetchBackendCart(customerId: String, couponCode: String?): ApiResult<CartResponse> =
+            fetchBackendCart(customerId)
         override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
             val items = defaultCartItems
             val subtotal = items.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.unitPrice.multiply(BigDecimal.valueOf(it.quantity.toLong()))) }

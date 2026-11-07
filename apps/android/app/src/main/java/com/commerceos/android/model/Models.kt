@@ -123,7 +123,11 @@ data class CartResponse(
     @SerializedName(value = "freeDeliveryEligible", alternate = ["free_delivery_eligible"])
     val freeDeliveryEligible: Boolean? = null,
     @SerializedName(value = "remainingForFreeDelivery", alternate = ["remaining_for_free_delivery"])
-    val remainingForFreeDelivery: BigDecimal? = null
+    val remainingForFreeDelivery: BigDecimal? = null,
+    @SerializedName(value = "couponCode", alternate = ["coupon_code"])
+    val couponCode: String? = null,
+    @SerializedName(value = "invalidCouponReason", alternate = ["invalid_coupon_reason"])
+    val invalidCouponReason: String? = null
 )
 
 enum class CouponDiscountType {

@@ -47,6 +47,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.model.ApiMedicine
+import com.commerceos.android.model.CouponCampaign
 import com.commerceos.android.util.MoneyFormatter
 import com.commerceos.android.model.CartItem
 import com.commerceos.android.model.CommerceEntity
@@ -88,6 +89,7 @@ fun HomeScreen(
     viewModel: HomeViewModel,
     customerId: String,
     cartItems: List<CartItem> = emptyList(),
+    availableCampaigns: List<CouponCampaign> = emptyList(),
     homeContext: HomeContext? = null,
     selectedAddress: ApiAddress? = null,
     calculatedEtaMinutes: Int = 0,
@@ -183,13 +185,16 @@ fun HomeScreen(
             }
 
             // 2b. Tiered Promotional Campaigns Strip (Active Authoritative Coupons)
-            item {
-                Box(modifier = Modifier.padding(horizontal = 14.dp)) {
-                    PromotionalCampaignsStrip(
-                        onSelectCampaign = { code ->
-                            onSearchClick("")
-                        }
-                    )
+            if (availableCampaigns.isNotEmpty()) {
+                item {
+                    Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+                        PromotionalCampaignsStrip(
+                            campaigns = availableCampaigns,
+                            onSelectCampaign = { code ->
+                                onSearchClick("")
+                            }
+                        )
+                    }
                 }
             }
 
@@ -551,22 +556,10 @@ private fun HeroDualActionCards(
  */
 @Composable
 private fun PromotionalCampaignsStrip(
+    campaigns: List<CouponCampaign>,
     onSelectCampaign: (String) -> Unit
 ) {
-    val campaigns = remember {
-        listOf(
-            Triple(
-                "HEALTH30",
-                "FLAT ₹150 OFF",
-                "On orders > ₹799 (Medicines)"
-            ),
-            Triple(
-                "SAVE10",
-                "FLAT ₹100 OFF",
-                "On orders > ₹199 (Instant)"
-            )
-        )
-    }
+    if (campaigns.isEmpty()) return
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -603,8 +596,8 @@ private fun PromotionalCampaignsStrip(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            campaigns.forEachIndexed { index, (code, title, desc) ->
-                val gradient = when (index) {
+            campaigns.forEachIndexed { index, camp ->
+                val gradient = when (index % 3) {
                     0 -> Brush.horizontalGradient(listOf(Color(0xFF064E3B), Color(0xFF047857)))
                     1 -> Brush.horizontalGradient(listOf(Color(0xFF1E1B4B), Color(0xFF4338CA)))
                     else -> Brush.horizontalGradient(listOf(Color(0xFF155E75), Color(0xFF0891B2)))
@@ -615,7 +608,7 @@ private fun PromotionalCampaignsStrip(
                     shadowElevation = 1.dp,
                     modifier = Modifier
                         .width(220.dp)
-                        .clickable { onSelectCampaign(code) }
+                        .clickable { onSelectCampaign(camp.code) }
                 ) {
                     Box(
                         modifier = Modifier
@@ -633,7 +626,7 @@ private fun PromotionalCampaignsStrip(
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Text(
-                                        text = title,
+                                        text = camp.title.ifBlank { camp.badge.ifBlank { "OFFER" } },
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Black,
                                         color = Color.White,
@@ -648,7 +641,7 @@ private fun PromotionalCampaignsStrip(
                                 )
                             }
                             Text(
-                                text = desc,
+                                text = camp.description.ifBlank { "Min order ${MoneyFormatter.format(camp.minOrderValue)}" },
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.9f),
                                 fontWeight = FontWeight.Medium,
@@ -671,7 +664,7 @@ private fun PromotionalCampaignsStrip(
                                         color = Color(0xFF475569)
                                     )
                                     Text(
-                                        text = code,
+                                        text = camp.code,
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Black,
                                         color = Color(0xFF0F172A)

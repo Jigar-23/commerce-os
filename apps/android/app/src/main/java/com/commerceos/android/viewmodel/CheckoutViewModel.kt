@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.commerceos.android.model.*
 import com.commerceos.android.network.ApiResult
 import com.commerceos.android.repository.AppRepository
+import com.commerceos.android.util.MoneyFormatter
 import java.math.BigDecimal
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -429,8 +430,9 @@ class CheckoutViewModel(
                     .subtract(currentDiscount)
                     .coerceAtLeast(BigDecimal.ZERO)
                 var authoritativeCartQuote: CartResponse? = null
+                val couponParam = uiState.couponCode?.takeIf { it.isNotBlank() }
 
-                when (val backendQuote = repository.fetchBackendCart(customerIdSnapshot)) {
+                when (val backendQuote = repository.fetchBackendCart(customerIdSnapshot, couponParam)) {
                     is ApiResult.Success -> {
                         val cartDto = backendQuote.data
                         authoritativeCartQuote = cartDto
@@ -496,17 +498,60 @@ class CheckoutViewModel(
                 val deliveryFeeChanged = authoritativeDeliveryFee.compareTo(uiState.deliveryFee) != 0
                 val coldChainFeeChanged = authoritativeColdChainFee.compareTo(uiState.coldChainFee) != 0
 
-                if (itemsChanged || totalChanged || subtotalChanged || discountChanged || deliveryFeeChanged || coldChainFeeChanged) {
-                    authoritativeCartQuote?.let { quote -> gate?.reconcileWithServer(quote) }
+                val invalidatedCoupon = if (uiState.couponCode != null && (authoritativeCartQuote?.invalidCouponReason != null || (currentDiscount > BigDecimal.ZERO && authoritativeDiscount.compareTo(BigDecimal.ZERO) == 0))) {
+                    uiState.couponCode
+                } else null
+
+                if (itemsChanged || totalChanged || subtotalChanged || discountChanged || deliveryFeeChanged || coldChainFeeChanged || invalidatedCoupon != null) {
+                    val changeDetails = mutableListOf<String>()
+
+                    if (invalidatedCoupon != null) {
+                        val reason = authoritativeCartQuote?.invalidCouponReason ?: "Coupon '$invalidatedCoupon' is no longer active and has been removed."
+                        changeDetails.add(reason)
+                    } else if (discountChanged) {
+                        changeDetails.add("Coupon discount changed from ${MoneyFormatter.format(currentDiscount)} to ${MoneyFormatter.format(authoritativeDiscount)}")
+                    }
+
+                    val oldItemMap = currentItems.associateBy { it.sku.trim() }
+                    for (newItem in authoritativeItems) {
+                        val oldItem = oldItemMap[newItem.sku.trim()]
+                        if (oldItem != null && newItem.unitPrice.compareTo(oldItem.unitPrice) != 0) {
+                            val diffName = newItem.name.ifBlank { newItem.sku }
+                            changeDetails.add("Price of '$diffName' updated from ${MoneyFormatter.format(oldItem.unitPrice)} to ${MoneyFormatter.format(newItem.unitPrice)}")
+                        }
+                    }
+                    for (oldItem in currentItems) {
+                        if (authoritativeItems.none { it.sku.trim() == oldItem.sku.trim() }) {
+                            changeDetails.add("'${oldItem.name.ifBlank { oldItem.sku }}' is no longer available and was removed.")
+                        }
+                    }
+                    if (deliveryFeeChanged) {
+                        changeDetails.add("Delivery fee updated to ${MoneyFormatter.format(authoritativeDeliveryFee)}")
+                    }
+                    if (coldChainFeeChanged) {
+                        changeDetails.add("Packaging fee updated to ${MoneyFormatter.format(authoritativeColdChainFee)}")
+                    }
+
+                    val noticeMessage = if (changeDetails.isEmpty()) {
+                        "Cart contents or price updated. Please review and confirm your order."
+                    } else {
+                        changeDetails.joinToString("\n")
+                    }
+
+                    authoritativeCartQuote?.let { quote ->
+                        gate?.reconcileWithServer(quote, invalidatedCouponCode = invalidatedCoupon, changeNotice = noticeMessage)
+                    }
+                    val effectiveCoupon = if (invalidatedCoupon != null) null else uiState.couponCode
                     uiState = uiState.copy(
                         items = authoritativeItems,
                         itemsSubtotal = authoritativeSubtotal,
+                        couponCode = effectiveCoupon,
                         couponDiscount = authoritativeDiscount,
                         deliveryFee = authoritativeDeliveryFee,
                         coldChainFee = authoritativeColdChainFee,
                         grandTotal = authoritativeGrandTotal,
                         isProcessing = false,
-                        errorMessage = "Cart contents or price updated. Please review and confirm your order."
+                        errorMessage = noticeMessage
                     )
                     return@launch
                 }
@@ -542,7 +587,7 @@ class CheckoutViewModel(
                         val coldChainFee = BigDecimal.valueOf(srvResult.data.coldChainFee)
 
                         // Refresh server quote after serviceability to check quote against final serviceability rates
-                        val refreshedQuote = repository.fetchBackendCart(customerIdSnapshot)
+                        val refreshedQuote = repository.fetchBackendCart(customerIdSnapshot, couponParam)
                         if (refreshedQuote !is ApiResult.Success) {
                             failCheckout("CART_SYNC_ERROR", (refreshedQuote as? ApiResult.Failure)?.error?.message?.ifBlank { "Failed to refresh final quote" } ?: "Failed to refresh final quote")
                             return@launch
@@ -575,18 +620,59 @@ class CheckoutViewModel(
                                 finalDeliveryFee.compareTo(deliveryFee) != 0 ||
                                 finalColdChainFee.compareTo(coldChainFee) != 0
 
-                            if (finalItemsChanged || finalPricingChanged) {
-                                gate?.reconcileWithServer(refreshedData)
+                            val finalInvalidatedCoupon = if (uiState.couponCode != null && (refreshedData.invalidCouponReason != null || (authoritativeDiscount > BigDecimal.ZERO && refreshedDiscount.compareTo(BigDecimal.ZERO) == 0))) {
+                                uiState.couponCode
+                            } else null
+
+                            if (finalItemsChanged || finalPricingChanged || finalInvalidatedCoupon != null) {
+                                val changeDetails = mutableListOf<String>()
+
+                                if (finalInvalidatedCoupon != null) {
+                                    val reason = refreshedData.invalidCouponReason ?: "Coupon '$finalInvalidatedCoupon' is no longer active and has been removed."
+                                    changeDetails.add(reason)
+                                } else if (refreshedDiscount.compareTo(authoritativeDiscount) != 0) {
+                                    changeDetails.add("Coupon discount changed from ${MoneyFormatter.format(authoritativeDiscount)} to ${MoneyFormatter.format(refreshedDiscount)}")
+                                }
+
+                                val oldItemMap = authoritativeItems.associateBy { it.sku.trim() }
+                                for (newItem in refreshedItems) {
+                                    val oldItem = oldItemMap[newItem.sku.trim()]
+                                    if (oldItem != null && newItem.unitPrice.compareTo(oldItem.unitPrice) != 0) {
+                                        val diffName = newItem.name.ifBlank { newItem.sku }
+                                        changeDetails.add("Price of '$diffName' updated from ${MoneyFormatter.format(oldItem.unitPrice)} to ${MoneyFormatter.format(newItem.unitPrice)}")
+                                    }
+                                }
+                                for (oldItem in authoritativeItems) {
+                                    if (refreshedItems.none { it.sku.trim() == oldItem.sku.trim() }) {
+                                        changeDetails.add("'${oldItem.name.ifBlank { oldItem.sku }}' is no longer available and was removed.")
+                                    }
+                                }
+                                if (finalDeliveryFee.compareTo(deliveryFee) != 0) {
+                                    changeDetails.add("Delivery fee updated to ${MoneyFormatter.format(finalDeliveryFee)}")
+                                }
+                                if (finalColdChainFee.compareTo(coldChainFee) != 0) {
+                                    changeDetails.add("Packaging fee updated to ${MoneyFormatter.format(finalColdChainFee)}")
+                                }
+
+                                val noticeMessage = if (changeDetails.isEmpty()) {
+                                    "Cart contents or pricing updated. Please review and confirm your order."
+                                } else {
+                                    changeDetails.joinToString("\n")
+                                }
+
+                                gate?.reconcileWithServer(refreshedData, invalidatedCouponCode = finalInvalidatedCoupon, changeNotice = noticeMessage)
+                                val effectiveCoupon = if (finalInvalidatedCoupon != null) null else uiState.couponCode
                                 uiState = uiState.copy(
                                     items = refreshedItems,
                                     itemsSubtotal = refreshedSubtotal,
+                                    couponCode = effectiveCoupon,
                                     couponDiscount = refreshedDiscount,
                                     serviceability = ServiceabilityState.Success(address.id, srvResult.data),
                                     deliveryFee = finalDeliveryFee,
                                     coldChainFee = finalColdChainFee,
                                     grandTotal = finalGrandTotal,
                                     isProcessing = false,
-                                    errorMessage = "Cart contents or pricing updated. Please review and confirm your order."
+                                    errorMessage = noticeMessage
                                 )
                                 return@launch
                             }

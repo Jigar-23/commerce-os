@@ -8,5 +8,9 @@ interface CartMutationGate {
     fun lockMutations()
     fun unlockMutations()
     suspend fun awaitMutationsIdle(): List<CartItem>
-    suspend fun reconcileWithServer(cart: CartResponse) {}
+    suspend fun reconcileWithServer(
+        cart: CartResponse,
+        invalidatedCouponCode: String? = null,
+        changeNotice: String? = null
+    ) {}
 }

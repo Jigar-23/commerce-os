@@ -86,8 +86,14 @@ fun CartScreen(
     onStartShopping: () -> Unit,
     onBack: (() -> Unit)? = null,
     hasPendingSync: Boolean = false,
-    onRetrySync: (() -> Unit)? = null
+    onRetrySync: (() -> Unit)? = null,
+    priceChangeNotice: String? = null,
+    onClearPriceChangeNotice: (() -> Unit)? = null,
+    onRefreshPromotions: (() -> Unit)? = null
 ) {
+    LaunchedEffect(Unit) {
+        onRefreshPromotions?.invoke()
+    }
     if (cartItems.isEmpty()) {
         EmptyCart(onStartShopping = onStartShopping, onBack = onBack)
         return
@@ -241,6 +247,63 @@ fun CartScreen(
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFFB45309)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Price or Campaign Change Notification Banner
+            if (!priceChangeNotice.isNullOrBlank()) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Color(0xFFFEF3C7),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFF59E0B))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .padding(top = 2.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Prices or Offers Updated",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF92400E)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = priceChangeNotice,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF78350F),
+                                    lineHeight = 16.sp
+                                )
+                            }
+                            if (onClearPriceChangeNotice != null) {
+                                IconButton(
+                                    onClick = onClearPriceChangeNotice,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Dismiss",
+                                        tint = Color(0xFF92400E),
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }

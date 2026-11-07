@@ -3,6 +3,7 @@ package com.commerceos.android.repository
 import com.commerceos.android.model.*
 import com.commerceos.android.network.Api
 import com.commerceos.android.network.ApiResult
+import com.commerceos.android.network.CouponValidationResponse
 import com.commerceos.android.network.DeleteAddressResponse
 import com.commerceos.android.network.NetworkClient
 import kotlinx.coroutines.*
@@ -125,7 +126,10 @@ open class AppRepository {
         withContext(Dispatchers.IO) { Api.run { NetworkClient.catalogApi.getMedicineDetail(id) } }
 
     open suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> =
-        withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.getCart(customerId) } }
+        fetchBackendCart(customerId, null)
+
+    open suspend fun fetchBackendCart(customerId: String, couponCode: String?): ApiResult<CartResponse> =
+        withContext(Dispatchers.IO) { Api.run { NetworkClient.cartApi.getCart(customerId, couponCode) } }
 
     open suspend fun addCartItem(customerId: String, item: CartItem): ApiResult<CartResponse> =
         addCartItem(customerId, item, null)
@@ -277,4 +281,7 @@ open class AppRepository {
                 }
             }
         }
+
+    open suspend fun validateCoupon(code: String, subtotal: Double): ApiResult<CouponValidationResponse> =
+        withContext(Dispatchers.IO) { Api.run { NetworkClient.promotionsApi.validateCoupon(code, subtotal) } }
 }
