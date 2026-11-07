@@ -2188,13 +2188,71 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
       } catch (_) {}
     }
 
-    // 3. Bound Hardware Keystore HMAC / Attested Key Signature
-    if (!verified && signature) {
-      for (const msg of candidatePayloads) {
-        const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(msg).digest('hex');
-        if (signature.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
-          verified = true;
-          break;
+    // 3. Enrolled Device Key Signature Verification (Android Keystore / Hardware-Backed Key)
+    if (!verified && (signature || attestation.signature)) {
+      const activeSig = String(signature || attestation.signature).trim();
+      const activeKeyId = String(attestation.keyId || attestation.deviceId || deviceId || '').trim();
+      let enrolledKeyPem = null;
+
+      if (activeKeyId) {
+        if (pool && !isLocalMode) {
+          try {
+            const kRes = await pool.query(
+              `SELECT public_key FROM rider_attestation_keys WHERE rider_id = $1 AND key_id = $2`,
+              [riderId, activeKeyId]
+            );
+            if (kRes.rows.length > 0) {
+              enrolledKeyPem = kRes.rows[0].public_key;
+            }
+          } catch (_) {}
+        } else {
+          const localKey = inMemoryAttestationKeys.get(`${riderId}:${activeKeyId}`);
+          if (localKey) {
+            enrolledKeyPem = localKey.publicKey;
+          }
+        }
+      }
+
+      if (enrolledKeyPem && enrolledKeyPem.startsWith('-----BEGIN')) {
+        let sigBuf = null;
+        try {
+          if (/^[0-9a-fA-F]+$/.test(activeSig) && activeSig.length % 2 === 0) {
+            sigBuf = Buffer.from(activeSig, 'hex');
+          } else {
+            sigBuf = Buffer.from(activeSig, 'base64');
+          }
+        } catch (_) {}
+
+        if (sigBuf) {
+          for (const msg of candidatePayloads) {
+            try {
+              const verifier = crypto.createVerify('SHA256');
+              verifier.update(Buffer.from(msg, 'utf8'));
+              if (verifier.verify(enrolledKeyPem, sigBuf)) {
+                verified = true;
+                break;
+              }
+              if (sigBuf.length === 64) {
+                const verifierP1363 = crypto.createVerify('SHA256');
+                verifierP1363.update(Buffer.from(msg, 'utf8'));
+                if (verifierP1363.verify({ key: enrolledKeyPem, dsaEncoding: 'ieee-p1363' }, sigBuf)) {
+                  verified = true;
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      }
+
+      // Fallback: Bound Hardware Keystore HMAC / Attested Key Signature
+      if (!verified) {
+        for (const msg of candidatePayloads) {
+          const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(msg).digest('hex');
+          if (activeSig.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(activeSig, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+            verified = true;
+            break;
+          }
         }
       }
     }
@@ -2614,13 +2672,20 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims || !authClaims.sub) {
         return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for admin live stream.' });
       }
+      // Strictly require an explicit admin role; subject identifier matching alone is prohibited
       const isAdmin = authClaims.role === 'ADMIN' ||
         authClaims.role === 'ROLE_ADMIN' ||
-        authClaims.sub === 'admin' ||
-        (authClaims.roles && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
+        (Array.isArray(authClaims.roles) && (authClaims.roles.includes('ADMIN') || authClaims.roles.includes('ROLE_ADMIN')));
 
       if (!isAdmin) {
-        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Administrator authority is required.' });
+        return sendJson(res, 403, { error: 'FORBIDDEN', message: 'Explicit administrator role authority is required.' });
+      }
+
+      // Recheck token expiration at connection time
+      const expSec = Number(authClaims.exp);
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (!isNaN(expSec) && expSec <= nowSec) {
+        return sendJson(res, 401, { error: 'TOKEN_EXPIRED', message: 'Bearer JWT has expired.' });
       }
 
       res.writeHead(200, {
@@ -2637,6 +2702,44 @@ const server = http.createServer(async (req, res) => {
       sseBroadcasterInstance.subscribe('global', res, lastEventId);
       sseBroadcasterInstance.subscribe('orders', res, lastEventId);
       sseBroadcasterInstance.subscribe('telemetry', res, lastEventId);
+
+      // Enforce expiry-driven automatic stream termination
+      const msUntilExpiry = !isNaN(expSec) ? Math.max(500, (expSec - nowSec) * 1000) : 3600000;
+      const expiryTimer = setTimeout(() => {
+        try {
+          res.write(`event: error\ndata: ${JSON.stringify({ error: 'TOKEN_EXPIRED', message: 'Admin JWT has expired. Connection closed.' })}\n\n`);
+          res.end();
+        } catch (_) {}
+      }, msUntilExpiry);
+      if (expiryTimer.unref) expiryTimer.unref();
+
+      // Continuous background role revocation check if DB pool is present
+      let revocationInterval = null;
+      if (pool && !isLocalMode) {
+        revocationInterval = setInterval(async () => {
+          try {
+            const adminCheck = await pool.query(
+              `SELECT role, status FROM users WHERE (id = $1 OR username = $1 OR email = $1) LIMIT 1`,
+              [authClaims.sub]
+            );
+            if (adminCheck.rows.length > 0) {
+              const u = adminCheck.rows[0];
+              const stillAdmin = (u.role === 'ADMIN' || u.role === 'ROLE_ADMIN') && u.status !== 'SUSPENDED' && u.status !== 'REVOKED';
+              if (!stillAdmin) {
+                res.write(`event: error\ndata: ${JSON.stringify({ error: 'ROLE_REVOKED', message: 'Admin authority has been revoked.' })}\n\n`);
+                res.end();
+                clearInterval(revocationInterval);
+              }
+            }
+          } catch (_) {}
+        }, 30000);
+        if (revocationInterval.unref) revocationInterval.unref();
+      }
+
+      req.on('close', () => {
+        clearTimeout(expiryTimer);
+        if (revocationInterval) clearInterval(revocationInterval);
+      });
       return;
     }
 
@@ -10900,11 +11003,12 @@ const server = http.createServer(async (req, res) => {
 
           // Verify AAGUID (bytes 37-52): validate App Attest environment (Finding 6)
           const aaguid = authData.subarray(37, 53);
-          const devAaguid = Buffer.from('appattestdevelop', 'ascii');
-          const prodAaguid = Buffer.concat([Buffer.from('appattest', 'ascii'), Buffer.alloc(7, 0)]);
-          const zeroAaguid = Buffer.alloc(16, 0);
+          const devAaguid = Buffer.from('appattestdevelop', 'ascii'); // 16 bytes: 'appattestdevelop'
+          const prodAaguid = Buffer.concat([Buffer.from('appattest', 'ascii'), Buffer.alloc(7, 0)]); // 16 bytes: 'appattest' + 7 zeros
 
-          const appAttestEnv = String(process.env.APP_ATTEST_ENVIRONMENT || (process.env.NODE_ENV === 'production' ? 'production' : 'development')).toLowerCase();
+          const isDeployed = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER || process.env.CI || process.env.STAGING || process.env.DEPLOYMENT_ENV);
+          const rawAppAttestEnv = process.env.APP_ATTEST_ENVIRONMENT;
+          const appAttestEnv = String(rawAppAttestEnv || (isDeployed ? 'production' : 'development')).toLowerCase().trim();
 
           if (appAttestEnv === 'production') {
             if (aaguid.equals(devAaguid)) {
@@ -10913,20 +11017,30 @@ const server = http.createServer(async (req, res) => {
                 message: 'Development App Attest key is strictly rejected in production environment.'
               });
             }
-            if (!aaguid.equals(prodAaguid) && !aaguid.equals(zeroAaguid)) {
+            if (!aaguid.equals(prodAaguid)) {
               return sendJson(res, 400, {
                 error: 'INVALID_AAGUID',
                 message: 'Authenticator AAGUID does not match production App Attest identifier.'
               });
             }
-          } else {
-            const isKnownAaguid = aaguid.equals(devAaguid) || aaguid.equals(prodAaguid) || aaguid.equals(zeroAaguid);
-            if (!isKnownAaguid) {
+          } else if (appAttestEnv === 'development') {
+            if (aaguid.equals(prodAaguid)) {
               return sendJson(res, 400, {
-                error: 'INVALID_AAGUID',
-                message: 'Authenticator AAGUID does not match valid App Attest identifier.'
+                error: 'INVALID_ATTESTATION_ENVIRONMENT',
+                message: 'Production App Attest key submitted to development environment.'
               });
             }
+            if (!aaguid.equals(devAaguid)) {
+              return sendJson(res, 400, {
+                error: 'INVALID_AAGUID',
+                message: 'Authenticator AAGUID does not match development App Attest identifier.'
+              });
+            }
+          } else {
+            return sendJson(res, 400, {
+              error: 'INVALID_ATTESTATION_ENVIRONMENT',
+              message: `Unknown App Attest environment '${appAttestEnv}'. Must be 'production' or 'development'.`
+            });
           }
 
           // Verify credentialId and bind to submitted keyId
@@ -10969,7 +11083,20 @@ const server = http.createServer(async (req, res) => {
         if (!validIntegrity) {
           return sendJson(res, 400, { error: 'PLAY_INTEGRITY_VERIFICATION_FAILED', message: 'Google Play Integrity verdict verification failed.' });
         }
-        authenticPublicKeyPem = `android_play_integrity_verified:${keyId}`;
+        let pubKey = String(body.publicKey || '').trim();
+        if (pubKey) {
+          if (!pubKey.startsWith('-----BEGIN')) {
+            pubKey = `-----BEGIN PUBLIC KEY-----\n${pubKey}\n-----END PUBLIC KEY-----`;
+          }
+          try {
+            crypto.createPublicKey(pubKey);
+            authenticPublicKeyPem = pubKey;
+          } catch (e) {
+            return sendJson(res, 400, { error: 'INVALID_PUBLIC_KEY', message: `Device public key is invalid: ${e.message}` });
+          }
+        } else {
+          authenticPublicKeyPem = `android_play_integrity_verified:${keyId}`;
+        }
       } else {
         return sendJson(res, 400, { error: 'UNSUPPORTED_PLATFORM', message: `Platform ${platform} is not supported.` });
       }

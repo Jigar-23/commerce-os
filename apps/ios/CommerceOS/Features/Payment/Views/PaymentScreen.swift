@@ -10,7 +10,8 @@ public struct PaymentScreen: View {
     @EnvironmentObject private var addressRepository: AddressRepository
     
     public let address: AddressDto?
-    public let quote: AuthoritativeCartQuote?
+    public let initialQuote: AuthoritativeCartQuote?
+    public let initialCouponCode: String?
     public let onAuthorize: (String) -> Void
     public let onChangeAddress: (() -> Void)?
     public let onBack: (() -> Void)?
@@ -19,32 +20,39 @@ public struct PaymentScreen: View {
     @State private var isPlacingOrder: Bool = false
     @State private var orderError: String? = nil
     @State private var authoritativeQuote: AuthoritativeCartQuote? = nil
+    @State private var isFetchingQuote: Bool = false
+    @State private var quoteFetchError: String? = nil
+    @State private var priceChangeNotice: String? = nil
+    @State private var priceChangeConfirmed: Bool = false
+    @State private var activeIdempotencyKey: String? = nil
+    @State private var lastPayloadFingerprint: String? = nil
     
     public init(
         address: AddressDto? = nil,
         quote: AuthoritativeCartQuote? = nil,
+        couponCode: String? = nil,
         onAuthorize: @escaping (String) -> Void,
         onChangeAddress: (() -> Void)? = nil,
         onBack: (() -> Void)? = nil
     ) {
         self.address = address
-        self.quote = quote
+        self.initialQuote = quote
+        self.initialCouponCode = couponCode
         self.onAuthorize = onAuthorize
         self.onChangeAddress = onChangeAddress
         self.onBack = onBack
     }
     
     private var activeQuote: AuthoritativeCartQuote? {
-        quote ?? authoritativeQuote
+        authoritativeQuote ?? initialQuote ?? cartStore.authoritativeQuote
+    }
+
+    private var activeCouponCode: String? {
+        activeQuote?.couponCode ?? initialCouponCode ?? cartStore.appliedCouponCode
     }
 
     private var grandTotal: Double {
-        if let q = activeQuote {
-            return q.effectiveGrandTotal
-        }
-        let delivery = cartStore.subtotal > 300 ? 0.0 : 25.0
-        let handling = 5.00
-        return max(0.0, cartStore.subtotal + delivery + handling)
+        activeQuote?.effectiveGrandTotal ?? 0.0
     }
     
     private func triggerHaptic() {
@@ -73,6 +81,52 @@ public struct PaymentScreen: View {
                     // 4. Payment Method Selection
                     paymentMethodsCard
                     
+                    if let notice = priceChangeNotice, !priceChangeConfirmed {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(Color(hex: "D97706"))
+                                Text(notice)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(Color(hex: "92400E"))
+                            }
+                            Button(action: {
+                                priceChangeConfirmed = true
+                            }) {
+                                Text("Accept Updated Total")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 14)
+                                    .background(Color(hex: "059669"))
+                                    .cornerRadius(8)
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(hex: "FEF3C7"))
+                        .cornerRadius(10)
+                    }
+
+                    if let err = quoteFetchError {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(.orange)
+                            Text(err)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.orange)
+                            Spacer()
+                            Button("Retry") {
+                                fetchAuthoritativeQuote()
+                            }
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color(hex: "0E675E"))
+                        }
+                        .padding(12)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(10)
+                    }
+
                     if let err = orderError {
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.circle.fill")
@@ -97,13 +151,41 @@ public struct PaymentScreen: View {
         }
         .navigationBarHidden(true)
         .onAppear {
-            if quote == nil {
-                let customerId = container.customerSession?.customerId ?? UserDefaults.standard.string(forKey: "customer_id") ?? "self"
-                Task {
-                    do {
-                        let q = try await container.orderRepository.fetchCartQuote(customerId: customerId)
-                        await MainActor.run { self.authoritativeQuote = q }
-                    } catch {}
+            fetchAuthoritativeQuote()
+        }
+    }
+
+    private func fetchAuthoritativeQuote() {
+        let customerId = container.customerSession?.customerId ?? UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        let couponToFetch = activeCouponCode
+        isFetchingQuote = true
+        quoteFetchError = nil
+
+        Task {
+            do {
+                let q = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: couponToFetch)
+                await MainActor.run {
+                    self.isFetchingQuote = false
+                    let priorTotal = (self.initialQuote ?? self.cartStore.authoritativeQuote)?.effectiveGrandTotal
+                    self.authoritativeQuote = q
+                    self.cartStore.authoritativeQuote = q
+                    if let code = q.couponCode {
+                        self.cartStore.appliedCouponCode = code
+                    }
+
+                    if let prior = priorTotal, prior > 0, abs(prior - q.effectiveGrandTotal) > 0.5 {
+                        let diff = q.effectiveGrandTotal - prior
+                        let changeStr = diff > 0 ? "+₹\(String(format: "%.2f", diff))" : "-₹\(String(format: "%.2f", abs(diff)))"
+                        self.priceChangeNotice = "Authoritative total changed (\(changeStr)) to ₹\(String(format: "%.2f", q.effectiveGrandTotal)). Please confirm to place order."
+                        self.priceChangeConfirmed = false
+                    } else {
+                        self.priceChangeConfirmed = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isFetchingQuote = false
+                    self.quoteFetchError = "Failed to load authoritative quote: \(error.localizedDescription)"
                 }
             }
         }
@@ -445,21 +527,39 @@ public struct PaymentScreen: View {
             Spacer()
             
             let hasValidAddress = (address ?? addressRepository.selectedAddress) != nil
+            let hasValidQuote = activeQuote != nil && !isFetchingQuote
+            let isPriceConfirmed = priceChangeNotice == nil || priceChangeConfirmed
+            let canPlaceOrder = hasValidAddress && hasValidQuote && isPriceConfirmed && !isPlacingOrder
+
             Button(action: {
-                if hasValidAddress {
-                    executeOrderPlacement()
-                } else {
+                if !hasValidAddress {
                     onChangeAddress?()
+                } else if !hasValidQuote {
+                    fetchAuthoritativeQuote()
+                } else if !isPriceConfirmed {
+                    priceChangeConfirmed = true
+                } else {
+                    executeOrderPlacement()
                 }
             }) {
                 HStack(spacing: 6) {
-                    if isPlacingOrder {
+                    if isPlacingOrder || isFetchingQuote {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else if !hasValidAddress {
                         Image(systemName: "mappin.circle.fill")
                             .font(.system(size: 14))
                         Text("SELECT ADDRESS")
+                            .font(.system(size: 13, weight: .heavy))
+                    } else if !hasValidQuote {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14))
+                        Text("UPDATE QUOTE")
+                            .font(.system(size: 13, weight: .heavy))
+                    } else if !isPriceConfirmed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14))
+                        Text("CONFIRM PRICE")
                             .font(.system(size: 13, weight: .heavy))
                     } else {
                         Image(systemName: "lock.shield.fill")
@@ -471,11 +571,11 @@ public struct PaymentScreen: View {
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 46)
-                .background(hasValidAddress ? brandTeal : Color(hex: "94A3B8"))
+                .background(canPlaceOrder ? brandTeal : Color(hex: "94A3B8"))
                 .cornerRadius(12)
-                .shadow(color: hasValidAddress ? brandTeal.opacity(0.35) : Color.clear, radius: 6, x: 0, y: 3)
+                .shadow(color: canPlaceOrder ? brandTeal.opacity(0.35) : Color.clear, radius: 6, x: 0, y: 3)
             }
-            .disabled(isPlacingOrder)
+            .disabled(isPlacingOrder || (hasValidAddress && !hasValidQuote && isFetchingQuote))
             .buttonStyle(PlainButtonStyle())
         }
         .padding(.horizontal, 16)
@@ -495,6 +595,22 @@ public struct PaymentScreen: View {
                     await MainActor.run {
                         self.isPlacingOrder = false
                         self.orderError = "Please sign in to place your order."
+                    }
+                    return
+                }
+
+                guard let quoteToUse = activeQuote else {
+                    await MainActor.run {
+                        self.isPlacingOrder = false
+                        self.orderError = "Authoritative quote required. Please update quote."
+                    }
+                    return
+                }
+
+                if let notice = priceChangeNotice, !priceChangeConfirmed {
+                    await MainActor.run {
+                        self.isPlacingOrder = false
+                        self.orderError = "Please accept the updated total (\(notice)) to proceed."
                     }
                     return
                 }
@@ -536,14 +652,31 @@ public struct PaymentScreen: View {
                     latitude: addr.latitude,
                     longitude: addr.longitude
                 )
+
+                // Compute deterministic fingerprint over address, sorted items (SKU + quantity), coupon, and payment method
+                let sortedItemsFingerprint = itemsPayload.sorted(by: { $0.sku < $1.sku }).map { "\($0.sku):\($0.quantity)" }.joined(separator: ";")
+                let currentFingerprint = "\(authoritativeId)|\(sortedItemsFingerprint)|\(quoteToUse.couponCode ?? activeCouponCode ?? "")|\(selectedMethod)"
+
+                let finalIdempotencyKey: String
+                if let existingKey = activeIdempotencyKey, lastPayloadFingerprint == currentFingerprint {
+                    finalIdempotencyKey = existingKey
+                } else {
+                    let newKey = "ios_order_\(UUID().uuidString)"
+                    finalIdempotencyKey = newKey
+                    await MainActor.run {
+                        self.activeIdempotencyKey = newKey
+                        self.lastPayloadFingerprint = currentFingerprint
+                    }
+                }
+
                 let payload = PlaceOrderRequest(
-                    idempotencyKey: "ios_order_\(UUID().uuidString)",
+                    idempotencyKey: finalIdempotencyKey,
                     paymentMethod: selectedMethod,
                     addressId: authoritativeId,
                     deliveryAddress: addressPayload,
                     items: itemsPayload,
                     prescriptionId: nil,
-                    couponCode: activeQuote?.couponCode
+                    couponCode: quoteToUse.couponCode ?? activeCouponCode
                 )
                 
                 let orderRes: ServerOrderResponse = try await container.apiClient.post(
@@ -552,6 +685,8 @@ public struct PaymentScreen: View {
                 )
                 
                 await MainActor.run {
+                    self.activeIdempotencyKey = nil
+                    self.lastPayloadFingerprint = nil
                     self.container.orderRepository.lastPlacedOrder = orderRes
                     if !self.container.orderRepository.customerOrders.contains(where: { $0.id == orderRes.id }) {
                         self.container.orderRepository.customerOrders.insert(orderRes, at: 0)

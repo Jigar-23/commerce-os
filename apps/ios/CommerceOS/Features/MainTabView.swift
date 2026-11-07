@@ -106,9 +106,11 @@ public struct MainTabView: View {
                                 navigator.push(.paymentGateway)
                             }
                         )
-                    case .paymentGateway:
+                    case .paymentGateway(let quote, let couponCode):
                         PaymentScreen(
                             address: addressRepository.selectedAddress,
+                            quote: quote ?? CartLocalStore.shared.authoritativeQuote,
+                            couponCode: couponCode ?? CartLocalStore.shared.appliedCouponCode,
                             onAuthorize: { orderId in
                                 navigator.pop() // pop payment
                                 navigator.pop() // pop cart

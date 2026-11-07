@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.security.KeyStore
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -52,6 +54,30 @@ android {
                 }
                 if (keystorePassword.isNullOrBlank() || keyAliasEnv.isNullOrBlank() || keyPasswordEnv.isNullOrBlank()) {
                     throw GradleException("Release build signing failed: KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD must be provided via secure environment variables.")
+                }
+            }
+
+            // Invalidate historically exposed signing certificate from git history (SHA-256: 08:5D:02:68...)
+            val revokedCertSha256 = "085D0268C184C1F0F963219B37EFFDC2ECCED8717B4027730A79475B1481EDD6"
+            if (keystoreFile != null && keystoreFile.exists() && !keystorePassword.isNullOrBlank() && !keyAliasEnv.isNullOrBlank()) {
+                val cert = try {
+                    val ks = KeyStore.getInstance(if (keystoreFile.name.endsWith(".jks", ignoreCase = true)) "JKS" else "PKCS12")
+                    keystoreFile.inputStream().use { ks.load(it, keystorePassword.toCharArray()) }
+                    ks.getCertificate(keyAliasEnv)
+                } catch (_: Exception) {
+                    try {
+                        val ksFallback = KeyStore.getInstance("PKCS12")
+                        keystoreFile.inputStream().use { ksFallback.load(it, keystorePassword.toCharArray()) }
+                        ksFallback.getCertificate(keyAliasEnv)
+                    } catch (_: Exception) { null }
+                }
+
+                if (cert != null) {
+                    val md = MessageDigest.getInstance("SHA-256")
+                    val fp = md.digest(cert.encoded).joinToString("") { b -> "%02X".format(b) }
+                    if (fp.equals(revokedCertSha256, ignoreCase = true)) {
+                        throw GradleException("REVOKED_SIGNING_KEY_REJECTED: The provided keystore matches the historically exposed certificate (SHA-256: 08:5D:02:68...). This key has been permanently revoked and rotated.")
+                    }
                 }
             }
 

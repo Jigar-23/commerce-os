@@ -847,7 +847,25 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 val md = java.security.MessageDigest.getInstance("SHA-256")
                 val reqHash = md.digest(msg.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-                // Play Integrity token is reserved for initial milestone and throttled to once per minute to respect Classic API quota (5 requests/min)
+                // Cryptographic Device Key Signature bound to coordinates, sequence, timestamp, and nonce
+                val keyManager = com.commerceos.rider.security.RiderDeviceKeyManager
+                val keyId = keyManager.getKeyId(applicationContext)
+                val signature = keyManager.sign(applicationContext, msg)
+
+                jsonBody.put("keyId", keyId)
+                jsonBody.put("deviceId", keyId)
+                jsonBody.put("signature", signature)
+
+                val attestationObj = JSONObject().apply {
+                    put("platform", "android_device_key")
+                    put("keyId", keyId)
+                    put("signature", signature)
+                    put("nonce", nonce)
+                    put("timestamp", timestamp)
+                    put("requestHash", reqHash)
+                }
+
+                // Play Integrity token attests device enrollment and session state on milestone and throttled intervals
                 val now = System.currentTimeMillis()
                 val isMilestone = nextUpdate.sequenceNumber == 1L
                 val isCadenceDue = (now - lastAttestationTimestamp) >= ATTESTATION_INTERVAL_MS
@@ -856,16 +874,12 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     val integrityToken = playIntegrityService.requestToken(reqHash)
                     if (!integrityToken.isNullOrBlank()) {
                         lastAttestationTimestamp = now
-                        jsonBody.put("deviceAttestation", JSONObject().apply {
-                            put("platform", "android_play_integrity")
-                            put("token", integrityToken)
-                            put("integrityToken", integrityToken)
-                            put("nonce", nonce)
-                            put("requestHash", reqHash)
-                            put("timestamp", timestamp)
-                        })
+                        attestationObj.put("token", integrityToken)
+                        attestationObj.put("integrityToken", integrityToken)
+                        keyManager.ensureEnrolled(applicationContext, baseUrl, token)
                     }
                 }
+                jsonBody.put("deviceAttestation", attestationObj)
 
                 conn.outputStream.use { os ->
                     os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))

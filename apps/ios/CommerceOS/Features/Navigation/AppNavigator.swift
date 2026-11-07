@@ -15,7 +15,11 @@ public enum AppScreen: Identifiable, Equatable {
     case prescriptions
     case addressSelection(fromCheckout: Bool, fromProfile: Bool)
     case addAddressFlow
-    case paymentGateway
+    case paymentGateway(quote: AuthoritativeCartQuote?, couponCode: String?)
+
+    public static var paymentGateway: AppScreen {
+        .paymentGateway(quote: CartLocalStore.shared.authoritativeQuote, couponCode: CartLocalStore.shared.appliedCouponCode)
+    }
 
     public var id: String {
         switch self {
@@ -28,7 +32,8 @@ public enum AppScreen: Identifiable, Equatable {
         case .prescriptions: return "prescriptions"
         case .addressSelection(let c, let p): return "address_c\(c)_p\(p)"
         case .addAddressFlow: return "add_address_flow"
-        case .paymentGateway: return "payment_gateway"
+        case .paymentGateway(let quote, let couponCode):
+            return "payment_gateway_\(couponCode ?? "")_\(quote?.effectiveGrandTotal ?? 0)"
         }
     }
 

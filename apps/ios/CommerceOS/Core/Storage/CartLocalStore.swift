@@ -17,6 +17,8 @@ public final class CartLocalStore: ObservableObject {
     public static let shared = CartLocalStore()
     
     @Published public private(set) var items: [String: (product: ProductDto, quantity: Int)] = [:]
+    @Published public var appliedCouponCode: String? = nil
+    @Published public var authoritativeQuote: AuthoritativeCartQuote? = nil
     
     private let storageKey = "commerce_os_cart_items_v1"
     private let userDefaults: UserDefaults
@@ -67,6 +69,8 @@ public final class CartLocalStore: ObservableObject {
     
     public func clear() {
         items.removeAll()
+        appliedCouponCode = nil
+        authoritativeQuote = nil
         persistToDisk()
     }
     

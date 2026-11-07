@@ -10,7 +10,7 @@ public struct OrderItemPayload: Codable {
     }
 }
 
-public struct AuthoritativeCartQuote: Codable {
+public struct AuthoritativeCartQuote: Codable, Equatable {
     public let customerId: String?
     public let subtotal: Double?
     public let itemsSubtotal: Double?

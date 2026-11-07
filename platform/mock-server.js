@@ -126,7 +126,7 @@ function getJwtSecret() {
   }
   // In development test harness, generate a cryptographically strong runtime secret
   if (!global._devRuntimeJwtSecret) {
-    global._devRuntimeJwtSecret = 'c3VwZXItc2VjcmV0LWp3dC1rZXktY29tbWVyY2Utb3MtMjAyNi1lbnRlcnByaXNl';
+    global._devRuntimeJwtSecret = crypto.randomBytes(32).toString('hex');
   }
   return global._devRuntimeJwtSecret;
 }
@@ -1550,6 +1550,7 @@ function grandTotal(items) {
     cold,
     grandTotal: grand,
     itemsSubtotal: itemsSubtotal,
+    deliveryFee: expressFee,
     expressDeliveryFee: expressFee,
     coldChainPackagingFee: cold,
     freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD,
@@ -1582,6 +1583,8 @@ async function grandTotalWithCoupon(items, couponCode) {
     promo = (db.promotions || []).find(p => String(p.code).trim().toUpperCase() === cleanCode);
   }
 
+  const baseDeliveryFee = Number(baseTotals.expressDeliveryFee ?? baseTotals.deliveryFee ?? baseTotals.expressFee ?? 0);
+
   if (!promo) {
     invalidCouponReason = `Coupon '${cleanCode}' is invalid.`;
   } else if (promo.status !== 'ACTIVE') {
@@ -1596,7 +1599,7 @@ async function grandTotalWithCoupon(items, couponCode) {
     var isFreeShipping = false;
     if (promoType === 'FREE_SHIPPING' || promoType === 'FREE_DELIVERY') {
       isFreeShipping = true;
-      couponDiscount = Number(baseTotals.deliveryFee != null ? baseTotals.deliveryFee : 25.00);
+      couponDiscount = baseDeliveryFee;
     } else if (promoType === 'PERCENTAGE') {
       const pct = Number(promo.discount_percent || promo.discountPercent || 0);
       const calc = baseTotals.itemsSubtotal * (pct / 100);
@@ -1609,15 +1612,18 @@ async function grandTotalWithCoupon(items, couponCode) {
     couponDiscount = Math.round(couponDiscount * 100) / 100;
   }
 
-  const effectiveDeliveryFee = isFreeShipping ? 0 : Number(baseTotals.deliveryFee || 0);
-  const finalGrandTotal = Math.max(0, Math.round((Number(baseTotals.grandTotal) - (isFreeShipping ? Number(baseTotals.deliveryFee || 0) : couponDiscount)) * 100) / 100);
+  const effectiveDeliveryFee = isFreeShipping ? 0 : baseDeliveryFee;
+  const itemDiscounts = isFreeShipping ? 0 : couponDiscount;
+  const finalGrandTotal = Math.max(0, Math.round((baseTotals.itemsSubtotal - itemDiscounts + effectiveDeliveryFee + baseTotals.cold) * 100) / 100);
   return {
     ...baseTotals,
     deliveryFee: effectiveDeliveryFee,
     expressDeliveryFee: effectiveDeliveryFee,
+    expressFee: effectiveDeliveryFee,
     freeDeliveryEligible: Boolean(baseTotals.freeDeliveryEligible || isFreeShipping),
     remainingForFreeDelivery: isFreeShipping ? 0 : baseTotals.remainingForFreeDelivery,
     discountAmount: Math.max(Number(baseTotals.discountAmount || 0), couponDiscount),
+    couponDiscountAmount: couponDiscount,
     couponCode: couponDiscount > 0 ? cleanCode : null,
     invalidCouponReason: invalidCouponReason,
     grandTotal: finalGrandTotal,
@@ -2470,10 +2476,19 @@ async function newOrder(customerId, payload, cartItems) {
     });
   }
 
-  const allowedPaymentMethods = ['UPI_INSTANT', 'CARD_CREDIT_DEBIT', 'NET_BANKING', 'COD', 'CASH_ON_DELIVERY', 'CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'UPI', 'WALLET', 'CARD'];
-  if (payload.paymentMethod && !allowedPaymentMethods.includes(String(payload.paymentMethod).toUpperCase())) {
-    payload.paymentMethod = 'COD';
+  const allowedPaymentMethods = ['COD', 'CASH_ON_DELIVERY', 'CASH', 'PAY_ON_DELIVERY'];
+  const requestedMethod = payload.paymentMethod ? String(payload.paymentMethod).toUpperCase() : 'COD';
+  if (!allowedPaymentMethods.includes(requestedMethod)) {
+    return {
+      status: 400,
+      httpStatus: 400,
+      code: 'PAYMENT_METHOD_NOT_SUPPORTED',
+      error: 'INVALID_PAYMENT_METHOD',
+      isPaymentMethodError: true,
+      message: `Payment method '${payload.paymentMethod}' is not supported. Only Cash on Delivery (COD) is supported for this release.`
+    };
   }
+  payload.paymentMethod = 'COD';
 
   const requestedCouponCode = payload.couponCode || (payload.pricingSnapshot && payload.pricingSnapshot.couponCode) || null;
   const t = await grandTotalWithCoupon(items, requestedCouponCode);
@@ -2483,7 +2498,7 @@ async function newOrder(customerId, payload, cartItems) {
       isCouponError: true
     };
   }
-  const isCod = ['COD', 'CASH_ON_DELIVERY', 'CASH'].includes((payload.paymentMethod || 'COD').toUpperCase());
+  const isCod = true;
   // SERVER-AUTHORITATIVE PRICING: ignore any client-supplied totalAmount; always
   // recompute from catalog-backed unit prices on the server.
   const totalAmt = Math.round(Number(t.grandTotal) * 100) / 100;
@@ -2554,9 +2569,9 @@ async function newOrder(customerId, payload, cartItems) {
     items,
     deliveryOtp: DeliveryOtpService.generateSecureOtp(),
     deliverySlaMins: slaMins,
-    paymentMethod: isCod ? 'COD' : (payload.paymentMethod || 'UPI_INSTANT'),
+    paymentMethod: 'COD',
     paymentId: null,
-    paymentStatus: isCod ? 'COD_PENDING' : 'PAYMENT_PENDING',
+    paymentStatus: 'COD_PENDING',
     pricingSnapshot: {
       items: items.map((it) => ({
         productId: it.productId,
@@ -10070,8 +10085,9 @@ async function startApplication() {
         console.error(`Error on ${s.name}:`, err);
       }
     });
-    server.listen(s.port, '0.0.0.0', () => {
-      console.log(`   - ${s.name} listening at http://localhost:${s.port}`);
+    const bindHost = process.env.BIND_HOST || process.env.HOST || '127.0.0.1';
+    server.listen(s.port, bindHost, () => {
+      console.log(`   - ${s.name} listening at http://${bindHost}:${s.port}`);
     });
   });
 }

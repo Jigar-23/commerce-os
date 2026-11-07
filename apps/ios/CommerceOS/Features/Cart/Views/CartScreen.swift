@@ -44,6 +44,8 @@ public struct CartScreen: View {
     @State private var authoritativeQuote: AuthoritativeCartQuote? = nil
     @State private var isFetchingQuote: Bool = false
     @State private var priceChangeNotice: String? = nil
+    @State private var quoteRevision: Int = 0
+    @State private var activeQuoteTask: Task<Void, Never>? = nil
     
     private struct CouponCampaignItem: Identifiable {
         let id: String
@@ -602,7 +604,9 @@ public struct CartScreen: View {
                         if !isAddressSelected {
                             activeCartSheet = .addressSelection
                         } else {
-                            AppNavigator.shared.push(.paymentGateway)
+                            cartStore.appliedCouponCode = appliedCouponCode
+                            cartStore.authoritativeQuote = authoritativeQuote
+                            AppNavigator.shared.push(.paymentGateway(quote: authoritativeQuote, couponCode: appliedCouponCode))
                         }
                     }) {
                         HStack {
@@ -655,7 +659,9 @@ public struct CartScreen: View {
                         addressRepository.selectAddress(newAddr)
                         activeCartSheet = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            AppNavigator.shared.push(.paymentGateway)
+                            cartStore.appliedCouponCode = appliedCouponCode
+                            cartStore.authoritativeQuote = authoritativeQuote
+                            AppNavigator.shared.push(.paymentGateway(quote: authoritativeQuote, couponCode: appliedCouponCode))
                         }
                     }
                 case .vaultSheet:
@@ -864,24 +870,41 @@ public struct CartScreen: View {
     private func fetchAuthoritativeQuote(coupon: String? = nil) {
         let code = coupon ?? appliedCouponCode
         let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+
+        activeQuoteTask?.cancel()
+        quoteRevision += 1
+        let currentRevision = quoteRevision
+        let requestedCoupon = code
         isFetchingQuote = true
-        Task {
+
+        activeQuoteTask = Task {
             do {
-                let quote = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: code)
+                let quote = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: requestedCoupon)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.quoteRevision == currentRevision else { return }
                     self.isFetchingQuote = false
                     let priorTotal = self.authoritativeQuote?.effectiveGrandTotal
                     self.authoritativeQuote = quote
+                    self.cartStore.authoritativeQuote = quote
 
                     if let invalidReason = quote.invalidCouponReason, !invalidReason.isEmpty {
                         self.couponFeedbackMessage = invalidReason
                         self.isCouponError = true
                         self.appliedCouponCode = nil
+                        self.cartStore.appliedCouponCode = nil
                         self.couponDiscountAmount = 0.0
                     } else if let validCoupon = quote.couponCode, !validCoupon.isEmpty {
                         self.appliedCouponCode = validCoupon
+                        self.cartStore.appliedCouponCode = validCoupon
                         self.couponDiscountAmount = quote.effectiveDiscount
                         self.couponFeedbackMessage = "Coupon '\(validCoupon)' applied! Saved ₹\(Int(quote.effectiveDiscount))"
+                        self.isCouponError = false
+                    } else if requestedCoupon == nil {
+                        self.appliedCouponCode = nil
+                        self.cartStore.appliedCouponCode = nil
+                        self.couponDiscountAmount = 0.0
+                        self.couponFeedbackMessage = nil
                         self.isCouponError = false
                     }
 
@@ -892,8 +915,14 @@ public struct CartScreen: View {
                     }
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.quoteRevision == currentRevision else { return }
                     self.isFetchingQuote = false
+                    if let code = requestedCoupon, !code.isEmpty {
+                        self.couponFeedbackMessage = "Unable to verify '\(code)' with server. Please try again."
+                        self.isCouponError = true
+                    }
                 }
             }
         }
@@ -911,7 +940,10 @@ public struct CartScreen: View {
     }
 
     private func removeCoupon() {
+        activeQuoteTask?.cancel()
+        quoteRevision += 1
         appliedCouponCode = nil
+        cartStore.appliedCouponCode = nil
         couponDiscountAmount = 0.0
         couponFeedbackMessage = nil
         isCouponError = false
