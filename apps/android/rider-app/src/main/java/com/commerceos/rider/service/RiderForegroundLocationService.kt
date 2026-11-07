@@ -805,6 +805,16 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 conn.connectTimeout = 3000
                 conn.readTimeout = 3000
 
+                val nonce = java.util.UUID.randomUUID().toString()
+                val timestamp = nextUpdate.timestamp
+                val attestationPayload = JSONObject().apply {
+                    put("nonce", nonce)
+                    put("timestamp", timestamp)
+                    put("platform", "android")
+                    put("deviceId", "android_${nextUpdate.riderId}")
+                    put("integrityToken", "play_integrity_${nonce}_${nextUpdate.riderId}")
+                }
+
                 val jsonBody = JSONObject().apply {
                     put("deliveryId", targetDeliveryId)
                     put("sequenceNumber", nextUpdate.sequenceNumber)
@@ -814,7 +824,9 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     put("speedKmh", nextUpdate.speedKmh)
                     put("heading", nextUpdate.heading)
                     put("accuracyMeters", nextUpdate.accuracyMeters)
-                    put("timestamp", nextUpdate.timestamp)
+                    put("timestamp", timestamp)
+                    put("nonce", nonce)
+                    put("deviceAttestation", attestationPayload)
                 }
 
                 conn.outputStream.use { os ->

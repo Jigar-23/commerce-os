@@ -2,10 +2,15 @@ FROM osrm/osrm-backend:v5.27.1
 
 WORKDIR /data
 
+# Versioned real regional road network configuration
+ENV OSRM_DATASET_VERSION="v2026.11.01-delhi-ncr-haryana"
+ENV OSRM_REGION="delhi-ncr-haryana"
+ENV OSM_EXTRACT_URL="https://download.geofabrik.de/asia/india/northern-zone-latest.osm.pbf"
+
 COPY platform/docker/osrm-entrypoint.sh /usr/local/bin/osrm-entrypoint.sh
 RUN chmod +x /usr/local/bin/osrm-entrypoint.sh
 
-# Build pinned road-network dataset at build time
+# Build versioned regional road-network dataset at build time
 RUN /usr/local/bin/osrm-entrypoint.sh true
 
 EXPOSE 5000
