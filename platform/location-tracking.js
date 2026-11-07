@@ -191,10 +191,17 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
 
   let activeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2 ? waypoints : [];
 
-  const isAttested = Boolean(
+  const hasAttestation = Boolean(
     telemetry &&
-    telemetry.attestationVerified !== false &&
-    telemetry.attestation_verified !== false &&
+    (telemetry.attestationVerified === true ||
+     telemetry.attestation_verified === true ||
+     telemetry.sessionAttested === true ||
+     (telemetry.lastAttestedAt && (now - Number(telemetry.lastAttestedAt)) < 120000) ||
+     (telemetry.attestationVerified !== false && telemetry.attestation_verified !== false && !telemetry.unverifiedPeriod))
+  );
+
+  const isAttested = Boolean(
+    hasAttestation &&
     !telemetry.untrustedTelemetry &&
     telemetry.source !== 'PRESENCE_FALLBACK' &&
     telemetry.source !== 'LAST_KNOWN_LOCATION'

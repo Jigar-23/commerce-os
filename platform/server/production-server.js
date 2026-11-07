@@ -1593,40 +1593,57 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
 const seenAttestationNonces = new Map();
 const inMemoryAttestationKeys = new Map();
 const attestationEnrollmentChallenges = new Map();
+const deliveryAttestationSessions = new Map(); // deliveryId -> { lastAttestedAt: number, riderId: string }
 const ATTESTATION_MAX_AGE_MS = 300000; // 5 minutes sliding window
 const MAX_IN_MEMORY_NONCES = 10000;
 
-function saveEnrollmentChallenge(riderId, challenge, ttlMs = 5 * 60 * 1000) {
+// Official Pinned Apple App Attestation Root CA Certificate (Apple Root CA - G3 / App Attest Root)
+const APPLE_APP_ATTEST_ROOT_CA_PEM = `-----BEGIN CERTIFICATE-----
+MIICITCCAaegAwIBAgIQC/O+DvHN0uD7jG5yH2IXmDAKBggqhkjOPQQDAzBSMSYw
+JAYDVQQDDB1BcHBsZSBBcHAgQXR0ZXN0YXRpb24gUm9vdCBDQTETMBEGA1UECgwK
+QXBwbGUgSW5jLjETMBEGA1UECAwKQ2FsaWZvcm5pYTAeFw0yMDAzMTgxODMyNTNa
+Fw00NTAzMTUwMDAwMDBaMFIxJjAkBgNVBAMMHUFwcGxlIEFwcCBBdHRlc3RhdGlv
+biBSb290IENBMRMwEQYDVQQKDApBcHBsZSBJbmMuMRMwEQYDVQQIDApDYWxpZm9y
+bmlhMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAERTHhmLW07ATaFQIEVwTtT4dyctdh
+NbJhFs/Ii2FdCgAHGbpphY3+d8qjuDngIN3WVhQUBHAoMeQ/cLiP1sOUtgjqK9au
+Yen1mMEvRq9Sk3Jm5X8U62H+xTD3FE9TgS41o0IwQDAPBgNVHRMBAf8EBTADAQH/
+MB0GA1UdDgQWBBSskRBTM72+aEH/pwyp5frq5eWKoTAOBgNVHQ8BAf8EBAMCAQYw
+CgYIKoZIzj0EAwMDaAAwZQIwQgFGnByvsiVbpTKwSga0kP0e8EeDS4+sQmTvb7vn
+53O5+FRXgeLhpJ06ysC5PrOyAjEAp5U4xDgEgllF7En3VcE3iexZZtKeYnpqtijV
+oyFraWVIyd/dganmrduC1bmTBGwD
+-----END CERTIFICATE-----`;
+
+function extractAppleNonce(certDer) {
+  // OID 1.2.840.113635.100.8.2 in DER: 0x2a 0x86 0x48 0x86 0xf7 0x63 0x64 0x08 0x02
+  const targetOid = Buffer.from([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x63, 0x64, 0x08, 0x02]);
+  const idx = certDer.indexOf(targetOid);
+  if (idx === -1) return null;
+  const extSlice = certDer.subarray(idx + targetOid.length, idx + targetOid.length + 64);
+  for (let i = 0; i < extSlice.length - 34; i++) {
+    if (extSlice[i] === 0x04 && extSlice[i + 1] === 0x20) {
+      return extSlice.subarray(i + 2, i + 34);
+    }
+  }
+  return null;
+}
+
+async function saveEnrollmentChallenge(riderId, challenge, ttlMs = 5 * 60 * 1000) {
   const expiresAt = Date.now() + ttlMs;
-  attestationEnrollmentChallenges.set(riderId, { challenge, expiresAt });
   if (pool && !isLocalMode) {
-    pool.query(
+    await pool.query(
       `INSERT INTO rider_attestation_challenges (rider_id, challenge, expires_at, created_at)
        VALUES ($1, $2, TO_TIMESTAMP($3 / 1000.0), NOW())
        ON CONFLICT (rider_id)
        DO UPDATE SET challenge = EXCLUDED.challenge, expires_at = EXCLUDED.expires_at, created_at = NOW()`,
       [riderId, challenge, expiresAt]
-    ).catch(() => {});
+    );
+  } else {
+    attestationEnrollmentChallenges.set(riderId, { challenge, expiresAt });
   }
 }
 
 async function consumeEnrollmentChallenge(riderId, providedChallenge) {
   if (!riderId || !providedChallenge) return false;
-  const now = Date.now();
-  const mem = attestationEnrollmentChallenges.get(riderId);
-  if (mem) {
-    if (mem.expiresAt < now) {
-      attestationEnrollmentChallenges.delete(riderId);
-      return false;
-    }
-    if (mem.challenge === providedChallenge) {
-      attestationEnrollmentChallenges.delete(riderId);
-      if (pool && !isLocalMode) {
-        pool.query('DELETE FROM rider_attestation_challenges WHERE rider_id = $1', [riderId]).catch(() => {});
-      }
-      return true;
-    }
-  }
 
   if (pool && !isLocalMode) {
     try {
@@ -1634,11 +1651,20 @@ async function consumeEnrollmentChallenge(riderId, providedChallenge) {
         'DELETE FROM rider_attestation_challenges WHERE rider_id = $1 AND challenge = $2 AND expires_at > NOW() RETURNING challenge',
         [riderId, providedChallenge]
       );
-      if (res.rows && res.rows.length > 0) {
-        attestationEnrollmentChallenges.delete(riderId);
-        return true;
-      }
-    } catch (_) {}
+      return Boolean(res.rows && res.rows.length > 0);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Local / in-memory mode fallback
+  const now = Date.now();
+  const mem = attestationEnrollmentChallenges.get(riderId);
+  if (mem) {
+    attestationEnrollmentChallenges.delete(riderId);
+    if (mem.expiresAt >= now && mem.challenge === providedChallenge) {
+      return true;
+    }
   }
   return false;
 }
@@ -1753,31 +1779,51 @@ async function verifyPlayIntegrityToken(platformToken, candidatePayloads) {
     } catch (_) {}
   }
 
-  // 2. Server-side JWE decryption flow (5-part token)
+  // 2. Server-side JWE decryption flow (5-part token, documented Google format: A256KW + A256GCM)
   if (!payload && platformToken.includes('.') && platformToken.split('.').length === 5) {
     try {
       const [headerB64, encKeyB64, ivB64, cipherB64, tagB64] = platformToken.split('.');
       if (process.env.PLAY_INTEGRITY_DECRYPTION_KEY) {
-        const privateKey = process.env.PLAY_INTEGRITY_DECRYPTION_KEY;
+        const rawDecKey = process.env.PLAY_INTEGRITY_DECRYPTION_KEY.trim();
+        let kek = Buffer.from(rawDecKey, 'base64');
+        if (kek.length !== 32 && rawDecKey.length === 64) {
+          kek = Buffer.from(rawDecKey, 'hex');
+        }
+
         const encKey = Buffer.from(encKeyB64, 'base64url');
-        const decryptedKey = crypto.privateDecrypt(
-          { key: privateKey, oaepHash: 'sha256' },
-          encKey
-        );
-        const iv = Buffer.from(ivB64, 'base64url');
-        const ciphertext = Buffer.from(cipherB64, 'base64url');
-        const tag = Buffer.from(tagB64, 'base64url');
-        const decipher = crypto.createDecipheriv('aes-256-gcm', decryptedKey, iv);
-        decipher.setAuthTag(tag);
-        const decryptedJws = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
-        if (decryptedJws.includes('.') && decryptedJws.split('.').length === 3) {
-          platformToken = decryptedJws;
+        let cek = null;
+
+        // Documented Google A256KW (RFC 3394 AES Key Wrap)
+        if (kek.length === 32) {
+          try {
+            const unwrapDecipher = crypto.createDecipheriv('id-aes256-wrap', kek, Buffer.alloc(8, 0xa6));
+            cek = Buffer.concat([unwrapDecipher.update(encKey), unwrapDecipher.final()]);
+          } catch (_) {
+            cek = kek;
+          }
+        } else if (rawDecKey.includes('-----BEGIN')) {
+          try {
+            cek = crypto.privateDecrypt({ key: rawDecKey, oaepHash: 'sha256' }, encKey);
+          } catch (_) {}
+        }
+
+        if (cek) {
+          const iv = Buffer.from(ivB64, 'base64url');
+          const ciphertext = Buffer.from(cipherB64, 'base64url');
+          const tag = Buffer.from(tagB64, 'base64url');
+          const decipher = crypto.createDecipheriv('aes-256-gcm', cek, iv);
+          decipher.setAAD(Buffer.from(headerB64, 'ascii'));
+          decipher.setAuthTag(tag);
+          const decryptedJws = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+          if (decryptedJws.includes('.') && decryptedJws.split('.').length === 3) {
+            platformToken = decryptedJws;
+          }
         }
       }
     } catch (_) {}
   }
 
-  // 3. JWS Signature verification & payload validation (Google public key or verified verdict)
+  // 3. JWS Signature verification & payload validation (Google ES256 ECDSA P-256 or verified verdict)
   if (!payload && platformToken.includes('.') && platformToken.split('.').length === 3) {
     try {
       const parts = platformToken.split('.');
@@ -1786,10 +1832,25 @@ async function verifyPlayIntegrityToken(platformToken, candidatePayloads) {
       const providedSig = Buffer.from(parts[2], 'base64url');
 
       let sigValid = false;
-      if (process.env.PLAY_INTEGRITY_PUBLIC_KEY) {
-        const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(signedContent);
-        sigValid = verifier.verify(process.env.PLAY_INTEGRITY_PUBLIC_KEY, providedSig);
+      const keyMaterial = process.env.PLAY_INTEGRITY_VERIFICATION_KEY || process.env.PLAY_INTEGRITY_PUBLIC_KEY;
+      if (keyMaterial) {
+        let pubKey = keyMaterial.trim();
+        if (!pubKey.includes('-----BEGIN')) {
+          pubKey = `-----BEGIN PUBLIC KEY-----\n${pubKey}\n-----END PUBLIC KEY-----`;
+        }
+        // Documented Google Play Integrity ES256 (ECDSA P-256 with IEEE P1363 signature)
+        try {
+          const verifier = crypto.createVerify('SHA256');
+          verifier.update(signedContent);
+          sigValid = verifier.verify({ key: pubKey, dsaEncoding: 'ieee-p1363' }, providedSig);
+        } catch (_) {}
+        if (!sigValid) {
+          try {
+            const verifier = crypto.createVerify('SHA256');
+            verifier.update(signedContent);
+            sigValid = verifier.verify(pubKey, providedSig);
+          } catch (_) {}
+        }
       } else if (process.env.PLAY_INTEGRITY_ALLOW_MOCK_SIGNATURE === 'true' || JWT_SECRET) {
         const expectedSigBuf = crypto.createHmac('sha256', JWT_SECRET || 'secret').update(signedContent).digest();
         if (providedSig.length === expectedSigBuf.length && crypto.timingSafeEqual(providedSig, expectedSigBuf)) {
@@ -1809,15 +1870,32 @@ async function verifyPlayIntegrityToken(platformToken, candidatePayloads) {
   const requestNonce = requestDetails.nonce;
   const packageName = requestDetails.requestPackageName || payload.packageName;
   const tokenTs = Number(requestDetails.timestampMillis || payload.timestampMillis || 0);
+
+  const appIntegrity = payload.appIntegrity || {};
+  const appRecognitionVerdict = appIntegrity.appRecognitionVerdict || payload.appRecognitionVerdict;
   const deviceIntegrity = payload.deviceIntegrity || {};
   const deviceRecognition = deviceIntegrity.deviceRecognitionVerdict || payload.deviceRecognitionVerdict || [];
 
-  const isPackageValid = packageName === 'com.commerceos.rider' || packageName === 'com.commerceos.android';
+  // Finding 2: Strictly enforce rider app package ONLY (never accept customer app)
+  const isPackageValid = packageName === 'com.commerceos.rider';
   const isNotExpired = tokenTs > 0 ? (Math.abs(Date.now() - tokenTs) < ATTESTATION_MAX_AGE_MS) : true;
-  const meetsIntegrity = Array.isArray(deviceRecognition) &&
+  const meetsDeviceIntegrity = Array.isArray(deviceRecognition) &&
     (deviceRecognition.includes('MEETS_STRONG_INTEGRITY') || deviceRecognition.includes('MEETS_DEVICE_INTEGRITY'));
+  // Finding 2: Require PLAY_RECOGNIZED app recognition verdict
+  const meetsAppIntegrity = appRecognitionVerdict === 'PLAY_RECOGNIZED';
 
-  if (!isPackageValid || !isNotExpired || !meetsIntegrity || !requestNonce) {
+  // Finding 2: Validate signing certificate digest if configured
+  const certDigests = appIntegrity.certificateSha256Digest || payload.certificateSha256Digest || [];
+  let isCertValid = true;
+  if (process.env.RIDER_APP_CERT_SHA256) {
+    const expectedDigest = String(process.env.RIDER_APP_CERT_SHA256).toLowerCase().replace(/[^a-f0-9]/g, '');
+    isCertValid = Array.isArray(certDigests) && certDigests.some(d => {
+      const normalized = String(d).toLowerCase().replace(/[^a-f0-9]/g, '');
+      return normalized === expectedDigest;
+    });
+  }
+
+  if (!isPackageValid || !isNotExpired || !meetsDeviceIntegrity || !meetsAppIntegrity || !isCertValid || !requestNonce) {
     return false;
   }
 
@@ -4524,7 +4602,7 @@ const server = http.createServer(async (req, res) => {
     if ((pathname === '/api/v1/promotions' || pathname === '/api/v1/campaigns') && method === 'GET') {
       let activePromotions = [];
       try {
-        const dbRes = await productionPgPool.query(`
+        const dbRes = await pool.query(`
           SELECT id, code, title, type, discount_text AS "discountText", description,
                  min_order_value::numeric AS "minOrderValue",
                  discount_percent::numeric AS "discountPercent",
@@ -4533,6 +4611,7 @@ const server = http.createServer(async (req, res) => {
                  badge, status, valid_until AS "validUntil"
           FROM promotions
           WHERE status = 'ACTIVE'
+            AND (valid_until IS NULL OR valid_until > NOW())
           ORDER BY min_order_value ASC
         `);
         activePromotions = dbRes.rows.map(r => ({
@@ -4544,41 +4623,63 @@ const server = http.createServer(async (req, res) => {
         }));
       } catch (err) {
         console.warn('[production-server] promotions DB query failed:', err.message);
-        activePromotions = [
-          {
-            id: 'promo2',
-            code: 'HEALTH30',
-            title: 'FLAT ₹150 OFF',
-            type: 'FLAT_DISCOUNT',
-            discountText: '₹150 Flat Off Medicines',
-            description: 'Flat ₹150 OFF on orders above ₹799',
-            minOrderValue: 799,
-            flatDiscount: 150,
-            maxDiscount: 150,
-            badge: 'BIG SAVINGS / ₹150 OFF',
-            status: 'ACTIVE',
-            validUntil: '2026-11-30'
-          },
-          {
-            id: 'promo_save10',
-            code: 'SAVE10',
-            title: 'FLAT ₹100 OFF',
-            type: 'FLAT_DISCOUNT',
-            discountText: 'Flat ₹100 OFF',
-            description: 'Flat ₹100 OFF on orders above ₹199',
-            minOrderValue: 199,
-            flatDiscount: 100,
-            maxDiscount: 100,
-            badge: 'INSTANT SAVINGS',
-            status: 'ACTIVE',
-            validUntil: '2026-12-31'
-          }
-        ];
+        activePromotions = [];
       }
       return sendJson(res, 200, {
         promotions: activePromotions,
         total: activePromotions.length
       });
+    }
+
+    // -------------------------------------------------------------
+    // Seller Promotions Management: GET /api/v1/seller/promotions
+    // -------------------------------------------------------------
+    if (pathname === '/api/v1/seller/promotions' && method === 'GET') {
+      try {
+        const dbRes = await pool.query(`
+          SELECT id, code, title, type, discount_text AS "discountText", description,
+                 min_order_value::numeric AS "minOrderValue",
+                 discount_percent::numeric AS "discountPercent",
+                 flat_discount::numeric AS "flatDiscount",
+                 max_discount::numeric AS "maxDiscount",
+                 badge, status, valid_until AS "validUntil",
+                 usage_count AS "usageCount", max_usage AS "maxUsage"
+          FROM promotions
+          ORDER BY created_at DESC
+        `);
+        const allPromos = dbRes.rows.map(r => ({
+          ...r,
+          minOrderValue: Number(r.minOrderValue || 0),
+          discountPercent: Number(r.discountPercent || 0),
+          flatDiscount: Number(r.flatDiscount || 0),
+          maxDiscount: r.maxDiscount != null ? Number(r.maxDiscount) : null,
+          usageCount: Number(r.usageCount || 0),
+          maxUsage: Number(r.maxUsage || 5000)
+        }));
+        return sendJson(res, 200, allPromos);
+      } catch (err) {
+        console.warn('[production-server] seller promotions DB error:', err.message);
+        return sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (pathname.match(/^\/api\/v1\/seller\/promotions\/([^/]+)\/toggle$/) && method === 'POST') {
+      const promoCodeOrId = pathname.split('/')[5];
+      try {
+        const updateRes = await pool.query(`
+          UPDATE promotions
+          SET status = CASE WHEN status = 'ACTIVE' THEN 'PAUSED' ELSE 'ACTIVE' END,
+              updated_at = NOW()
+          WHERE UPPER(code) = UPPER($1) OR id = $1
+          RETURNING *
+        `, [promoCodeOrId]);
+        if (updateRes.rows.length > 0) {
+          return sendJson(res, 200, { success: true, promotion: updateRes.rows[0] });
+        }
+        return sendJson(res, 404, { error: 'Promotion not found' });
+      } catch (err) {
+        return sendJson(res, 500, { error: err.message });
+      }
     }
 
     // -------------------------------------------------------------
@@ -4597,7 +4698,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
-        const dbRes = await productionPgPool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [code]);
+        const dbRes = await pool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [code]);
         if (dbRes.rows.length === 0) {
           return sendJson(res, 404, { valid: false, error: 'INVALID_COUPON', message: `Coupon code '${code}' is invalid.` });
         }
@@ -4646,7 +4747,7 @@ const server = http.createServer(async (req, res) => {
         cacheTtlDays: 30
       };
       try {
-        const dbRes = await productionPgPool.query('SELECT * FROM delivery_config WHERE is_active = TRUE LIMIT 1');
+        const dbRes = await pool.query('SELECT * FROM delivery_config WHERE is_active = TRUE LIMIT 1');
         if (dbRes.rows.length > 0) {
           const row = dbRes.rows[0];
           deliveryConfig.freeDeliveryThreshold = Number(row.free_delivery_threshold || 199.00);
@@ -5461,7 +5562,7 @@ const server = http.createServer(async (req, res) => {
       return { isSurge: false, isProvisional: true, storeId: null };
     }
 
-    function formatCartResponseDto(customerId, rawItems, surgeContext = false) {
+    async function formatCartResponseDto(customerId, rawItems, surgeContext = false, couponCode = null) {
       const isSurge = typeof surgeContext === 'boolean' ? surgeContext : Boolean(surgeContext?.isSurge);
       const isProvisional = typeof surgeContext === 'object' && surgeContext !== null ? Boolean(surgeContext.isProvisional) : false;
       const items = (rawItems || []).map(r => {
@@ -5510,7 +5611,41 @@ const server = http.createServer(async (req, res) => {
         surgeFee,
         isCod: true
       });
-      const grandTotal = pricing.totalAmount;
+
+      let couponDiscount = 0;
+      let couponStatus = null;
+      let invalidCouponReason = null;
+      if (couponCode && pool) {
+        try {
+          const promoRes = await pool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [String(couponCode).trim()]);
+          if (promoRes.rows.length === 0) {
+            invalidCouponReason = `Coupon '${couponCode}' is invalid.`;
+          } else {
+            const promo = promoRes.rows[0];
+            if (promo.status !== 'ACTIVE') {
+              invalidCouponReason = `Coupon '${couponCode}' is currently ${promo.status.toLowerCase()}.`;
+            } else if (promo.valid_until && new Date(promo.valid_until) < new Date()) {
+              invalidCouponReason = `Coupon '${couponCode}' has expired.`;
+            } else if (roundedSubtotal < Number(promo.min_order_value || 0)) {
+              invalidCouponReason = `Add ₹${(Number(promo.min_order_value) - roundedSubtotal).toFixed(2)} more to apply ${couponCode}`;
+            } else {
+              if (promo.type === 'PERCENTAGE') {
+                const calc = roundedSubtotal * (Number(promo.discount_percent || 0) / 100);
+                couponDiscount = promo.max_discount != null ? Math.min(Number(promo.max_discount), calc) : calc;
+              } else {
+                couponDiscount = Math.min(Number(promo.flat_discount || 0), roundedSubtotal);
+              }
+              couponDiscount = Math.round(couponDiscount * 100) / 100;
+              couponStatus = 'APPLIED';
+            }
+          }
+        } catch (e) {
+          console.warn('[production-server] cart coupon validation failed:', e.message);
+        }
+      }
+
+      const totalDiscount = Math.max(Number(pricing.discountAmount || 0), couponDiscount);
+      const grandTotal = Math.max(0, Math.round((Number(pricing.totalAmount) - couponDiscount) * 100) / 100);
       const remainingForFreeDelivery = Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - roundedSubtotal) * 100) / 100);
       const requiresPrescription = items.some(it => it.prescriptionRequired);
 
@@ -5527,7 +5662,9 @@ const server = http.createServer(async (req, res) => {
         surgeFee: pricing.surgeFee || 0.0,
         taxAmount: pricing.taxAmount,
         taxBreakdown: pricing.taxBreakdown,
-        discountAmount: pricing.discountAmount,
+        discountAmount: totalDiscount,
+        couponCode: couponStatus === 'APPLIED' ? String(couponCode).trim().toUpperCase() : null,
+        invalidCouponReason: invalidCouponReason,
         total: grandTotal,
         grandTotal: grandTotal,
         requiresPrescription: requiresPrescription,
@@ -5567,7 +5704,9 @@ const server = http.createServer(async (req, res) => {
       if (!authClaims) return;
       const rawItems = await appRepositories.cartRepo.getCart(customerId);
       const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems);
-      return sendJson(res, 200, formatCartResponseDto(customerId, rawItems, surgeContext));
+      const couponCode = parsedUrl.searchParams.get('couponCode') || parsedUrl.searchParams.get('code') || null;
+      const cartResponse = await formatCartResponseDto(customerId, rawItems, surgeContext, couponCode);
+      return sendJson(res, 200, cartResponse);
     }
 
     const cartAddMatch = pathname.match(/^\/api\/v1\/cart\/([^/]+)\/items$/);
@@ -10549,7 +10688,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const challenge = crypto.randomBytes(32).toString('hex');
-      saveEnrollmentChallenge(authClaims.sub, challenge);
+      await saveEnrollmentChallenge(authClaims.sub, challenge);
       return sendJson(res, 200, { ok: true, challenge, riderId: authClaims.sub });
     }
 
@@ -10604,54 +10743,114 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: 'INVALID_ATTESTATION', message: 'Attestation format must be apple-appattest.' });
           }
 
-          if (!attObj.attStmt || !Array.isArray(attObj.attStmt.x5c) || attObj.attStmt.x5c.length === 0) {
-            return sendJson(res, 400, { error: 'INVALID_CERT_CHAIN', message: 'Attestation certificate chain x5c is missing.' });
+          // Full Apple Certificate Chain Verification to Pinned Apple Root
+          if (!attObj.attStmt || !Array.isArray(attObj.attStmt.x5c) || attObj.attStmt.x5c.length < 2) {
+            return sendJson(res, 400, {
+              error: 'INVALID_CERT_CHAIN',
+              message: 'Attestation certificate chain x5c must include credCert and intermediate CA (minimum 2 certs).'
+            });
           }
 
-          const leafCertDer = attObj.attStmt.x5c[0];
-          const leafCert = new crypto.X509Certificate(leafCertDer);
+          const credCertDer = attObj.attStmt.x5c[0];
+          const intermediateCertDer = attObj.attStmt.x5c[1];
+          const credCert = new crypto.X509Certificate(credCertDer);
+          const intermediateCert = new crypto.X509Certificate(intermediateCertDer);
+          const appleRootCert = new crypto.X509Certificate(APPLE_APP_ATTEST_ROOT_CA_PEM);
 
-          // Verify intermediate certificate if present in chain
-          if (attObj.attStmt.x5c.length > 1) {
-            const intermediateCert = new crypto.X509Certificate(attObj.attStmt.x5c[1]);
-            const issuerVerified = leafCert.verify(intermediateCert.publicKey);
-            if (!issuerVerified) {
-              return sendJson(res, 400, { error: 'INVALID_CERT_CHAIN', message: 'Attestation certificate failed chain verification.' });
-            }
+          // Verify leaf was issued by intermediate CA
+          const leafVerified = credCert.verify(intermediateCert.publicKey);
+          if (!leafVerified) {
+            return sendJson(res, 400, { error: 'INVALID_CERT_CHAIN', message: 'credCert is not signed by intermediate CA.' });
           }
 
-          // Validate authData: minimum 37 bytes
+          // Verify intermediate CA was issued by Apple App Attestation Root CA
+          const intermediateVerified = intermediateCert.verify(appleRootCert.publicKey);
+          if (!intermediateVerified) {
+            return sendJson(res, 400, { error: 'INVALID_CERT_CHAIN', message: 'Intermediate CA is not signed by Apple App Attestation Root CA.' });
+          }
+
+          // Verify certificate validity periods
+          const nowMs = Date.now();
+          if (nowMs < new Date(credCert.validFrom).getTime() || nowMs > new Date(credCert.validTo).getTime()) {
+            return sendJson(res, 400, { error: 'CERTIFICATE_EXPIRED', message: 'credCert is expired or not yet valid.' });
+          }
+          if (nowMs < new Date(intermediateCert.validFrom).getTime() || nowMs > new Date(intermediateCert.validTo).getTime()) {
+            return sendJson(res, 400, { error: 'CERTIFICATE_EXPIRED', message: 'Intermediate CA is expired or not yet valid.' });
+          }
+
+          // Validate authData structure (RFC WebAuthn format)
           const authData = Buffer.isBuffer(attObj.authData) ? attObj.authData : Buffer.from(attObj.authData);
-          if (authData.length < 37) {
+          if (authData.length < 57) {
             return sendJson(res, 400, { error: 'INVALID_AUTH_DATA', message: 'Authenticator data length is invalid.' });
           }
 
-          // Verify RP ID Hash (bytes 0-31)
+          // Verify RP ID Hash (bytes 0-31): validate configured Team ID plus bundle ID
           const rpIdHash = authData.subarray(0, 32);
-          const candidateRpIds = [
+          const teamId = process.env.APPLE_TEAM_ID || 'TEAMCOMMERCE';
+          const candidateAppIds = [
+            `${teamId}.com.commerceos.rider`,
+            `${teamId}.com.commerceos.CommerceOSRider`,
             'com.commerceos.rider',
             'com.commerceos.CommerceOSRider',
             process.env.APPLE_APP_ID,
             process.env.APPLE_RP_ID
           ].filter(Boolean);
 
-          const rpMatches = candidateRpIds.some(rpId => {
-            const exp = crypto.createHash('sha256').update(rpId).digest();
+          const rpMatches = candidateAppIds.some(appId => {
+            const exp = crypto.createHash('sha256').update(appId).digest();
             return rpIdHash.length === exp.length && crypto.timingSafeEqual(rpIdHash, exp);
           });
 
           if (!rpMatches) {
-            return sendJson(res, 400, { error: 'RP_ID_MISMATCH', message: 'Attestation RP ID hash does not match authorized app identity.' });
+            return sendJson(res, 400, {
+              error: 'RP_ID_MISMATCH',
+              message: 'Attestation RP ID hash does not match configured Team ID + Bundle ID.'
+            });
           }
 
-          // Verify signCount counter must be 0 for initial attestation
+          // Verify flags (byte 32): bit 6 (AT) must be set for attested credential data
+          const flags = authData[32];
+          if ((flags & 0x40) === 0) {
+            return sendJson(res, 400, { error: 'INVALID_AUTH_DATA', message: 'Attested credential data flag is missing in authData.' });
+          }
+
+          // Verify signCount (bytes 33-36): must be 0 upon registration
           const signCount = authData.readUInt32BE(33);
           if (signCount !== 0) {
             return sendJson(res, 400, { error: 'INVALID_COUNTER', message: 'Attestation signCount must be 0 upon registration.' });
           }
 
+          // Verify credentialId and bind to submitted keyId
+          const credentialIdLength = authData.readUInt16BE(53);
+          if (authData.length < 55 + credentialIdLength) {
+            return sendJson(res, 400, { error: 'INVALID_AUTH_DATA', message: 'Authenticator data credentialId is truncated.' });
+          }
+          const credentialId = authData.subarray(55, 55 + credentialIdLength);
+          let keyIdBuf = null;
+          try {
+            keyIdBuf = Buffer.from(keyId, 'base64');
+          } catch (_) {}
+          if (!keyIdBuf || keyIdBuf.length !== credentialId.length || !crypto.timingSafeEqual(keyIdBuf, credentialId)) {
+            return sendJson(res, 400, {
+              error: 'KEY_ID_MISMATCH',
+              message: 'Submitted keyId does not match credentialId in authenticator data.'
+            });
+          }
+
+          // Verify challenge-bound nonce extension 1.2.840.113635.100.8.2 against SHA256(authData || clientDataHash)
+          const clientDataHash = crypto.createHash('sha256').update(challenge).digest();
+          const expectedNonce = crypto.createHash('sha256').update(Buffer.concat([authData, clientDataHash])).digest();
+          const extractedNonce = extractAppleNonce(credCert.raw);
+
+          if (!extractedNonce || extractedNonce.length !== expectedNonce.length || !crypto.timingSafeEqual(extractedNonce, expectedNonce)) {
+            return sendJson(res, 400, {
+              error: 'NONCE_MISMATCH',
+              message: 'Apple App Attest nonce extension (1.2.840.113635.100.8.2) does not match challenge-bound hash.'
+            });
+          }
+
           // Extract authentic hardware public key PEM directly from verified leaf certificate
-          authenticPublicKeyPem = leafCert.publicKey.export({ type: 'spki', format: 'pem' });
+          authenticPublicKeyPem = credCert.publicKey.export({ type: 'spki', format: 'pem' });
         } catch (err) {
           return sendJson(res, 400, { error: 'ATTESTATION_VERIFICATION_FAILED', message: err.message });
         }
@@ -10821,6 +11020,18 @@ const server = http.createServer(async (req, res) => {
         await verifyTelemetryAttestation(attestationCandidate, authClaims.sub, deliveryId, lat, lng, seq, pool)
       );
 
+      const now = Date.now();
+      if (isAttestationVerified) {
+        deliveryAttestationSessions.set(deliveryId, { lastAttestedAt: now, riderId: authClaims.sub });
+      }
+      const activeAttestation = deliveryAttestationSessions.get(deliveryId);
+      const isSessionAttested = Boolean(
+        activeAttestation &&
+        activeAttestation.riderId === authClaims.sub &&
+        (now - activeAttestation.lastAttestedAt < 120000)
+      );
+      const isTrustedForTracking = isAttestationVerified || isSessionAttested;
+
       let telemRes = null;
       try {
         telemRes = await appRepositories.telemetryRepo.recordTelemetry({
@@ -10836,7 +11047,7 @@ const server = http.createServer(async (req, res) => {
           isMockLocation: false,
           attestationVerified: isAttestationVerified,
           attestationPayload: isAttestationVerified ? attestationCandidate : null,
-          recordedAt: Date.now()
+          recordedAt: now
         });
       } catch (err) {
         return sendJson(res, 400, { error: 'INVALID_TELEMETRY', message: err.message });
@@ -10856,8 +11067,8 @@ const server = http.createServer(async (req, res) => {
       let rerouted = false;
       let deviation = { isOffRoute: false, deviationMeters: 0 };
 
-      // Route alignment and dynamic updates are strictly gated by hardware attestation verification
-      if (isAttestationVerified) {
+      // Route alignment and dynamic updates are active for verified milestones and active attested sessions
+      if (isAttestationVerified || isSessionAttested) {
         // Initialize route if not already stored (atomic guard against duplicate concurrent calls)
         if (waypoints.length === 0 && !inFlightRouteCalculations.has(deliveryId)) {
           inFlightRouteCalculations.add(deliveryId);
@@ -11001,16 +11212,19 @@ const server = http.createServer(async (req, res) => {
           riderId: authClaims.sub,
           deliveryId,
           sequenceNumber: seq,
-          latitude: isAttestationVerified ? lat : null,
-          longitude: isAttestationVerified ? lng : null,
-          speedKmh: isAttestationVerified ? Number(body.speedKmh || body.speed || 0) : 0,
-          speed: isAttestationVerified ? Number(body.speedKmh || body.speed || 0) : 0,
-          heading: isAttestationVerified ? Number(body.heading || body.bearing || 0) : 0,
-          recordedAt: Date.now(),
-          serverTimestamp: Date.now(),
+          latitude: isTrustedForTracking ? lat : null,
+          longitude: isTrustedForTracking ? lng : null,
+          speedKmh: isTrustedForTracking ? Number(body.speedKmh || body.speed || 0) : 0,
+          speed: isTrustedForTracking ? Number(body.speedKmh || body.speed || 0) : 0,
+          heading: isTrustedForTracking ? Number(body.heading || body.bearing || 0) : 0,
+          recordedAt: now,
+          serverTimestamp: now,
           attestationVerified: isAttestationVerified,
-          untrustedTelemetry: !isAttestationVerified,
-          locationVerified: isAttestationVerified
+          sessionAttested: isSessionAttested,
+          lastAttestedAt: activeAttestation?.lastAttestedAt || null,
+          unverifiedPeriod: !isAttestationVerified,
+          untrustedTelemetry: !isTrustedForTracking,
+          locationVerified: isTrustedForTracking
         },
         null,
         waypoints

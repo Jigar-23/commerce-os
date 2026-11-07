@@ -79,6 +79,8 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
         private var staticDbHelper: RiderTelemetryDbHelper? = null
         private var currentSequenceNumber = 0L
+        private var lastAttestationTimestamp = 0L
+        private const val ATTESTATION_INTERVAL_MS = 60_000L
         private var activeDeliveryId = ""
         private var activeRiderId = ""
         private var apiBaseUrl = System.getProperty("BASE_URL") ?: ""
@@ -123,6 +125,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 staticDbHelper?.purgeDelivery(toPurge)
             }
             activeDeliveryId = ""
+            lastAttestationTimestamp = 0L
             activeInstance?.reconfigureLocationTracking()
         }
 
@@ -131,6 +134,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
             activeRiderId = ""
             authToken = ""
             currentSequenceNumber = 0L
+            lastAttestationTimestamp = 0L
             activeInstance?.stopSelf()
         }
 
@@ -843,17 +847,24 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 val md = java.security.MessageDigest.getInstance("SHA-256")
                 val reqHash = md.digest(msg.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-                val playIntegrityService = com.commerceos.rider.security.PlayIntegrityService.getInstance(applicationContext)
-                val integrityToken = playIntegrityService.requestToken(reqHash)
-                if (!integrityToken.isNullOrBlank()) {
-                    jsonBody.put("deviceAttestation", JSONObject().apply {
-                        put("platform", "android_play_integrity")
-                        put("token", integrityToken)
-                        put("integrityToken", integrityToken)
-                        put("nonce", nonce)
-                        put("requestHash", reqHash)
-                        put("timestamp", timestamp)
-                    })
+                // Play Integrity token is reserved for initial milestone and throttled to once per minute to respect Classic API quota (5 requests/min)
+                val now = System.currentTimeMillis()
+                val isMilestone = nextUpdate.sequenceNumber == 1L
+                val isCadenceDue = (now - lastAttestationTimestamp) >= ATTESTATION_INTERVAL_MS
+                if (isMilestone || isCadenceDue) {
+                    val playIntegrityService = com.commerceos.rider.security.PlayIntegrityService.getInstance(applicationContext)
+                    val integrityToken = playIntegrityService.requestToken(reqHash)
+                    if (!integrityToken.isNullOrBlank()) {
+                        lastAttestationTimestamp = now
+                        jsonBody.put("deviceAttestation", JSONObject().apply {
+                            put("platform", "android_play_integrity")
+                            put("token", integrityToken)
+                            put("integrityToken", integrityToken)
+                            put("nonce", nonce)
+                            put("requestHash", reqHash)
+                            put("timestamp", timestamp)
+                        })
+                    }
                 }
 
                 conn.outputStream.use { os ->
