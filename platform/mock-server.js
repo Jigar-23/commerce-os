@@ -3545,7 +3545,57 @@ async function handleRequest(port, req, res) {
       } else {
         all = db.products || [];
       }
-      const filtered = all.map(formatProductForCatalog).filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
+
+      const q = (query.get('query') || query.get('q') || '').trim().toLowerCase();
+      const rawCat = (query.get('categoryId') || query.get('category') || '').trim();
+      const coll = (query.get('collectionId') || '').trim();
+      const brand = (query.get('brandId') || query.get('brand') || '').trim().toLowerCase();
+
+      let matched = all.map(formatProductForCatalog);
+
+      // 1. Text search query
+      if (q) {
+        matched = matched.filter(m =>
+          (String(m.name || '') + ' ' + String(m.brandName || '') + ' ' + String(m.therapeuticCategory || m.category || '') + ' ' + String(m.sku || '') + ' ' + String(m.saltComposition || m.activeSalt || '')).toLowerCase().includes(q)
+        );
+      }
+
+      // 2. Brand filter
+      if (brand) {
+        matched = matched.filter(m =>
+          (String(m.brandName || '') + ' ' + String(m.manufacturer || '')).toLowerCase().includes(brand)
+        );
+      }
+
+      // 3. Category / CategoryId filter
+      const isPromoTitle = /deal|generic|substitute|most bought|best seller/i.test(rawCat);
+      if (rawCat && (!coll || !isPromoTitle)) {
+        const cleanCat = rawCat.replace(/^cat_/i, '').replace(/[-_&]/g, ' ').trim().toLowerCase();
+        const words = cleanCat.split(/\s+/).filter(w => w.length > 2);
+        if (words.length > 0) {
+          matched = matched.filter(m => {
+            const textToMatch = (String(m.category || '') + ' ' + String(m.therapeuticCategory || '') + ' ' + String(m.name || '') + ' ' + String(m.therapeuticClass || '')).toLowerCase();
+            return words.some(w => textToMatch.includes(w));
+          });
+        } else {
+          matched = matched.filter(m => {
+            const textToMatch = (String(m.category || '') + ' ' + String(m.therapeuticCategory || '') + ' ' + String(m.name || '')).toLowerCase();
+            return textToMatch.includes(cleanCat);
+          });
+        }
+      }
+
+      // 4. Collection filter & sorting
+      if (coll === 'deals_of_the_day') {
+        matched = matched.filter(m => Number(m.discountedPrice || m.price || 0) < Number(m.mrp || m.price || 0) || Number(m.discountPercentage || 0) > 0);
+        matched.sort((a, b) => Number(b.discountPercentage || 0) - Number(a.discountPercentage || 0));
+      } else if (coll === 'generic_substitutes') {
+        matched = matched.filter(m => Boolean(m.saltComposition || m.activeSalt));
+      } else if (coll === 'best_sellers') {
+        matched.sort((a, b) => Number(b.mrp || 0) - Number(a.mrp || 0));
+      }
+
+      const filtered = matched.filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
       return json(res, 200, paginate(filtered, query.get('limit'), query.get('offset')));
     }
 

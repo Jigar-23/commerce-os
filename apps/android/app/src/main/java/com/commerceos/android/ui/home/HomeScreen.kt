@@ -47,6 +47,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.model.ApiMedicine
+import com.commerceos.android.model.CatalogCategory
 import com.commerceos.android.model.CouponCampaign
 import com.commerceos.android.util.MoneyFormatter
 import com.commerceos.android.model.CartItem
@@ -105,7 +106,8 @@ fun HomeScreen(
     onVerticalSelect: (HomeVertical) -> Unit = {},
     onOpenCatalog: () -> Unit = {},
     onUploadPrescription: () -> Unit = {},
-    onSelectCampaign: (String) -> Unit = {}
+    onSelectCampaign: (String) -> Unit = {},
+    onSelectCategory: (CatalogCategory) -> Unit = {}
 ) {
     // Feed is keyed on (customer, delivery address): changing location MUST
     // invalidate and refetch inventory/ETA/promotions for the new address.
@@ -209,7 +211,17 @@ fun HomeScreen(
             item {
                 Box(modifier = Modifier.padding(horizontal = 14.dp)) {
                     MedicineCategoryRail(
-                        onSelectCategory = { categoryQuery -> onSearchClick(categoryQuery) },
+                        onSelectCategory = { categoryQuery ->
+                            val catSlug = categoryQuery.lowercase().replace(" & ", "_").replace(" ", "_")
+                            onSelectCategory(
+                                CatalogCategory(
+                                    id = "cat_$catSlug",
+                                    slug = catSlug,
+                                    name = categoryQuery,
+                                    productCount = 10
+                                )
+                            )
+                        },
                         onSeeAll = onOpenCatalog
                     )
                 }

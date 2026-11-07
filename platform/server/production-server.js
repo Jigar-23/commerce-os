@@ -4770,7 +4770,9 @@ const server = http.createServer(async (req, res) => {
 
     if ((pathname === '/api/v1/catalog/medicines/search' || pathname === '/api/v1/catalog/medicines' || pathname === '/api/v1/catalog/products/search' || pathname === '/api/v1/catalog/products' || pathname === '/api/v1/search') && method === 'GET') {
       const q = (parsedUrl.searchParams.get('q') || parsedUrl.searchParams.get('query') || '').trim();
-      const cat = (parsedUrl.searchParams.get('category') || '').trim();
+      const rawCat = (parsedUrl.searchParams.get('category') || parsedUrl.searchParams.get('categoryId') || '').trim();
+      const coll = (parsedUrl.searchParams.get('collectionId') || '').trim();
+      const brand = (parsedUrl.searchParams.get('brandId') || parsedUrl.searchParams.get('brand') || '').trim();
 
       let queryText = `SELECT id, sku, name, brand_name, pack_size, category, mrp, price, discounted_price, image_url, rx_requirement, cold_chain_required, description, manufacturer, salt_composition, safety_advice, storage_condition, therapeutic_class FROM products WHERE is_active = TRUE`;
       const queryParams = [];
@@ -4779,11 +4781,34 @@ const server = http.createServer(async (req, res) => {
         queryParams.push(`%${q}%`);
         queryText += ` AND (name ILIKE $${queryParams.length} OR brand_name ILIKE $${queryParams.length} OR category ILIKE $${queryParams.length} OR sku ILIKE $${queryParams.length} OR salt_composition ILIKE $${queryParams.length} OR manufacturer ILIKE $${queryParams.length})`;
       }
-      if (cat) {
-        queryParams.push(`%${cat}%`);
-        queryText += ` AND category ILIKE $${queryParams.length}`;
+      if (brand) {
+        queryParams.push(`%${brand}%`);
+        queryText += ` AND (brand_name ILIKE $${queryParams.length} OR manufacturer ILIKE $${queryParams.length} OR name ILIKE $${queryParams.length})`;
       }
-      queryText += ` ORDER BY created_at DESC LIMIT 100`;
+      const isPromoTitle = /deal|generic|substitute|most bought|best seller/i.test(rawCat);
+      if (rawCat && (!coll || !isPromoTitle)) {
+        const cleanCat = rawCat.replace(/^cat_/i, '').replace(/[-_&]/g, ' ').trim();
+        const words = cleanCat.split(/\s+/).filter(w => w.length > 2);
+        if (words.length > 0) {
+          const catClauses = words.map(w => {
+            queryParams.push(`%${w}%`);
+            return `(category ILIKE $${queryParams.length} OR name ILIKE $${queryParams.length} OR therapeutic_class ILIKE $${queryParams.length})`;
+          });
+          queryText += ` AND (${catClauses.join(' OR ')})`;
+        } else {
+          queryParams.push(`%${rawCat}%`);
+          queryText += ` AND (category ILIKE $${queryParams.length} OR id ILIKE $${queryParams.length})`;
+        }
+      }
+      if (coll === 'deals_of_the_day') {
+        queryText += ` AND (discounted_price IS NOT NULL AND discounted_price < price) ORDER BY ((mrp - COALESCE(discounted_price, price)) / NULLIF(mrp, 0)) DESC LIMIT 100`;
+      } else if (coll === 'generic_substitutes') {
+        queryText += ` AND (salt_composition IS NOT NULL AND salt_composition != '') ORDER BY created_at DESC LIMIT 100`;
+      } else if (coll === 'best_sellers') {
+        queryText += ` ORDER BY mrp DESC LIMIT 100`;
+      } else {
+        queryText += ` ORDER BY created_at DESC LIMIT 100`;
+      }
 
       const searchRes = await pool.query(queryText, queryParams);
       const results = searchRes.rows.map(r => {

@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.commerceos.android.model.CatalogCategory
+import com.commerceos.android.model.CatalogQuery
 import com.commerceos.android.model.HomeContext
 import com.commerceos.android.model.ApiAddress
 import com.commerceos.android.ui.components.ProductImage
@@ -269,7 +270,9 @@ private data class QuickPromoItem(
     val bgStart: Color,
     val bgEnd: Color,
     val borderColor: Color,
-    val query: String
+    val categoryName: String,
+    val categoryId: String? = null,
+    val collectionId: String? = null
 )
 
 private val QUICK_PROMO_ITEMS = listOf(
@@ -282,7 +285,8 @@ private val QUICK_PROMO_ITEMS = listOf(
         bgStart = Color(0xFFE6F7F0),
         bgEnd = Color(0xFFD1F2E2),
         borderColor = Color(0xFFB5EAD7),
-        query = "Dolo 650"
+        categoryName = "Most Bought Essentials",
+        collectionId = "best_sellers"
     ),
     QuickPromoItem(
         title = "Deals Of The Day",
@@ -293,18 +297,20 @@ private val QUICK_PROMO_ITEMS = listOf(
         bgStart = Color(0xFFE5F6FA),
         bgEnd = Color(0xFFCEEFF9),
         borderColor = Color(0xFFB2E5F3),
-        query = "Vitamins"
+        categoryName = "Deals Of The Day",
+        collectionId = "deals_of_the_day"
     ),
     QuickPromoItem(
-        title = "Health Checkups",
-        subtitle = "Free Home Pickup",
-        badge = "NABL LABS",
-        icon = Icons.Default.Biotech,
-        iconTint = Color(0xFF4F46E5),
-        bgStart = Color(0xFFEEF2FF),
-        bgEnd = Color(0xFFE0E7FF),
-        borderColor = Color(0xFFC7D2FE),
-        query = "Full Body Checkup"
+        title = "First Aid & Urgent",
+        subtitle = "Bandages, Dettol, ORS",
+        badge = "⚡ 10m SLA",
+        icon = Icons.Default.MedicalServices,
+        iconTint = Color(0xFFDC2626),
+        bgStart = Color(0xFFFEF2F2),
+        bgEnd = Color(0xFFFEE2E2),
+        borderColor = Color(0xFFFECACA),
+        categoryName = "First Aid & Essentials",
+        categoryId = "cat_first_aid"
     ),
     QuickPromoItem(
         title = "Generic Switch",
@@ -315,7 +321,8 @@ private val QUICK_PROMO_ITEMS = listOf(
         bgStart = Color(0xFFFEF3C7),
         bgEnd = Color(0xFFFDE68A),
         borderColor = Color(0xFFFCD34D),
-        query = "Paracip"
+        categoryName = "Generic Substitutes & Savings",
+        collectionId = "generic_substitutes"
     )
 )
 
@@ -397,6 +404,7 @@ fun CategoriesScreen(
     onNotificationsClick: () -> Unit = {},
     onSearchClick: (String) -> Unit = {},
     onUploadPrescription: () -> Unit = {},
+    onOpenCatalog: (CatalogQuery) -> Unit = {},
     onSelectCategory: (CatalogCategory) -> Unit
 ) {
     LaunchedEffect(Unit) {
@@ -438,12 +446,10 @@ fun CategoriesScreen(
         if (matched != null) {
             onSelectCategory(matched)
         } else {
-            onSelectCategory(
-                CatalogCategory(
-                    id = "cat_${queryText.lowercase().replace(" ", "_")}",
-                    slug = queryText.lowercase().replace(" ", "-"),
-                    name = queryText,
-                    productCount = 10
+            onOpenCatalog(
+                CatalogQuery(
+                    text = queryText,
+                    categoryName = queryText
                 )
             )
         }
@@ -565,7 +571,15 @@ fun CategoriesScreen(
                                     border = BorderStroke(1.dp, item.borderColor),
                                     modifier = Modifier
                                         .width(135.dp)
-                                        .clickable { handleTrigger(item.query) }
+                                        .clickable {
+                                            onOpenCatalog(
+                                                CatalogQuery(
+                                                    categoryId = item.categoryId,
+                                                    collectionId = item.collectionId,
+                                                    categoryName = item.categoryName
+                                                )
+                                            )
+                                        }
                                 ) {
                                     Column(
                                         modifier = Modifier
@@ -957,7 +971,14 @@ fun CategoriesScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp)
-                            .clickable { handleTrigger("Generic Equivalents") }
+                            .clickable {
+                                onOpenCatalog(
+                                    CatalogQuery(
+                                        collectionId = "generic_substitutes",
+                                        categoryName = "Generic Substitutes & Savings"
+                                    )
+                                )
+                            }
                     ) {
                         Row(
                             modifier = Modifier.padding(14.dp),
@@ -1072,7 +1093,14 @@ fun CategoriesScreen(
                                     shadowElevation = 1.dp,
                                     modifier = Modifier
                                         .width(150.dp)
-                                        .clickable { handleTrigger(brand.query) }
+                                        .clickable {
+                                            onOpenCatalog(
+                                                CatalogQuery(
+                                                    brandId = brand.name,
+                                                    categoryName = "${brand.name} Store"
+                                                )
+                                            )
+                                        }
                                 ) {
                                     Column(
                                         modifier = Modifier.padding(12.dp)

@@ -332,7 +332,7 @@ fun CommerceOSApp(
         is Screen.OrderHistory -> terminology.orderLabel
         is Screen.Cart -> terminology.cartLabel
         is Screen.Account -> "My Account"
-        is Screen.Catalog -> "Catalog"
+        is Screen.Catalog -> screen.query.categoryName ?: screen.query.collectionId?.replace("_", " ")?.replaceFirstChar { it.uppercase() } ?: "Catalog"
         is Screen.ProductDetail -> "Medicine Details"
         is Screen.AddressSelection -> if (screen.fromProfile) "Saved Addresses" else "Deliver to"
         is Screen.PaymentGateway -> terminology.checkoutLabel
@@ -627,8 +627,15 @@ fun CommerceOSApp(
                         }
                     },
                     onOpenCatalog = {
-                        universalSearchViewModel.reset()
-                        openUniversalSearch(UniversalSearchQuery(text = ""))
+                        navigateRoot(Screen.Categories)
+                    },
+                    onSelectCategory = { category ->
+                        val query = CatalogQuery(
+                            categoryId = category.id,
+                            categoryName = category.name
+                        )
+                        catalogViewModel.open(query)
+                        navigate(Screen.Catalog(query))
                     },
                     onUploadPrescription = {
                         showRxUploadDialog = true
@@ -673,9 +680,17 @@ fun CommerceOSApp(
                     onUploadPrescription = {
                         showRxUploadDialog = true
                     },
+                    onOpenCatalog = { catalogQuery ->
+                        catalogViewModel.open(catalogQuery)
+                        navigate(Screen.Catalog(catalogQuery))
+                    },
                     onSelectCategory = { category ->
-                        universalSearchViewModel.executeSearch(category.name)
-                        openUniversalSearch(UniversalSearchQuery(text = category.name))
+                        val query = CatalogQuery(
+                            categoryId = category.id,
+                            categoryName = category.name
+                        )
+                        catalogViewModel.open(query)
+                        navigate(Screen.Catalog(query))
                     }
                 )
                 is Screen.VerticalHome -> VerticalHomeScreen(

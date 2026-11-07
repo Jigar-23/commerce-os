@@ -175,7 +175,8 @@ class CatalogViewModel(private val repository: AppRepository) : ViewModel() {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             isLoadingMore = true
-            when (val result = repository.queryCatalogProducts(query, categoryName ?: "", categoryId, brandId, storeId, collectionId, campaignId, offerId, vertical, selectedPriceBand, PAGE_SIZE, offset)) {
+            val backendCategory = if (collectionId != null || categoryId != null) "" else (categoryName ?: "")
+            when (val result = repository.queryCatalogProducts(query, backendCategory, categoryId, brandId, storeId, collectionId, campaignId, offerId, vertical, selectedPriceBand, PAGE_SIZE, offset)) {
                 is ApiResult.Success -> {
                     if (activeGenerationId == generationId) {
                         appendPage(result.data)
@@ -193,7 +194,8 @@ class CatalogViewModel(private val repository: AppRepository) : ViewModel() {
         activeGenerationId = generationId
         loadJob = viewModelScope.launch {
             uiState = CatalogUiState.Loading
-            when (val result = repository.queryCatalogProducts(query, categoryName ?: "", categoryId, brandId, storeId, collectionId, campaignId, offerId, vertical, selectedPriceBand, PAGE_SIZE, 0)) {
+            val backendCategory = if (collectionId != null || categoryId != null) "" else (categoryName ?: "")
+            when (val result = repository.queryCatalogProducts(query, backendCategory, categoryId, brandId, storeId, collectionId, campaignId, offerId, vertical, selectedPriceBand, PAGE_SIZE, 0)) {
                 is ApiResult.Success -> {
                     if (activeGenerationId == generationId) {
                         applyPage(result.data, replace = true)
@@ -229,8 +231,9 @@ class CatalogViewModel(private val repository: AppRepository) : ViewModel() {
     }
 
     private fun titleFor(): String = when {
-        !brandId.isNullOrBlank() -> "Brand: $brandId"
         !categoryName.isNullOrBlank() -> categoryName!!
+        !brandId.isNullOrBlank() -> "Brand: $brandId"
+        !collectionId.isNullOrBlank() -> collectionId!!.replace("_", " ").replaceFirstChar { it.uppercase() }
         !categoryId.isNullOrBlank() -> categoryId!!
         !vertical.isNullOrBlank() && vertical != "general" -> "${vertical!!.replaceFirstChar { it.uppercase() }} Catalog"
         query.isNotBlank() -> "Results for '$query'"
