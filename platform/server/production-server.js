@@ -4785,19 +4785,56 @@ const server = http.createServer(async (req, res) => {
         queryParams.push(`%${brand}%`);
         queryText += ` AND (brand_name ILIKE $${queryParams.length} OR manufacturer ILIKE $${queryParams.length} OR name ILIKE $${queryParams.length})`;
       }
+      const CATEGORY_MAP = {
+        'cat_pain_fever': ['Pain & Fever'],
+        'pain-fever': ['Pain & Fever'],
+        'pain & fever': ['Pain & Fever'],
+        'cat_cold_cough': ['Cough & Cold'],
+        'cold-cough': ['Cough & Cold'],
+        'cold & cough': ['Cough & Cold'],
+        'cat_diabetes_care': ['Diabetes Care'],
+        'diabetes-care': ['Diabetes Care'],
+        'diabetes care': ['Diabetes Care'],
+        'cat_vitamins': ['Vitamins & Supplements', 'Immunity Boosters', 'Calcium & Minerals', 'Health Drinks & Protein'],
+        'vitamins-nutrition': ['Vitamins & Supplements', 'Immunity Boosters', 'Calcium & Minerals', 'Health Drinks & Protein'],
+        'vitamins & daily wellness': ['Vitamins & Supplements', 'Immunity Boosters', 'Calcium & Minerals', 'Health Drinks & Protein'],
+        'cat_digestive': ['Acidity & Digestion', 'Digestive Churn'],
+        'digestive-health': ['Acidity & Digestion', 'Digestive Churn'],
+        'stomach & digestion': ['Acidity & Digestion', 'Digestive Churn'],
+        'cat_cardiac': ['Heart & Blood Pressure'],
+        'cardiac-care': ['Heart & Blood Pressure'],
+        'heart & blood pressure': ['Heart & Blood Pressure'],
+        'cat_antibiotics': ['Antibiotics'],
+        'antibiotics': ['Antibiotics'],
+        'cat_skin_care': ['Dermatological Care'],
+        'skin-care': ['Dermatological Care'],
+        'skin & dermatology': ['Dermatological Care'],
+        'cat_ayurveda': ['Pure Herbs', 'Herbal Juices', 'Chyawanprash'],
+        'ayurveda-herbal': ['Pure Herbs', 'Herbal Juices', 'Chyawanprash'],
+        'ayurveda & herbal care': ['Pure Herbs', 'Herbal Juices', 'Chyawanprash'],
+        'cat_women_care': ['Calcium & Minerals', 'Thyroid Management'],
+        'women-care': ['Calcium & Minerals', 'Thyroid Management'],
+        'women\'s health & care': ['Calcium & Minerals', 'Thyroid Management'],
+        'cat_first_aid': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'first-aid': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'first aid & essentials': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'first aid & urgent': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'cat_baby_care': ['Baby & Infant Care'],
+        'baby-care': ['Baby & Infant Care'],
+        'baby & mother care': ['Baby & Infant Care']
+      };
+
       const isPromoTitle = /deal|generic|substitute|most bought|best seller/i.test(rawCat);
       if (rawCat && (!coll || !isPromoTitle)) {
-        const cleanCat = rawCat.replace(/^cat_/i, '').replace(/[-_&]/g, ' ').trim();
-        const words = cleanCat.split(/\s+/).filter(w => w.length > 2);
-        if (words.length > 0) {
-          const catClauses = words.map(w => {
-            queryParams.push(`%${w}%`);
-            return `(category ILIKE $${queryParams.length} OR name ILIKE $${queryParams.length} OR therapeutic_class ILIKE $${queryParams.length})`;
-          });
-          queryText += ` AND (${catClauses.join(' OR ')})`;
+        const catKey = rawCat.toLowerCase().trim();
+        const mappedCats = CATEGORY_MAP[catKey] || CATEGORY_MAP[rawCat];
+        if (mappedCats && mappedCats.length > 0) {
+          queryParams.push(mappedCats);
+          queryText += ` AND category = ANY($${queryParams.length})`;
         } else {
-          queryParams.push(`%${rawCat}%`);
-          queryText += ` AND (category ILIKE $${queryParams.length} OR id ILIKE $${queryParams.length})`;
+          const cleanCat = rawCat.replace(/^cat_/i, '').replace(/[-_&]/g, ' ').trim();
+          queryParams.push(`%${cleanCat}%`);
+          queryText += ` AND (category ILIKE $${queryParams.length} OR therapeutic_class ILIKE $${queryParams.length})`;
         }
       }
       if (coll === 'deals_of_the_day') {
@@ -4805,7 +4842,9 @@ const server = http.createServer(async (req, res) => {
       } else if (coll === 'generic_substitutes') {
         queryText += ` AND (salt_composition IS NOT NULL AND salt_composition != '') ORDER BY created_at DESC LIMIT 100`;
       } else if (coll === 'best_sellers') {
-        queryText += ` ORDER BY mrp DESC LIMIT 100`;
+        const bestSellerSkus = ['MED_DOLO_650', 'MED_VOLINI_GEL', 'MED_DIGENE_MINT', 'MED_BECOSULES_Z', 'MED_DETTOL_250', 'MED_PAN_40', 'MED_CHESTON_COLD', 'MED_COMBIFLAM', 'MED_CROCIN_ADV', 'MED_BENADRYL'];
+        queryParams.push(bestSellerSkus);
+        queryText += ` AND sku = ANY($${queryParams.length}) ORDER BY (price - COALESCE(discounted_price, price)) DESC LIMIT 100`;
       } else {
         queryText += ` ORDER BY created_at DESC LIMIT 100`;
       }

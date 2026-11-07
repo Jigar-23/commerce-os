@@ -3568,16 +3568,53 @@ async function handleRequest(port, req, res) {
       }
 
       // 3. Category / CategoryId filter
+      const CATEGORY_MAP = {
+        'cat_pain_fever': ['Pain & Fever'],
+        'pain-fever': ['Pain & Fever'],
+        'pain & fever': ['Pain & Fever'],
+        'cat_cold_cough': ['Cough & Cold'],
+        'cold-cough': ['Cough & Cold'],
+        'cold & cough': ['Cough & Cold'],
+        'cat_diabetes_care': ['Diabetes Care'],
+        'diabetes-care': ['Diabetes Care'],
+        'diabetes care': ['Diabetes Care'],
+        'cat_vitamins': ['Vitamins & Supplements', 'Immunity Boosters', 'Calcium & Minerals', 'Health Drinks & Protein'],
+        'vitamins-nutrition': ['Vitamins & Supplements', 'Immunity Boosters', 'Calcium & Minerals', 'Health Drinks & Protein'],
+        'vitamins & daily wellness': ['Vitamins & Supplements', 'Immunity Boosters', 'Calcium & Minerals', 'Health Drinks & Protein'],
+        'cat_digestive': ['Acidity & Digestion', 'Digestive Churn'],
+        'digestive-health': ['Acidity & Digestion', 'Digestive Churn'],
+        'stomach & digestion': ['Acidity & Digestion', 'Digestive Churn'],
+        'cat_cardiac': ['Heart & Blood Pressure'],
+        'cardiac-care': ['Heart & Blood Pressure'],
+        'heart & blood pressure': ['Heart & Blood Pressure'],
+        'cat_antibiotics': ['Antibiotics'],
+        'antibiotics': ['Antibiotics'],
+        'cat_skin_care': ['Dermatological Care'],
+        'skin-care': ['Dermatological Care'],
+        'skin & dermatology': ['Dermatological Care'],
+        'cat_ayurveda': ['Pure Herbs', 'Herbal Juices', 'Chyawanprash'],
+        'ayurveda-herbal': ['Pure Herbs', 'Herbal Juices', 'Chyawanprash'],
+        'ayurveda & herbal care': ['Pure Herbs', 'Herbal Juices', 'Chyawanprash'],
+        'cat_women_care': ['Calcium & Minerals', 'Thyroid Management'],
+        'women-care': ['Calcium & Minerals', 'Thyroid Management'],
+        'women\'s health & care': ['Calcium & Minerals', 'Thyroid Management'],
+        'cat_first_aid': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'first-aid': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'first aid & essentials': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'first aid & urgent': ['First Aid & Wound', 'Antiseptics & Sanitizers'],
+        'cat_baby_care': ['Baby & Infant Care'],
+        'baby-care': ['Baby & Infant Care'],
+        'baby & mother care': ['Baby & Infant Care']
+      };
+
       const isPromoTitle = /deal|generic|substitute|most bought|best seller/i.test(rawCat);
       if (rawCat && (!coll || !isPromoTitle)) {
-        const cleanCat = rawCat.replace(/^cat_/i, '').replace(/[-_&]/g, ' ').trim().toLowerCase();
-        const words = cleanCat.split(/\s+/).filter(w => w.length > 2);
-        if (words.length > 0) {
-          matched = matched.filter(m => {
-            const textToMatch = (String(m.category || '') + ' ' + String(m.therapeuticCategory || '') + ' ' + String(m.name || '') + ' ' + String(m.therapeuticClass || '')).toLowerCase();
-            return words.some(w => textToMatch.includes(w));
-          });
+        const catKey = rawCat.toLowerCase().trim();
+        const mappedCats = CATEGORY_MAP[catKey] || CATEGORY_MAP[rawCat];
+        if (mappedCats && mappedCats.length > 0) {
+          matched = matched.filter(m => mappedCats.includes(m.category) || mappedCats.includes(m.therapeuticCategory));
         } else {
+          const cleanCat = rawCat.replace(/^cat_/i, '').replace(/[-_&]/g, ' ').trim().toLowerCase();
           matched = matched.filter(m => {
             const textToMatch = (String(m.category || '') + ' ' + String(m.therapeuticCategory || '') + ' ' + String(m.name || '')).toLowerCase();
             return textToMatch.includes(cleanCat);
@@ -3592,7 +3629,9 @@ async function handleRequest(port, req, res) {
       } else if (coll === 'generic_substitutes') {
         matched = matched.filter(m => Boolean(m.saltComposition || m.activeSalt));
       } else if (coll === 'best_sellers') {
-        matched.sort((a, b) => Number(b.mrp || 0) - Number(a.mrp || 0));
+        const bestSellerSkus = ['MED_DOLO_650', 'MED_VOLINI_GEL', 'MED_DIGENE_MINT', 'MED_BECOSULES_Z', 'MED_DETTOL_250', 'MED_PAN_40', 'MED_CHESTON_COLD', 'MED_COMBIFLAM', 'MED_CROCIN_ADV', 'MED_BENADRYL'];
+        matched = matched.filter(m => bestSellerSkus.includes(m.sku));
+        matched.sort((a, b) => (Number(b.mrp || 0) - Number(b.discountedPrice || 0)) - (Number(a.mrp || 0) - Number(a.discountedPrice || 0)));
       }
 
       const filtered = matched.filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
