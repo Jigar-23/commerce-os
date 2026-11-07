@@ -448,6 +448,54 @@ class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(co
         }
     }
 
+    /**
+     * Resequence queued telemetry packets for an active delivery starting at newStartSeq.
+     * Invoked upon 409 SEQUENCE_CONFLICT recovery to atomically renumber pending rows
+     * above the server's high-water mark, preventing head-of-line blocking by stale packets.
+     */
+    @Synchronized
+    fun resequenceQueue(deliveryId: String, newStartSeq: Long): Boolean {
+        if (deliveryId.isBlank() || newStartSeq <= 0) return false
+        val db = writableDatabase
+        val hashed = hashDeliveryId(deliveryId)
+        db.beginTransaction()
+        try {
+            val cursor = db.query(
+                TABLE_NAME,
+                arrayOf("rowid", COLUMN_SEQUENCE_NUMBER),
+                "$COLUMN_DELIVERY_ID = ? OR $COLUMN_DELIVERY_ID = ?",
+                arrayOf(hashed, deliveryId),
+                null,
+                null,
+                "$COLUMN_SEQUENCE_NUMBER ASC"
+            )
+            val rowIds = mutableListOf<Long>()
+            cursor.use {
+                while (it.moveToNext()) {
+                    rowIds.add(it.getLong(0))
+                }
+            }
+
+            var nextSeq = newStartSeq
+            for (rid in rowIds) {
+                val cv = ContentValues().apply {
+                    put(COLUMN_SEQUENCE_NUMBER, nextSeq)
+                }
+                db.update(TABLE_NAME, cv, "rowid = ?", arrayOf(rid.toString()))
+                nextSeq++
+            }
+
+            recordHighWaterMark(deliveryId, nextSeq - 1)
+            db.setTransactionSuccessful()
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resequence telemetry queue: ${e.message}")
+            return false
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     @Synchronized
     fun purgeDelivery(deliveryId: String) {
         if (deliveryId.isBlank()) return

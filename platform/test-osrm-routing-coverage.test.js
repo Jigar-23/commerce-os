@@ -19,6 +19,7 @@ const assert = require('assert');
 const http = require('http');
 
 let mockServer = null;
+let isUsingMockServer = false;
 
 // Geographic nodes from the versioned regional extract
 const REWARI_STORE = { lat: 28.2015, lng: 76.6145, name: 'Rewari Central Dark Store Hub' };
@@ -59,7 +60,7 @@ async function verifyRoutingPair(origin, destination, maxExpectedDurationSec = 7
   const roadDistanceKm = route.distance / 1000.0;
   assert(roadDistanceKm >= straightLineKm * 0.95, `Road distance (${roadDistanceKm.toFixed(2)} km) >= Euclidean baseline (${straightLineKm.toFixed(2)} km)`);
   assert(route.duration <= maxExpectedDurationSec, `Duration (${Math.round(route.duration)}s) within acceptable operational limit`);
-  return { source: 'live_osrm', roadDistanceKm, durationSec: route.duration };
+  return { source: isUsingMockServer ? 'mock_synthetic_osrm' : 'live_osrm', roadDistanceKm, durationSec: route.duration };
 }
 
 async function ensurePrivateRoutingEndpoint() {
@@ -75,6 +76,7 @@ async function ensurePrivateRoutingEndpoint() {
   }
 
   // Spin up local private mock server on loopback
+  isUsingMockServer = true;
   mockServer = http.createServer((req, res) => {
     const u = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
     if (u.pathname.startsWith('/route/v1/driving/')) {

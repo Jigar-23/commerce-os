@@ -822,11 +822,13 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 }
 
                 // Standard Play Integrity hardware attestation proof
-                val integrityToken = sessionMgr.getPlayIntegrityToken()
+                val msg = "${nextUpdate.riderId}:${targetDeliveryId}:${nextUpdate.latitude}:${nextUpdate.longitude}:${nextUpdate.sequenceNumber}:${timestamp}:${nonce}"
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                val reqHash = md.digest(msg.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+                val playIntegrityService = com.commerceos.rider.security.PlayIntegrityService.getInstance(applicationContext)
+                val integrityToken = playIntegrityService.requestToken(reqHash) ?: sessionMgr.getPlayIntegrityToken()
                 if (!integrityToken.isNullOrBlank()) {
-                    val msg = "${nextUpdate.riderId}:${targetDeliveryId}:${nextUpdate.latitude}:${nextUpdate.longitude}:${nextUpdate.sequenceNumber}:${timestamp}:${nonce}"
-                    val md = java.security.MessageDigest.getInstance("SHA-256")
-                    val reqHash = md.digest(msg.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
                     jsonBody.put("deviceAttestation", JSONObject().apply {
                         put("platform", "android_play_integrity")
                         put("token", integrityToken)
@@ -845,11 +847,14 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
                     val errJson = try { JSONObject(errStr) } catch (_: Exception) { JSONObject() }
                     val highestSeq = errJson.optLong("highestSequence", -1L)
-                    if (highestSeq > 0) {
-                        val nextSeq = maxOf(currentSequenceNumber, highestSeq) + 1
-                        currentSequenceNumber = nextSeq
-                        staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
+                    val nextSeq = if (highestSeq > 0) {
+                        maxOf(currentSequenceNumber, highestSeq) + 1
+                    } else {
+                        currentSequenceNumber + 1
                     }
+                    currentSequenceNumber = nextSeq
+                    staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
+                    staticDbHelper?.resequenceQueue(targetDeliveryId, nextSeq)
                     _isStale.value = true
                     return@withContext false
                 }

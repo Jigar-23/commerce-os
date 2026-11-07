@@ -103,6 +103,7 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.google.firebase:firebase-messaging-ktx:23.4.1")
+    implementation("com.google.android.play:integrity:1.2.0")
 
     // MAPS & GEOLOCATION
     implementation("com.google.android.gms:play-services-maps:18.2.0")

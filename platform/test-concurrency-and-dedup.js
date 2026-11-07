@@ -200,8 +200,8 @@ async function runAllTests() {
     assert.strictEqual(maxAttemptsRes.error, 'MAX_ATTEMPTS_EXCEEDED');
   });
 
-  // Test 6: REAL PostgreSQL Multi-Client Concurrent Inventory Debit Test
-  await test('Real Postgres Multi-Client Concurrency: Two separate DB clients competing for last 1 unit -> exactly one 200, one 409 OUT_OF_STOCK, stock >= 0', async () => {
+  // Test 6: Multi-Client Concurrent Inventory Debit Test (Simulated Postgres Engine)
+  await test('Postgres Multi-Client Concurrency Simulation: Two separate DB clients competing for last 1 unit -> exactly one 200, one 409 OUT_OF_STOCK, stock >= 0', async () => {
     // Multi-client Database simulation with row-level atomic conditional UPDATE RETURNING
     class SimulatedPostgresConnectionPool {
       constructor(initialStock = 1) {

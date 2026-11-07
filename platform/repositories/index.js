@@ -6797,7 +6797,11 @@ class TransactionalPresenceRepository {
       last_known_lat: lat,
       last_known_lng: lng,
       lastSeenAt: r.last_seen_at,
-      last_seen_at: r.last_seen_at
+      last_seen_at: r.last_seen_at,
+      attestation_verified: false,
+      attestationVerified: false,
+      is_presence_fallback: true,
+      untrustedTelemetry: true
     };
   }
 
@@ -6908,7 +6912,11 @@ class TransactionalPresenceRepository {
       lastKnownLng: rLng,
       latitude: rLat,
       longitude: rLng,
-      lastSeenAt: r.last_seen_at
+      lastSeenAt: r.last_seen_at,
+      attestation_verified: false,
+      attestationVerified: false,
+      is_presence_fallback: true,
+      untrustedTelemetry: true
     };
   }
 }

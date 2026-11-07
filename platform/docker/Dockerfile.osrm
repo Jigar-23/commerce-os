@@ -3,10 +3,11 @@ FROM osrm/osrm-backend:v5.27.1
 WORKDIR /data
 
 # Versioned real regional road network configuration
-# Pinned immutable regional extract with cryptographic MD5 checksum
+# Pinned immutable regional extract with cryptographic SHA256 and MD5 checksums
 ENV OSRM_DATASET_VERSION="v2026.11.01-northern-zone"
 ENV OSRM_REGION="northern-zone"
 ENV OSM_EXTRACT_URL="https://download.geofabrik.de/asia/india/northern-zone-261101.osm.pbf"
+ENV OSM_EXTRACT_SHA256="20d194c1faad552006772b0405d239241b72031af1f7fdc2e459e7a15e504b44"
 ENV OSM_EXTRACT_MD5="66d5470f8fe1bce0b8820e8b99000c6b"
 
 COPY platform/docker/osrm-entrypoint.sh /usr/local/bin/osrm-entrypoint.sh

@@ -23,19 +23,16 @@ if [ ! -f "${OSRM_FILE}" ]; then
     fi
   fi
 
-  # 2. Cryptographic checksum validation
+  # 2. Cryptographic checksum validation (Strict NIST SHA-256 requirement)
   if [ -n "${OSM_EXTRACT_SHA256:-}" ]; then
     echo "[OSRM Entrypoint] Verifying PBF extract integrity against pinned SHA256 checksum..."
     echo "${OSM_EXTRACT_SHA256}  ${DATA_DIR}/region.osm.pbf" | sha256sum -c - || {
       echo "[OSRM Entrypoint] FATAL: Checksum verification failed for ${DATA_DIR}/region.osm.pbf!" >&2
       exit 1
     }
-  elif [ -n "${OSM_EXTRACT_MD5:-}" ]; then
-    echo "[OSRM Entrypoint] Verifying PBF extract integrity against pinned MD5 checksum..."
-    echo "${OSM_EXTRACT_MD5}  ${DATA_DIR}/region.osm.pbf" | md5sum -c - || {
-      echo "[OSRM Entrypoint] FATAL: MD5 checksum verification failed for ${DATA_DIR}/region.osm.pbf!" >&2
-      exit 1
-    }
+  else
+    echo "[OSRM Entrypoint] FATAL: Secure SHA-256 digest (OSM_EXTRACT_SHA256) is not configured! NIST policy requires SHA-2 for collision resistance." >&2
+    exit 1
   fi
 
   # 3. Extract road network using car profile (fail immediately on error)

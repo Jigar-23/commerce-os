@@ -48,7 +48,7 @@ async function runTest(pool) {
     ...process.env,
     DATABASE_URL: databaseUrl,
     PORT: String(TEST_PORT),
-    OSRM_BASE_URL: 'http://router.project-osrm.org',
+    OSRM_BASE_URL: 'http://127.0.0.1:5000',
     JWT_SECRET: 'test_secret_for_boot',
     JWT_ISSUER: 'commerce-os-auth',
     JWT_AUDIENCE: 'commerce-os-api',
@@ -147,7 +147,7 @@ async function runTest(pool) {
     JWT_ISSUER: 'commerce-os-auth',
     JWT_AUDIENCE: 'commerce-os-api',
     COMMERCEOS_OTP_PEPPER: 'test_boot_pepper_sec_key_112',
-    OSRM_BASE_URL: 'http://router.project-osrm.org',
+    OSRM_BASE_URL: 'http://127.0.0.1:5000',
     FCM_SERVER_KEY: 'test_fcm_prod_key_771',
     FCM_ENDPOINT_URL: 'https://fcm.googleapis.com/fcm/send'
   };

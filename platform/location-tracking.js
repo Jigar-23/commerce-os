@@ -156,7 +156,10 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
       serverTimestamp: presenceTs,
       recordedAt: presenceTs,
       isStale: true,
-      source: 'LAST_KNOWN_LOCATION'
+      attestationVerified: false,
+      attestation_verified: false,
+      untrustedTelemetry: true,
+      source: 'PRESENCE_FALLBACK'
     };
   } else if (telemetry) {
     telemetry = {
@@ -188,7 +191,14 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
 
   let activeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2 ? waypoints : [];
 
-  const isAttested = telemetry ? (telemetry.attestationVerified !== false && !telemetry.untrustedTelemetry) : true;
+  const isAttested = Boolean(
+    telemetry &&
+    telemetry.attestationVerified !== false &&
+    telemetry.attestation_verified !== false &&
+    !telemetry.untrustedTelemetry &&
+    telemetry.source !== 'PRESENCE_FALLBACK' &&
+    telemetry.source !== 'LAST_KNOWN_LOCATION'
+  );
 
   let mapMatched = {
     snappedLat: (isAttested && telemetry?.latitude) ? telemetry.latitude : null,

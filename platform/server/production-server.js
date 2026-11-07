@@ -1585,6 +1585,7 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
 
 // Module-level durable and in-memory replay protection for device telemetry attestations
 const seenAttestationNonces = new Map();
+const inMemoryAttestationKeys = new Map();
 const ATTESTATION_MAX_AGE_MS = 300000; // 5 minutes sliding window
 const MAX_IN_MEMORY_NONCES = 10000;
 
@@ -1596,7 +1597,21 @@ function pruneStaleAttestationNonces() {
     }
   }
 }
-setInterval(pruneStaleAttestationNonces, 60000).unref();
+
+async function pruneDurableAttestationNonces(dbClient = null) {
+  const targetDb = dbClient || pool;
+  if (!targetDb || isLocalMode) return;
+  try {
+    await targetDb.query(
+      `DELETE FROM telemetry_attestation_nonces WHERE created_at < NOW() - INTERVAL '15 minutes'`
+    );
+  } catch (_) {}
+}
+
+setInterval(() => {
+  pruneStaleAttestationNonces();
+  pruneDurableAttestationNonces().catch(() => {});
+}, 60000).unref();
 
 async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat = 0, lng = 0, sequenceNumber = 0, dbClient = null) {
   if (!attestation || typeof attestation !== 'object') return false;
@@ -1608,6 +1623,7 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
   if (age > ATTESTATION_MAX_AGE_MS) return false;
 
   pruneStaleAttestationNonces();
+  pruneDurableAttestationNonces(dbClient).catch(() => {});
   const nonceKey = String(nonce).trim();
   if (!nonceKey || seenAttestationNonces.has(nonceKey)) {
     return false;
@@ -1704,7 +1720,7 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
       } catch (_) {}
     }
 
-    // 2. Apple App Attest Hardware Assertion Verification (Registered Key & Monotonic Counter)
+    // 2. Apple App Attest Hardware Assertion Verification (Registered Key, RP ID & Monotonic Counter with Row Locking)
     if (!verified && (attestation.appAttestToken || attestation.assertion)) {
       try {
         const assertionData = attestation.assertion || attestation.appAttestToken;
@@ -1732,65 +1748,111 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
         }
 
         if (hashMatches && matchedHash) {
-          // Look up registered public key and counter for (riderId, keyId)
-          let keyRow = null;
-          if (pool) {
+          // Parse assertion data: authenticatorData (min 37 bytes) and signature
+          let authDataBuf = null;
+          let sigBuf = null;
+          if (typeof assertionData === 'object' && assertionData.authenticatorData && assertionData.signature) {
+            authDataBuf = Buffer.isBuffer(assertionData.authenticatorData) ? assertionData.authenticatorData : Buffer.from(assertionData.authenticatorData, 'base64');
+            sigBuf = Buffer.isBuffer(assertionData.signature) ? assertionData.signature : Buffer.from(assertionData.signature, 'base64');
+          } else if (typeof assertionData === 'string') {
             try {
-              const res = await pool.query(
-                'SELECT public_key, counter FROM rider_attestation_keys WHERE rider_id = $1 AND key_id = $2',
-                [riderId, keyId]
-              );
-              if (res.rows.length > 0) {
-                keyRow = res.rows[0];
+              const parsed = JSON.parse(Buffer.from(assertionData, 'base64').toString('utf8'));
+              if (parsed.authenticatorData && parsed.signature) {
+                authDataBuf = Buffer.from(parsed.authenticatorData, 'base64');
+                sigBuf = Buffer.from(parsed.signature, 'base64');
               }
             } catch (_) {}
           }
 
-          if (keyRow) {
-            // Parse assertion data: authenticatorData (min 37 bytes) and signature
-            let authDataBuf = null;
-            let sigBuf = null;
-            if (typeof assertionData === 'object' && assertionData.authenticatorData && assertionData.signature) {
-              authDataBuf = Buffer.isBuffer(assertionData.authenticatorData) ? assertionData.authenticatorData : Buffer.from(assertionData.authenticatorData, 'base64');
-              sigBuf = Buffer.isBuffer(assertionData.signature) ? assertionData.signature : Buffer.from(assertionData.signature, 'base64');
-            } else if (typeof assertionData === 'string') {
-              try {
-                const parsed = JSON.parse(Buffer.from(assertionData, 'base64').toString('utf8'));
-                if (parsed.authenticatorData && parsed.signature) {
-                  authDataBuf = Buffer.from(parsed.authenticatorData, 'base64');
-                  sigBuf = Buffer.from(parsed.signature, 'base64');
-                }
-              } catch (_) {}
-            }
+          if (authDataBuf && sigBuf && authDataBuf.length >= 37) {
+            // Verify RP ID (bytes 0-31 are SHA-256 of RP ID)
+            const rpIdHash = authDataBuf.subarray(0, 32);
+            const candidateRpIds = [
+              'com.commerceos.rider',
+              'com.commerceos.CommerceOSRider',
+              process.env.APPLE_APP_ID,
+              process.env.APPLE_RP_ID
+            ].filter(Boolean);
 
-            if (authDataBuf && sigBuf && authDataBuf.length >= 37) {
-              // Extract counter (bytes 33-36, big-endian unsigned 32-bit int)
+            const rpIdMatches = candidateRpIds.some(rpId => {
+              const expectedRpHash = crypto.createHash('sha256').update(rpId).digest();
+              return rpIdHash.length === expectedRpHash.length && crypto.timingSafeEqual(rpIdHash, expectedRpHash);
+            });
+
+            if (rpIdMatches) {
               const counter = authDataBuf.readUInt32BE(33);
-              const prevCounter = Number(keyRow.counter || 0);
 
-              // Counter must be strictly monotonic
-              if (counter > prevCounter) {
-                // Verify ECDSA signature over (authenticatorData + clientDataHash)
-                const signedData = Buffer.concat([authDataBuf, matchedHash]);
-                const pubKeyPem = keyRow.public_key.startsWith('-----BEGIN')
-                  ? keyRow.public_key
-                  : `-----BEGIN PUBLIC KEY-----\n${keyRow.public_key}\n-----END PUBLIC KEY-----`;
-
+              if (pool && !isLocalMode) {
+                const client = await pool.connect();
                 try {
-                  const verifier = crypto.createVerify('SHA256');
-                  verifier.update(signedData);
-                  const isSigValid = verifier.verify(pubKeyPem, sigBuf);
-                  if (isSigValid) {
-                    verified = true;
-                    // Atomically advance counter in database
-                    if (pool) {
-                      await pool.query(
-                        'UPDATE rider_attestation_keys SET counter = $1, updated_at = NOW() WHERE rider_id = $2 AND key_id = $3',
-                        [counter, riderId, keyId]
-                      );
+                  await client.query('BEGIN');
+                  // Lock key row with FOR UPDATE to prevent counter regression under concurrent requests
+                  const lockRes = await client.query(
+                    'SELECT public_key, counter FROM rider_attestation_keys WHERE rider_id = $1 AND key_id = $2 FOR UPDATE',
+                    [riderId, keyId]
+                  );
+
+                  if (lockRes.rows && lockRes.rows.length > 0) {
+                    const keyRow = lockRes.rows[0];
+                    const prevCounter = Number(keyRow.counter || 0);
+
+                    // Counter must be strictly monotonic
+                    if (counter > prevCounter) {
+                      const signedData = Buffer.concat([authDataBuf, matchedHash]);
+                      const pubKeyPem = keyRow.public_key.startsWith('-----BEGIN')
+                        ? keyRow.public_key
+                        : `-----BEGIN PUBLIC KEY-----\n${keyRow.public_key}\n-----END PUBLIC KEY-----`;
+
+                      const verifier = crypto.createVerify('SHA256');
+                      verifier.update(signedData);
+                      const isSigValid = verifier.verify(pubKeyPem, sigBuf);
+
+                      if (isSigValid) {
+                        // Atomic conditional advance in database
+                        const updRes = await client.query(
+                          'UPDATE rider_attestation_keys SET counter = $1, updated_at = NOW() WHERE rider_id = $2 AND key_id = $3 AND counter < $1 RETURNING counter',
+                          [counter, riderId, keyId]
+                        );
+                        if (updRes.rows && updRes.rows.length > 0) {
+                          await client.query('COMMIT');
+                          verified = true;
+                        } else {
+                          await client.query('ROLLBACK');
+                        }
+                      } else {
+                        await client.query('ROLLBACK');
+                      }
+                    } else {
+                      await client.query('ROLLBACK');
                     }
+                  } else {
+                    await client.query('ROLLBACK');
                   }
-                } catch (_) {}
+                } catch (e) {
+                  await client.query('ROLLBACK').catch(() => {});
+                } finally {
+                  client.release();
+                }
+              } else {
+                // In-memory local mode handler
+                const localKey = inMemoryAttestationKeys.get(`${riderId}:${keyId}`);
+                if (localKey) {
+                  const prevCounter = Number(localKey.counter || 0);
+                  if (counter > prevCounter) {
+                    const signedData = Buffer.concat([authDataBuf, matchedHash]);
+                    const pubKeyPem = localKey.publicKey.startsWith('-----BEGIN')
+                      ? localKey.publicKey
+                      : `-----BEGIN PUBLIC KEY-----\n${localKey.publicKey}\n-----END PUBLIC KEY-----`;
+                    try {
+                      const verifier = crypto.createVerify('SHA256');
+                      verifier.update(signedData);
+                      if (verifier.verify(pubKeyPem, sigBuf)) {
+                        localKey.counter = counter;
+                        verified = true;
+                      }
+                    } catch (_) {}
+                  }
+                }
               }
             }
           }
@@ -6779,8 +6841,9 @@ const server = http.createServer(async (req, res) => {
       const rName = deliverySession?.rider_name || (rider && rider.name) || null;
       const rPhone = deliverySession?.rider_phone || (rider && rider.phone) || null;
       const rVehicle = deliverySession?.rider_vehicle || (rider && rider.vehicle) || null;
-      const telemLat = telemetry?.latitude || (deliverySession?.current_lat ? Number(deliverySession.current_lat) : null);
-      const telemLng = telemetry?.longitude || (deliverySession?.current_lng ? Number(deliverySession.current_lng) : null);
+      const isTelemVerified = Boolean(telemetry && (telemetry.attestation_verified === true || telemetry.attestationVerified === true) && !telemetry.untrustedTelemetry);
+      const telemLat = isTelemVerified ? (telemetry?.latitude != null ? Number(telemetry.latitude) : null) : null;
+      const telemLng = isTelemVerified ? (telemetry?.longitude != null ? Number(telemetry.longitude) : null) : null;
 
       singleOrderDto.riderId = deliverySession?.rider_id || order.rider_id || order.riderId || null;
       singleOrderDto.riderName = rName;
@@ -6793,8 +6856,10 @@ const server = http.createServer(async (req, res) => {
       singleOrderDto.rider_lat = telemLat;
       singleOrderDto.riderLng = telemLng;
       singleOrderDto.rider_lng = telemLng;
-      singleOrderDto.riderBearing = telemetry?.heading ?? 0;
-      singleOrderDto.speedKmh = telemetry?.speedKmh ?? 0;
+      singleOrderDto.locationVerified = isTelemVerified;
+      singleOrderDto.untrustedTelemetry = !isTelemVerified;
+      singleOrderDto.riderBearing = isTelemVerified ? (telemetry?.heading ?? 0) : 0;
+      singleOrderDto.speedKmh = isTelemVerified ? (telemetry?.speedKmh ?? 0) : 0;
 
       singleOrderDto.deliverySession = deliverySession ? {
         deliveryId: deliverySession.delivery_id,
@@ -6807,12 +6872,7 @@ const server = http.createServer(async (req, res) => {
         riderVehicle: rVehicle,
         history: typeof deliverySession.history === 'string' ? JSON.parse(deliverySession.history) : (deliverySession.history || []),
         waypoints: typeof deliverySession.waypoints === 'string' ? JSON.parse(deliverySession.waypoints) : (deliverySession.waypoints || []),
-        telemetry: telemetry || (deliverySession.current_lat ? {
-          latitude: Number(deliverySession.current_lat),
-          longitude: Number(deliverySession.current_lng),
-          speedKmh: Number(deliverySession.speed_kmh || 0),
-          heading: Number(deliverySession.heading || 0)
-        } : null)
+        telemetry: isTelemVerified ? telemetry : null
       } : null;
 
       if (rider || deliverySession?.rider_id || rName) {
@@ -6823,8 +6883,9 @@ const server = http.createServer(async (req, res) => {
           vehicle: rVehicle || 'Delivery Vehicle',
           latitude: telemLat,
           longitude: telemLng,
-          speedKmh: telemetry?.speedKmh ?? null,
-          heading: telemetry?.heading ?? null
+          locationVerified: isTelemVerified,
+          speedKmh: isTelemVerified ? (telemetry?.speedKmh ?? null) : null,
+          heading: isTelemVerified ? (telemetry?.heading ?? null) : null
         };
       }
 
@@ -10229,6 +10290,43 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { active: true, session });
     }
 
+    // POST /api/v1/rider/attestation/register or /api/v1/delivery/rider/attestation/register
+    if ((pathname === '/api/v1/rider/attestation/register' || pathname === '/api/v1/delivery/rider/attestation/register') && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const body = await parseJsonBody(req);
+      const keyId = String(body.keyId || '').trim();
+      const publicKey = String(body.publicKey || body.public_key || '').trim();
+      const platform = String(body.platform || 'ios_app_attest').trim();
+
+      if (!keyId || !publicKey) {
+        return sendJson(res, 400, { error: 'INVALID_REGISTRATION', message: 'keyId and publicKey are required.' });
+      }
+
+      if (pool && !isLocalMode) {
+        await pool.query(
+          `INSERT INTO rider_attestation_keys (rider_id, key_id, public_key, counter, platform, created_at, updated_at)
+           VALUES ($1, $2, $3, 0, $4, NOW(), NOW())
+           ON CONFLICT (rider_id, key_id)
+           DO UPDATE SET public_key = EXCLUDED.public_key, updated_at = NOW()`,
+          [authClaims.sub, keyId, publicKey, platform]
+        );
+      } else {
+        inMemoryAttestationKeys.set(`${authClaims.sub}:${keyId}`, {
+          riderId: authClaims.sub,
+          keyId,
+          publicKey,
+          counter: 0,
+          platform
+        });
+      }
+
+      return sendJson(res, 200, { ok: true, registered: true, riderId: authClaims.sub, keyId });
+    }
+
     // POST /api/v1/delivery/rider/presence
     if (pathname === '/api/v1/delivery/rider/presence' && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
@@ -11193,13 +11291,23 @@ const server = http.createServer(async (req, res) => {
       activeTrackingDto.id = delivery.order_id || delivery.id;
       activeTrackingDto.etaMinutes = activeTrackingDto.estimatedArrivalMins;
       activeTrackingDto.estimatedMinutes = activeTrackingDto.estimatedArrivalMins || 0;
-      const fallbackLat = delivery.rider_lat ?? delivery.current_lat ?? delivery.riderLat ?? delivery.currentLat ?? null;
-      const fallbackLng = delivery.rider_lng ?? delivery.current_lng ?? delivery.riderLng ?? delivery.currentLng ?? null;
-      activeTrackingDto.riderLat = activeTrackingDto.liveRiderTelemetry?.latitude ?? fallbackLat;
-      activeTrackingDto.riderLng = activeTrackingDto.liveRiderTelemetry?.longitude ?? fallbackLng;
-      activeTrackingDto.riderBearing = activeTrackingDto.liveRiderTelemetry?.heading ?? delivery.rider_heading ?? delivery.heading ?? 0;
+      const isVerified = Boolean(activeTrackingDto.locationVerified);
+      if (!isVerified) {
+        activeTrackingDto.riderLat = null;
+        activeTrackingDto.riderLng = null;
+        activeTrackingDto.rider_lat = null;
+        activeTrackingDto.rider_lng = null;
+        activeTrackingDto.liveRiderTelemetry = null;
+        activeTrackingDto.untrustedTelemetry = true;
+      } else {
+        activeTrackingDto.riderLat = activeTrackingDto.liveRiderTelemetry?.latitude ?? null;
+        activeTrackingDto.riderLng = activeTrackingDto.liveRiderTelemetry?.longitude ?? null;
+        activeTrackingDto.rider_lat = activeTrackingDto.riderLat;
+        activeTrackingDto.rider_lng = activeTrackingDto.riderLng;
+      }
+      activeTrackingDto.riderBearing = isVerified ? (activeTrackingDto.liveRiderTelemetry?.heading ?? 0) : 0;
       activeTrackingDto.riderHeading = activeTrackingDto.riderBearing;
-      activeTrackingDto.speedKmh = activeTrackingDto.liveRiderTelemetry?.speedKmh ?? delivery.speed_kmh ?? 0;
+      activeTrackingDto.speedKmh = isVerified ? (activeTrackingDto.liveRiderTelemetry?.speedKmh ?? 0) : 0;
       delete activeTrackingDto.deliveryOtp;
       delete activeTrackingDto.delivery_otp_hash;
       delete activeTrackingDto.deliveryOtpHash;
