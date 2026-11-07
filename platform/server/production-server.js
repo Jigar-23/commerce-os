@@ -114,6 +114,62 @@ function validateProductionConfiguration(env = process.env) {
     console.error('FATAL_CONFIGURATION_ERROR: FCM_ENDPOINT_URL is strictly required for Commerce OS Production Server.');
     process.exit(1);
   }
+
+  // Reject test-only bypass switches if deployed or running against remote/shared database
+  const isDeployed =
+    env.NODE_ENV === 'production' ||
+    env.NODE_ENV === 'staging' ||
+    env.NODE_ENV === 'uat' ||
+    env.NODE_ENV === 'demo' ||
+    Boolean(env.RENDER) ||
+    Boolean(env.RAILWAY_ENVIRONMENT) ||
+    Boolean(env.FLY_APP_NAME) ||
+    Boolean(env.HEROKU_APP_NAME) ||
+    Boolean(env.AWS_EXECUTION_ENV) ||
+    Boolean(env.KUBERNETES_SERVICE_HOST);
+
+  const dbUrl = env.DATABASE_URL || '';
+  const isLocalLoopback = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1');
+
+  if (isDeployed || !isLocalLoopback) {
+    if (env.COMMERCEOS_ISOLATED_TEST_RUNNER === 'true' || env.ALLOW_MASTER_OTP === 'true') {
+      console.error('FATAL_CONFIGURATION_ERROR: Test-only switch (COMMERCEOS_ISOLATED_TEST_RUNNER / ALLOW_MASTER_OTP) cannot be active in a deployed environment or against a shared/remote database.');
+      process.exit(1);
+    }
+  }
+}
+
+function isIsolatedTestRunner(env = process.env) {
+  const isDeployed =
+    env.NODE_ENV === 'production' ||
+    env.NODE_ENV === 'staging' ||
+    env.NODE_ENV === 'uat' ||
+    env.NODE_ENV === 'demo' ||
+    Boolean(env.RENDER) ||
+    Boolean(env.RAILWAY_ENVIRONMENT) ||
+    Boolean(env.FLY_APP_NAME) ||
+    Boolean(env.HEROKU_APP_NAME) ||
+    Boolean(env.AWS_EXECUTION_ENV) ||
+    Boolean(env.KUBERNETES_SERVICE_HOST);
+
+  if (isDeployed) {
+    return false;
+  }
+
+  const dbUrl = env.DATABASE_URL || '';
+  const isLocalLoopbackTestDb =
+    (dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')) &&
+    (dbUrl.includes('commerceos_test') || dbUrl.includes('_test'));
+
+  if (!isLocalLoopbackTestDb) {
+    return false;
+  }
+
+  const isTestHarness =
+    env.COMMERCEOS_ISOLATED_TEST_RUNNER === 'true' ||
+    (Array.isArray(process.argv) && process.argv.some(arg => /test[/-]|\.test\.js$|test.*\.js$/i.test(arg)));
+
+  return Boolean(isTestHarness);
 }
 
 if (require.main === module) {
@@ -1463,6 +1519,12 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
     return false;
   }
 
+  // Reject client-generated placeholder tokens immediately without parsing or substring checks
+  const platformToken = String(integrityToken || token || appAttestToken || '').trim();
+  if (/^(play_integrity_|app_attest_|mock_|test_|fake_|placeholder_)/i.test(platformToken)) {
+    return false;
+  }
+
   // Durable Replay Protection: Atomically insert nonce into database with RETURNING nonce
   // If the nonce already exists in PostgreSQL, ON CONFLICT DO NOTHING returns 0 rows, rejecting the replay.
   const activeDb = dbClient || pool;
@@ -1490,7 +1552,7 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
 
   let verified = false;
   try {
-    const candidates = [
+    const candidatePayloads = [
       `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}`,
       `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}:${deviceId || ''}`,
       `${riderId}:${deliveryId}:${Number(lat).toFixed(4)}:${Number(lng).toFixed(4)}:${sequenceNumber}:${timestamp}:${nonce}`,
@@ -1498,16 +1560,75 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
       `${riderId}:${nonce}:${timestamp}:${deviceId || ''}`
     ];
 
-    // Genuine platform attestation check (Play Integrity / Apple App Attest / KeyStore hardware attestation)
-    const platformToken = String(integrityToken || token || appAttestToken || '').trim();
-    if (platformToken.length >= 32) {
-      if (platformToken.includes(nonceKey) || signature) {
-        verified = true;
-      }
+    // 1. Google Play Integrity Verification (Signed Token / JWT Verdict)
+    if (platformToken && platformToken.includes('.') && platformToken.split('.').length === 3) {
+      try {
+        const parts = platformToken.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+
+        // Verify bound challenge / nonce in Play Integrity verdict
+        const requestNonce = payload?.requestDetails?.nonce || payload?.nonce;
+        const packageName = payload?.requestDetails?.requestPackageName || payload?.packageName;
+        const tokenTs = Number(payload?.requestDetails?.timestampMillis || payload?.timestampMillis || 0);
+        const deviceRecognition = payload?.deviceIntegrity?.deviceRecognitionVerdict || [];
+
+        const isPackageValid = packageName === 'com.commerceos.rider' || packageName === 'com.commerceos.android';
+        const isNotExpired = tokenTs > 0 ? (Math.abs(Date.now() - tokenTs) < ATTESTATION_MAX_AGE_MS) : true;
+        const meetsIntegrity = Array.isArray(deviceRecognition) &&
+          (deviceRecognition.includes('MEETS_STRONG_INTEGRITY') || deviceRecognition.includes('MEETS_DEVICE_INTEGRITY'));
+
+        let challengeMatches = false;
+        if (requestNonce) {
+          for (const msg of candidatePayloads) {
+            const expectedB64 = crypto.createHash('sha256').update(msg).digest('base64');
+            const expectedB64Url = crypto.createHash('sha256').update(msg).digest('base64url');
+            const expectedHex = crypto.createHash('sha256').update(msg).digest('hex');
+            if (requestNonce === expectedB64 || requestNonce === expectedB64Url || requestNonce === expectedHex || requestNonce === msg) {
+              challengeMatches = true;
+              break;
+            }
+          }
+        }
+
+        let sigValid = false;
+        const signedContent = `${parts[0]}.${parts[1]}`;
+        const providedSig = Buffer.from(parts[2], 'base64url');
+        if (process.env.PLAY_INTEGRITY_PUBLIC_KEY) {
+          const verifier = crypto.createVerify('RSA-SHA256');
+          verifier.update(signedContent);
+          sigValid = verifier.verify(process.env.PLAY_INTEGRITY_PUBLIC_KEY, providedSig);
+        } else if (JWT_SECRET) {
+          const expectedSigBuf = crypto.createHmac('sha256', JWT_SECRET).update(signedContent).digest();
+          if (providedSig.length === expectedSigBuf.length && crypto.timingSafeEqual(providedSig, expectedSigBuf)) {
+            sigValid = true;
+          }
+        }
+
+        if (challengeMatches && isPackageValid && isNotExpired && meetsIntegrity && sigValid) {
+          verified = true;
+        }
+      } catch (_) {}
     }
 
+    // 2. Apple App Attest / DeviceCheck Hardware Assertion
+    if (!verified && (attestation.appAttestToken || attestation.assertion) && attestation.clientDataHash) {
+      try {
+        const candidateHashes = candidatePayloads.map(msg => crypto.createHash('sha256').update(msg).digest('hex'));
+        const clientDataHashHex = String(attestation.clientDataHash).trim();
+        if (candidateHashes.includes(clientDataHashHex)) {
+          if (signature && JWT_SECRET) {
+            const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(clientDataHashHex).digest('hex');
+            if (signature.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+              verified = true;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Bound Hardware Keystore HMAC / Attested Key Signature
     if (!verified && signature) {
-      for (const msg of candidates) {
+      for (const msg of candidatePayloads) {
         const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(msg).digest('hex');
         if (signature.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
           verified = true;
@@ -2597,8 +2718,8 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/v1/admin/cod/settle' && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
-      const isTestEnv = process.env.NODE_ENV !== 'production' || process.env.DATABASE_URL?.includes('test');
-      if (!isTestEnv) {
+      const allowTestBypass = isIsolatedTestRunner() && (!req.headers.authorization && !req.headers.Authorization);
+      if (!allowTestBypass) {
         if (!authClaims || !authClaims.sub) {
           return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required for COD settlement.' });
         }
@@ -3001,10 +3122,10 @@ const server = http.createServer(async (req, res) => {
         expiresInSeconds: 300,
         resendAfterSeconds: 30
       };
-      if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true') {
+      if (isIsolatedTestRunner() && process.env.ALLOW_MASTER_OTP === 'true') {
         responseDto.masterOtp = '123456';
       }
-      if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEBUG_OTP === 'true') {
+      if (isIsolatedTestRunner() && process.env.ALLOW_DEBUG_OTP === 'true') {
         responseDto.debugOtp = rawOtp;
       }
 
@@ -3018,7 +3139,7 @@ const server = http.createServer(async (req, res) => {
       const phoneDigits = rawPhone.replace(/\D/g, '').slice(-10);
       const otp = String(body.otpCode || body.otp_code || body.otp || body.code || '').trim();
 
-      const isMasterOtp = process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true' && ['1234', '123456', '0000', '9999'].includes(otp);
+      const isMasterOtp = isIsolatedTestRunner() && process.env.ALLOW_MASTER_OTP === 'true' && ['1234', '123456', '0000', '9999'].includes(otp);
 
       if (phoneDigits.length !== 10 || !otp) {
         return sendJson(res, 400, { error: 'INVALID_REQUEST', message: 'Valid 10-digit phone and otp code are mandatory.' });
@@ -3405,7 +3526,7 @@ const server = http.createServer(async (req, res) => {
         expiresInSeconds: 300,
         resendAfterSeconds: 30
       };
-      if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_MASTER_OTP === 'true') {
+      if (isIsolatedTestRunner() && process.env.ALLOW_MASTER_OTP === 'true') {
         responseDto.masterOtp = '123456';
       }
 
@@ -3450,7 +3571,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 429, { error: 'MAX_ATTEMPTS_EXCEEDED', message: 'Maximum OTP verification attempts exceeded.' });
       }
 
-      const isMasterOtp = (process.env.NODE_ENV !== 'production' || process.env.ALLOW_MASTER_OTP === 'true') && otp === '123456';
+      const isMasterOtp = isIsolatedTestRunner() && otp === '123456';
       const otpResult = isMasterOtp ? { ok: true } : DeliveryOtpService.verifyOtp(otp, challenge.otp_hash);
       if (!otpResult || !otpResult.ok) {
         await pool.query(`UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = $1`, [activeChallengeId]);
@@ -6991,7 +7112,7 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/v1/payments/webhook' && method === 'POST') {
       const rawBody = await parseRawBody(req);
       const signatureHeader = req.headers['x-webhook-signature'] || req.headers['x-razorpay-signature'] || req.headers['stripe-signature'];
-      const webhookSecret = process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || (process.env.NODE_ENV !== 'production' ? 'whsec_commerceos_dev_secret' : null);
+      const webhookSecret = process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || (isIsolatedTestRunner() ? 'whsec_commerceos_dev_secret' : null);
       if (!webhookSecret) {
         return sendJson(res, 500, {
           error: 'WEBHOOK_SECRET_UNCONFIGURED',
@@ -10098,7 +10219,7 @@ const server = http.createServer(async (req, res) => {
         const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
         const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
 
-        if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL && !OSRM_BASE_URL.includes('project-osrm.org')) {
+        if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL) {
           try {
             const osrmUrl = `${OSRM_BASE_URL}/route/v1/driving/${lng},${lat};${destLng},${destLat}?overview=full&geometries=geojson`;
             const osrmRes = await fetch(osrmUrl);
@@ -10143,7 +10264,7 @@ const server = http.createServer(async (req, res) => {
           const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
           const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
 
-          if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL && !OSRM_BASE_URL.includes('project-osrm.org')) {
+          if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL) {
             try {
               const osrmUrl = `${OSRM_BASE_URL}/route/v1/driving/${lng},${lat};${destLng},${destLat}?overview=full&geometries=geojson`;
               const osrmRes = await fetch(osrmUrl);
@@ -10390,7 +10511,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      if (!OSRM_BASE_URL || OSRM_BASE_URL.includes('project-osrm.org')) {
+      if (!OSRM_BASE_URL) {
         return sendJson(res, 503, {
           ok: false,
           error: 'OSRM_BASE_URL_UNCONFIGURED',
@@ -10503,8 +10624,7 @@ const server = http.createServer(async (req, res) => {
         targetLng = Number(delivery.customer_lng != null ? delivery.customer_lng : delivery.customerLng);
       }
 
-      const isTestEnv = process.env.NODE_ENV !== 'production' || process.env.DATABASE_URL?.includes('test');
-      if (isTestEnv && (!serverTelem || !serverTelem.attestation_verified)) {
+      if (isIsolatedTestRunner() && (!serverTelem || serverTelem.latitude == null)) {
         if (!isNaN(targetLat) && !isNaN(targetLng) && (targetLat !== 0 || targetLng !== 0)) {
           serverTelem = {
             latitude: targetLat,

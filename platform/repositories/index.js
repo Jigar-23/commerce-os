@@ -19,6 +19,39 @@ function getOtpPepper() {
   return process.env.COMMERCEOS_OTP_PEPPER || 'local_test_otp_pepper_non_prod';
 }
 
+function isIsolatedTestRunner(env = process.env) {
+  const isDeployed =
+    env.NODE_ENV === 'production' ||
+    env.NODE_ENV === 'staging' ||
+    env.NODE_ENV === 'uat' ||
+    env.NODE_ENV === 'demo' ||
+    Boolean(env.RENDER) ||
+    Boolean(env.RAILWAY_ENVIRONMENT) ||
+    Boolean(env.FLY_APP_NAME) ||
+    Boolean(env.HEROKU_APP_NAME) ||
+    Boolean(env.AWS_EXECUTION_ENV) ||
+    Boolean(env.KUBERNETES_SERVICE_HOST);
+
+  if (isDeployed) {
+    return false;
+  }
+
+  const dbUrl = env.DATABASE_URL || '';
+  const isLocalLoopbackTestDb =
+    (dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')) &&
+    (dbUrl.includes('commerceos_test') || dbUrl.includes('_test'));
+
+  if (!isLocalLoopbackTestDb) {
+    return false;
+  }
+
+  const isTestHarness =
+    env.COMMERCEOS_ISOLATED_TEST_RUNNER === 'true' ||
+    (Array.isArray(process.argv) && process.argv.some(arg => /test[/-]|\.test\.js$|test.*\.js$/i.test(arg)));
+
+  return Boolean(isTestHarness);
+}
+
 class DeliveryOtpService {
   static OTP_EXPIRY_MINUTES = 45;
 
@@ -4029,7 +4062,7 @@ class TransactionalDeliveryRepository {
             };
           }
 
-          if (isRealPgPool && t.attestation_verified !== true && !order.customer_confirmed_at && !session.customer_confirmed_at && !submittedOtp && process.env.NODE_ENV === 'production') {
+          if (isRealPgPool && t.attestation_verified !== true && !order.customer_confirmed_at && !session.customer_confirmed_at && !submittedOtp && !isIsolatedTestRunner()) {
             await client.query('ROLLBACK');
             return {
               ok: false,
@@ -4039,7 +4072,7 @@ class TransactionalDeliveryRepository {
             };
           }
 
-          const isTestEnvironment = process.env.NODE_ENV !== 'production' || process.env.DATABASE_URL?.includes('test');
+          const isTestEnvironment = isIsolatedTestRunner();
           const distKm = haversineDistanceKm(tLat, tLng, targetCustomerLat, targetCustomerLng);
           if (distKm * 1000 > 150.0 && !isTestEnvironment) {
             await client.query('ROLLBACK');
@@ -4099,7 +4132,7 @@ class TransactionalDeliveryRepository {
           (options.cashCollected != null ? Number(options.cashCollected) :
           (options.collectedAmount != null ? Number(options.collectedAmount) : null));
 
-        if (!hasAmountParam && (process.env.NODE_ENV !== 'production' || process.env.DATABASE_URL?.includes('test'))) {
+        if (!hasAmountParam && isIsolatedTestRunner()) {
           hasAmountParam = true;
           resolvedAmount = expectedCod;
         }

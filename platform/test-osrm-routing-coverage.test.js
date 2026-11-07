@@ -44,35 +44,19 @@ async function verifyRoutingPair(origin, destination, maxExpectedDurationSec = 7
   const straightLineKm = haversineDistanceKm(origin.lat, origin.lng, destination.lat, destination.lng);
   assert(straightLineKm > 0, `Valid positive distance between ${origin.name} and ${destination.name}`);
 
-  // Test OSRM endpoint when available, or validate against kinematic lower-bounds
-  const osrmBase = process.env.OSRM_BASE_URL;
-  if (osrmBase && !osrmBase.includes('project-osrm.org')) {
-    try {
-      const url = `${osrmBase.replace(/\/+$/, '')}/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`;
-      const res = await fetch(url, { headers: { 'User-Agent': 'CommerceOS-Verification/2.0' } });
-      if (res.ok) {
-        const data = await res.json();
-        assert(data.code === 'Ok', `OSRM returned code Ok for ${origin.name} -> ${destination.name}`);
-        assert(data.routes && data.routes.length > 0, 'Contains at least one valid route');
-        const route = data.routes[0];
-        const roadDistanceKm = route.distance / 1000.0;
-        assert(roadDistanceKm >= straightLineKm * 0.95, `Road distance (${roadDistanceKm.toFixed(2)} km) >= Euclidean baseline (${straightLineKm.toFixed(2)} km)`);
-        assert(route.duration <= maxExpectedDurationSec, `Duration (${Math.round(route.duration)}s) within acceptable operational limit`);
-        return { source: 'live_osrm', roadDistanceKm, durationSec: route.duration };
-      }
-    } catch (_) {}
-  }
-
-  // Authoritative fallback validation for offline / isolated environments:
-  // Assumes realistic regional urban speed (30-45 km/h for urban, 70-80 km/h for highway)
-  const isHighway = straightLineKm > 10.0;
-  const avgSpeedKmh = isHighway ? 65.0 : 35.0;
-  const estimatedRoadDistanceKm = straightLineKm * (isHighway ? 1.15 : 1.30);
-  const estimatedDurationSec = (estimatedRoadDistanceKm / avgSpeedKmh) * 3600;
-
-  assert(estimatedRoadDistanceKm >= straightLineKm, 'Estimated road distance satisfies triangle inequality');
-  assert(estimatedDurationSec > 0 && estimatedDurationSec <= maxExpectedDurationSec, 'Estimated ETA within plausible bounds');
-  return { source: 'kinematic_model', roadDistanceKm: estimatedRoadDistanceKm, durationSec: estimatedDurationSec };
+  // Authoritative live OSRM endpoint verification (private container cluster or regional gateway)
+  const osrmBase = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+  const url = `${osrmBase.replace(/\/+$/, '')}/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'CommerceOS-Verification/2.0' } });
+  assert(res.ok, `OSRM HTTP response ok for ${origin.name} -> ${destination.name}`);
+  const data = await res.json();
+  assert(data.code === 'Ok', `OSRM returned code Ok for ${origin.name} -> ${destination.name}`);
+  assert(data.routes && data.routes.length > 0, 'Contains at least one valid route');
+  const route = data.routes[0];
+  const roadDistanceKm = route.distance / 1000.0;
+  assert(roadDistanceKm >= straightLineKm * 0.95, `Road distance (${roadDistanceKm.toFixed(2)} km) >= Euclidean baseline (${straightLineKm.toFixed(2)} km)`);
+  assert(route.duration <= maxExpectedDurationSec, `Duration (${Math.round(route.duration)}s) within acceptable operational limit`);
+  return { source: 'live_osrm', roadDistanceKm, durationSec: route.duration };
 }
 
 async function main() {
