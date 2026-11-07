@@ -806,6 +806,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 conn.readTimeout = 3000
 
                 val timestamp = nextUpdate.timestamp
+                val nonce = "${targetDeliveryId}:${nextUpdate.sequenceNumber}:${timestamp}"
 
                 val jsonBody = JSONObject().apply {
                     put("deliveryId", targetDeliveryId)
@@ -817,10 +818,40 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     put("heading", nextUpdate.heading)
                     put("accuracyMeters", nextUpdate.accuracyMeters)
                     put("timestamp", timestamp)
+                    put("nonce", nonce)
+                }
+
+                // Standard Play Integrity hardware attestation proof
+                val integrityToken = sessionMgr.getPlayIntegrityToken()
+                if (!integrityToken.isNullOrBlank()) {
+                    val msg = "${nextUpdate.riderId}:${targetDeliveryId}:${nextUpdate.latitude}:${nextUpdate.longitude}:${nextUpdate.sequenceNumber}:${timestamp}:${nonce}"
+                    val md = java.security.MessageDigest.getInstance("SHA-256")
+                    val reqHash = md.digest(msg.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+                    jsonBody.put("deviceAttestation", JSONObject().apply {
+                        put("platform", "android_play_integrity")
+                        put("token", integrityToken)
+                        put("integrityToken", integrityToken)
+                        put("nonce", nonce)
+                        put("requestHash", reqHash)
+                        put("timestamp", timestamp)
+                    })
                 }
 
                 conn.outputStream.use { os ->
                     os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+                }
+
+                if (conn.responseCode == 409) {
+                    val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    val errJson = try { JSONObject(errStr) } catch (_: Exception) { JSONObject() }
+                    val highestSeq = errJson.optLong("highestSequence", -1L)
+                    if (highestSeq > 0) {
+                        val nextSeq = maxOf(currentSequenceNumber, highestSeq) + 1
+                        currentSequenceNumber = nextSeq
+                        staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
+                    }
+                    _isStale.value = true
+                    return@withContext false
                 }
 
                 if (conn.responseCode == 401) {
@@ -837,13 +868,26 @@ class RiderForegroundLocationService : Service(), LocationListener {
                         retryConn.outputStream.use { os ->
                             os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
                         }
+                        if (retryConn.responseCode == 409) {
+                            val errStr = retryConn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                            val errJson = try { JSONObject(errStr) } catch (_: Exception) { JSONObject() }
+                            val highestSeq = errJson.optLong("highestSequence", -1L)
+                            if (highestSeq > 0) {
+                                val nextSeq = maxOf(currentSequenceNumber, highestSeq) + 1
+                                currentSequenceNumber = nextSeq
+                                staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
+                            }
+                            _isStale.value = true
+                            return@withContext false
+                        }
                         if (retryConn.responseCode in 200..299) {
                             val responseStr = retryConn.inputStream.bufferedReader().use { it.readText() }
                             val respJson = JSONObject(responseStr)
                             val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
                             val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
                             val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
-                            if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
+                            val duplicateMatch = respJson.optBoolean("duplicateMatch", false)
+                            if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || (isDuplicate && duplicateMatch)) {
                                 _lastServerAckSeq.value = ackSeq
                                 _lastServerAckTimestamp.value = System.currentTimeMillis()
                                 _isStale.value = false
@@ -861,9 +905,10 @@ class RiderForegroundLocationService : Service(), LocationListener {
                     val ackSeq = respJson.optLong("ackSequenceNumber", -1L)
                     val accepted = respJson.optBoolean("accepted", respJson.optBoolean("ok", true))
                     val isDuplicate = respJson.optBoolean("duplicate", false) || respJson.optBoolean("duplicateOrOutdated", false)
+                    val duplicateMatch = respJson.optBoolean("duplicateMatch", false)
 
-                    // Atomic Dequeue upon explicit sequence ACK
-                    if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || isDuplicate) {
+                    // Atomic Dequeue upon explicit sequence ACK or genuine duplicate match
+                    if ((accepted && ackSeq >= nextUpdate.sequenceNumber) || (isDuplicate && duplicateMatch)) {
                         _lastServerAckSeq.value = ackSeq
                         _lastServerAckTimestamp.value = System.currentTimeMillis()
                         _isStale.value = false

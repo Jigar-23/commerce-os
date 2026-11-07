@@ -39,6 +39,11 @@ class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(co
 
         private const val MAX_QUEUE_SIZE = 10000
         private const val RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000L // 24 hours
+
+        const val TABLE_HWM = "telemetry_high_water_mark"
+        const val COLUMN_HWM_DELIVERY_ID = "delivery_id"
+        const val COLUMN_HWM_MAX_SEQ = "max_sequence_number"
+        const val COLUMN_HWM_UPDATED_AT = "updated_at"
     }
 
     private fun hashDeliveryId(raw: String): String {
@@ -67,10 +72,28 @@ class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(co
             );
         """.trimIndent()
         db.execSQL(createTableSql)
+
+        val createHwmTableSql = """
+            CREATE TABLE IF NOT EXISTS $TABLE_HWM (
+                $COLUMN_HWM_DELIVERY_ID TEXT PRIMARY KEY,
+                $COLUMN_HWM_MAX_SEQ INTEGER NOT NULL,
+                $COLUMN_HWM_UPDATED_AT INTEGER NOT NULL
+            );
+        """.trimIndent()
+        db.execSQL(createHwmTableSql)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
+        try {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS $TABLE_HWM (
+                    $COLUMN_HWM_DELIVERY_ID TEXT PRIMARY KEY,
+                    $COLUMN_HWM_MAX_SEQ INTEGER NOT NULL,
+                    $COLUMN_HWM_UPDATED_AT INTEGER NOT NULL
+                );
+            """.trimIndent())
+        } catch (_: Exception) {}
         if (needsVacuum) {
             try {
                 db.execSQL("VACUUM")
@@ -307,6 +330,7 @@ class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(co
             if (rowId == -1L) {
                 return false
             }
+            recordHighWaterMark(update.deliveryId, update.sequenceNumber)
             db.setTransactionSuccessful()
             return true
         } catch (e: Exception) {
@@ -403,11 +427,36 @@ class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(co
     }
 
     @Synchronized
+    fun recordHighWaterMark(deliveryId: String, seq: Long) {
+        if (deliveryId.isBlank()) return
+        try {
+            val db = writableDatabase
+            val hashed = hashDeliveryId(deliveryId)
+            val now = System.currentTimeMillis()
+            db.execSQL(
+                "INSERT INTO $TABLE_HWM ($COLUMN_HWM_DELIVERY_ID, $COLUMN_HWM_MAX_SEQ, $COLUMN_HWM_UPDATED_AT) VALUES (?, ?, ?) ON CONFLICT($COLUMN_HWM_DELIVERY_ID) DO UPDATE SET $COLUMN_HWM_MAX_SEQ = MAX($TABLE_HWM.$COLUMN_HWM_MAX_SEQ, excluded.$COLUMN_HWM_MAX_SEQ), $COLUMN_HWM_UPDATED_AT = excluded.$COLUMN_HWM_UPDATED_AT",
+                arrayOf(hashed, seq, now)
+            )
+            if (hashed != deliveryId) {
+                db.execSQL(
+                    "INSERT INTO $TABLE_HWM ($COLUMN_HWM_DELIVERY_ID, $COLUMN_HWM_MAX_SEQ, $COLUMN_HWM_UPDATED_AT) VALUES (?, ?, ?) ON CONFLICT($COLUMN_HWM_DELIVERY_ID) DO UPDATE SET $COLUMN_HWM_MAX_SEQ = MAX($TABLE_HWM.$COLUMN_HWM_MAX_SEQ, excluded.$COLUMN_HWM_MAX_SEQ), $COLUMN_HWM_UPDATED_AT = excluded.$COLUMN_HWM_UPDATED_AT",
+                    arrayOf(deliveryId, seq, now)
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist telemetry high-water mark: ${e.message}")
+        }
+    }
+
+    @Synchronized
     fun purgeDelivery(deliveryId: String) {
         if (deliveryId.isBlank()) return
         val db = writableDatabase
         val hashed = hashDeliveryId(deliveryId)
         db.delete(TABLE_NAME, "$COLUMN_DELIVERY_ID = ? OR $COLUMN_DELIVERY_ID = ?", arrayOf(hashed, deliveryId))
+        try {
+            db.delete(TABLE_HWM, "$COLUMN_HWM_DELIVERY_ID = ? OR $COLUMN_HWM_DELIVERY_ID = ?", arrayOf(hashed, deliveryId))
+        } catch (_: Exception) {}
     }
 
     /**
@@ -449,16 +498,33 @@ class RiderTelemetryDbHelper(private val context: Context) : SQLiteOpenHelper(co
     fun getMaxSequenceNumber(deliveryId: String): Long {
         val db = readableDatabase
         val hashed = hashDeliveryId(deliveryId)
-        val cursor = db.rawQuery(
-            "SELECT MAX($COLUMN_SEQUENCE_NUMBER) FROM $TABLE_NAME WHERE $COLUMN_DELIVERY_ID = ? OR $COLUMN_DELIVERY_ID = ?",
-            arrayOf(hashed, deliveryId)
-        )
-        cursor.use {
-            if (it.moveToFirst() && !it.isNull(0)) {
-                return it.getLong(0)
+        var qMax = 0L
+        try {
+            val cursor = db.rawQuery(
+                "SELECT MAX($COLUMN_SEQUENCE_NUMBER) FROM $TABLE_NAME WHERE $COLUMN_DELIVERY_ID = ? OR $COLUMN_DELIVERY_ID = ?",
+                arrayOf(hashed, deliveryId)
+            )
+            cursor.use {
+                if (it.moveToFirst() && !it.isNull(0)) {
+                    qMax = it.getLong(0)
+                }
             }
-        }
-        return 0L
+        } catch (_: Exception) {}
+
+        var hwmMax = 0L
+        try {
+            val hwmCursor = db.rawQuery(
+                "SELECT MAX($COLUMN_HWM_MAX_SEQ) FROM $TABLE_HWM WHERE $COLUMN_HWM_DELIVERY_ID = ? OR $COLUMN_HWM_DELIVERY_ID = ?",
+                arrayOf(hashed, deliveryId)
+            )
+            hwmCursor.use {
+                if (it.moveToFirst() && !it.isNull(0)) {
+                    hwmMax = it.getLong(0)
+                }
+            }
+        } catch (_: Exception) {}
+
+        return maxOf(qMax, hwmMax)
     }
 
     @Synchronized

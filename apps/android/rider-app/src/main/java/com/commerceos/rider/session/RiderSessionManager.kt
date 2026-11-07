@@ -40,6 +40,18 @@ class RiderSessionManager private constructor(context: Context) {
         }
     }
 
+    fun getPlayIntegrityToken(): String? {
+        return secureStore.read("play_integrity_token")
+    }
+
+    fun savePlayIntegrityToken(token: String?) {
+        if (token.isNullOrBlank()) {
+            secureStore.clear("play_integrity_token")
+        } else {
+            secureStore.save("play_integrity_token", token)
+        }
+    }
+
     fun getBaseUrl(): String {
         val saved = prefs.getString(KEY_BASE_URL, null)
         if (!saved.isNullOrBlank() && !saved.contains("127.0.0.1") && !saved.contains("localhost")) {

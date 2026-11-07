@@ -1,5 +1,7 @@
 import Foundation
 import CoreLocation
+import CryptoKit
+import DeviceCheck
 
 public struct BufferedTelemetryRecord: Codable {
     public let latitude: Double
@@ -45,7 +47,11 @@ public final class RiderTelemetryBuffer {
         batteryPct: Int
     ) {
         queue.async {
-            self.sequenceCounter += 1
+            let hwmKey = "telemetry_hwm_\(deliveryId)"
+            let storedSeq = UserDefaults.standard.integer(forKey: hwmKey)
+            self.sequenceCounter = max(self.sequenceCounter, storedSeq) + 1
+            UserDefaults.standard.set(self.sequenceCounter, forKey: hwmKey)
+
             let rawAcc = location.horizontalAccuracy
             let normalizedAcc = (rawAcc > 0 && rawAcc <= 65.0) ? rawAcc : 25.0
             let record = BufferedTelemetryRecord(
@@ -64,6 +70,12 @@ public final class RiderTelemetryBuffer {
         }
     }
 
+    public func clearDelivery(deliveryId: String) {
+        queue.async {
+            UserDefaults.standard.removeObject(forKey: "telemetry_hwm_\(deliveryId)")
+        }
+    }
+
     public func flush() {
         queue.async {
             self.flushSynchronously()
@@ -79,7 +91,12 @@ public final class RiderTelemetryBuffer {
             // Stream each telemetry packet with monotonic sequenceNumber to POST /api/v1/delivery/:deliveryId/telemetry
             for record in batch {
                 let ts = Int(record.timestamp.timeIntervalSince1970 * 1000)
-                let payload: [String: AnyEncodable] = [
+                let nonce = "\(record.deliveryId):\(record.sequenceNumber):\(ts)"
+                let payloadMsg = "\(record.deliveryId):\(record.sequenceNumber):\(record.latitude):\(record.longitude):\(ts):\(nonce)"
+                let hashData = SHA256.hash(data: Data(payloadMsg.utf8))
+                let clientDataHashHex = hashData.compactMap { String(format: "%02x", $0) }.joined()
+
+                var payload: [String: AnyEncodable] = [
                     "latitude": AnyEncodable(record.latitude),
                     "longitude": AnyEncodable(record.longitude),
                     "speedKmh": AnyEncodable(record.speedKmh),
@@ -88,8 +105,24 @@ public final class RiderTelemetryBuffer {
                     "bearing": AnyEncodable(record.bearing),
                     "accuracyMeters": AnyEncodable(record.accuracyMeters),
                     "sequenceNumber": AnyEncodable(record.sequenceNumber),
-                    "timestamp": AnyEncodable(ts)
+                    "timestamp": AnyEncodable(ts),
+                    "nonce": AnyEncodable(nonce)
                 ]
+
+                // Wire platform hardware attestation proof if available
+                let keyId = UserDefaults.standard.string(forKey: "rider_app_attest_key_id")
+                let assertionData = UserDefaults.standard.string(forKey: "rider_app_attest_assertion")
+                if let keyId = keyId, !keyId.isEmpty, let assertionData = assertionData, !assertionData.isEmpty {
+                    payload["deviceAttestation"] = AnyEncodable([
+                        "platform": AnyEncodable("ios_app_attest"),
+                        "keyId": AnyEncodable(keyId),
+                        "assertion": AnyEncodable(assertionData),
+                        "clientDataHash": AnyEncodable(clientDataHashHex),
+                        "nonce": AnyEncodable(nonce),
+                        "timestamp": AnyEncodable(String(ts))
+                    ])
+                }
+
                 do {
                     try await apiClient.postVoid(
                         endpoint: .streamDeliveryTelemetry(deliveryId: record.deliveryId),

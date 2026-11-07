@@ -7216,10 +7216,72 @@ class TransactionalTelemetryRepository {
     );
 
     const isInserted = Boolean(result.rows && result.rows.length > 0);
+    if (!isInserted) {
+      // Sequence conflict check: Query existing stored packet for (delivery_id, sequence_number)
+      try {
+        const existingRes = await this.pool.query(
+          `SELECT latitude, longitude, heading, speed, accuracy, is_mock_location, attestation_verified
+           FROM rider_telemetry
+           WHERE delivery_id = $1 AND sequence_number = $2`,
+          [deliveryId, sequenceNumber]
+        );
+        const existingRow = existingRes.rows[0];
+        if (existingRow) {
+          const latDiff = Math.abs(lat - Number(existingRow.latitude));
+          const lngDiff = Math.abs(lng - Number(existingRow.longitude));
+          // If coordinates match within epsilon, treat as genuine idempotent re-transmission ACK
+          const isSamePayload = latDiff < 0.0001 && lngDiff < 0.0001;
+          if (isSamePayload) {
+            return {
+              ok: true,
+              accepted: true,
+              duplicate: !isInserted,
+              duplicateMatch: true,
+              sequenceNumber,
+              isMockLocation: existingRow.is_mock_location,
+              attestationVerified: existingRow.attestation_verified
+            };
+          }
+        }
+
+        // Mismatched payload under existing sequence number: Reject with SEQUENCE_CONFLICT
+        const maxSeqRes = await this.pool.query(
+          `SELECT COALESCE(MAX(sequence_number), 0) AS max_seq FROM rider_telemetry WHERE delivery_id = $1`,
+          [deliveryId]
+        );
+        const highestSequence = Number(maxSeqRes.rows[0]?.max_seq || sequenceNumber);
+        return {
+          ok: false,
+          error: 'SEQUENCE_CONFLICT',
+          message: `Sequence number ${sequenceNumber} is already allocated to a different telemetry payload for delivery ${deliveryId}. Highest sequence is ${highestSequence}.`,
+          highestSequence,
+          duplicate: !isInserted,
+          duplicateMatch: false,
+          sequenceNumber,
+          isMockLocation,
+          attestationVerified
+        };
+      } catch (checkErr) {
+        // Fallback safely if check query errors
+        return {
+          ok: false,
+          error: 'SEQUENCE_CONFLICT',
+          message: `Sequence conflict on ${sequenceNumber}: ${checkErr.message}`,
+          highestSequence: sequenceNumber,
+          duplicate: !isInserted,
+          duplicateMatch: false,
+          sequenceNumber,
+          isMockLocation,
+          attestationVerified
+        };
+      }
+    }
+
     return {
       ok: true,
       accepted: isInserted,
       duplicate: !isInserted,
+      duplicateMatch: false,
       sequenceNumber,
       isMockLocation,
       attestationVerified

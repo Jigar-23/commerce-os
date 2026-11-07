@@ -586,6 +586,17 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_rider_time ON rider_telemetry(rider_id,
 CREATE INDEX IF NOT EXISTS idx_telemetry_delivery_time ON rider_telemetry(delivery_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_delivery_seq ON rider_telemetry(delivery_id, sequence_number DESC);
 
+CREATE TABLE IF NOT EXISTS rider_attestation_keys (
+    rider_id VARCHAR(64) NOT NULL,
+    key_id VARCHAR(128) NOT NULL,
+    public_key TEXT NOT NULL,
+    counter BIGINT NOT NULL DEFAULT 0,
+    platform VARCHAR(32) NOT NULL DEFAULT 'ios_app_attest',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (rider_id, key_id)
+);
+
 CREATE TABLE IF NOT EXISTS rider_notifications (
     id VARCHAR(64) PRIMARY KEY,
     notification_id VARCHAR(64) UNIQUE NOT NULL,

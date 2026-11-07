@@ -188,22 +188,24 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
 
   let activeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2 ? waypoints : [];
 
+  const isAttested = telemetry ? (telemetry.attestationVerified !== false && !telemetry.untrustedTelemetry) : true;
+
   let mapMatched = {
-    snappedLat: telemetry?.latitude || null,
-    snappedLng: telemetry?.longitude || null,
+    snappedLat: (isAttested && telemetry?.latitude) ? telemetry.latitude : null,
+    snappedLng: (isAttested && telemetry?.longitude) ? telemetry.longitude : null,
     remainingDistanceKm: null,
     routeProgressPct: 0,
     isSnapped: false
   };
 
-  if (telemetry && telemetry.latitude && telemetry.longitude) {
+  if (isAttested && telemetry && telemetry.latitude && telemetry.longitude) {
     mapMatched = mapMatchRiderToRoute(telemetry.latitude, telemetry.longitude, activeWaypoints);
   }
 
   const sessionRiderLat = Number(session.current_lat || session.currentLat || session.rider_lat || session.riderLat || 0) || null;
   const sessionRiderLng = Number(session.current_lng || session.currentLng || session.rider_lng || session.riderLng || 0) || null;
-  const riderCurrentLat = isAssigned ? (mapMatched.snappedLat || sessionRiderLat) : null;
-  const riderCurrentLng = isAssigned ? (mapMatched.snappedLng || sessionRiderLng) : null;
+  const riderCurrentLat = (isAssigned && isAttested) ? (mapMatched.snappedLat || sessionRiderLat) : null;
+  const riderCurrentLng = (isAssigned && isAttested) ? (mapMatched.snappedLng || sessionRiderLng) : null;
 
   const distToCustomerKm = (riderCurrentLat != null && cLat != null) ? haversineDistanceKm(riderCurrentLat, riderCurrentLng, cLat, cLng) : null;
   const distToStoreKm = (riderCurrentLat != null && mLat != null) ? haversineDistanceKm(riderCurrentLat, riderCurrentLng, mLat, mLng) : null;
@@ -312,7 +314,9 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
     etaUpdatedAt: etaMins != null ? now : null,
     etaTimestamp: etaMins != null ? now : null,
     telemetrySource,
-    liveRiderTelemetry: (isAssigned && telemetry) ? {
+    locationVerified: Boolean(isAssigned && isAttested && telemetry),
+    untrustedTelemetry: Boolean(telemetry && !isAttested),
+    liveRiderTelemetry: (isAssigned && telemetry && isAttested) ? {
       latitude: mapMatched.snappedLat, // Snapped road latitude
       longitude: mapMatched.snappedLng, // Snapped road longitude
       rawLatitude: telemetry.latitude,
@@ -331,7 +335,7 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
       predictionWindowMs: isPredictive ? 2500 : 0,
       deadReckoningAllowed: isPredictive
     } : null,
-    trackingStatusText: statusText,
+    trackingStatusText: !isAttested ? 'Awaiting hardware-attested location from rider device' : statusText,
     estimatedArrivalMins: etaMins,
     etaMode,
     remainingDistanceKm: mapMatched.remainingDistanceKm,

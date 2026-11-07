@@ -1,9 +1,9 @@
 #!/bin/sh
-set -eo pipefail
+set -eu
 
 DATA_DIR="/data"
 OSRM_FILE="${DATA_DIR}/routing.osrm"
-OSM_EXTRACT_VERSION="${OSRM_DATASET_VERSION:-v2026.11.01-delhi-ncr-haryana}"
+OSM_EXTRACT_VERSION="${OSRM_DATASET_VERSION:-v2026.11.01-northern-zone}"
 
 if [ ! -f "${OSRM_FILE}" ]; then
   echo "[OSRM Entrypoint] Initializing versioned real regional road-network extract (${OSM_EXTRACT_VERSION})..."
@@ -11,7 +11,7 @@ if [ ! -f "${OSRM_FILE}" ]; then
 
   # 1. Ensure authentic regional OSM PBF extract is present; download if needed
   if [ ! -f "${DATA_DIR}/region.osm.pbf" ]; then
-    if [ -n "${OSM_EXTRACT_URL}" ]; then
+    if [ -n "${OSM_EXTRACT_URL:-}" ]; then
       echo "[OSRM Entrypoint] Downloading versioned regional OSM extract from ${OSM_EXTRACT_URL}..."
       curl -fsSL "${OSM_EXTRACT_URL}" -o "${DATA_DIR}/region.osm.pbf" || {
         echo "[OSRM Entrypoint] FATAL: Failed to download authentic regional OSM extract from ${OSM_EXTRACT_URL}" >&2
@@ -24,10 +24,16 @@ if [ ! -f "${OSRM_FILE}" ]; then
   fi
 
   # 2. Cryptographic checksum validation
-  if [ -n "${OSM_EXTRACT_SHA256}" ]; then
+  if [ -n "${OSM_EXTRACT_SHA256:-}" ]; then
     echo "[OSRM Entrypoint] Verifying PBF extract integrity against pinned SHA256 checksum..."
     echo "${OSM_EXTRACT_SHA256}  ${DATA_DIR}/region.osm.pbf" | sha256sum -c - || {
       echo "[OSRM Entrypoint] FATAL: Checksum verification failed for ${DATA_DIR}/region.osm.pbf!" >&2
+      exit 1
+    }
+  elif [ -n "${OSM_EXTRACT_MD5:-}" ]; then
+    echo "[OSRM Entrypoint] Verifying PBF extract integrity against pinned MD5 checksum..."
+    echo "${OSM_EXTRACT_MD5}  ${DATA_DIR}/region.osm.pbf" | md5sum -c - || {
+      echo "[OSRM Entrypoint] FATAL: MD5 checksum verification failed for ${DATA_DIR}/region.osm.pbf!" >&2
       exit 1
     }
   fi
@@ -65,7 +71,7 @@ if [ ! -f "${OSRM_FILE}" ]; then
 fi
 
 # If invoked during docker build as verification step
-if [ "$1" = "true" ] || [ "$1" = "verify" ]; then
+if [ "${1:-}" = "true" ] || [ "${1:-}" = "verify" ]; then
   echo "[OSRM Entrypoint] Build verification complete."
   exit 0
 fi

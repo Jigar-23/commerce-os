@@ -80,6 +80,76 @@ const { createProductionRepositories, initApplicationRepositories, DeliveryOtpSe
 const { buildEnrichedTrackingDTO, detectRouteDeviation, mapMatchRiderToRoute } = require('../location-tracking');
 
 // 1. Production Configuration & Mandatory Fail-Fast Preconditions (Zero Source Code Fallback Strings)
+function isPrivateRoutingHostname(hostname) {
+  if (!hostname || typeof hostname !== 'string') return false;
+  const h = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+
+  // Explicitly reject known public OSRM servers or public top-level internet domains
+  if (h === 'router.project-osrm.org' || h.endsWith('.project-osrm.org')) {
+    return false;
+  }
+
+  // Loopback
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') {
+    return true;
+  }
+
+  // Single-label hostnames (Docker compose services, Kubernetes cluster services)
+  if (/^[a-z0-9_-]+$/.test(h)) {
+    return true;
+  }
+
+  // Internal network suffixes
+  if (
+    h.endsWith('.local') ||
+    h.endsWith('.internal') ||
+    h.endsWith('.lan') ||
+    h.endsWith('.cluster.local') ||
+    h.endsWith('.svc') ||
+    h.endsWith('.docker.internal')
+  ) {
+    return true;
+  }
+
+  // Private IPv4 ranges (RFC 1918 + loopback + link-local)
+  const ipv4Match = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const octets = [Number(ipv4Match[1]), Number(ipv4Match[2]), Number(ipv4Match[3]), Number(ipv4Match[4])];
+    if (octets.some(o => o < 0 || o > 255)) return false;
+    // 127.0.0.0/8 (Loopback)
+    if (octets[0] === 127) return true;
+    // 10.0.0.0/8 (Private network)
+    if (octets[0] === 10) return true;
+    // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+    if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+    // 192.168.0.0/16
+    if (octets[0] === 192 && octets[1] === 168) return true;
+    // 169.254.0.0/16 (Link Local)
+    if (octets[0] === 169 && octets[1] === 254) return true;
+    return false;
+  }
+
+  return false;
+}
+
+function validatePrivateRoutingUrl(urlString, envVarName = 'OSRM_BASE_URL') {
+  if (!urlString) return;
+  try {
+    const parsed = new URL(urlString);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      console.error(`FATAL_CONFIGURATION_ERROR: ${envVarName} must use http or https protocol.`);
+      process.exit(1);
+    }
+    if (!isPrivateRoutingHostname(parsed.hostname)) {
+      console.error(`FATAL_CONFIGURATION_ERROR: ${envVarName} must point to a private internal routing endpoint, received public host: ${parsed.hostname}`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`FATAL_CONFIGURATION_ERROR: Invalid URL for ${envVarName}: ${err.message}`);
+    process.exit(1);
+  }
+}
+
 function validateProductionConfiguration(env = process.env) {
   if (!env.DATABASE_URL) {
     console.error('FATAL_CONFIGURATION_ERROR: DATABASE_URL is strictly required for Commerce OS Production Server.');
@@ -88,6 +158,10 @@ function validateProductionConfiguration(env = process.env) {
   if (!env.OSRM_BASE_URL) {
     console.error('FATAL_CONFIGURATION_ERROR: OSRM_BASE_URL is strictly required for Commerce OS Production Server.');
     process.exit(1);
+  }
+  validatePrivateRoutingUrl(env.OSRM_BASE_URL, 'OSRM_BASE_URL');
+  if (env.OSRM_FALLBACK_URL) {
+    validatePrivateRoutingUrl(env.OSRM_FALLBACK_URL, 'OSRM_FALLBACK_URL');
   }
   if (!env.JWT_SECRET) {
     console.error('FATAL_CONFIGURATION_ERROR: JWT_SECRET is strictly required for Commerce OS Production Server.');
@@ -306,7 +380,17 @@ const REQUIRED_DATABASE_MIGRATIONS = [
     delivery_id VARCHAR(64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );`,
-  `CREATE INDEX IF NOT EXISTS idx_telemetry_attestation_nonces_created ON telemetry_attestation_nonces(created_at);`
+  `CREATE INDEX IF NOT EXISTS idx_telemetry_attestation_nonces_created ON telemetry_attestation_nonces(created_at);`,
+  `CREATE TABLE IF NOT EXISTS rider_attestation_keys (
+    rider_id VARCHAR(64) NOT NULL,
+    key_id VARCHAR(128) NOT NULL,
+    public_key TEXT NOT NULL,
+    counter BIGINT NOT NULL DEFAULT 0,
+    platform VARCHAR(32) NOT NULL DEFAULT 'ios_app_attest',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (rider_id, key_id)
+  );`
 ];
 
 async function runDatabaseMigrations(pgPool) {
@@ -366,6 +450,16 @@ if (DATABASE_URL) {
 const OSRM_FALLBACK_URL = process.env.OSRM_FALLBACK_URL || process.env.ROUTING_FALLBACK_URL || '';
 
 async function queryOsrmEndpoint(baseUrl, lon1, lat1, lon2, lat2, withWaypoints) {
+  if (!baseUrl) return { ok: false, error: 'OSRM_BASE_URL_UNCONFIGURED' };
+  try {
+    const parsed = new URL(baseUrl);
+    if (!isPrivateRoutingHostname(parsed.hostname)) {
+      console.warn(`[ProductionServer] Refusing to forward coordinates to non-private routing host: ${parsed.hostname}`);
+      return { ok: false, error: 'PUBLIC_ROUTING_ENDPOINT_FORBIDDEN' };
+    }
+  } catch (_) {
+    return { ok: false, error: 'INVALID_ROUTING_URL' };
+  }
   const geomParam = withWaypoints ? 'overview=full&geometries=geojson' : 'overview=false';
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBase}/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?${geomParam}`;
@@ -1610,16 +1704,94 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
       } catch (_) {}
     }
 
-    // 2. Apple App Attest / DeviceCheck Hardware Assertion
-    if (!verified && (attestation.appAttestToken || attestation.assertion) && attestation.clientDataHash) {
+    // 2. Apple App Attest Hardware Assertion Verification (Registered Key & Monotonic Counter)
+    if (!verified && (attestation.appAttestToken || attestation.assertion)) {
       try {
-        const candidateHashes = candidatePayloads.map(msg => crypto.createHash('sha256').update(msg).digest('hex'));
-        const clientDataHashHex = String(attestation.clientDataHash).trim();
-        if (candidateHashes.includes(clientDataHashHex)) {
-          if (signature && JWT_SECRET) {
-            const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(clientDataHashHex).digest('hex');
-            if (signature.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
-              verified = true;
+        const assertionData = attestation.assertion || attestation.appAttestToken;
+        const keyId = String(attestation.keyId || 'default_rider_key').trim();
+
+        // 1. Verify clientDataHash matches SHA-256 of candidate payloads
+        let clientDataHashBuf = null;
+        if (attestation.clientDataHash) {
+          clientDataHashBuf = Buffer.from(String(attestation.clientDataHash).trim(), 'hex');
+        }
+
+        let hashMatches = false;
+        let matchedHash = null;
+        for (const msg of candidatePayloads) {
+          const expectedHash = crypto.createHash('sha256').update(msg).digest();
+          if (clientDataHashBuf && crypto.timingSafeEqual(expectedHash, clientDataHashBuf)) {
+            hashMatches = true;
+            matchedHash = expectedHash;
+            break;
+          } else if (!clientDataHashBuf) {
+            hashMatches = true;
+            matchedHash = expectedHash;
+            break;
+          }
+        }
+
+        if (hashMatches && matchedHash) {
+          // Look up registered public key and counter for (riderId, keyId)
+          let keyRow = null;
+          if (pool) {
+            try {
+              const res = await pool.query(
+                'SELECT public_key, counter FROM rider_attestation_keys WHERE rider_id = $1 AND key_id = $2',
+                [riderId, keyId]
+              );
+              if (res.rows.length > 0) {
+                keyRow = res.rows[0];
+              }
+            } catch (_) {}
+          }
+
+          if (keyRow) {
+            // Parse assertion data: authenticatorData (min 37 bytes) and signature
+            let authDataBuf = null;
+            let sigBuf = null;
+            if (typeof assertionData === 'object' && assertionData.authenticatorData && assertionData.signature) {
+              authDataBuf = Buffer.isBuffer(assertionData.authenticatorData) ? assertionData.authenticatorData : Buffer.from(assertionData.authenticatorData, 'base64');
+              sigBuf = Buffer.isBuffer(assertionData.signature) ? assertionData.signature : Buffer.from(assertionData.signature, 'base64');
+            } else if (typeof assertionData === 'string') {
+              try {
+                const parsed = JSON.parse(Buffer.from(assertionData, 'base64').toString('utf8'));
+                if (parsed.authenticatorData && parsed.signature) {
+                  authDataBuf = Buffer.from(parsed.authenticatorData, 'base64');
+                  sigBuf = Buffer.from(parsed.signature, 'base64');
+                }
+              } catch (_) {}
+            }
+
+            if (authDataBuf && sigBuf && authDataBuf.length >= 37) {
+              // Extract counter (bytes 33-36, big-endian unsigned 32-bit int)
+              const counter = authDataBuf.readUInt32BE(33);
+              const prevCounter = Number(keyRow.counter || 0);
+
+              // Counter must be strictly monotonic
+              if (counter > prevCounter) {
+                // Verify ECDSA signature over (authenticatorData + clientDataHash)
+                const signedData = Buffer.concat([authDataBuf, matchedHash]);
+                const pubKeyPem = keyRow.public_key.startsWith('-----BEGIN')
+                  ? keyRow.public_key
+                  : `-----BEGIN PUBLIC KEY-----\n${keyRow.public_key}\n-----END PUBLIC KEY-----`;
+
+                try {
+                  const verifier = crypto.createVerify('SHA256');
+                  verifier.update(signedData);
+                  const isSigValid = verifier.verify(pubKeyPem, sigBuf);
+                  if (isSigValid) {
+                    verified = true;
+                    // Atomically advance counter in database
+                    if (pool) {
+                      await pool.query(
+                        'UPDATE rider_attestation_keys SET counter = $1, updated_at = NOW() WHERE rider_id = $2 AND key_id = $3',
+                        [counter, riderId, keyId]
+                      );
+                    }
+                  }
+                } catch (_) {}
+              }
             }
           }
         }
@@ -10208,58 +10380,25 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'INVALID_TELEMETRY', message: err.message });
       }
 
+      if (telemRes && !telemRes.ok && telemRes.error === 'SEQUENCE_CONFLICT') {
+        return sendJson(res, 409, {
+          ok: false,
+          error: 'SEQUENCE_CONFLICT',
+          message: telemRes.message,
+          highestSequence: telemRes.highestSequence,
+          ackSequenceNumber: telemRes.highestSequence
+        });
+      }
+
       let waypoints = delivery.waypoints ? (typeof delivery.waypoints === 'string' ? JSON.parse(delivery.waypoints) : delivery.waypoints) : [];
       let rerouted = false;
       let deviation = { isOffRoute: false, deviationMeters: 0 };
 
-      // Initialize route if not already stored (atomic guard against duplicate concurrent calls)
-      if (waypoints.length === 0 && !inFlightRouteCalculations.has(deliveryId)) {
-        inFlightRouteCalculations.add(deliveryId);
-        const isPrePickup = ['ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'ASSIGNED'].includes(delivery.state);
-        const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
-        const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
-
-        if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL) {
-          try {
-            const osrmUrl = `${OSRM_BASE_URL}/route/v1/driving/${lng},${lat};${destLng},${destLat}?overview=full&geometries=geojson`;
-            const osrmRes = await fetch(osrmUrl);
-            if (osrmRes.ok) {
-              const osrmData = await osrmRes.json();
-              if (osrmData.routes && osrmData.routes.length > 0) {
-                const newRoute = osrmData.routes[0];
-                const newWaypoints = newRoute.geometry.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }));
-                const distanceKm = Math.round((newRoute.distance / 1000) * 10) / 10;
-                const durationMins = Math.max(1, Math.round(newRoute.duration / 60));
-
-                waypoints = newWaypoints;
-                delivery.waypoints = newWaypoints;
-                delivery.route_version = 1;
-                delivery.remainingDurationMins = durationMins;
-                delivery.distance_km = distanceKm;
-
-                if (appRepositories.deliveryRepo && appRepositories.deliveryRepo.updateRouteTransactionally) {
-                  await appRepositories.deliveryRepo.updateRouteTransactionally(deliveryId, newWaypoints, durationMins, distanceKm, 1);
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(`[ProductionServer] Route initialization failed: ${e.message}`);
-          } finally {
-            inFlightRouteCalculations.delete(deliveryId);
-          }
-        } else {
-          inFlightRouteCalculations.delete(deliveryId);
-        }
-      }
-
-      if (waypoints && waypoints.length >= 2) {
-        deviation = detectRouteDeviation(lat, lng, waypoints, 85);
-        const now = Date.now();
-        const lastReroute = lastRerouteTimes.get(deliveryId) || delivery.last_reroute_time || 0;
-        // Debounce automatic reroutes with minimum 10-second cooldown and atomic in-flight guard
-        if (deviation.isOffRoute && (now - lastReroute > 10000) && !inFlightRouteCalculations.has(deliveryId)) {
+      // Route alignment and dynamic updates are strictly gated by hardware attestation verification
+      if (isAttestationVerified) {
+        // Initialize route if not already stored (atomic guard against duplicate concurrent calls)
+        if (waypoints.length === 0 && !inFlightRouteCalculations.has(deliveryId)) {
           inFlightRouteCalculations.add(deliveryId);
-          lastRerouteTimes.set(deliveryId, now);
           const isPrePickup = ['ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'ASSIGNED'].includes(delivery.state);
           const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
           const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
@@ -10278,29 +10417,17 @@ const server = http.createServer(async (req, res) => {
 
                   waypoints = newWaypoints;
                   delivery.waypoints = newWaypoints;
-                  delivery.route_version = (delivery.route_version || 1) + 1;
+                  delivery.route_version = 1;
                   delivery.remainingDurationMins = durationMins;
                   delivery.distance_km = distanceKm;
-                  delivery.last_reroute_time = now;
-                  rerouted = true;
 
                   if (appRepositories.deliveryRepo && appRepositories.deliveryRepo.updateRouteTransactionally) {
-                    await appRepositories.deliveryRepo.updateRouteTransactionally(deliveryId, newWaypoints, durationMins, distanceKm, delivery.route_version);
+                    await appRepositories.deliveryRepo.updateRouteTransactionally(deliveryId, newWaypoints, durationMins, distanceKm, 1);
                   }
-
-                  sseBroadcasterInstance.broadcast(delivery.order_id, 'ROUTE_REROUTED', {
-                    deliveryId,
-                    orderId: delivery.order_id,
-                    routeVersion: delivery.route_version,
-                    waypoints: newWaypoints,
-                    distanceKm,
-                    durationMins,
-                    deviationMeters: deviation.deviationMeters
-                  });
                 }
               }
             } catch (e) {
-              console.warn(`[ProductionServer] Automatic reroute on deviation failed: ${e.message}`);
+              console.warn(`[ProductionServer] Route initialization failed: ${e.message}`);
             } finally {
               inFlightRouteCalculations.delete(deliveryId);
             }
@@ -10308,40 +10435,98 @@ const server = http.createServer(async (req, res) => {
             inFlightRouteCalculations.delete(deliveryId);
           }
         }
-      }
 
-      // Dynamic remaining duration / ETA update if not rerouted
-      if (!rerouted && waypoints && waypoints.length >= 2) {
-        const match = mapMatchRiderToRoute(lat, lng, waypoints);
-        if (match.remainingDistanceKm != null) {
-          const totalDist = Number(delivery.distance_km || delivery.distanceKm || match.remainingDistanceKm || 1);
-          const initialDur = Number(delivery.initial_duration_mins || delivery.durationMins || delivery.remainingDurationMins || 10);
-          const progressRatio = totalDist > 0 ? Math.max(0, Math.min(1, 1 - (match.remainingDistanceKm / totalDist))) : 0;
-          delivery.remainingDurationMins = Math.max(1, Math.ceil(initialDur * (1 - progressRatio)));
-
-          // Periodic route-current dynamic ETA refresh (every >= 15s or >= 150m) against live OSRM
-          const nowMs = Date.now();
-          const lastEtaRefresh = delivery.last_eta_refresh_time || 0;
-          const lastEtaLat = delivery.last_eta_refresh_lat || lat;
-          const lastEtaLng = delivery.last_eta_refresh_lng || lng;
-          const distSinceLastRefreshMeters = haversineDistanceKm(lat, lng, lastEtaLat, lastEtaLng) * 1000;
-
-          if ((nowMs - lastEtaRefresh > 15000) || (distSinceLastRefreshMeters >= 150)) {
+        if (waypoints && waypoints.length >= 2) {
+          deviation = detectRouteDeviation(lat, lng, waypoints, 85);
+          const now = Date.now();
+          const lastReroute = lastRerouteTimes.get(deliveryId) || delivery.last_reroute_time || 0;
+          // Debounce automatic reroutes with minimum 10-second cooldown and atomic in-flight guard
+          if (deviation.isOffRoute && (now - lastReroute > 10000) && !inFlightRouteCalculations.has(deliveryId)) {
+            inFlightRouteCalculations.add(deliveryId);
+            lastRerouteTimes.set(deliveryId, now);
             const isPrePickup = ['ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'ASSIGNED'].includes(delivery.state);
             const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
             const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
 
-            if (!isNaN(destLat) && !isNaN(destLng)) {
+            if (!isNaN(destLat) && !isNaN(destLng) && OSRM_BASE_URL) {
               try {
-                osrmRouteResolver(lat, lng, destLat, destLng, true).then(liveRoute => {
-                  if (liveRoute && liveRoute.ok && liveRoute.durationMins) {
-                    delivery.remainingDurationMins = Math.max(1, Math.ceil(liveRoute.durationMins));
-                    delivery.last_eta_refresh_time = nowMs;
-                    delivery.last_eta_refresh_lat = lat;
-                    delivery.last_eta_refresh_lng = lng;
+                const osrmUrl = `${OSRM_BASE_URL}/route/v1/driving/${lng},${lat};${destLng},${destLat}?overview=full&geometries=geojson`;
+                const osrmRes = await fetch(osrmUrl);
+                if (osrmRes.ok) {
+                  const osrmData = await osrmRes.json();
+                  if (osrmData.routes && osrmData.routes.length > 0) {
+                    const newRoute = osrmData.routes[0];
+                    const newWaypoints = newRoute.geometry.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }));
+                    const distanceKm = Math.round((newRoute.distance / 1000) * 10) / 10;
+                    const durationMins = Math.max(1, Math.round(newRoute.duration / 60));
+
+                    waypoints = newWaypoints;
+                    delivery.waypoints = newWaypoints;
+                    delivery.route_version = (delivery.route_version || 1) + 1;
+                    delivery.remainingDurationMins = durationMins;
+                    delivery.distance_km = distanceKm;
+                    delivery.last_reroute_time = now;
+                    rerouted = true;
+
+                    if (appRepositories.deliveryRepo && appRepositories.deliveryRepo.updateRouteTransactionally) {
+                      await appRepositories.deliveryRepo.updateRouteTransactionally(deliveryId, newWaypoints, durationMins, distanceKm, delivery.route_version);
+                    }
+
+                    sseBroadcasterInstance.broadcast(delivery.order_id, 'ROUTE_REROUTED', {
+                      deliveryId,
+                      orderId: delivery.order_id,
+                      routeVersion: delivery.route_version,
+                      waypoints: newWaypoints,
+                      distanceKm,
+                      durationMins,
+                      deviationMeters: deviation.deviationMeters
+                    });
                   }
-                }).catch(() => {});
-              } catch {}
+                }
+              } catch (e) {
+                console.warn(`[ProductionServer] Automatic reroute on deviation failed: ${e.message}`);
+              } finally {
+                inFlightRouteCalculations.delete(deliveryId);
+              }
+            } else {
+              inFlightRouteCalculations.delete(deliveryId);
+            }
+          }
+        }
+
+        // Dynamic remaining duration / ETA update if not rerouted
+        if (!rerouted && waypoints && waypoints.length >= 2) {
+          const match = mapMatchRiderToRoute(lat, lng, waypoints);
+          if (match.remainingDistanceKm != null) {
+            const totalDist = Number(delivery.distance_km || delivery.distanceKm || match.remainingDistanceKm || 1);
+            const initialDur = Number(delivery.initial_duration_mins || delivery.durationMins || delivery.remainingDurationMins || 10);
+            const progressRatio = totalDist > 0 ? Math.max(0, Math.min(1, 1 - (match.remainingDistanceKm / totalDist))) : 0;
+            delivery.remainingDurationMins = Math.max(1, Math.ceil(initialDur * (1 - progressRatio)));
+
+            // Periodic route-current dynamic ETA refresh (every >= 15s or >= 150m) against live OSRM
+            const nowMs = Date.now();
+            const lastEtaRefresh = delivery.last_eta_refresh_time || 0;
+            const lastEtaLat = delivery.last_eta_refresh_lat || lat;
+            const lastEtaLng = delivery.last_eta_refresh_lng || lng;
+            const distSinceLastRefreshMeters = haversineDistanceKm(lat, lng, lastEtaLat, lastEtaLng) * 1000;
+
+            if ((nowMs - lastEtaRefresh > 15000) || (distSinceLastRefreshMeters >= 150)) {
+              const isPrePickup = ['ACCEPTED', 'EN_ROUTE_STORE', 'ARRIVED_AT_STORE', 'ASSIGNED'].includes(delivery.state);
+              const destLat = isPrePickup ? Number(delivery.merchant_lat || delivery.merchantLat) : Number(delivery.customer_lat || delivery.customerLat);
+              const destLng = isPrePickup ? Number(delivery.merchant_lng || delivery.merchantLng) : Number(delivery.customer_lng || delivery.customerLng);
+
+              if (!isNaN(destLat) && !isNaN(destLng)) {
+                try {
+                  osrmRouteResolver(lat, lng, destLat, destLng, true).then(liveRoute => {
+                    if (liveRoute && liveRoute.ok && liveRoute.durationMins) {
+                      delivery.remainingDurationMins = Math.max(1, Math.ceil(liveRoute.durationMins));
+                      delivery.last_eta_refresh_time = nowMs;
+                      delivery.last_eta_refresh_lat = lat;
+                      delivery.last_eta_refresh_lng = lng;
+                    }
+                  }).catch(() => {});
+                } catch {}
+              }
             }
           }
         }
@@ -10354,13 +10539,16 @@ const server = http.createServer(async (req, res) => {
           riderId: authClaims.sub,
           deliveryId,
           sequenceNumber: seq,
-          latitude: lat,
-          longitude: lng,
-          speedKmh: Number(body.speedKmh || body.speed || 0),
-          speed: Number(body.speedKmh || body.speed || 0),
-          heading: Number(body.heading || body.bearing || 0),
+          latitude: isAttestationVerified ? lat : null,
+          longitude: isAttestationVerified ? lng : null,
+          speedKmh: isAttestationVerified ? Number(body.speedKmh || body.speed || 0) : 0,
+          speed: isAttestationVerified ? Number(body.speedKmh || body.speed || 0) : 0,
+          heading: isAttestationVerified ? Number(body.heading || body.bearing || 0) : 0,
           recordedAt: Date.now(),
-          serverTimestamp: Date.now()
+          serverTimestamp: Date.now(),
+          attestationVerified: isAttestationVerified,
+          untrustedTelemetry: !isAttestationVerified,
+          locationVerified: isAttestationVerified
         },
         null,
         waypoints
@@ -10381,6 +10569,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         accepted: telemRes ? telemRes.accepted : true,
         duplicate: telemRes ? telemRes.duplicate : false,
+        duplicateMatch: telemRes ? Boolean(telemRes.duplicateMatch) : false,
         ackSequenceNumber: seq,
         deliveryId,
         latitude: lat,
@@ -10388,6 +10577,8 @@ const server = http.createServer(async (req, res) => {
         isOffRoute: deviation.isOffRoute,
         deviationMeters: deviation.deviationMeters,
         rerouted,
+        locationVerified: isAttestationVerified,
+        untrustedTelemetry: !isAttestationVerified,
         estimatedArrivalMins: enrichedDto.estimatedArrivalMins,
         etaMode: enrichedDto.etaMode
       });
@@ -10520,18 +10711,15 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
-        const baseUrl = OSRM_BASE_URL.replace(/\/+$/, '');
-        const osrmUrl = `${baseUrl}/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson`;
-        const osrmRes = await fetch(osrmUrl, { headers: { 'User-Agent': 'CommerceOS-Production/2.0' } });
-        if (osrmRes.ok) {
-          const osrmData = await osrmRes.json();
-          if (osrmData.routes && osrmData.routes.length > 0) {
-            const route = osrmData.routes[0];
-            const waypoints = route.geometry.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }));
-            const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
-            const durationMins = Math.max(1, Math.round(route.duration / 60));
-            return sendJson(res, 200, { ok: true, distanceKm, durationMins, waypoints, provider: 'OSRM_OPENSTREETMAP' });
-          }
+        const queryRes = await queryOsrmEndpoint(OSRM_BASE_URL, originLng, originLat, destLng, destLat, true);
+        if (queryRes && queryRes.ok) {
+          return sendJson(res, 200, queryRes);
+        } else if (queryRes && queryRes.error === 'PUBLIC_ROUTING_ENDPOINT_FORBIDDEN') {
+          return sendJson(res, 403, {
+            ok: false,
+            error: 'PUBLIC_ROUTING_ENDPOINT_FORBIDDEN',
+            message: 'Private road network routing forbids public external endpoints.'
+          });
         }
       } catch (e) {
         console.warn(`[ProductionServer] OSRM routing failed: ${e.message}`);
