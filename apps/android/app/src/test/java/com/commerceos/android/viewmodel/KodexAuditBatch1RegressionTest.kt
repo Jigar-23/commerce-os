@@ -1533,6 +1533,133 @@ class KodexAuditBatch1RegressionTest {
     }
 
     @Test
+    fun testCheckoutViewModel_serverOnlySurchargeRequiresOneReviewThenAllowsCheckout() = runTest {
+        var checkoutAttempted = false
+        val item = CartItem(
+            productId = "p_surge",
+            sku = "s_surge",
+            name = "Surge Test Item",
+            unitPrice = BigDecimal("150.00"),
+            quantity = 1
+        )
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> =
+                ApiResult.Success(
+                    CartResponse(
+                        customerId = customerId,
+                        items = listOf(item),
+                        itemsSubtotal = BigDecimal("150.00"),
+                        expressDeliveryFee = BigDecimal("20.00"),
+                        grandTotal = BigDecimal("195.00") // Includes a server-only ₹25 surge fee.
+                    )
+                )
+
+            override suspend fun getServiceability(
+                customerId: String,
+                addressId: String,
+                items: List<ServiceabilityItem>
+            ): ApiResult<ServiceabilityResponse> =
+                ApiResult.Success(ServiceabilityResponse(eligible = true, deliveryFee = 20.0))
+
+            override suspend fun checkoutFromCart(
+                customerId: String,
+                request: CartCheckoutRequest
+            ): ApiResult<CustomerOrderApiResponse> {
+                checkoutAttempted = true
+                return ApiResult.Success(CustomerOrderApiResponse(id = "ord_surge_ok"))
+            }
+        }
+
+        val viewModel = CheckoutViewModel(repo)
+        viewModel.start("cust_surge", listOf(item))
+        viewModel.selectAddress(ApiAddress(id = "addr_surge", addressLine = "Main St", city = "BLR", postalCode = "560001"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.executeCheckout("COD")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertFalse("The changed server total must be shown for customer review first.", checkoutAttempted)
+        assertEquals(BigDecimal("195.00"), viewModel.uiState.grandTotal)
+        assertEquals("Cart contents or price updated. Please review and confirm your order.", viewModel.uiState.errorMessage)
+
+        viewModel.executeCheckout("COD")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue("The unchanged, reviewed server quote must not be rejected again.", checkoutAttempted)
+        assertTrue(viewModel.uiState.state is CheckoutState.Confirmed)
+    }
+
+    @Test
+    fun testCheckoutViewModel_reconcilesRepricedServerCartBeforeReviewRetry() = runTest {
+        var catalogPrice = BigDecimal("100.00")
+        var checkoutAttempted = false
+        fun currentItem() = CartItem(
+            productId = "p_repriced",
+            sku = "s_repriced",
+            name = "Repriced Item",
+            unitPrice = catalogPrice,
+            quantity = 1
+        )
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> {
+                val item = currentItem()
+                val total = catalogPrice.add(BigDecimal("20.00"))
+                return ApiResult.Success(
+                    CartResponse(
+                        customerId = customerId,
+                        items = listOf(item),
+                        itemsSubtotal = catalogPrice,
+                        expressDeliveryFee = BigDecimal("20.00"),
+                        grandTotal = total
+                    )
+                )
+            }
+
+            override suspend fun getServiceability(
+                customerId: String,
+                addressId: String,
+                items: List<ServiceabilityItem>
+            ): ApiResult<ServiceabilityResponse> =
+                ApiResult.Success(ServiceabilityResponse(eligible = true, deliveryFee = 20.0))
+
+            override suspend fun checkoutFromCart(
+                customerId: String,
+                request: CartCheckoutRequest
+            ): ApiResult<CustomerOrderApiResponse> {
+                checkoutAttempted = true
+                return ApiResult.Success(CustomerOrderApiResponse(id = "ord_repriced_ok"))
+            }
+        }
+
+        val cartViewModel = CartViewModel(repo)
+        cartViewModel.init("cust_repriced")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val checkoutViewModel = CheckoutViewModel(repo)
+        checkoutViewModel.setMutationGate(cartViewModel)
+        checkoutViewModel.start("cust_repriced", cartViewModel.cartItems)
+        checkoutViewModel.selectAddress(ApiAddress(id = "addr_repriced", addressLine = "Main St", city = "BLR", postalCode = "560001"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Catalog price changes after the cart was loaded. The first attempt must
+        // refresh both checkout and cart state, then allow the reviewed retry.
+        catalogPrice = BigDecimal("110.00")
+        checkoutViewModel.executeCheckout("COD")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertFalse(checkoutAttempted)
+        assertEquals(BigDecimal("110.00"), checkoutViewModel.uiState.items.single().unitPrice)
+        assertEquals(BigDecimal("110.00"), cartViewModel.cartItems.single().unitPrice)
+
+        checkoutViewModel.executeCheckout("COD")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue("Checkout must accept the exact cart quote the customer just reviewed.", checkoutAttempted)
+        assertTrue(checkoutViewModel.uiState.state is CheckoutState.Confirmed)
+    }
+
+    @Test
     fun testCartViewModel_guestCartSyncUsesServerSupportedIdempotencyKey() = runTest {
         var addCartItemCalls = 0
         var capturedKey: String? = null

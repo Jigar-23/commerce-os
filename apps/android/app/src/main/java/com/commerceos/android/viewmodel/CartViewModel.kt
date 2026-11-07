@@ -82,6 +82,28 @@ class CartViewModel(
         isLockedForCheckout = false
     }
 
+    override suspend fun reconcileWithServer(cart: CartResponse) {
+        val targetCustomerId = customerId.trim()
+        if (targetCustomerId.isBlank()) return
+        val authoritativeItems = sanitizeCartItems(cart.items ?: emptyList())
+        var applied = false
+
+        cartMutex.withLock {
+            if (customerId.trim() == targetCustomerId) {
+                // Invalidate any older asynchronous cart load before replacing its
+                // snapshot with the exact quote that checkout asked the customer to review.
+                cartRevision++
+                cartItems = authoritativeItems
+                totals = cart
+                applied = true
+            }
+        }
+
+        if (applied && !syncLocalCartCache(targetCustomerId, authoritativeItems)) {
+            errorMessage = "Could not update offline cart cache."
+        }
+    }
+
     override suspend fun awaitMutationsIdle(): List<CartItem> {
         // Join all pending background mutation and loading jobs OUTSIDE the mutex to prevent deadlock
         while (true) {

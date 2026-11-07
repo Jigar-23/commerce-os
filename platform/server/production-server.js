@@ -240,7 +240,14 @@ const REQUIRED_DATABASE_MIGRATIONS = [
   `ALTER TABLE stores ADD COLUMN IF NOT EXISTS max_active_orders INT NOT NULL DEFAULT 50;`,
   `ALTER TABLE rider_telemetry ADD COLUMN IF NOT EXISTS is_mock_location BOOLEAN NOT NULL DEFAULT FALSE;`,
   `ALTER TABLE rider_telemetry ADD COLUMN IF NOT EXISTS attestation_verified BOOLEAN NOT NULL DEFAULT FALSE;`,
-  `ALTER TABLE rider_telemetry ADD COLUMN IF NOT EXISTS attestation_payload JSONB DEFAULT NULL;`
+  `ALTER TABLE rider_telemetry ADD COLUMN IF NOT EXISTS attestation_payload JSONB DEFAULT NULL;`,
+  `CREATE TABLE IF NOT EXISTS telemetry_attestation_nonces (
+    nonce VARCHAR(128) PRIMARY KEY,
+    rider_id VARCHAR(64) NOT NULL,
+    delivery_id VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_telemetry_attestation_nonces_created ON telemetry_attestation_nonces(created_at);`
 ];
 
 async function runDatabaseMigrations(pgPool) {
@@ -1422,6 +1429,70 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
   res.writeHead(statusCode, headers);
   res.end(JSON.stringify(data));
 }
+
+// Module-level durable and in-memory replay protection for device telemetry attestations
+const seenAttestationNonces = new Map();
+const ATTESTATION_MAX_AGE_MS = 300000; // 5 minutes sliding window
+const MAX_IN_MEMORY_NONCES = 10000;
+
+function pruneStaleAttestationNonces() {
+  const now = Date.now();
+  for (const [nonce, ts] of seenAttestationNonces.entries()) {
+    if (now - ts > ATTESTATION_MAX_AGE_MS) {
+      seenAttestationNonces.delete(nonce);
+    }
+  }
+}
+setInterval(pruneStaleAttestationNonces, 60000).unref();
+
+function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat = 0, lng = 0, sequenceNumber = 0) {
+  if (!attestation || typeof attestation !== 'object') return false;
+  const { nonce, signature, timestamp, deviceId } = attestation;
+  if (!nonce || !signature || !timestamp) return false;
+  const numTimestamp = Number(timestamp);
+  if (isNaN(numTimestamp)) return false;
+  const age = Math.abs(Date.now() - numTimestamp);
+  if (age > ATTESTATION_MAX_AGE_MS) return false;
+
+  pruneStaleAttestationNonces();
+  const nonceKey = String(nonce).trim();
+  if (!nonceKey || seenAttestationNonces.has(nonceKey)) {
+    return false;
+  }
+
+  try {
+    const candidates = [
+      `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}`,
+      `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}:${deviceId || ''}`,
+      `${riderId}:${deliveryId}:${Number(lat).toFixed(4)}:${Number(lng).toFixed(4)}:${sequenceNumber}:${timestamp}:${nonce}`,
+      `${riderId}:${deliveryId}:${Number(lat).toFixed(6)}:${Number(lng).toFixed(6)}:${sequenceNumber}:${timestamp}:${nonce}`,
+      `${riderId}:${nonce}:${timestamp}:${deviceId || ''}`
+    ];
+    for (const msg of candidates) {
+      const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(msg).digest('hex');
+      if (signature.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+        seenAttestationNonces.set(nonceKey, Date.now());
+        if (seenAttestationNonces.size > MAX_IN_MEMORY_NONCES) {
+          const oldestKey = seenAttestationNonces.keys().next().value;
+          seenAttestationNonces.delete(oldestKey);
+        }
+        if (pool) {
+          pool.query(
+            `INSERT INTO telemetry_attestation_nonces (nonce, rider_id, delivery_id, created_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (nonce) DO NOTHING`,
+            [nonceKey, riderId, deliveryId || null]
+          ).catch(() => {});
+        }
+        return true;
+      }
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+const verifyNonceBoundAttestation = (att, rId) => verifyTelemetryAttestation(att, rId, '', 0, 0, 0);
 
 // 7. Production HTTP Request Router
 const server = http.createServer(async (req, res) => {
@@ -10263,45 +10334,6 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    const seenAttestationNonces = new Map();
-    function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat = 0, lng = 0, sequenceNumber = 0) {
-      if (!attestation || typeof attestation !== 'object') return false;
-      const { nonce, signature, timestamp, deviceId } = attestation;
-      if (!nonce || !signature || !timestamp) return false;
-      const age = Math.abs(Date.now() - Number(timestamp));
-      if (age > 300000) return false;
-
-      // Replay resistance: reject previously seen nonce within 5-minute sliding window
-      const now = Date.now();
-      for (const [n, ts] of seenAttestationNonces.entries()) {
-        if (now - ts > 300000) seenAttestationNonces.delete(n);
-      }
-      if (seenAttestationNonces.has(String(nonce))) {
-        return false;
-      }
-      seenAttestationNonces.set(String(nonce), now);
-
-      try {
-        const candidates = [
-          `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}`,
-          `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}:${deviceId || ''}`,
-          `${riderId}:${deliveryId}:${Number(lat).toFixed(4)}:${Number(lng).toFixed(4)}:${sequenceNumber}:${timestamp}:${nonce}`,
-          `${riderId}:${deliveryId}:${Number(lat).toFixed(6)}:${Number(lng).toFixed(6)}:${sequenceNumber}:${timestamp}:${nonce}`,
-          `${riderId}:${nonce}:${timestamp}:${deviceId || ''}`
-        ];
-        for (const msg of candidates) {
-          const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(msg).digest('hex');
-          if (signature.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
-            return true;
-          }
-        }
-        return false;
-      } catch (_) {
-        return false;
-      }
-    }
-    const verifyNonceBoundAttestation = (att, rId) => verifyTelemetryAttestation(att, rId, '', 0, 0, 0);
-
     // Server-Authoritative Location & Geofence Validator (Finding 3: Atomic geofence and state transition)
     async function verifyRiderMilestoneLocation(txClient, reqBody, delivery, authClaims, targetType) {
       const deliveryId = delivery.delivery_id || delivery.id;
@@ -10320,7 +10352,7 @@ const server = http.createServer(async (req, res) => {
       if (txClient) {
         try {
           const tRes = await txClient.query(
-            `SELECT latitude, longitude, accuracy, accuracy_meters, recorded_at, created_at, timestamp, is_mock_location, attestation_verified
+            `SELECT latitude, longitude, accuracy, recorded_at, sequence_number, is_mock_location, attestation_verified
              FROM rider_telemetry
              WHERE (delivery_id = $1 OR delivery_id = $2) AND rider_id = $3
              ORDER BY sequence_number DESC, recorded_at DESC LIMIT 1`,
@@ -10339,11 +10371,12 @@ const server = http.createServer(async (req, res) => {
       }
 
       // For STORE arrival, if no telemetry has been submitted for this newly accepted delivery, query rider presence
+      // but do NOT treat rider-editable presence as verified or attested proof (attestation_verified = false, is_presence_fallback = true)
       if (!serverTelem && targetType === 'STORE') {
         if (txClient) {
           try {
             const pRes = await txClient.query(
-              `SELECT last_known_lat AS latitude, last_known_lng AS longitude, last_seen_at AS recorded_at, updated_at, 10.0 AS accuracy, FALSE AS is_mock_location, TRUE AS attestation_verified
+              `SELECT last_known_lat AS latitude, last_known_lng AS longitude, last_seen_at AS recorded_at, 10.0 AS accuracy, FALSE AS is_mock_location, FALSE AS attestation_verified, TRUE AS is_presence_fallback
                FROM rider_presence
                WHERE rider_id = $1`,
               [authClaims.sub]
@@ -10364,7 +10397,8 @@ const server = http.createServer(async (req, res) => {
                 accuracy: 10.0,
                 recorded_at: pres.lastSeenAt || pres.updated_at || new Date(),
                 is_mock_location: false,
-                attestation_verified: true
+                attestation_verified: false,
+                is_presence_fallback: true
               };
             }
           } catch (_) {}
@@ -10441,7 +10475,8 @@ const server = http.createServer(async (req, res) => {
       const riderLng = telemLng;
 
       // Compute Location Confidence Score based on telemetry integrity, accuracy, age, and verified cryptographic attestation
-      let locationConfidence = 1.0;
+      const isPresenceFallback = Boolean(serverTelem.is_presence_fallback);
+      let locationConfidence = isPresenceFallback ? 0.50 : 0.85;
 
       // Treat device-integrity evidence as valid only after server-side verification of a bound attestation
       const hasVerifiedAttestation = Boolean(
@@ -10449,9 +10484,8 @@ const server = http.createServer(async (req, res) => {
         serverTelem?.attestationVerified === true ||
         (reqBody?.deviceAttestation && verifyTelemetryAttestation(reqBody.deviceAttestation, authClaims.sub, deliveryId, telemLat, telemLng, 0))
       );
-      if (!hasVerifiedAttestation) {
-        // Unverified rider telemetry penalizes confidence below 0.70 threshold to fail closed without secondary verification
-        locationConfidence -= 0.35;
+      if (hasVerifiedAttestation) {
+        locationConfidence = 1.0;
       }
 
       if (telemAccuracy > 40.0) {
@@ -10472,9 +10506,73 @@ const server = http.createServer(async (req, res) => {
       // If location confidence is insufficient (< 0.70), require authoritative secondary verification
       // (Rider-supplied booleans like merchantConfirmation or customerConfirmation are strictly ignored)
       if (locationConfidence < 0.70) {
-        const secondaryConfirmed = targetType === 'STORE'
-          ? Boolean(delivery.merchant_confirmed_at != null || (reqBody?.merchantOtp && String(reqBody.merchantOtp).trim().length >= 4))
-          : Boolean(delivery.customer_confirmed_at != null || (reqBody?.handoffOtp && String(reqBody.handoffOtp).trim().length >= 4));
+        let secondaryConfirmed = false;
+        const linkedOrderId = delivery.order_id || delivery.id;
+        let orderRow = null;
+        if (txClient) {
+          try {
+            const oRes = await txClient.query(
+              `SELECT id, order_id, status, seller_approval_status, short_order_id, delivery_otp_hash, otp_expires_at, otp_attempts, cumulative_otp_attempts
+               FROM orders WHERE order_id = $1 OR id = $1 LIMIT 1`,
+              [linkedOrderId]
+            );
+            if (oRes.rows.length > 0) orderRow = oRes.rows[0];
+          } catch (_) {}
+        } else if (appRepositories?.orderRepo?.getOrderById) {
+          try {
+            orderRow = await appRepositories.orderRepo.getOrderById(linkedOrderId);
+          } catch (_) {}
+        }
+
+        if (targetType === 'STORE') {
+          // Store milestone: requires either server-recorded merchant confirmation (e.g. from seller portal)
+          // or a valid merchant OTP verified against server-stored value.
+          const isMerchantConfirmed = Boolean(
+            delivery.merchant_confirmed_at != null ||
+            orderRow?.seller_approval_status === 'ACCEPTED' ||
+            orderRow?.status === 'READY_FOR_PICKUP' ||
+            orderRow?.status === 'ACCEPTED'
+          );
+
+          if (isMerchantConfirmed) {
+            secondaryConfirmed = true;
+          } else if (reqBody?.merchantOtp) {
+            const candidateMerchantOtp = String(reqBody.merchantOtp).trim();
+            const expectedHash = delivery.merchant_otp_hash || orderRow?.merchant_otp_hash;
+            if (expectedHash) {
+              const verifyRes = DeliveryOtpService.verifyOtp(candidateMerchantOtp, expectedHash);
+              if (verifyRes.ok) secondaryConfirmed = true;
+            } else if (orderRow?.short_order_id) {
+              const cleanShort = String(orderRow.short_order_id).replace(/\D/g, '');
+              const expectedCode = cleanShort.length >= 4 ? cleanShort.slice(-4) : cleanShort;
+              if (candidateMerchantOtp === expectedCode && expectedCode.length >= 4) {
+                secondaryConfirmed = true;
+              }
+            }
+          }
+        } else {
+          // Customer milestone: requires either server-recorded customer confirmation
+          // or authoritative customer OTP verified against orders.delivery_otp_hash
+          if (delivery.customer_confirmed_at != null) {
+            secondaryConfirmed = true;
+          } else if (reqBody?.handoffOtp || reqBody?.customerOtp || reqBody?.otp) {
+            const candidateCustomerOtp = String(reqBody.handoffOtp || reqBody.customerOtp || reqBody.otp).trim();
+            const expectedHash = orderRow?.delivery_otp_hash || delivery.delivery_otp_hash;
+            if (expectedHash) {
+              const isExpired = orderRow?.otp_expires_at ? (new Date() > new Date(orderRow.otp_expires_at)) : false;
+              const verifyRes = DeliveryOtpService.verifyOtp(
+                candidateCustomerOtp,
+                expectedHash,
+                orderRow?.otp_attempts || 0,
+                5,
+                isExpired
+              );
+              if (verifyRes.ok) {
+                secondaryConfirmed = true;
+              }
+            }
+          }
+        }
 
         if (!secondaryConfirmed) {
           return {

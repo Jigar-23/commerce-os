@@ -47,6 +47,11 @@ const { extractCoarseLocality, sanitizeSegment } = require('./locality-sanitizer
  * Fluent builder for native Apple Push Notification (APNs) JSON payloads
  */
 class ApnsPayloadBuilder {
+  static createRiderOfferNotification(offer) {
+    const d = new ApnsDispatcher();
+    return d.createRiderOfferPayload(offer).build().payload;
+  }
+
   constructor() {
     this.aps = {};
     this.customData = {};

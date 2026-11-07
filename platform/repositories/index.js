@@ -7822,21 +7822,50 @@ class TransactionalCartRepository {
     if (res.rows.length === 0) return [];
     const raw = res.rows[0].items;
     const items = typeof raw === 'string' ? JSON.parse(raw) : (raw || []);
+    if (items.length === 0) return [];
+
+    // Cart rows keep SKU/quantity and may predate catalog price or fulfillment-flag
+    // changes. Re-resolve those fields on every quote so checkout and serviceability
+    // price the same current product snapshot.
+    const identifiers = [...new Set(items.map(item => item.sku || item.productId || item.id).filter(Boolean))];
+    const catalogRes = identifiers.length > 0
+      ? await this.pool.query(
+          `SELECT sku, id, name, price, discounted_price, mrp, rx_requirement, cold_chain_required
+           FROM products
+           WHERE (sku = ANY($1) OR id = ANY($1)) AND is_active = TRUE`,
+          [identifiers]
+        )
+      : { rows: [] };
+    const productByIdentifier = new Map();
+    for (const product of catalogRes.rows || []) {
+      if (product.sku) productByIdentifier.set(String(product.sku), product);
+      if (product.id) productByIdentifier.set(String(product.id), product);
+    }
+
     return items.map(r => {
-      const isRx = Boolean(r.requiresPrescription || r.prescriptionRequired || (r.pharmacyAttributes && r.pharmacyAttributes.prescriptionRequired));
-      const isCold = Boolean(r.coldChain || (r.pharmacyAttributes && r.pharmacyAttributes.coldChain));
-      let uPrice = Number(r.unitPrice || r.discountedPrice || r.price || 0);
+      const product = productByIdentifier.get(String(r.sku || '')) ||
+        productByIdentifier.get(String(r.productId || r.id || '')) || null;
+      const isRx = product
+        ? ['RX_REQUIRED', 'SCHEDULE_H'].includes(String(product.rx_requirement || '').toUpperCase())
+        : Boolean(r.requiresPrescription || r.prescriptionRequired || (r.pharmacyAttributes && r.pharmacyAttributes.prescriptionRequired));
+      const isCold = product
+        ? Boolean(product.cold_chain_required)
+        : Boolean(r.coldChain || (r.pharmacyAttributes && r.pharmacyAttributes.coldChain));
+      let uPrice = product
+        ? Number(product.discounted_price || product.price || product.mrp || 0)
+        : Number(r.unitPrice || r.discountedPrice || r.price || 0);
       if (uPrice <= 0) uPrice = 15;
+      const mrp = product ? Number(product.mrp || product.price || uPrice) : Number(r.mrp || r.price || uPrice);
       return {
         id: r.id || r.sku,
         productId: r.productId || r.id || r.sku,
         sku: r.sku,
-        name: r.name || r.sku,
+        name: product?.name || r.name || r.sku,
         quantity: Number(r.quantity) || 1,
         unitPrice: uPrice,
-        price: Number(r.price || uPrice),
-        discountedPrice: Number(r.discountedPrice || uPrice),
-        mrp: Number(r.mrp || r.price || uPrice),
+        price: uPrice,
+        discountedPrice: uPrice,
+        mrp,
         brand: r.brand || null,
         packSize: r.packSize || null,
         image: r.image || null,
@@ -8053,7 +8082,33 @@ class LocalDevelopmentCartRepository {
 
   async getCart(customerId) {
     this.db.carts = this.db.carts || {};
-    return this.db.carts[customerId] || [];
+    const items = this.db.carts[customerId] || [];
+    if (!Array.isArray(items) || items.length === 0) return [];
+    const products = this.db.products || [];
+    return items.map(r => {
+      const product = products.find(p => p.sku === r.sku || p.id === r.sku || p.sku === r.productId || p.id === r.productId);
+      if (!product) return r;
+      const isRx = ['RX_REQUIRED', 'SCHEDULE_H'].includes(String(product.rxRequirement || product.rx_requirement || '').toUpperCase()) ||
+        Boolean(product.requiresPrescription || product.prescriptionRequired);
+      const isCold = Boolean(product.coldChain || product.cold_chain_required);
+      const uPrice = Number(product.discountedPrice || product.discounted_price || product.price || product.mrp || r.unitPrice || 15);
+      const mrp = Number(product.mrp || product.price || uPrice);
+      return {
+        ...r,
+        name: product.name || r.name || r.sku,
+        unitPrice: uPrice,
+        price: uPrice,
+        discountedPrice: uPrice,
+        mrp,
+        prescriptionRequired: isRx,
+        requiresPrescription: isRx,
+        coldChain: isCold,
+        pharmacyAttributes: {
+          prescriptionRequired: isRx,
+          coldChain: isCold
+        }
+      };
+    });
   }
 
   async addItem(customerId, item, idempotencyKey = null) {

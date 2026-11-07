@@ -428,10 +428,12 @@ class CheckoutViewModel(
                     .add(uiState.coldChainFee)
                     .subtract(currentDiscount)
                     .coerceAtLeast(BigDecimal.ZERO)
+                var authoritativeCartQuote: CartResponse? = null
 
                 when (val backendQuote = repository.fetchBackendCart(customerIdSnapshot)) {
                     is ApiResult.Success -> {
                         val cartDto = backendQuote.data
+                        authoritativeCartQuote = cartDto
                         val serverItems = cartDto.items
                         if (serverItems == null) {
                             failCheckout("CART_SYNC_ERROR", "Server returned incomplete cart quote: missing items")
@@ -461,18 +463,31 @@ class CheckoutViewModel(
                     }
                 }
 
-                val currentGrandTotal = currentSubtotal
-                    .add(uiState.deliveryFee)
-                    .add(uiState.coldChainFee)
-                    .subtract(currentDiscount)
-                    .coerceAtLeast(BigDecimal.ZERO)
-
                 val initialAuthSig = currentItems.map {
+                    "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
+                }.sorted()
+                val uiStateAuthSig = uiState.items.map {
                     "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
                 }.sorted()
                 val freshAuthSig = authoritativeItems.map {
                     "${it.sku.trim()}:${it.quantity}:${it.unitPrice.stripTrailingZeros().toPlainString()}:${it.prescriptionRequired}:${it.coldChain}"
                 }.sorted()
+
+                // Compare against the last total actually shown to the customer when
+                // reviewing this exact item set. The server quote may include server-only
+                // components (for example surge) that are not represented by locally
+                // recomputed fee components. When the settled cart brought in new items
+                // that were not part of the previous uiState snapshot, compare against
+                // the locally recomputed baseline for those new items.
+                val currentGrandTotal = if (initialAuthSig == uiStateAuthSig) {
+                    uiState.grandTotal
+                } else {
+                    currentSubtotal
+                        .add(uiState.deliveryFee)
+                        .add(uiState.coldChainFee)
+                        .subtract(currentDiscount)
+                        .coerceAtLeast(BigDecimal.ZERO)
+                }
 
                 val itemsChanged = initialAuthSig != freshAuthSig
                 val totalChanged = authoritativeGrandTotal.compareTo(currentGrandTotal) != 0
@@ -482,6 +497,7 @@ class CheckoutViewModel(
                 val coldChainFeeChanged = authoritativeColdChainFee.compareTo(uiState.coldChainFee) != 0
 
                 if (itemsChanged || totalChanged || subtotalChanged || discountChanged || deliveryFeeChanged || coldChainFeeChanged) {
+                    gate?.reconcileWithServer(authoritativeCartQuote)
                     uiState = uiState.copy(
                         items = authoritativeItems,
                         itemsSubtotal = authoritativeSubtotal,
@@ -560,6 +576,7 @@ class CheckoutViewModel(
                                 finalColdChainFee.compareTo(coldChainFee) != 0
 
                             if (finalItemsChanged || finalPricingChanged) {
+                                gate?.reconcileWithServer(refreshedData)
                                 uiState = uiState.copy(
                                     items = refreshedItems,
                                     itemsSubtotal = refreshedSubtotal,
