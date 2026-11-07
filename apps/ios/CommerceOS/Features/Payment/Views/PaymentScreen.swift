@@ -10,6 +10,7 @@ public struct PaymentScreen: View {
     @EnvironmentObject private var addressRepository: AddressRepository
     
     public let address: AddressDto?
+    public let quote: AuthoritativeCartQuote?
     public let onAuthorize: (String) -> Void
     public let onChangeAddress: (() -> Void)?
     public let onBack: (() -> Void)?
@@ -17,21 +18,33 @@ public struct PaymentScreen: View {
     @State private var selectedMethod: String = "COD"
     @State private var isPlacingOrder: Bool = false
     @State private var orderError: String? = nil
+    @State private var authoritativeQuote: AuthoritativeCartQuote? = nil
     
     public init(
         address: AddressDto? = nil,
+        quote: AuthoritativeCartQuote? = nil,
         onAuthorize: @escaping (String) -> Void,
         onChangeAddress: (() -> Void)? = nil,
         onBack: (() -> Void)? = nil
     ) {
         self.address = address
+        self.quote = quote
         self.onAuthorize = onAuthorize
         self.onChangeAddress = onChangeAddress
         self.onBack = onBack
     }
     
+    private var activeQuote: AuthoritativeCartQuote? {
+        quote ?? authoritativeQuote
+    }
+
     private var grandTotal: Double {
-        cartStore.subtotal
+        if let q = activeQuote {
+            return q.effectiveGrandTotal
+        }
+        let delivery = cartStore.subtotal > 300 ? 0.0 : 25.0
+        let handling = 5.00
+        return max(0.0, cartStore.subtotal + delivery + handling)
     }
     
     private func triggerHaptic() {
@@ -83,6 +96,17 @@ public struct PaymentScreen: View {
             bottomPlaceOrderBar
         }
         .navigationBarHidden(true)
+        .onAppear {
+            if quote == nil {
+                let customerId = container.customerSession?.customerId ?? UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+                Task {
+                    do {
+                        let q = try await container.orderRepository.fetchCartQuote(customerId: customerId)
+                        await MainActor.run { self.authoritativeQuote = q }
+                    } catch {}
+                }
+            }
+        }
     }
     
     // MARK: - Top App Bar
@@ -276,9 +300,17 @@ public struct PaymentScreen: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(Color(hex: "0F172A"))
             
-            billRow(label: "Item total", value: "₹\(String(format: "%.2f", grandTotal))")
-            billRow(label: "Delivery fee", value: "FREE", isFree: true)
-            billRow(label: "Packaging & Handling", value: "₹0.00")
+            let itemsSubtotal = activeQuote?.effectiveSubtotal ?? cartStore.subtotal
+            let deliveryFee = activeQuote?.effectiveDeliveryFee ?? (cartStore.subtotal > 300 ? 0.0 : 25.0)
+            let packagingFee = activeQuote?.effectivePackagingFee ?? 5.00
+            let discount = activeQuote?.effectiveDiscount ?? 0.0
+
+            billRow(label: "Item total", value: "₹\(String(format: "%.2f", itemsSubtotal))")
+            billRow(label: "Delivery fee", value: deliveryFee == 0 ? "FREE" : "₹\(String(format: "%.2f", deliveryFee))", isFree: deliveryFee == 0)
+            billRow(label: "Packaging & Handling", value: "₹\(String(format: "%.2f", packagingFee))")
+            if discount > 0 {
+                billRow(label: "Coupon Discount (\(activeQuote?.couponCode ?? ""))", value: "-₹\(String(format: "%.2f", discount))", isFree: true)
+            }
             
             Divider().padding(.vertical, 4)
             
@@ -510,7 +542,8 @@ public struct PaymentScreen: View {
                     addressId: authoritativeId,
                     deliveryAddress: addressPayload,
                     items: itemsPayload,
-                    prescriptionId: nil
+                    prescriptionId: nil,
+                    couponCode: activeQuote?.couponCode
                 )
                 
                 let orderRes: ServerOrderResponse = try await container.apiClient.post(

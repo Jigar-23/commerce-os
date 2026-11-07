@@ -632,6 +632,10 @@ fun CommerceOSApp(
                     },
                     onUploadPrescription = {
                         showRxUploadDialog = true
+                    },
+                    onSelectCampaign = { code ->
+                        cartViewModel.applyCoupon(code)
+                        navigate(Screen.Cart)
                     }
                 )
                 }

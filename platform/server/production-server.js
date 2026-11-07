@@ -1593,7 +1593,6 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
 const seenAttestationNonces = new Map();
 const inMemoryAttestationKeys = new Map();
 const attestationEnrollmentChallenges = new Map();
-const deliveryAttestationSessions = new Map(); // deliveryId -> { lastAttestedAt: number, riderId: string }
 const ATTESTATION_MAX_AGE_MS = 300000; // 5 minutes sliding window
 const MAX_IN_MEMORY_NONCES = 10000;
 
@@ -4713,7 +4712,11 @@ const server = http.createServer(async (req, res) => {
         }
 
         let discount = 0;
-        if (promo.type === 'PERCENTAGE') {
+        const promoType = String(promo.type || promo.discount_type || promo.discountType || '').toUpperCase();
+        const isFreeShipping = (promoType === 'FREE_SHIPPING' || promoType === 'FREE_DELIVERY');
+        if (isFreeShipping) {
+          discount = 25.00;
+        } else if (promoType === 'PERCENTAGE') {
           const calculated = subtotal * (Number(promo.discount_percent || 0) / 100);
           const maxDisc = promo.max_discount != null ? Number(promo.max_discount) : null;
           discount = maxDisc ? Math.min(maxDisc, calculated) : calculated;
@@ -4727,7 +4730,11 @@ const server = http.createServer(async (req, res) => {
           code: promo.code,
           discountAmount: discount,
           discountText: promo.discount_text,
-          message: `Coupon '${promo.code}' applied! You saved ₹${discount.toFixed(2)}`
+          isFreeShipping: isFreeShipping,
+          freeDeliveryEligible: isFreeShipping,
+          message: isFreeShipping
+            ? `Coupon '${promo.code}' applied! Free express delivery unlocked.`
+            : `Coupon '${promo.code}' applied! You saved ₹${discount.toFixed(2)}`
         });
       } catch (err) {
         console.warn('[production-server] promo validation error:', err.message);
@@ -5615,6 +5622,7 @@ const server = http.createServer(async (req, res) => {
       let couponDiscount = 0;
       let couponStatus = null;
       let invalidCouponReason = null;
+      let isFreeShipping = false;
       if (couponCode && pool) {
         try {
           const promoRes = await pool.query('SELECT * FROM promotions WHERE UPPER(code) = UPPER($1)', [String(couponCode).trim()]);
@@ -5622,6 +5630,7 @@ const server = http.createServer(async (req, res) => {
             invalidCouponReason = `Coupon '${couponCode}' is invalid.`;
           } else {
             const promo = promoRes.rows[0];
+            const promoType = String(promo.type || promo.discount_type || promo.discountType || '').toUpperCase();
             if (promo.status !== 'ACTIVE') {
               invalidCouponReason = `Coupon '${couponCode}' is currently ${promo.status.toLowerCase()}.`;
             } else if (promo.valid_until && new Date(promo.valid_until) < new Date()) {
@@ -5629,7 +5638,10 @@ const server = http.createServer(async (req, res) => {
             } else if (roundedSubtotal < Number(promo.min_order_value || 0)) {
               invalidCouponReason = `Add ₹${(Number(promo.min_order_value) - roundedSubtotal).toFixed(2)} more to apply ${couponCode}`;
             } else {
-              if (promo.type === 'PERCENTAGE') {
+              if (promoType === 'FREE_SHIPPING' || promoType === 'FREE_DELIVERY') {
+                isFreeShipping = true;
+                couponDiscount = deliveryFee;
+              } else if (promoType === 'PERCENTAGE') {
                 const calc = roundedSubtotal * (Number(promo.discount_percent || 0) / 100);
                 couponDiscount = promo.max_discount != null ? Math.min(Number(promo.max_discount), calc) : calc;
               } else {
@@ -5644,9 +5656,11 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      const effectiveDeliveryFee = isFreeShipping ? 0 : deliveryFee;
+      const isFreeDeliveryEligible = freeDeliveryEligible || isFreeShipping;
       const totalDiscount = Math.max(Number(pricing.discountAmount || 0), couponDiscount);
-      const grandTotal = Math.max(0, Math.round((Number(pricing.totalAmount) - couponDiscount) * 100) / 100);
-      const remainingForFreeDelivery = Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - roundedSubtotal) * 100) / 100);
+      const grandTotal = Math.max(0, Math.round((Number(pricing.totalAmount) - (isFreeShipping ? deliveryFee : couponDiscount)) * 100) / 100);
+      const remainingForFreeDelivery = isFreeShipping ? 0 : Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - roundedSubtotal) * 100) / 100);
       const requiresPrescription = items.some(it => it.prescriptionRequired);
 
       return {
@@ -5654,8 +5668,8 @@ const server = http.createServer(async (req, res) => {
         items: items,
         subtotal: roundedSubtotal,
         itemsSubtotal: roundedSubtotal,
-        deliveryFee: deliveryFee,
-        expressDeliveryFee: deliveryFee,
+        deliveryFee: effectiveDeliveryFee,
+        expressDeliveryFee: effectiveDeliveryFee,
         coldChainPackagingFee: coldChainPackagingFee,
         packagingFee: coldChainPackagingFee,
         handlingFee: coldChainPackagingFee,
@@ -5670,7 +5684,7 @@ const server = http.createServer(async (req, res) => {
         requiresPrescription: requiresPrescription,
         prescriptionRequired: requiresPrescription,
         freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD,
-        freeDeliveryEligible: freeDeliveryEligible,
+        freeDeliveryEligible: isFreeDeliveryEligible,
         remainingForFreeDelivery: remainingForFreeDelivery,
         isProvisional: isProvisional,
         isQuoteProvisional: isProvisional
@@ -10820,6 +10834,37 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: 'INVALID_COUNTER', message: 'Attestation signCount must be 0 upon registration.' });
           }
 
+          // Verify AAGUID (bytes 37-52): validate App Attest environment (Finding 6)
+          const aaguid = authData.subarray(37, 53);
+          const devAaguid = Buffer.from('appattestdevelop', 'ascii');
+          const prodAaguid = Buffer.concat([Buffer.from('appattest', 'ascii'), Buffer.alloc(7, 0)]);
+          const zeroAaguid = Buffer.alloc(16, 0);
+
+          const appAttestEnv = String(process.env.APP_ATTEST_ENVIRONMENT || (process.env.NODE_ENV === 'production' ? 'production' : 'development')).toLowerCase();
+
+          if (appAttestEnv === 'production') {
+            if (aaguid.equals(devAaguid)) {
+              return sendJson(res, 400, {
+                error: 'INVALID_ATTESTATION_ENVIRONMENT',
+                message: 'Development App Attest key is strictly rejected in production environment.'
+              });
+            }
+            if (!aaguid.equals(prodAaguid) && !aaguid.equals(zeroAaguid)) {
+              return sendJson(res, 400, {
+                error: 'INVALID_AAGUID',
+                message: 'Authenticator AAGUID does not match production App Attest identifier.'
+              });
+            }
+          } else {
+            const isKnownAaguid = aaguid.equals(devAaguid) || aaguid.equals(prodAaguid) || aaguid.equals(zeroAaguid);
+            if (!isKnownAaguid) {
+              return sendJson(res, 400, {
+                error: 'INVALID_AAGUID',
+                message: 'Authenticator AAGUID does not match valid App Attest identifier.'
+              });
+            }
+          }
+
           // Verify credentialId and bind to submitted keyId
           const credentialIdLength = authData.readUInt16BE(53);
           if (authData.length < 55 + credentialIdLength) {
@@ -11021,16 +11066,7 @@ const server = http.createServer(async (req, res) => {
       );
 
       const now = Date.now();
-      if (isAttestationVerified) {
-        deliveryAttestationSessions.set(deliveryId, { lastAttestedAt: now, riderId: authClaims.sub });
-      }
-      const activeAttestation = deliveryAttestationSessions.get(deliveryId);
-      const isSessionAttested = Boolean(
-        activeAttestation &&
-        activeAttestation.riderId === authClaims.sub &&
-        (now - activeAttestation.lastAttestedAt < 120000)
-      );
-      const isTrustedForTracking = isAttestationVerified || isSessionAttested;
+      const isTrustedForTracking = isAttestationVerified;
 
       let telemRes = null;
       try {
@@ -11067,8 +11103,8 @@ const server = http.createServer(async (req, res) => {
       let rerouted = false;
       let deviation = { isOffRoute: false, deviationMeters: 0 };
 
-      // Route alignment and dynamic updates are active for verified milestones and active attested sessions
-      if (isAttestationVerified || isSessionAttested) {
+      // Route alignment and dynamic updates are active ONLY for verified milestone packets
+      if (isAttestationVerified) {
         // Initialize route if not already stored (atomic guard against duplicate concurrent calls)
         if (waypoints.length === 0 && !inFlightRouteCalculations.has(deliveryId)) {
           inFlightRouteCalculations.add(deliveryId);
@@ -11205,6 +11241,66 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      // Publish only the last verified point as stale when no valid token exists;
+      // never relabel new client coordinates as verified.
+      let broadcastPoint = null;
+      if (isAttestationVerified) {
+        broadcastPoint = {
+          latitude: lat,
+          longitude: lng,
+          speedKmh: Number(body.speedKmh || body.speed || 0),
+          speed: Number(body.speedKmh || body.speed || 0),
+          heading: Number(body.heading || body.bearing || 0),
+          recordedAt: now,
+          serverTimestamp: now,
+          attestationVerified: true,
+          untrustedTelemetry: false,
+          locationVerified: true,
+          isStale: false
+        };
+      } else {
+        let lastVerifiedPoint = null;
+        if (appRepositories && appRepositories.telemetryRepo) {
+          if (typeof appRepositories.telemetryRepo.getLatestVerifiedTelemetryForDelivery === 'function') {
+            lastVerifiedPoint = await appRepositories.telemetryRepo.getLatestVerifiedTelemetryForDelivery(deliveryId);
+          } else if (typeof appRepositories.telemetryRepo.getLatestTelemetryForDelivery === 'function') {
+            const candidate = await appRepositories.telemetryRepo.getLatestTelemetryForDelivery(deliveryId);
+            if (candidate && (candidate.attestationVerified || candidate.attestation_verified)) {
+              lastVerifiedPoint = candidate;
+            }
+          }
+        }
+        if (lastVerifiedPoint) {
+          broadcastPoint = {
+            latitude: lastVerifiedPoint.latitude,
+            longitude: lastVerifiedPoint.longitude,
+            speedKmh: 0,
+            speed: 0,
+            heading: lastVerifiedPoint.heading || 0,
+            recordedAt: lastVerifiedPoint.recordedAt,
+            serverTimestamp: now,
+            attestationVerified: false,
+            untrustedTelemetry: true,
+            locationVerified: false,
+            isStale: true
+          };
+        } else {
+          broadcastPoint = {
+            latitude: null,
+            longitude: null,
+            speedKmh: 0,
+            speed: 0,
+            heading: 0,
+            recordedAt: now,
+            serverTimestamp: now,
+            attestationVerified: false,
+            untrustedTelemetry: true,
+            locationVerified: false,
+            isStale: true
+          };
+        }
+      }
+
       // Broadcast real-time map-matched tracking update to customer and order streams
       const enrichedDto = buildEnrichedTrackingDTO(
         delivery,
@@ -11212,19 +11308,8 @@ const server = http.createServer(async (req, res) => {
           riderId: authClaims.sub,
           deliveryId,
           sequenceNumber: seq,
-          latitude: isTrustedForTracking ? lat : null,
-          longitude: isTrustedForTracking ? lng : null,
-          speedKmh: isTrustedForTracking ? Number(body.speedKmh || body.speed || 0) : 0,
-          speed: isTrustedForTracking ? Number(body.speedKmh || body.speed || 0) : 0,
-          heading: isTrustedForTracking ? Number(body.heading || body.bearing || 0) : 0,
-          recordedAt: now,
-          serverTimestamp: now,
-          attestationVerified: isAttestationVerified,
-          sessionAttested: isSessionAttested,
-          lastAttestedAt: activeAttestation?.lastAttestedAt || null,
-          unverifiedPeriod: !isAttestationVerified,
-          untrustedTelemetry: !isTrustedForTracking,
-          locationVerified: isTrustedForTracking
+          ...broadcastPoint,
+          unverifiedPeriod: !isAttestationVerified
         },
         null,
         waypoints
@@ -11248,13 +11333,14 @@ const server = http.createServer(async (req, res) => {
         duplicateMatch: telemRes ? Boolean(telemRes.duplicateMatch) : false,
         ackSequenceNumber: seq,
         deliveryId,
-        latitude: lat,
-        longitude: lng,
+        latitude: isAttestationVerified ? lat : broadcastPoint.latitude,
+        longitude: isAttestationVerified ? lng : broadcastPoint.longitude,
         isOffRoute: deviation.isOffRoute,
         deviationMeters: deviation.deviationMeters,
         rerouted,
         locationVerified: isAttestationVerified,
         untrustedTelemetry: !isAttestationVerified,
+        isStale: !isAttestationVerified,
         estimatedArrivalMins: enrichedDto.estimatedArrivalMins,
         etaMode: enrichedDto.etaMode
       });

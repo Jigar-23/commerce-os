@@ -7330,6 +7330,40 @@ class TransactionalTelemetryRepository {
     };
   }
 
+  async getLatestVerifiedTelemetryForDelivery(deliveryId) {
+    if (!this.pool || !deliveryId) return null;
+    const res = await this.pool.query(
+      `SELECT rider_id, delivery_id, sequence_number, latitude, longitude, heading, speed, accuracy, recorded_at, is_mock_location, attestation_verified, attestation_payload
+       FROM rider_telemetry
+       WHERE delivery_id = $1 AND attestation_verified = true
+       ORDER BY sequence_number DESC, recorded_at DESC
+       LIMIT 1`,
+      [deliveryId]
+    );
+    if (!res.rows[0]) return null;
+    const row = res.rows[0];
+    const ts = new Date(row.recorded_at).getTime();
+    return {
+      riderId: row.rider_id,
+      deliveryId: row.delivery_id,
+      sequenceNumber: Number(row.sequence_number || 1),
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+      heading: Number(row.heading || 0),
+      speedKmh: Number(row.speed || 0),
+      speed: Number(row.speed || 0),
+      accuracyMeters: Number(row.accuracy || 10),
+      isMockLocation: Boolean(row.is_mock_location),
+      is_mock_location: Boolean(row.is_mock_location),
+      attestationVerified: true,
+      attestation_verified: true,
+      attestationPayload: row.attestation_payload,
+      recordedAt: ts,
+      serverTimestamp: ts,
+      isStale: true
+    };
+  }
+
   async getLatestTelemetry(deliveryIdOrRiderId) {
     if (!this.pool || !deliveryIdOrRiderId) return null;
     const byDelivery = await this.getLatestTelemetryForDelivery(deliveryIdOrRiderId);
@@ -7437,6 +7471,12 @@ class LocalDevelopmentTelemetryRepository {
     const list = (this.db.riderTelemetry || []).filter(t => t.deliveryId === deliveryId);
     if (list.length === 0) return null;
     return list[list.length - 1];
+  }
+
+  async getLatestVerifiedTelemetryForDelivery(deliveryId) {
+    const list = (this.db.riderTelemetry || []).filter(t => t.deliveryId === deliveryId && (t.attestationVerified === true || t.attestation_verified === true));
+    if (list.length === 0) return null;
+    return { ...list[list.length - 1], isStale: true };
   }
 
   async getLatestTelemetry(deliveryIdOrRiderId) {

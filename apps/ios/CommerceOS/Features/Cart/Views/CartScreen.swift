@@ -41,6 +41,9 @@ public struct CartScreen: View {
     @State private var couponDiscountAmount: Double = 0.0
     @State private var couponFeedbackMessage: String? = nil
     @State private var isCouponError: Bool = false
+    @State private var authoritativeQuote: AuthoritativeCartQuote? = nil
+    @State private var isFetchingQuote: Bool = false
+    @State private var priceChangeNotice: String? = nil
     
     private struct CouponCampaignItem: Identifiable {
         let id: String
@@ -461,11 +464,26 @@ public struct CartScreen: View {
                     
                     // Bill Breakdown
                     VStack(spacing: 8) {
+                        if let notice = priceChangeNotice {
+                            HStack(spacing: 6) {
+                                Image(systemName: "info.circle.fill")
+                                    .foregroundColor(Color(hex: "0284C7"))
+                                Text(notice)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(Color(hex: "0369A1"))
+                                Spacer()
+                            }
+                            .padding(8)
+                            .background(Color(hex: "F0F9FF"))
+                            .cornerRadius(8)
+                        }
+
                         HStack {
                             Text("Item Total")
                                 .foregroundColor(Color(hex: "0F172A"))
                             Spacer()
-                            Text("₹\(String(format: "%.2f", cartStore.subtotal))")
+                            let sub = authoritativeQuote?.effectiveSubtotal ?? cartStore.subtotal
+                            Text("₹\(String(format: "%.2f", sub))")
                                 .foregroundColor(Color(hex: "0F172A"))
                         }
                         .font(.system(size: 13))
@@ -474,9 +492,12 @@ public struct CartScreen: View {
                             Text("10-Min Express Delivery Fee")
                                 .foregroundColor(Color(hex: "0F172A"))
                             Spacer()
-                            Text(cartStore.subtotal > 300 ? "FREE" : "₹25.00")
-                                .foregroundColor(cartStore.subtotal > 300 ? Color(hex: "059669") : Color(hex: "0F172A"))
-                                .fontWeight(cartStore.subtotal > 300 ? .bold : .regular)
+                            let isFree = (authoritativeQuote != nil) ? (authoritativeQuote!.effectiveDeliveryFee == 0) : (cartStore.subtotal > 300)
+                            let feeVal = authoritativeQuote?.effectiveDeliveryFee ?? (cartStore.subtotal > 300 ? 0.0 : 25.0)
+                            let feeText = isFree ? "FREE" : "₹\(String(format: "%.2f", feeVal))"
+                            Text(feeText)
+                                .foregroundColor(isFree ? Color(hex: "059669") : Color(hex: "0F172A"))
+                                .fontWeight(isFree ? .bold : .regular)
                         }
                         .font(.system(size: 13))
                         
@@ -484,7 +505,8 @@ public struct CartScreen: View {
                             Text("Handling & Packaging Fee")
                                 .foregroundColor(Color(hex: "0F172A"))
                             Spacer()
-                            Text("₹5.00")
+                            let packFee = authoritativeQuote?.effectivePackagingFee ?? 5.00
+                            Text("₹\(String(format: "%.2f", packFee))")
                                 .foregroundColor(Color(hex: "0F172A"))
                         }
                         .font(.system(size: 13))
@@ -501,16 +523,17 @@ public struct CartScreen: View {
                             .font(.system(size: 13))
                         }
 
-                        if couponDiscountAmount > 0 {
+                        let effDiscount = authoritativeQuote?.effectiveDiscount ?? couponDiscountAmount
+                        if effDiscount > 0 {
                             HStack {
                                 HStack(spacing: 4) {
                                     Image(systemName: "tag.fill")
                                         .font(.system(size: 11))
-                                    Text("Coupon Discount (\(appliedCouponCode ?? ""))")
+                                    Text("Coupon Discount (\(authoritativeQuote?.couponCode ?? appliedCouponCode ?? ""))")
                                 }
                                 .foregroundColor(Color(hex: "059669"))
                                 Spacer()
-                                Text("-₹\(String(format: "%.2f", couponDiscountAmount))")
+                                Text("-₹\(String(format: "%.2f", effDiscount))")
                                     .foregroundColor(Color(hex: "059669"))
                                     .fontWeight(.bold)
                             }
@@ -669,6 +692,10 @@ public struct CartScreen: View {
             }
             .onAppear {
                 loadSavedPrescriptions()
+                fetchAuthoritativeQuote()
+            }
+            .onChange(of: cartStore.totalItemCount) { _ in
+                fetchAuthoritativeQuote()
             }
         }
     }
@@ -834,6 +861,44 @@ public struct CartScreen: View {
         .padding(.horizontal, 14)
     }
     
+    private func fetchAuthoritativeQuote(coupon: String? = nil) {
+        let code = coupon ?? appliedCouponCode
+        let customerId = UserDefaults.standard.string(forKey: "customer_id") ?? "self"
+        isFetchingQuote = true
+        Task {
+            do {
+                let quote = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: code)
+                await MainActor.run {
+                    self.isFetchingQuote = false
+                    let priorTotal = self.authoritativeQuote?.effectiveGrandTotal
+                    self.authoritativeQuote = quote
+
+                    if let invalidReason = quote.invalidCouponReason, !invalidReason.isEmpty {
+                        self.couponFeedbackMessage = invalidReason
+                        self.isCouponError = true
+                        self.appliedCouponCode = nil
+                        self.couponDiscountAmount = 0.0
+                    } else if let validCoupon = quote.couponCode, !validCoupon.isEmpty {
+                        self.appliedCouponCode = validCoupon
+                        self.couponDiscountAmount = quote.effectiveDiscount
+                        self.couponFeedbackMessage = "Coupon '\(validCoupon)' applied! Saved ₹\(Int(quote.effectiveDiscount))"
+                        self.isCouponError = false
+                    }
+
+                    if let prior = priorTotal, prior > 0, abs(prior - quote.effectiveGrandTotal) > 0.5 {
+                        let diff = quote.effectiveGrandTotal - prior
+                        let changeText = diff > 0 ? "+₹\(String(format: "%.2f", diff))" : "-₹\(String(format: "%.2f", abs(diff)))"
+                        self.priceChangeNotice = "Authoritative quote updated (\(changeText)). Please review."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isFetchingQuote = false
+                }
+            }
+        }
+    }
+
     private func applyCoupon(code: String) {
         let clean = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !clean.isEmpty else {
@@ -841,32 +906,18 @@ public struct CartScreen: View {
             isCouponError = true
             return
         }
-        guard let campaign = availableCampaigns.first(where: { $0.code == clean }) else {
-            couponFeedbackMessage = "Invalid coupon code '\(clean)'"
-            isCouponError = true
-            return
-        }
-        if cartStore.subtotal < campaign.minOrderValue {
-            let diff = campaign.minOrderValue - cartStore.subtotal
-            couponFeedbackMessage = "Add ₹\(Int(ceil(diff))) more to apply \(campaign.code)"
-            isCouponError = true
-            return
-        }
-        
-        appliedCouponCode = campaign.code
-        couponDiscountAmount = campaign.flatDiscount
-        couponFeedbackMessage = "Coupon '\(campaign.code)' applied! Saved ₹\(Int(campaign.flatDiscount))"
-        isCouponError = false
         inputCouponCode = ""
+        fetchAuthoritativeQuote(coupon: clean)
     }
-    
+
     private func removeCoupon() {
         appliedCouponCode = nil
         couponDiscountAmount = 0.0
         couponFeedbackMessage = nil
         isCouponError = false
+        fetchAuthoritativeQuote(coupon: nil)
     }
-    
+
     private var isAddressSelected: Bool {
         guard let addr = addressRepository.selectedAddress else { return false }
         return !addr.id.isEmpty &&
@@ -874,8 +925,11 @@ public struct CartScreen: View {
                (addr.tag?.caseInsensitiveCompare("Current Location") != .orderedSame) &&
                !addr.addressLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    
+
     private var grandTotal: Double {
+        if let quote = authoritativeQuote {
+            return max(0.0, quote.effectiveGrandTotal + Double(selectedTip))
+        }
         let delivery = cartStore.subtotal > 300 ? 0.0 : 25.0
         let handling = 5.00
         let tip = Double(selectedTip)
@@ -988,7 +1042,8 @@ public struct CartScreen: View {
                     addressId: authoritativeId,
                     deliveryAddress: addressPayload,
                     items: itemsPayload,
-                    prescriptionId: attachedPrescription?.id
+                    prescriptionId: attachedPrescription?.id,
+                    couponCode: appliedCouponCode
                 )
                 
                 let orderRes: ServerOrderResponse = try await container.apiClient.post(

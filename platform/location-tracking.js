@@ -191,20 +191,24 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
 
   let activeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2 ? waypoints : [];
 
-  const hasAttestation = Boolean(
-    telemetry &&
-    (telemetry.attestationVerified === true ||
-     telemetry.attestation_verified === true ||
-     telemetry.sessionAttested === true ||
-     (telemetry.lastAttestedAt && (now - Number(telemetry.lastAttestedAt)) < 120000) ||
-     (telemetry.attestationVerified !== false && telemetry.attestation_verified !== false && !telemetry.unverifiedPeriod))
+  const isExplicitlyUntrusted = Boolean(
+    !telemetry ||
+    telemetry.attestationVerified === false ||
+    telemetry.attestation_verified === false ||
+    telemetry.untrustedTelemetry === true ||
+    telemetry.unverifiedPeriod === true ||
+    telemetry.locationVerified === false ||
+    telemetry.source === 'PRESENCE_FALLBACK' ||
+    telemetry.source === 'LAST_KNOWN_LOCATION'
   );
 
   const isAttested = Boolean(
-    hasAttestation &&
-    !telemetry.untrustedTelemetry &&
-    telemetry.source !== 'PRESENCE_FALLBACK' &&
-    telemetry.source !== 'LAST_KNOWN_LOCATION'
+    telemetry &&
+    !isExplicitlyUntrusted &&
+    (telemetry.attestationVerified === true ||
+     telemetry.attestation_verified === true ||
+     telemetry.locationVerified === true ||
+     telemetry.attestationVerified === undefined)
   );
 
   let mapMatched = {

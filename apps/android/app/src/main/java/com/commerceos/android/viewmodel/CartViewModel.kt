@@ -52,6 +52,8 @@ class CartViewModel(
     private var customerGeneration = 0L
     private var cartLoadJob: Job? = null
     private var accountSyncJob: Job? = null
+    private var couponValidationJob: Job? = null
+    private var couponValidationGeneration: Long = 0L
     private var reorderAllJob: Job? = null
     private var sanitizationCleanupJob: Job? = null
     private var isInitialized = false
@@ -330,7 +332,18 @@ class CartViewModel(
         get() = totals?.coldChainPackagingFee ?: if (containsColdChain) BigDecimal("15.00") else BigDecimal.ZERO
 
     val effectiveGrandTotal: BigDecimal
-        get() = (totals?.grandTotal ?: effectiveSubtotal.add(effectiveExpressFee).add(effectiveColdChainFee)).subtract(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
+        get() {
+            val baseGrandTotal = totals?.grandTotal
+            return if (baseGrandTotal != null) {
+                if (totals?.couponCode != null) {
+                    baseGrandTotal.coerceAtLeast(BigDecimal.ZERO)
+                } else {
+                    baseGrandTotal.subtract(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
+                }
+            } else {
+                effectiveSubtotal.add(effectiveExpressFee).add(effectiveColdChainFee).subtract(couponDiscountAmount).coerceAtLeast(BigDecimal.ZERO)
+            }
+        }
 
     val mrpTotal: BigDecimal
         get() = cartItems.fold(BigDecimal.ZERO) { acc, i ->
@@ -2025,25 +2038,38 @@ class CartViewModel(
         isCouponError = false
 
         // Real-time backend verification to guard against server-side status changes
-        viewModelScope.launch {
+        couponValidationJob?.cancel()
+        val currentValidationGen = ++couponValidationGeneration
+
+        couponValidationJob = viewModelScope.launch {
             try {
-                when (val valRes = repository.validateCoupon(cleanCode, effectiveSubtotal.toDouble())) {
+                val valRes = repository.validateCoupon(cleanCode, effectiveSubtotal.toDouble())
+                // Guard against out-of-order responses: ignore if newer coupon requested or code mismatch
+                if (currentValidationGen != couponValidationGeneration || appliedCouponCode != campaign.code) {
+                    return@launch
+                }
+                when (valRes) {
                     is ApiResult.Success -> {
                         if (!valRes.data.valid) {
-                            appliedCouponCode = null
-                            couponDiscountAmount = BigDecimal.ZERO
-                            couponFeedbackMessage = valRes.data.message ?: "Coupon '$cleanCode' is currently paused or inactive"
-                            isCouponError = true
+                            if (appliedCouponCode == campaign.code && currentValidationGen == couponValidationGeneration) {
+                                appliedCouponCode = null
+                                couponDiscountAmount = BigDecimal.ZERO
+                                couponFeedbackMessage = valRes.data.message ?: "Coupon '$cleanCode' is currently paused or inactive"
+                                isCouponError = true
+                            }
                         }
                     }
                     is ApiResult.Failure -> {
-                        val errMsg = valRes.error.message.ifBlank { "Coupon '$cleanCode' is currently paused or inactive" }
-                        appliedCouponCode = null
-                        couponDiscountAmount = BigDecimal.ZERO
-                        couponFeedbackMessage = errMsg
-                        isCouponError = true
+                        // Network/transient backend error: treat as unverified rather than invalid;
+                        // do NOT clear the applied coupon!
+                        if (appliedCouponCode == campaign.code && currentValidationGen == couponValidationGeneration) {
+                            couponFeedbackMessage = "Coupon '${campaign.code}' applied (offline/unverified; will confirm at checkout)"
+                            isCouponError = false
+                        }
                     }
                 }
+            } catch (_: CancellationException) {
+                // Job cancelled because user applied another coupon
             } catch (_: Exception) {}
         }
 
@@ -2056,6 +2082,8 @@ class CartViewModel(
     }
 
     fun removeCoupon() {
+        couponValidationJob?.cancel()
+        couponValidationGeneration++
         appliedCouponCode = null
         couponDiscountAmount = BigDecimal.ZERO
         couponFeedbackMessage = null
@@ -2066,6 +2094,8 @@ class CartViewModel(
         val activeCustId = customerId.ifBlank { LOCAL_OFFLINE_CART_KEY }
         customerGeneration++
         val clearGeneration = customerGeneration
+        couponValidationJob?.cancel()
+        couponValidationGeneration++
         accountSyncJob?.cancel()
         cartLoadJob?.cancel()
         refreshJob?.cancel()

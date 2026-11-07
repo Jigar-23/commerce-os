@@ -29,21 +29,37 @@ android {
             localFile.inputStream().use { localProps.load(it) }
         }
         val mapsApiKey: String = System.getenv("GOOGLE_MAPS_API_KEY")
+            ?: System.getenv("MAPS_API_KEY")
             ?: localProps.getProperty("MAPS_API_KEY")
             ?: localProps.getProperty("GOOGLE_MAPS_API_KEY")
-            ?: "AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c"
+            ?: ""
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
     }
 
     signingConfigs {
         create("release") {
-            val keystoreFile = rootProject.file("commerceos-release.jks")
-            if (keystoreFile.exists()) {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            val keystoreFile = if (!keystorePath.isNullOrBlank()) file(keystorePath) else null
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+            val keyAliasEnv = System.getenv("KEY_ALIAS")
+            val keyPasswordEnv = System.getenv("KEY_PASSWORD")
+
+            val isReleaseTask = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+            if (isReleaseTask) {
+                if (keystoreFile == null || !keystoreFile.exists()) {
+                    throw GradleException("Release build signing failed: KEYSTORE_PATH is required and must point to a valid keystore file.")
+                }
+                if (keystorePassword.isNullOrBlank() || keyAliasEnv.isNullOrBlank() || keyPasswordEnv.isNullOrBlank()) {
+                    throw GradleException("Release build signing failed: KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD must be provided via secure environment variables.")
+                }
+            }
+
+            if (keystoreFile != null && keystoreFile.exists() && !keystorePassword.isNullOrBlank() && !keyAliasEnv.isNullOrBlank() && !keyPasswordEnv.isNullOrBlank()) {
                 storeFile = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "commerceos2026"
-                keyAlias = System.getenv("KEY_ALIAS") ?: "commerceos"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "commerceos2026"
+                storePassword = keystorePassword
+                keyAlias = keyAliasEnv
+                keyPassword = keyPasswordEnv
             }
         }
     }

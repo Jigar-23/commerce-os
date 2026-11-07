@@ -1592,7 +1592,12 @@ async function grandTotalWithCoupon(items, couponCode) {
     const minVal = Number(promo.min_order_value || promo.minOrderValue || 0);
     invalidCouponReason = `Add ₹${(minVal - baseTotals.itemsSubtotal).toFixed(2)} more to apply ${cleanCode}`;
   } else {
-    if (promo.type === 'PERCENTAGE') {
+    const promoType = String(promo.type || promo.discount_type || promo.discountType || '').toUpperCase();
+    var isFreeShipping = false;
+    if (promoType === 'FREE_SHIPPING' || promoType === 'FREE_DELIVERY') {
+      isFreeShipping = true;
+      couponDiscount = Number(baseTotals.deliveryFee != null ? baseTotals.deliveryFee : 25.00);
+    } else if (promoType === 'PERCENTAGE') {
       const pct = Number(promo.discount_percent || promo.discountPercent || 0);
       const calc = baseTotals.itemsSubtotal * (pct / 100);
       const maxDisc = (promo.max_discount != null || promo.maxDiscount != null) ? Number(promo.max_discount ?? promo.maxDiscount) : null;
@@ -1604,10 +1609,15 @@ async function grandTotalWithCoupon(items, couponCode) {
     couponDiscount = Math.round(couponDiscount * 100) / 100;
   }
 
-  const finalGrandTotal = Math.max(0, Math.round((baseTotals.grandTotal - couponDiscount) * 100) / 100);
+  const effectiveDeliveryFee = isFreeShipping ? 0 : Number(baseTotals.deliveryFee || 0);
+  const finalGrandTotal = Math.max(0, Math.round((Number(baseTotals.grandTotal) - (isFreeShipping ? Number(baseTotals.deliveryFee || 0) : couponDiscount)) * 100) / 100);
   return {
     ...baseTotals,
-    discountAmount: couponDiscount,
+    deliveryFee: effectiveDeliveryFee,
+    expressDeliveryFee: effectiveDeliveryFee,
+    freeDeliveryEligible: Boolean(baseTotals.freeDeliveryEligible || isFreeShipping),
+    remainingForFreeDelivery: isFreeShipping ? 0 : baseTotals.remainingForFreeDelivery,
+    discountAmount: Math.max(Number(baseTotals.discountAmount || 0), couponDiscount),
     couponCode: couponDiscount > 0 ? cleanCode : null,
     invalidCouponReason: invalidCouponReason,
     grandTotal: finalGrandTotal,

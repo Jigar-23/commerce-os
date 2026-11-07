@@ -23,6 +23,9 @@ captures/
 .externalNativeBuild
 .cxx/
 *.apk
+*.jks
+*.keystore
+commerceos-release.jks
 
 # iOS & Xcode
 Pods/

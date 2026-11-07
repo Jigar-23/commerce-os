@@ -10,6 +10,47 @@ public struct OrderItemPayload: Codable {
     }
 }
 
+public struct AuthoritativeCartQuote: Codable {
+    public let customerId: String?
+    public let subtotal: Double?
+    public let itemsSubtotal: Double?
+    public let deliveryFee: Double?
+    public let expressDeliveryFee: Double?
+    public let packagingFee: Double?
+    public let coldChainPackagingFee: Double?
+    public let handlingFee: Double?
+    public let surgeFee: Double?
+    public let taxAmount: Double?
+    public let discountAmount: Double?
+    public let couponCode: String?
+    public let invalidCouponReason: String?
+    public let total: Double?
+    public let grandTotal: Double?
+    public let freeDeliveryEligible: Bool?
+    public let freeDeliveryThreshold: Double?
+    public let remainingForFreeDelivery: Double?
+
+    public var effectiveSubtotal: Double {
+        itemsSubtotal ?? subtotal ?? 0.0
+    }
+
+    public var effectiveDeliveryFee: Double {
+        deliveryFee ?? expressDeliveryFee ?? 0.0
+    }
+
+    public var effectivePackagingFee: Double {
+        coldChainPackagingFee ?? packagingFee ?? handlingFee ?? 5.0
+    }
+
+    public var effectiveDiscount: Double {
+        discountAmount ?? 0.0
+    }
+
+    public var effectiveGrandTotal: Double {
+        grandTotal ?? total ?? 0.0
+    }
+}
+
 public struct PlaceOrderRequest: Codable {
     public let idempotencyKey: String
     public let paymentMethod: String
@@ -17,6 +58,7 @@ public struct PlaceOrderRequest: Codable {
     public let deliveryAddress: DeliveryAddressPayload
     public let items: [OrderItemPayload]
     public let prescriptionId: String?
+    public let couponCode: String?
 
     public init(
         idempotencyKey: String = UUID().uuidString,
@@ -24,7 +66,8 @@ public struct PlaceOrderRequest: Codable {
         addressId: String? = nil,
         deliveryAddress: DeliveryAddressPayload,
         items: [OrderItemPayload],
-        prescriptionId: String? = nil
+        prescriptionId: String? = nil,
+        couponCode: String? = nil
     ) {
         self.idempotencyKey = idempotencyKey
         self.paymentMethod = paymentMethod
@@ -32,6 +75,7 @@ public struct PlaceOrderRequest: Codable {
         self.deliveryAddress = deliveryAddress
         self.items = items
         self.prescriptionId = prescriptionId
+        self.couponCode = couponCode
     }
 
     enum CodingKeys: String, CodingKey {
@@ -46,6 +90,8 @@ public struct PlaceOrderRequest: Codable {
         case items
         case prescriptionId = "prescription_id"
         case prescriptionIdCamel = "prescriptionId"
+        case couponCode = "coupon_code"
+        case couponCodeCamel = "couponCode"
     }
 
     public init(from decoder: Decoder) throws {
@@ -64,6 +110,8 @@ public struct PlaceOrderRequest: Codable {
         self.items = (try? container.decode([OrderItemPayload].self, forKey: .items)) ?? []
         self.prescriptionId = (try? container.decode(String.self, forKey: .prescriptionId))
             ?? (try? container.decode(String.self, forKey: .prescriptionIdCamel))
+        self.couponCode = (try? container.decode(String.self, forKey: .couponCode))
+            ?? (try? container.decode(String.self, forKey: .couponCodeCamel))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -79,6 +127,8 @@ public struct PlaceOrderRequest: Codable {
         try container.encode(items, forKey: .items)
         try container.encodeIfPresent(prescriptionId, forKey: .prescriptionId)
         try container.encodeIfPresent(prescriptionId, forKey: .prescriptionIdCamel)
+        try container.encodeIfPresent(couponCode, forKey: .couponCode)
+        try container.encodeIfPresent(couponCode, forKey: .couponCodeCamel)
     }
 }
 
@@ -753,5 +803,14 @@ public class OrderRepository: ObservableObject {
             return ord
         }
         return customerOrders.first(where: { $0.id == orderId || $0.orderId == orderId })
+    }
+
+    public func fetchCartQuote(customerId: String, couponCode: String? = nil) async throws -> AuthoritativeCartQuote {
+        var endpoint = "/api/v1/cart/\(customerId)"
+        if let code = couponCode?.trimmingCharacters(in: .whitespacesAndNewlines), !code.isEmpty {
+            let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
+            endpoint += "?couponCode=\(encoded)"
+        }
+        return try await apiClient.get(endpoint: endpoint)
     }
 }

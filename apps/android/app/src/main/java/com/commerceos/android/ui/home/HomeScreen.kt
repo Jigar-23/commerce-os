@@ -104,7 +104,8 @@ fun HomeScreen(
     onSearchClick: (String) -> Unit = {},
     onVerticalSelect: (HomeVertical) -> Unit = {},
     onOpenCatalog: () -> Unit = {},
-    onUploadPrescription: () -> Unit = {}
+    onUploadPrescription: () -> Unit = {},
+    onSelectCampaign: (String) -> Unit = {}
 ) {
     // Feed is keyed on (customer, delivery address): changing location MUST
     // invalidate and refetch inventory/ETA/promotions for the new address.
@@ -190,9 +191,7 @@ fun HomeScreen(
                     Box(modifier = Modifier.padding(horizontal = 14.dp)) {
                         PromotionalCampaignsStrip(
                             campaigns = availableCampaigns,
-                            onSelectCampaign = { code ->
-                                onSearchClick("")
-                            }
+                            onSelectCampaign = onSelectCampaign
                         )
                     }
                 }
@@ -590,6 +589,9 @@ private fun PromotionalCampaignsStrip(
             )
         }
 
+        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+        val context = androidx.compose.ui.platform.LocalContext.current
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -608,7 +610,11 @@ private fun PromotionalCampaignsStrip(
                     shadowElevation = 1.dp,
                     modifier = Modifier
                         .width(220.dp)
-                        .clickable { onSelectCampaign(camp.code) }
+                        .clickable {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(camp.code))
+                            android.widget.Toast.makeText(context, "Coupon '${camp.code}' copied & applied!", android.widget.Toast.LENGTH_SHORT).show()
+                            onSelectCampaign(camp.code)
+                        }
                 ) {
                     Box(
                         modifier = Modifier
