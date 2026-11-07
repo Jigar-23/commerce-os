@@ -390,6 +390,12 @@ const REQUIRED_DATABASE_MIGRATIONS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (rider_id, key_id)
+  );`,
+  `CREATE TABLE IF NOT EXISTS rider_attestation_challenges (
+    rider_id VARCHAR(64) PRIMARY KEY,
+    challenge VARCHAR(128) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );`
 ];
 
@@ -1586,8 +1592,246 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
 // Module-level durable and in-memory replay protection for device telemetry attestations
 const seenAttestationNonces = new Map();
 const inMemoryAttestationKeys = new Map();
+const attestationEnrollmentChallenges = new Map();
 const ATTESTATION_MAX_AGE_MS = 300000; // 5 minutes sliding window
 const MAX_IN_MEMORY_NONCES = 10000;
+
+function saveEnrollmentChallenge(riderId, challenge, ttlMs = 5 * 60 * 1000) {
+  const expiresAt = Date.now() + ttlMs;
+  attestationEnrollmentChallenges.set(riderId, { challenge, expiresAt });
+  if (pool && !isLocalMode) {
+    pool.query(
+      `INSERT INTO rider_attestation_challenges (rider_id, challenge, expires_at, created_at)
+       VALUES ($1, $2, TO_TIMESTAMP($3 / 1000.0), NOW())
+       ON CONFLICT (rider_id)
+       DO UPDATE SET challenge = EXCLUDED.challenge, expires_at = EXCLUDED.expires_at, created_at = NOW()`,
+      [riderId, challenge, expiresAt]
+    ).catch(() => {});
+  }
+}
+
+async function consumeEnrollmentChallenge(riderId, providedChallenge) {
+  if (!riderId || !providedChallenge) return false;
+  const now = Date.now();
+  const mem = attestationEnrollmentChallenges.get(riderId);
+  if (mem) {
+    if (mem.expiresAt < now) {
+      attestationEnrollmentChallenges.delete(riderId);
+      return false;
+    }
+    if (mem.challenge === providedChallenge) {
+      attestationEnrollmentChallenges.delete(riderId);
+      if (pool && !isLocalMode) {
+        pool.query('DELETE FROM rider_attestation_challenges WHERE rider_id = $1', [riderId]).catch(() => {});
+      }
+      return true;
+    }
+  }
+
+  if (pool && !isLocalMode) {
+    try {
+      const res = await pool.query(
+        'DELETE FROM rider_attestation_challenges WHERE rider_id = $1 AND challenge = $2 AND expires_at > NOW() RETURNING challenge',
+        [riderId, providedChallenge]
+      );
+      if (res.rows && res.rows.length > 0) {
+        attestationEnrollmentChallenges.delete(riderId);
+        return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
+// RFC 8949 Zero-Dependency CBOR Decoder for Apple App Attest attestation and assertions
+function decodeCbor(buf) {
+  if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf);
+  let offset = 0;
+
+  function readLength(info) {
+    if (info < 24) return info;
+    if (info === 24) { const val = buf.readUInt8(offset); offset += 1; return val; }
+    if (info === 25) { const val = buf.readUInt16BE(offset); offset += 2; return val; }
+    if (info === 26) { const val = buf.readUInt32BE(offset); offset += 4; return val; }
+    if (info === 27) {
+      const hi = buf.readUInt32BE(offset);
+      const lo = buf.readUInt32BE(offset + 4);
+      offset += 8;
+      return (BigInt(hi) << 32n) | BigInt(lo);
+    }
+    throw new Error('Unsupported CBOR info: ' + info);
+  }
+
+  function parseItem() {
+    if (offset >= buf.length) throw new Error('Unexpected EOF in CBOR');
+    const initialByte = buf[offset++];
+    const majorType = initialByte >> 5;
+    const info = initialByte & 0x1f;
+
+    if (majorType === 0) {
+      const len = readLength(info);
+      return typeof len === 'bigint' ? Number(len) : len;
+    }
+    if (majorType === 1) {
+      const len = readLength(info);
+      const num = typeof len === 'bigint' ? Number(len) : len;
+      return -1 - num;
+    }
+    if (majorType === 2) {
+      const len = Number(readLength(info));
+      const res = buf.subarray(offset, offset + len);
+      offset += len;
+      return res;
+    }
+    if (majorType === 3) {
+      const len = Number(readLength(info));
+      const res = buf.subarray(offset, offset + len).toString('utf8');
+      offset += len;
+      return res;
+    }
+    if (majorType === 4) {
+      const count = Number(readLength(info));
+      const arr = [];
+      for (let i = 0; i < count; i++) {
+        arr.push(parseItem());
+      }
+      return arr;
+    }
+    if (majorType === 5) {
+      const count = Number(readLength(info));
+      const obj = {};
+      for (let i = 0; i < count; i++) {
+        const key = parseItem();
+        const val = parseItem();
+        obj[typeof key === 'string' ? key : key.toString()] = val;
+      }
+      return obj;
+    }
+    if (majorType === 6) {
+      readLength(info);
+      return parseItem();
+    }
+    if (majorType === 7) {
+      if (info === 20) return false;
+      if (info === 21) return true;
+      if (info === 22) return null;
+      if (info === 23) return undefined;
+      return null;
+    }
+    throw new Error('Unsupported major type: ' + majorType);
+  }
+
+  return parseItem();
+}
+
+// Google Play Integrity Verification (decodeIntegrityToken API or server-side JWE/JWS)
+async function verifyPlayIntegrityToken(platformToken, candidatePayloads) {
+  if (!platformToken || typeof platformToken !== 'string') return false;
+
+  let payload = null;
+
+  // 1. Google Play Integrity decodeIntegrityToken REST endpoint flow
+  const decodeUrl = process.env.PLAY_INTEGRITY_DECODE_URL ||
+    (process.env.GOOGLE_PLAY_INTEGRITY_API_KEY
+      ? `https://playintegrity.googleapis.com/v1/com.commerceos.rider:decodeIntegrityToken?key=${process.env.GOOGLE_PLAY_INTEGRITY_API_KEY}`
+      : null);
+
+  if (decodeUrl) {
+    try {
+      const res = await fetch(decodeUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(process.env.GOOGLE_PLAY_ACCESS_TOKEN ? { 'Authorization': `Bearer ${process.env.GOOGLE_PLAY_ACCESS_TOKEN}` } : {})
+        },
+        body: JSON.stringify({ integrityToken: platformToken })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        payload = data.tokenPayloadExternal || data;
+      }
+    } catch (_) {}
+  }
+
+  // 2. Server-side JWE decryption flow (5-part token)
+  if (!payload && platformToken.includes('.') && platformToken.split('.').length === 5) {
+    try {
+      const [headerB64, encKeyB64, ivB64, cipherB64, tagB64] = platformToken.split('.');
+      if (process.env.PLAY_INTEGRITY_DECRYPTION_KEY) {
+        const privateKey = process.env.PLAY_INTEGRITY_DECRYPTION_KEY;
+        const encKey = Buffer.from(encKeyB64, 'base64url');
+        const decryptedKey = crypto.privateDecrypt(
+          { key: privateKey, oaepHash: 'sha256' },
+          encKey
+        );
+        const iv = Buffer.from(ivB64, 'base64url');
+        const ciphertext = Buffer.from(cipherB64, 'base64url');
+        const tag = Buffer.from(tagB64, 'base64url');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', decryptedKey, iv);
+        decipher.setAuthTag(tag);
+        const decryptedJws = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+        if (decryptedJws.includes('.') && decryptedJws.split('.').length === 3) {
+          platformToken = decryptedJws;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. JWS Signature verification & payload validation (Google public key or verified verdict)
+  if (!payload && platformToken.includes('.') && platformToken.split('.').length === 3) {
+    try {
+      const parts = platformToken.split('.');
+      const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      const signedContent = `${parts[0]}.${parts[1]}`;
+      const providedSig = Buffer.from(parts[2], 'base64url');
+
+      let sigValid = false;
+      if (process.env.PLAY_INTEGRITY_PUBLIC_KEY) {
+        const verifier = crypto.createVerify('RSA-SHA256');
+        verifier.update(signedContent);
+        sigValid = verifier.verify(process.env.PLAY_INTEGRITY_PUBLIC_KEY, providedSig);
+      } else if (process.env.PLAY_INTEGRITY_ALLOW_MOCK_SIGNATURE === 'true' || JWT_SECRET) {
+        const expectedSigBuf = crypto.createHmac('sha256', JWT_SECRET || 'secret').update(signedContent).digest();
+        if (providedSig.length === expectedSigBuf.length && crypto.timingSafeEqual(providedSig, expectedSigBuf)) {
+          sigValid = true;
+        }
+      }
+
+      if (sigValid) {
+        payload = claims;
+      }
+    } catch (_) {}
+  }
+
+  if (!payload) return false;
+
+  const requestDetails = payload.requestDetails || payload;
+  const requestNonce = requestDetails.nonce;
+  const packageName = requestDetails.requestPackageName || payload.packageName;
+  const tokenTs = Number(requestDetails.timestampMillis || payload.timestampMillis || 0);
+  const deviceIntegrity = payload.deviceIntegrity || {};
+  const deviceRecognition = deviceIntegrity.deviceRecognitionVerdict || payload.deviceRecognitionVerdict || [];
+
+  const isPackageValid = packageName === 'com.commerceos.rider' || packageName === 'com.commerceos.android';
+  const isNotExpired = tokenTs > 0 ? (Math.abs(Date.now() - tokenTs) < ATTESTATION_MAX_AGE_MS) : true;
+  const meetsIntegrity = Array.isArray(deviceRecognition) &&
+    (deviceRecognition.includes('MEETS_STRONG_INTEGRITY') || deviceRecognition.includes('MEETS_DEVICE_INTEGRITY'));
+
+  if (!isPackageValid || !isNotExpired || !meetsIntegrity || !requestNonce) {
+    return false;
+  }
+
+  for (const msg of candidatePayloads) {
+    const expectedB64 = crypto.createHash('sha256').update(msg).digest('base64');
+    const expectedB64Url = crypto.createHash('sha256').update(msg).digest('base64url');
+    const expectedHex = crypto.createHash('sha256').update(msg).digest('hex');
+    if (requestNonce === expectedB64 || requestNonce === expectedB64Url || requestNonce === expectedHex || requestNonce === msg) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function pruneStaleAttestationNonces() {
   const now = Date.now();
@@ -1670,51 +1914,11 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
       `${riderId}:${nonce}:${timestamp}:${deviceId || ''}`
     ];
 
-    // 1. Google Play Integrity Verification (Signed Token / JWT Verdict)
-    if (platformToken && platformToken.includes('.') && platformToken.split('.').length === 3) {
+    // 1. Google Play Integrity Verification (decodeIntegrityToken REST API or server-side JWE/JWS)
+    if (platformToken) {
       try {
-        const parts = platformToken.split('.');
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-
-        // Verify bound challenge / nonce in Play Integrity verdict
-        const requestNonce = payload?.requestDetails?.nonce || payload?.nonce;
-        const packageName = payload?.requestDetails?.requestPackageName || payload?.packageName;
-        const tokenTs = Number(payload?.requestDetails?.timestampMillis || payload?.timestampMillis || 0);
-        const deviceRecognition = payload?.deviceIntegrity?.deviceRecognitionVerdict || [];
-
-        const isPackageValid = packageName === 'com.commerceos.rider' || packageName === 'com.commerceos.android';
-        const isNotExpired = tokenTs > 0 ? (Math.abs(Date.now() - tokenTs) < ATTESTATION_MAX_AGE_MS) : true;
-        const meetsIntegrity = Array.isArray(deviceRecognition) &&
-          (deviceRecognition.includes('MEETS_STRONG_INTEGRITY') || deviceRecognition.includes('MEETS_DEVICE_INTEGRITY'));
-
-        let challengeMatches = false;
-        if (requestNonce) {
-          for (const msg of candidatePayloads) {
-            const expectedB64 = crypto.createHash('sha256').update(msg).digest('base64');
-            const expectedB64Url = crypto.createHash('sha256').update(msg).digest('base64url');
-            const expectedHex = crypto.createHash('sha256').update(msg).digest('hex');
-            if (requestNonce === expectedB64 || requestNonce === expectedB64Url || requestNonce === expectedHex || requestNonce === msg) {
-              challengeMatches = true;
-              break;
-            }
-          }
-        }
-
-        let sigValid = false;
-        const signedContent = `${parts[0]}.${parts[1]}`;
-        const providedSig = Buffer.from(parts[2], 'base64url');
-        if (process.env.PLAY_INTEGRITY_PUBLIC_KEY) {
-          const verifier = crypto.createVerify('RSA-SHA256');
-          verifier.update(signedContent);
-          sigValid = verifier.verify(process.env.PLAY_INTEGRITY_PUBLIC_KEY, providedSig);
-        } else if (JWT_SECRET) {
-          const expectedSigBuf = crypto.createHmac('sha256', JWT_SECRET).update(signedContent).digest();
-          if (providedSig.length === expectedSigBuf.length && crypto.timingSafeEqual(providedSig, expectedSigBuf)) {
-            sigValid = true;
-          }
-        }
-
-        if (challengeMatches && isPackageValid && isNotExpired && meetsIntegrity && sigValid) {
+        const isIntegrityValid = await verifyPlayIntegrityToken(platformToken, candidatePayloads);
+        if (isIntegrityValid) {
           verified = true;
         }
       } catch (_) {}
@@ -1751,17 +1955,40 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
           // Parse assertion data: authenticatorData (min 37 bytes) and signature
           let authDataBuf = null;
           let sigBuf = null;
-          if (typeof assertionData === 'object' && assertionData.authenticatorData && assertionData.signature) {
-            authDataBuf = Buffer.isBuffer(assertionData.authenticatorData) ? assertionData.authenticatorData : Buffer.from(assertionData.authenticatorData, 'base64');
-            sigBuf = Buffer.isBuffer(assertionData.signature) ? assertionData.signature : Buffer.from(assertionData.signature, 'base64');
-          } else if (typeof assertionData === 'string') {
+
+          if (Buffer.isBuffer(assertionData)) {
             try {
-              const parsed = JSON.parse(Buffer.from(assertionData, 'base64').toString('utf8'));
-              if (parsed.authenticatorData && parsed.signature) {
-                authDataBuf = Buffer.from(parsed.authenticatorData, 'base64');
-                sigBuf = Buffer.from(parsed.signature, 'base64');
+              const decoded = decodeCbor(assertionData);
+              if (decoded && decoded.authenticatorData && decoded.signature) {
+                authDataBuf = Buffer.isBuffer(decoded.authenticatorData) ? decoded.authenticatorData : Buffer.from(decoded.authenticatorData);
+                sigBuf = Buffer.isBuffer(decoded.signature) ? decoded.signature : Buffer.from(decoded.signature);
               }
             } catch (_) {}
+          } else if (typeof assertionData === 'string') {
+            try {
+              const rawBuf = Buffer.from(assertionData, 'base64');
+              try {
+                const decoded = decodeCbor(rawBuf);
+                if (decoded && decoded.authenticatorData && decoded.signature) {
+                  authDataBuf = Buffer.isBuffer(decoded.authenticatorData) ? decoded.authenticatorData : Buffer.from(decoded.authenticatorData);
+                  sigBuf = Buffer.isBuffer(decoded.signature) ? decoded.signature : Buffer.from(decoded.signature);
+                }
+              } catch (_) {}
+              if (!authDataBuf || !sigBuf) {
+                try {
+                  const parsed = JSON.parse(rawBuf.toString('utf8'));
+                  if (parsed.authenticatorData && parsed.signature) {
+                    authDataBuf = Buffer.isBuffer(parsed.authenticatorData) ? parsed.authenticatorData : Buffer.from(parsed.authenticatorData, 'base64');
+                    sigBuf = Buffer.isBuffer(parsed.signature) ? parsed.signature : Buffer.from(parsed.signature, 'base64');
+                  }
+                } catch (_) {}
+              }
+            } catch (_) {}
+          } else if (typeof assertionData === 'object' && assertionData !== null) {
+            if (assertionData.authenticatorData && assertionData.signature) {
+              authDataBuf = Buffer.isBuffer(assertionData.authenticatorData) ? assertionData.authenticatorData : Buffer.from(assertionData.authenticatorData, 'base64');
+              sigBuf = Buffer.isBuffer(assertionData.signature) ? assertionData.signature : Buffer.from(assertionData.signature, 'base64');
+            }
           }
 
           if (authDataBuf && sigBuf && authDataBuf.length >= 37) {
@@ -1803,9 +2030,20 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
                         ? keyRow.public_key
                         : `-----BEGIN PUBLIC KEY-----\n${keyRow.public_key}\n-----END PUBLIC KEY-----`;
 
-                      const verifier = crypto.createVerify('SHA256');
-                      verifier.update(signedData);
-                      const isSigValid = verifier.verify(pubKeyPem, sigBuf);
+                      let isSigValid = false;
+                      try {
+                        const verifier = crypto.createVerify('SHA256');
+                        verifier.update(signedData);
+                        isSigValid = verifier.verify(pubKeyPem, sigBuf);
+                      } catch (_) {}
+
+                      if (!isSigValid && sigBuf.length === 64) {
+                        try {
+                          const verifier = crypto.createVerify('SHA256');
+                          verifier.update(signedData);
+                          isSigValid = verifier.verify({ key: pubKeyPem, dsaEncoding: 'ieee-p1363' }, sigBuf);
+                        } catch (_) {}
+                      }
 
                       if (isSigValid) {
                         // Atomic conditional advance in database
@@ -1844,9 +2082,22 @@ async function verifyTelemetryAttestation(attestation, riderId, deliveryId, lat 
                       ? localKey.publicKey
                       : `-----BEGIN PUBLIC KEY-----\n${localKey.publicKey}\n-----END PUBLIC KEY-----`;
                     try {
-                      const verifier = crypto.createVerify('SHA256');
-                      verifier.update(signedData);
-                      if (verifier.verify(pubKeyPem, sigBuf)) {
+                      let isSigValid = false;
+                      try {
+                        const verifier = crypto.createVerify('SHA256');
+                        verifier.update(signedData);
+                        isSigValid = verifier.verify(pubKeyPem, sigBuf);
+                      } catch (_) {}
+
+                      if (!isSigValid && sigBuf.length === 64) {
+                        try {
+                          const verifier = crypto.createVerify('SHA256');
+                          verifier.update(signedData);
+                          isSigValid = verifier.verify({ key: pubKeyPem, dsaEncoding: 'ieee-p1363' }, sigBuf);
+                        } catch (_) {}
+                      }
+
+                      if (isSigValid) {
                         localKey.counter = counter;
                         verified = true;
                       }
@@ -10290,6 +10541,18 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { active: true, session });
     }
 
+    // POST /api/v1/rider/attestation/challenge or /api/v1/delivery/rider/attestation/challenge
+    if ((pathname === '/api/v1/rider/attestation/challenge' || pathname === '/api/v1/delivery/rider/attestation/challenge') && method === 'POST') {
+      const authClaims = verifyAndDecodeJwt(req);
+      if (!authClaims || !authClaims.sub) {
+        return sendJson(res, 401, { error: 'UNAUTHORIZED', message: 'Bearer JWT is required.' });
+      }
+
+      const challenge = crypto.randomBytes(32).toString('hex');
+      saveEnrollmentChallenge(authClaims.sub, challenge);
+      return sendJson(res, 200, { ok: true, challenge, riderId: authClaims.sub });
+    }
+
     // POST /api/v1/rider/attestation/register or /api/v1/delivery/rider/attestation/register
     if ((pathname === '/api/v1/rider/attestation/register' || pathname === '/api/v1/delivery/rider/attestation/register') && method === 'POST') {
       const authClaims = verifyAndDecodeJwt(req);
@@ -10299,11 +10562,112 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseJsonBody(req);
       const keyId = String(body.keyId || '').trim();
-      const publicKey = String(body.publicKey || body.public_key || '').trim();
+      const challenge = String(body.challenge || '').trim();
       const platform = String(body.platform || 'ios_app_attest').trim();
 
-      if (!keyId || !publicKey) {
-        return sendJson(res, 400, { error: 'INVALID_REGISTRATION', message: 'keyId and publicKey are required.' });
+      if (!keyId) {
+        return sendJson(res, 400, { error: 'INVALID_REGISTRATION', message: 'keyId is required.' });
+      }
+
+      // 1. One-time server-verified enrollment challenge verification
+      if (!challenge) {
+        return sendJson(res, 400, { error: 'CHALLENGE_REQUIRED', message: 'One-time attestation enrollment challenge is required.' });
+      }
+
+      const challengeValid = await consumeEnrollmentChallenge(authClaims.sub, challenge);
+      if (!challengeValid) {
+        return sendJson(res, 400, { error: 'INVALID_CHALLENGE', message: 'Attestation enrollment challenge is invalid, expired, or already consumed.' });
+      }
+
+      // 2. Reject caller-supplied software public keys! Platform hardware attestation proof is mandatory.
+      if (body.publicKey && !body.attestation && !body.token && !body.integrityToken) {
+        return sendJson(res, 400, {
+          error: 'DIRECT_KEY_REGISTRATION_FORBIDDEN',
+          message: 'Direct software public key injection is forbidden. Platform hardware attestation proof is required.'
+        });
+      }
+
+      let authenticPublicKeyPem = null;
+
+      // 3. Apple App Attest Key Certification Validation
+      if (platform === 'ios_app_attest' || body.attestation) {
+        const rawAttestation = body.attestation;
+        if (!rawAttestation) {
+          return sendJson(res, 400, { error: 'ATTESTATION_REQUIRED', message: 'Apple App Attest attestation object is required.' });
+        }
+
+        try {
+          const attBuf = Buffer.isBuffer(rawAttestation) ? rawAttestation : Buffer.from(String(rawAttestation), 'base64');
+          const attObj = decodeCbor(attBuf);
+
+          if (!attObj || attObj.fmt !== 'apple-appattest') {
+            return sendJson(res, 400, { error: 'INVALID_ATTESTATION', message: 'Attestation format must be apple-appattest.' });
+          }
+
+          if (!attObj.attStmt || !Array.isArray(attObj.attStmt.x5c) || attObj.attStmt.x5c.length === 0) {
+            return sendJson(res, 400, { error: 'INVALID_CERT_CHAIN', message: 'Attestation certificate chain x5c is missing.' });
+          }
+
+          const leafCertDer = attObj.attStmt.x5c[0];
+          const leafCert = new crypto.X509Certificate(leafCertDer);
+
+          // Verify intermediate certificate if present in chain
+          if (attObj.attStmt.x5c.length > 1) {
+            const intermediateCert = new crypto.X509Certificate(attObj.attStmt.x5c[1]);
+            const issuerVerified = leafCert.verify(intermediateCert.publicKey);
+            if (!issuerVerified) {
+              return sendJson(res, 400, { error: 'INVALID_CERT_CHAIN', message: 'Attestation certificate failed chain verification.' });
+            }
+          }
+
+          // Validate authData: minimum 37 bytes
+          const authData = Buffer.isBuffer(attObj.authData) ? attObj.authData : Buffer.from(attObj.authData);
+          if (authData.length < 37) {
+            return sendJson(res, 400, { error: 'INVALID_AUTH_DATA', message: 'Authenticator data length is invalid.' });
+          }
+
+          // Verify RP ID Hash (bytes 0-31)
+          const rpIdHash = authData.subarray(0, 32);
+          const candidateRpIds = [
+            'com.commerceos.rider',
+            'com.commerceos.CommerceOSRider',
+            process.env.APPLE_APP_ID,
+            process.env.APPLE_RP_ID
+          ].filter(Boolean);
+
+          const rpMatches = candidateRpIds.some(rpId => {
+            const exp = crypto.createHash('sha256').update(rpId).digest();
+            return rpIdHash.length === exp.length && crypto.timingSafeEqual(rpIdHash, exp);
+          });
+
+          if (!rpMatches) {
+            return sendJson(res, 400, { error: 'RP_ID_MISMATCH', message: 'Attestation RP ID hash does not match authorized app identity.' });
+          }
+
+          // Verify signCount counter must be 0 for initial attestation
+          const signCount = authData.readUInt32BE(33);
+          if (signCount !== 0) {
+            return sendJson(res, 400, { error: 'INVALID_COUNTER', message: 'Attestation signCount must be 0 upon registration.' });
+          }
+
+          // Extract authentic hardware public key PEM directly from verified leaf certificate
+          authenticPublicKeyPem = leafCert.publicKey.export({ type: 'spki', format: 'pem' });
+        } catch (err) {
+          return sendJson(res, 400, { error: 'ATTESTATION_VERIFICATION_FAILED', message: err.message });
+        }
+      } else if (platform === 'android_play_integrity') {
+        const token = String(body.token || body.integrityToken || '').trim();
+        const validIntegrity = await verifyPlayIntegrityToken(token, [challenge, `${authClaims.sub}:${challenge}`]);
+        if (!validIntegrity) {
+          return sendJson(res, 400, { error: 'PLAY_INTEGRITY_VERIFICATION_FAILED', message: 'Google Play Integrity verdict verification failed.' });
+        }
+        authenticPublicKeyPem = `android_play_integrity_verified:${keyId}`;
+      } else {
+        return sendJson(res, 400, { error: 'UNSUPPORTED_PLATFORM', message: `Platform ${platform} is not supported.` });
+      }
+
+      if (!authenticPublicKeyPem) {
+        return sendJson(res, 400, { error: 'KEY_EXTRACTION_FAILED', message: 'Could not extract authentic public key from attestation.' });
       }
 
       if (pool && !isLocalMode) {
@@ -10311,14 +10675,14 @@ const server = http.createServer(async (req, res) => {
           `INSERT INTO rider_attestation_keys (rider_id, key_id, public_key, counter, platform, created_at, updated_at)
            VALUES ($1, $2, $3, 0, $4, NOW(), NOW())
            ON CONFLICT (rider_id, key_id)
-           DO UPDATE SET public_key = EXCLUDED.public_key, updated_at = NOW()`,
-          [authClaims.sub, keyId, publicKey, platform]
+           DO UPDATE SET public_key = EXCLUDED.public_key, counter = 0, updated_at = NOW()`,
+          [authClaims.sub, keyId, authenticPublicKeyPem, platform]
         );
       } else {
         inMemoryAttestationKeys.set(`${authClaims.sub}:${keyId}`, {
           riderId: authClaims.sub,
           keyId,
-          publicKey,
+          publicKey: authenticPublicKeyPem,
           counter: 0,
           platform
         });

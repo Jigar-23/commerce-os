@@ -597,6 +597,13 @@ CREATE TABLE IF NOT EXISTS rider_attestation_keys (
     PRIMARY KEY (rider_id, key_id)
 );
 
+CREATE TABLE IF NOT EXISTS rider_attestation_challenges (
+    rider_id VARCHAR(64) PRIMARY KEY,
+    challenge VARCHAR(128) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS rider_notifications (
     id VARCHAR(64) PRIMARY KEY,
     notification_id VARCHAR(64) UNIQUE NOT NULL,

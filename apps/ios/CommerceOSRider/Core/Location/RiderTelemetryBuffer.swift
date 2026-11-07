@@ -103,15 +103,43 @@ public final class RiderTelemetryBuffer {
     public func clearDelivery(deliveryId: String) {
         queue.async {
             UserDefaults.standard.removeObject(forKey: "telemetry_hwm_\(deliveryId)")
-            var outbox = self.loadOutbox()
-            outbox.removeAll { $0.deliveryId == deliveryId }
-            self.saveOutbox(outbox)
+            var currentOutbox = self.loadOutbox()
+            currentOutbox.removeAll { $0.deliveryId == deliveryId }
+            self.saveOutbox(currentOutbox)
         }
     }
 
     public func flush() {
         queue.async {
             self.flushSynchronously()
+        }
+    }
+
+    private func removeAcknowledgedRecord(deliveryId: String, sequenceNumber: Int, ackSequence: Int?) {
+        queue.sync {
+            var currentOutbox = self.loadOutbox()
+            currentOutbox.removeAll { $0.deliveryId == deliveryId && $0.sequenceNumber == sequenceNumber }
+            self.saveOutbox(currentOutbox)
+            if let ackSeq = ackSequence {
+                UserDefaults.standard.set(ackSeq, forKey: "telemetry_hwm_\(deliveryId)")
+            }
+        }
+    }
+
+    private func resequencePendingOutbox(deliveryId: String, highestSeq: Int) {
+        queue.sync {
+            var currentOutbox = self.loadOutbox()
+            let nextSeq = max(self.sequenceCounter, highestSeq) + 1
+            var cur = nextSeq
+            for i in 0..<currentOutbox.count {
+                if currentOutbox[i].deliveryId == deliveryId {
+                    currentOutbox[i].sequenceNumber = cur
+                    cur += 1
+                }
+            }
+            self.sequenceCounter = max(self.sequenceCounter, cur)
+            self.saveOutbox(currentOutbox)
+            UserDefaults.standard.set(cur - 1, forKey: "telemetry_hwm_\(deliveryId)")
         }
     }
 
@@ -126,18 +154,20 @@ public final class RiderTelemetryBuffer {
                 }
             }
 
-            let outbox = self.loadOutbox()
-            guard !outbox.isEmpty else { return }
-
-            var remaining = outbox
             var lastSuccessful: BufferedTelemetryRecord? = nil
 
-            for record in outbox {
+            while true {
+                let nextRecord: BufferedTelemetryRecord? = self.queue.sync {
+                    let current = self.loadOutbox()
+                    return current.first
+                }
+                guard let record = nextRecord else { break }
+
                 let ts = Int(record.timestamp.timeIntervalSince1970 * 1000)
                 let nonce = "\(record.deliveryId):\(record.sequenceNumber):\(ts)"
                 let riderId = self.apiClient.currentRiderId ?? "rdr_assigned"
 
-                // Server-matching candidate payload: `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}`
+                // Server candidate payload: `${riderId}:${deliveryId}:${lat}:${lng}:${sequenceNumber}:${timestamp}:${nonce}`
                 let payloadMsg = "\(riderId):\(record.deliveryId):\(record.latitude):\(record.longitude):\(record.sequenceNumber):\(ts):\(nonce)"
                 let hashData = SHA256.hash(data: Data(payloadMsg.utf8))
                 let clientDataHashHex = hashData.compactMap { String(format: "%02x", $0) }.joined()
@@ -156,8 +186,8 @@ public final class RiderTelemetryBuffer {
                 ]
 
                 // Wire platform hardware attestation proof if available
-                var attestationKeyId = UserDefaults.standard.string(forKey: "rider_app_attest_key_id")
-                var assertionData = UserDefaults.standard.string(forKey: "rider_app_attest_assertion")
+                var attestationKeyId: String? = nil
+                var assertionData: String? = nil
 
                 if AppAttestManager.shared.isSupported {
                     if let (kId, assertionStr) = try? await AppAttestManager.shared.generateAssertion(clientDataHash: Data(hashData)) {
@@ -186,15 +216,12 @@ public final class RiderTelemetryBuffer {
                         body: requestData
                     )
 
-                    // Successfully acknowledged by server: remove from durable outbox
                     lastSuccessful = record
-                    self.queue.sync {
-                        remaining.removeAll { $0.deliveryId == record.deliveryId && $0.sequenceNumber == record.sequenceNumber }
-                        self.saveOutbox(remaining)
-                        if let ackSeq = ack.ackSequenceNumber ?? ack.highestSequence {
-                            UserDefaults.standard.set(ackSeq, forKey: "telemetry_hwm_\(record.deliveryId)")
-                        }
-                    }
+                    self.removeAcknowledgedRecord(
+                        deliveryId: record.deliveryId,
+                        sequenceNumber: record.sequenceNumber,
+                        ackSequence: ack.ackSequenceNumber ?? ack.highestSequence
+                    )
                 } catch {
                     // Check for 409 SEQUENCE_CONFLICT recovery
                     if case RiderAPIError.serverError(let code, let msg) = error, code == 409 {
@@ -204,19 +231,7 @@ public final class RiderTelemetryBuffer {
                            let hSeq = json["highestSequence"] as? Int {
                             highestSeq = hSeq
                         }
-                        self.queue.sync {
-                            let nextSeq = max(self.sequenceCounter, highestSeq) + 1
-                            var resequenced: [BufferedTelemetryRecord] = []
-                            var cur = nextSeq
-                            for var remRecord in remaining {
-                                remRecord.sequenceNumber = cur
-                                resequenced.append(remRecord)
-                                cur += 1
-                            }
-                            self.sequenceCounter = cur
-                            self.saveOutbox(resequenced)
-                            UserDefaults.standard.set(cur, forKey: "telemetry_hwm_\(record.deliveryId)")
-                        }
+                        self.resequencePendingOutbox(deliveryId: record.deliveryId, highestSeq: highestSeq)
                         break
                     } else {
                         print("[RiderTelemetryBuffer] Telemetry post failed for delivery \(record.deliveryId): \(error.localizedDescription); retained in outbox for replay")

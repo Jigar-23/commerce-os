@@ -86,6 +86,23 @@ class RiderForegroundLocationService : Service(), LocationListener {
         @Volatile
         private var activeInstance: RiderForegroundLocationService? = null
 
+        private fun handleSequenceConflict(targetDeliveryId: String, errStr: String): Boolean {
+            val errJson = try { JSONObject(errStr) } catch (_: Exception) { JSONObject() }
+            val highestSeq = errJson.optLong("highestSequence", -1L)
+            val nextSeq = if (highestSeq > 0) {
+                maxOf(currentSequenceNumber, highestSeq) + 1
+            } else {
+                currentSequenceNumber + 1
+            }
+            currentSequenceNumber = nextSeq
+            val resequenced = staticDbHelper?.resequenceQueue(targetDeliveryId, nextSeq) ?: false
+            if (!resequenced) {
+                Log.w(TAG, "Resequencing queue failed for delivery $targetDeliveryId; recording fallback high water mark")
+                staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
+            }
+            return resequenced
+        }
+
         fun updateDeliverySession(deliveryId: String, riderId: String, baseUrl: String = "", token: String = "") {
             activeDeliveryId = deliveryId
             if (riderId.isNotBlank()) activeRiderId = riderId
@@ -827,7 +844,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                 val reqHash = md.digest(msg.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
                 val playIntegrityService = com.commerceos.rider.security.PlayIntegrityService.getInstance(applicationContext)
-                val integrityToken = playIntegrityService.requestToken(reqHash) ?: sessionMgr.getPlayIntegrityToken()
+                val integrityToken = playIntegrityService.requestToken(reqHash)
                 if (!integrityToken.isNullOrBlank()) {
                     jsonBody.put("deviceAttestation", JSONObject().apply {
                         put("platform", "android_play_integrity")
@@ -845,16 +862,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
 
                 if (conn.responseCode == 409) {
                     val errStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                    val errJson = try { JSONObject(errStr) } catch (_: Exception) { JSONObject() }
-                    val highestSeq = errJson.optLong("highestSequence", -1L)
-                    val nextSeq = if (highestSeq > 0) {
-                        maxOf(currentSequenceNumber, highestSeq) + 1
-                    } else {
-                        currentSequenceNumber + 1
-                    }
-                    currentSequenceNumber = nextSeq
-                    staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
-                    staticDbHelper?.resequenceQueue(targetDeliveryId, nextSeq)
+                    handleSequenceConflict(targetDeliveryId, errStr)
                     _isStale.value = true
                     return@withContext false
                 }
@@ -875,13 +883,7 @@ class RiderForegroundLocationService : Service(), LocationListener {
                         }
                         if (retryConn.responseCode == 409) {
                             val errStr = retryConn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                            val errJson = try { JSONObject(errStr) } catch (_: Exception) { JSONObject() }
-                            val highestSeq = errJson.optLong("highestSequence", -1L)
-                            if (highestSeq > 0) {
-                                val nextSeq = maxOf(currentSequenceNumber, highestSeq) + 1
-                                currentSequenceNumber = nextSeq
-                                staticDbHelper?.recordHighWaterMark(targetDeliveryId, nextSeq)
-                            }
+                            handleSequenceConflict(targetDeliveryId, errStr)
                             _isStale.value = true
                             return@withContext false
                         }

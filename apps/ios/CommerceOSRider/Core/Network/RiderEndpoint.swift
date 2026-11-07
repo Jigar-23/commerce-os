@@ -22,6 +22,8 @@ public enum RiderEndpoint {
     case getNotifications
     case markNotificationRead(id: String)
     case markAllNotificationsRead
+    case getAttestationChallenge
+    case registerAttestationKey
 
     public var path: String {
         switch self {
@@ -67,12 +69,16 @@ public enum RiderEndpoint {
             return "api/v1/delivery/rider/notifications/\(id)/read"
         case .markAllNotificationsRead:
             return "api/v1/delivery/rider/notifications/read-all"
+        case .getAttestationChallenge:
+            return "api/v1/rider/attestation/challenge"
+        case .registerAttestationKey:
+            return "api/v1/rider/attestation/register"
         }
     }
 
     public var method: String {
         switch self {
-        case .sendOtp, .verifyOtp, .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .streamDeliveryTelemetry, .updatePresence, .toggleShift, .registerDeviceToken, .logoutDeviceToken, .markNotificationRead, .markAllNotificationsRead:
+        case .sendOtp, .verifyOtp, .acceptOffer, .declineOffer, .arriveMerchant, .confirmPickup, .arriveCustomer, .deliverWithOtp, .streamTelemetry, .streamDeliveryTelemetry, .updatePresence, .toggleShift, .registerDeviceToken, .logoutDeviceToken, .markNotificationRead, .markAllNotificationsRead, .getAttestationChallenge, .registerAttestationKey:
             return "POST"
         case .getTripsHistory, .getProfile, .activeSession, .getActiveOffers, .getNotifications:
             return "GET"
