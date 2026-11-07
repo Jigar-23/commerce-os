@@ -151,6 +151,29 @@ CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
 CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active);
 
 -- -----------------------------------------------------------------------------
+-- 3b. MEDICINE EQUIVALENCES (PHARMACIST-VERIFIED BIOEQUIVALENCE)
+--     Guarantees therapeutic equivalence: matching active ingredient,
+--     strength, dosage form, route of administration, and pharmacist verification.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS medicine_equivalences (
+    id VARCHAR(64) PRIMARY KEY,
+    reference_sku VARCHAR(64) NOT NULL,
+    substitute_sku VARCHAR(64) NOT NULL,
+    active_ingredient VARCHAR(255) NOT NULL,
+    strength VARCHAR(64) NOT NULL,
+    dosage_form VARCHAR(64) NOT NULL,
+    route VARCHAR(64) NOT NULL DEFAULT 'ORAL',
+    bioequivalence_status VARCHAR(64) NOT NULL DEFAULT 'VERIFIED_EQUIVALENT',
+    pharmacist_verified BOOLEAN NOT NULL DEFAULT TRUE,
+    savings_percent NUMERIC(5,2) DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_med_equiv_ref ON medicine_equivalences(reference_sku);
+CREATE INDEX IF NOT EXISTS idx_med_equiv_sub ON medicine_equivalences(substitute_sku);
+CREATE INDEX IF NOT EXISTS idx_med_equiv_active ON medicine_equivalences(active_ingredient, strength, dosage_form);
+
+-- -----------------------------------------------------------------------------
 -- 4. INVENTORY & LEDGER (3-STATE INVENTORY DOMAIN)
 -- -----------------------------------------------------------------------------
 

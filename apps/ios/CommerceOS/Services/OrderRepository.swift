@@ -29,6 +29,10 @@ public struct AuthoritativeCartQuote: Codable, Equatable {
     public let freeDeliveryEligible: Bool?
     public let freeDeliveryThreshold: Double?
     public let remainingForFreeDelivery: Double?
+    public let quoteToken: String?
+    public let quoteId: String?
+    public let pricingRevision: Double?
+    public let addressId: String?
 
     public var effectiveSubtotal: Double {
         itemsSubtotal ?? subtotal ?? 0.0
@@ -59,6 +63,7 @@ public struct PlaceOrderRequest: Codable {
     public let items: [OrderItemPayload]
     public let prescriptionId: String?
     public let couponCode: String?
+    public let quoteToken: String?
 
     public init(
         idempotencyKey: String = UUID().uuidString,
@@ -67,7 +72,8 @@ public struct PlaceOrderRequest: Codable {
         deliveryAddress: DeliveryAddressPayload,
         items: [OrderItemPayload],
         prescriptionId: String? = nil,
-        couponCode: String? = nil
+        couponCode: String? = nil,
+        quoteToken: String? = nil
     ) {
         self.idempotencyKey = idempotencyKey
         self.paymentMethod = paymentMethod
@@ -76,6 +82,7 @@ public struct PlaceOrderRequest: Codable {
         self.items = items
         self.prescriptionId = prescriptionId
         self.couponCode = couponCode
+        self.quoteToken = quoteToken
     }
 
     enum CodingKeys: String, CodingKey {
@@ -92,6 +99,8 @@ public struct PlaceOrderRequest: Codable {
         case prescriptionIdCamel = "prescriptionId"
         case couponCode = "coupon_code"
         case couponCodeCamel = "couponCode"
+        case quoteToken = "quote_token"
+        case quoteTokenCamel = "quoteToken"
     }
 
     public init(from decoder: Decoder) throws {
@@ -112,6 +121,8 @@ public struct PlaceOrderRequest: Codable {
             ?? (try? container.decode(String.self, forKey: .prescriptionIdCamel))
         self.couponCode = (try? container.decode(String.self, forKey: .couponCode))
             ?? (try? container.decode(String.self, forKey: .couponCodeCamel))
+        self.quoteToken = (try? container.decode(String.self, forKey: .quoteToken))
+            ?? (try? container.decode(String.self, forKey: .quoteTokenCamel))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -129,6 +140,8 @@ public struct PlaceOrderRequest: Codable {
         try container.encodeIfPresent(prescriptionId, forKey: .prescriptionIdCamel)
         try container.encodeIfPresent(couponCode, forKey: .couponCode)
         try container.encodeIfPresent(couponCode, forKey: .couponCodeCamel)
+        try container.encodeIfPresent(quoteToken, forKey: .quoteToken)
+        try container.encodeIfPresent(quoteToken, forKey: .quoteTokenCamel)
     }
 }
 
@@ -805,11 +818,19 @@ public class OrderRepository: ObservableObject {
         return customerOrders.first(where: { $0.id == orderId || $0.orderId == orderId })
     }
 
-    public func fetchCartQuote(customerId: String, couponCode: String? = nil) async throws -> AuthoritativeCartQuote {
+    public func fetchCartQuote(customerId: String, couponCode: String? = nil, addressId: String? = nil) async throws -> AuthoritativeCartQuote {
         var endpoint = "/api/v1/cart/\(customerId)"
+        var queryItems: [String] = []
         if let code = couponCode?.trimmingCharacters(in: .whitespacesAndNewlines), !code.isEmpty {
             let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
-            endpoint += "?couponCode=\(encoded)"
+            queryItems.append("couponCode=\(encoded)")
+        }
+        if let addr = addressId?.trimmingCharacters(in: .whitespacesAndNewlines), !addr.isEmpty {
+            let encoded = addr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? addr
+            queryItems.append("addressId=\(encoded)")
+        }
+        if !queryItems.isEmpty {
+            endpoint += "?" + queryItems.joined(separator: "&")
         }
         return try await apiClient.get(endpoint: endpoint)
     }

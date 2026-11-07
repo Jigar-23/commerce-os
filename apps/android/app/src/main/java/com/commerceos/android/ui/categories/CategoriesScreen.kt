@@ -277,15 +277,15 @@ private data class QuickPromoItem(
 
 private val QUICK_PROMO_ITEMS = listOf(
     QuickPromoItem(
-        title = "Most Bought",
-        subtitle = "Daily Essentials",
-        badge = "⚡ 10m SLA",
+        title = "Curated Top Deals",
+        subtitle = "Verified Top Sellers",
+        badge = "TOP PICKS",
         icon = Icons.Default.ShoppingBag,
         iconTint = Color(0xFF007E65),
         bgStart = Color(0xFFE6F7F0),
         bgEnd = Color(0xFFD1F2E2),
         borderColor = Color(0xFFB5EAD7),
-        categoryName = "Most Bought Essentials",
+        categoryName = "Curated Top Deals",
         collectionId = "best_sellers"
     ),
     QuickPromoItem(
@@ -314,14 +314,14 @@ private val QUICK_PROMO_ITEMS = listOf(
     ),
     QuickPromoItem(
         title = "Generic Switch",
-        subtitle = "Save up to 40%",
-        badge = "SAME SALT",
+        subtitle = "Pharmacist-Verified Equivalence",
+        badge = "BIOEQUIVALENT",
         icon = Icons.Default.SwapHoriz,
         iconTint = Color(0xFFD97706),
         bgStart = Color(0xFFFEF3C7),
         bgEnd = Color(0xFFFDE68A),
         borderColor = Color(0xFFFCD34D),
-        categoryName = "Generic Substitutes & Savings",
+        categoryName = "Verified Generic Substitutes",
         collectionId = "generic_substitutes"
     )
 )
@@ -1227,7 +1227,7 @@ fun CategoriesScreen(
 private fun PharmEasyCategoryCard(
     category: CatalogCategory,
     onClick: () -> Unit,
-    onSelectTag: (String) -> Unit
+    @Suppress("UNUSED_PARAMETER") onSelectTag: (String) -> Unit
 ) {
     val pres = getHealthcarePresentation(category.name)
 

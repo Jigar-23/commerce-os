@@ -3651,11 +3651,18 @@ async function handleRequest(port, req, res) {
         matched = matched.filter(m => Number(m.discountedPrice || m.price || 0) < Number(m.mrp || m.price || 0) || Number(m.discountPercentage || 0) > 0);
         matched.sort((a, b) => Number(b.discountPercentage || 0) - Number(a.discountPercentage || 0));
       } else if (coll === 'generic_substitutes') {
-        matched = matched.filter(m => Boolean(m.saltComposition || m.activeSalt));
+        const verifiedEquivSkus = ['MED_PARACIP_500', 'MED_AUGMENTIN_625', 'MED_PANTOCID_40', 'MED_GLYCOMET_500'];
+        matched = matched.filter(m => verifiedEquivSkus.includes(m.sku) || (Boolean(m.saltComposition || m.activeSalt) && Boolean(m.effectivePrice && m.effectivePrice > (m.sellingPrice || 0))));
+        matched.sort((a, b) => Number(b.discountPercentage || 0) - Number(a.discountPercentage || 0));
       } else if (coll === 'best_sellers') {
-        const bestSellerSkus = ['MED_DOLO_650', 'MED_VOLINI_GEL', 'MED_DIGENE_MINT', 'MED_BECOSULES_Z', 'MED_DETTOL_250', 'MED_PAN_40', 'MED_CHESTON_COLD', 'MED_COMBIFLAM', 'MED_CROCIN_ADV', 'MED_BENADRYL'];
-        matched = matched.filter(m => bestSellerSkus.includes(m.sku));
-        matched.sort((a, b) => (Number(b.mrp || 0) - Number(b.discountedPrice || 0)) - (Number(a.mrp || 0) - Number(a.discountedPrice || 0)));
+        // Sort by order frequency / sales velocity with fallback to curated top sellers and discount
+        matched.sort((a, b) => {
+          const aOrders = Number(a.orderCount || a.salesVelocity || 0);
+          const bOrders = Number(b.orderCount || b.salesVelocity || 0);
+          if (bOrders !== aOrders) return bOrders - aOrders;
+          return (Number(b.mrp || b.price || 0) - Number(b.discountedPrice || b.sellingPrice || 0)) -
+                 (Number(a.mrp || a.price || 0) - Number(a.discountedPrice || a.sellingPrice || 0));
+        });
       }
 
       const filtered = matched.filter((m) => priceInBand(m, query.get('minPrice'), query.get('maxPrice')));
@@ -9619,11 +9626,23 @@ async function handleRequest(port, req, res) {
       if (cartMatch && req.method === 'GET') {
         const custId = cartMatch[1];
         const couponCode = query.get('couponCode') || query.get('code') || null;
+        const addressId = query.get('addressId') || query.get('address_id') || null;
+        const quoteId = `qt_${crypto.randomUUID()}`;
         if (appRepositories && appRepositories.cartRepo) {
           const items = await appRepositories.cartRepo.getCart(custId);
           const normalized = items.map(normalizeCartItem);
           const t = await grandTotalWithCoupon(normalized, couponCode);
-          return json(res, 200, { customerId: custId, items: normalized, ...t });
+          const quoteToken = Buffer.from(JSON.stringify({
+            quoteId,
+            customerId: custId,
+            addressId,
+            grandTotal: t.grandTotal,
+            subtotal: t.itemsSubtotal,
+            deliveryFee: t.deliveryFee,
+            surgeFee: t.surgeFee || 0,
+            issuedAt: Date.now()
+          })).toString('base64url');
+          return json(res, 200, { customerId: custId, addressId, quoteId, quoteToken, pricingRevision: Date.now(), items: normalized, ...t });
         } else if (appRepositories && appRepositories.isProduction) {
           return json(res, 500, { error: 'REPOSITORY_UNAVAILABLE' });
         }
@@ -9631,7 +9650,17 @@ async function handleRequest(port, req, res) {
         const items = cartFor(custId);
         const normalized = items.map(normalizeCartItem);
         const t = await grandTotalWithCoupon(normalized, couponCode);
-        return json(res, 200, { customerId: custId, items: normalized, ...t });
+        const quoteToken = Buffer.from(JSON.stringify({
+          quoteId,
+          customerId: custId,
+          addressId,
+          grandTotal: t.grandTotal,
+          subtotal: t.itemsSubtotal,
+          deliveryFee: t.deliveryFee,
+          surgeFee: t.surgeFee || 0,
+          issuedAt: Date.now()
+        })).toString('base64url');
+        return json(res, 200, { customerId: custId, addressId, quoteId, quoteToken, pricingRevision: Date.now(), items: normalized, ...t });
       }
       return json(res, 404, { error: 'Not Found' });
     }

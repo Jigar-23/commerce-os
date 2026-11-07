@@ -875,11 +875,12 @@ public struct CartScreen: View {
         quoteRevision += 1
         let currentRevision = quoteRevision
         let requestedCoupon = code
+        let selectedAddrId = addressRepository.selectedAddress?.id ?? addressRepository.addresses.first?.id
         isFetchingQuote = true
 
         activeQuoteTask = Task {
             do {
-                let quote = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: requestedCoupon)
+                let quote = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: requestedCoupon, addressId: selectedAddrId)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard self.quoteRevision == currentRevision else { return }

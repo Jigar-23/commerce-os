@@ -73,6 +73,34 @@ public final class CartLocalStore: ObservableObject {
         authoritativeQuote = nil
         persistToDisk()
     }
+
+    // MARK: - Durable Pending Checkout Idempotency Store (Survives screen leaves, background kills, and restarts)
+    private func pendingIdempotencyKey(for customerId: String) -> String {
+        "commerce_os_pending_checkout_\(customerId)"
+    }
+
+    public func getPendingCheckoutIdempotency(customerId: String, currentFingerprint: String) -> String {
+        let key = pendingIdempotencyKey(for: customerId)
+        if let dict = userDefaults.dictionary(forKey: key),
+           let savedFingerprint = dict["fingerprint"] as? String,
+           let savedIdempotencyKey = dict["idempotencyKey"] as? String,
+           savedFingerprint == currentFingerprint,
+           !savedIdempotencyKey.isEmpty {
+            return savedIdempotencyKey
+        }
+        let freshKey = "ios_order_\(UUID().uuidString)"
+        let record: [String: Any] = [
+            "idempotencyKey": freshKey,
+            "fingerprint": currentFingerprint,
+            "createdAt": Date().timeIntervalSince1970
+        ]
+        userDefaults.set(record, forKey: key)
+        return freshKey
+    }
+
+    public func clearPendingCheckoutIdempotency(customerId: String) {
+        userDefaults.removeObject(forKey: pendingIdempotencyKey(for: customerId))
+    }
     
     public func persistToDisk() {
         let serializable = items.map { CartPersistedItem(product: $0.value.product, quantity: $0.value.quantity) }

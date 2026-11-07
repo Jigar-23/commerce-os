@@ -4939,6 +4939,42 @@ class TransactionalOrderRepository {
       const taxAmount = pricingResult.taxAmount;
       const totalAmount = pricingResult.totalAmount;
 
+      // 12b. Authoritative Quote & Address Binding Validation
+      const suppliedQuoteToken = data.quoteToken || data.quote_token;
+      if (suppliedQuoteToken) {
+        try {
+          const decodedJson = Buffer.from(suppliedQuoteToken, 'base64url').toString('utf8');
+          const decoded = JSON.parse(decodedJson);
+          if (decoded.addressId && resolvedAddress && decoded.addressId !== resolvedAddress.id) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 409,
+              error: 'STALE_QUOTE',
+              message: 'Authoritative quote was calculated for a different delivery address. Please refresh quote.'
+            };
+          }
+          if (decoded.storeId && decoded.storeId !== store.id) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 409,
+              error: 'STALE_QUOTE',
+              message: 'Fulfillment store or surge condition has changed. Please refresh quote.'
+            };
+          }
+          if (decoded.grandTotal != null && Math.abs(Number(decoded.grandTotal) - Number(totalAmount)) > 0.05) {
+            await client.query('ROLLBACK');
+            return {
+              ok: false,
+              httpStatus: 409,
+              error: 'STALE_QUOTE',
+              message: `Pricing has changed since quote was issued (quoted: ₹${Number(decoded.grandTotal).toFixed(2)}, authoritative: ₹${Number(totalAmount).toFixed(2)}). Please refresh quote.`
+            };
+          }
+        } catch (_) {}
+      }
+
       // 13. Atomic Store-Scoped Stock Reservation (with inventory_ledger audit entry)
       const stockResult = await this.inventoryRepo.reserveStockTransactionally(client, store.id, resolvedItemSnapshots);
       if (!stockResult.ok) {

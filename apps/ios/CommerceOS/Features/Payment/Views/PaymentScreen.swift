@@ -44,7 +44,8 @@ public struct PaymentScreen: View {
     }
     
     private var activeQuote: AuthoritativeCartQuote? {
-        authoritativeQuote ?? initialQuote ?? cartStore.authoritativeQuote
+        guard quoteFetchError == nil else { return nil }
+        return authoritativeQuote ?? initialQuote ?? cartStore.authoritativeQuote
     }
 
     private var activeCouponCode: String? {
@@ -158,12 +159,13 @@ public struct PaymentScreen: View {
     private func fetchAuthoritativeQuote() {
         let customerId = container.customerSession?.customerId ?? UserDefaults.standard.string(forKey: "customer_id") ?? "self"
         let couponToFetch = activeCouponCode
+        let targetAddr = address ?? addressRepository.selectedAddress ?? addressRepository.addresses.first
         isFetchingQuote = true
         quoteFetchError = nil
 
         Task {
             do {
-                let q = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: couponToFetch)
+                let q = try await container.orderRepository.fetchCartQuote(customerId: customerId, couponCode: couponToFetch, addressId: targetAddr?.id)
                 await MainActor.run {
                     self.isFetchingQuote = false
                     let priorTotal = (self.initialQuote ?? self.cartStore.authoritativeQuote)?.effectiveGrandTotal
@@ -185,6 +187,8 @@ public struct PaymentScreen: View {
             } catch {
                 await MainActor.run {
                     self.isFetchingQuote = false
+                    self.authoritativeQuote = nil
+                    self.cartStore.authoritativeQuote = nil
                     self.quoteFetchError = "Failed to load authoritative quote: \(error.localizedDescription)"
                 }
             }
@@ -527,7 +531,7 @@ public struct PaymentScreen: View {
             Spacer()
             
             let hasValidAddress = (address ?? addressRepository.selectedAddress) != nil
-            let hasValidQuote = activeQuote != nil && !isFetchingQuote
+            let hasValidQuote = activeQuote != nil && !isFetchingQuote && quoteFetchError == nil
             let isPriceConfirmed = priceChangeNotice == nil || priceChangeConfirmed
             let canPlaceOrder = hasValidAddress && hasValidQuote && isPriceConfirmed && !isPlacingOrder
 
@@ -554,7 +558,7 @@ public struct PaymentScreen: View {
                     } else if !hasValidQuote {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 14))
-                        Text("UPDATE QUOTE")
+                        Text(quoteFetchError != nil ? "RETRY QUOTE" : "UPDATE QUOTE")
                             .font(.system(size: 13, weight: .heavy))
                     } else if !isPriceConfirmed {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -657,17 +661,8 @@ public struct PaymentScreen: View {
                 let sortedItemsFingerprint = itemsPayload.sorted(by: { $0.sku < $1.sku }).map { "\($0.sku):\($0.quantity)" }.joined(separator: ";")
                 let currentFingerprint = "\(authoritativeId)|\(sortedItemsFingerprint)|\(quoteToUse.couponCode ?? activeCouponCode ?? "")|\(selectedMethod)"
 
-                let finalIdempotencyKey: String
-                if let existingKey = activeIdempotencyKey, lastPayloadFingerprint == currentFingerprint {
-                    finalIdempotencyKey = existingKey
-                } else {
-                    let newKey = "ios_order_\(UUID().uuidString)"
-                    finalIdempotencyKey = newKey
-                    await MainActor.run {
-                        self.activeIdempotencyKey = newKey
-                        self.lastPayloadFingerprint = currentFingerprint
-                    }
-                }
+                let customerKeyScope = customerId.isEmpty ? "guest" : customerId
+                let finalIdempotencyKey = cartStore.getPendingCheckoutIdempotency(customerId: customerKeyScope, currentFingerprint: currentFingerprint)
 
                 let payload = PlaceOrderRequest(
                     idempotencyKey: finalIdempotencyKey,
@@ -676,7 +671,8 @@ public struct PaymentScreen: View {
                     deliveryAddress: addressPayload,
                     items: itemsPayload,
                     prescriptionId: nil,
-                    couponCode: quoteToUse.couponCode ?? activeCouponCode
+                    couponCode: quoteToUse.couponCode ?? activeCouponCode,
+                    quoteToken: quoteToUse.quoteToken
                 )
                 
                 let orderRes: ServerOrderResponse = try await container.apiClient.post(
@@ -685,6 +681,7 @@ public struct PaymentScreen: View {
                 )
                 
                 await MainActor.run {
+                    self.cartStore.clearPendingCheckoutIdempotency(customerId: customerKeyScope)
                     self.activeIdempotencyKey = nil
                     self.lastPayloadFingerprint = nil
                     self.container.orderRepository.lastPlacedOrder = orderRes
@@ -701,7 +698,11 @@ public struct PaymentScreen: View {
             } catch {
                 await MainActor.run {
                     self.isPlacingOrder = false
-                    self.orderError = error.localizedDescription
+                    let errMsg = error.localizedDescription
+                    self.orderError = errMsg
+                    if errMsg.localizedCaseInsensitiveContains("STALE_QUOTE") || errMsg.localizedCaseInsensitiveContains("quote") {
+                        self.fetchAuthoritativeQuote()
+                    }
                 }
             }
         }

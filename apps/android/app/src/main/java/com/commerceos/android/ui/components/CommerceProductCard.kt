@@ -492,14 +492,14 @@ private fun GridProductCard(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = modifier
+        modifier = modifier.height(310.dp)
     ) {
-        Column(modifier = Modifier.fillMaxHeight()) {
+        Column(modifier = Modifier.fillMaxSize()) {
             // 1. Image Box with authentic pharma tags
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(125.dp)
+                    .height(115.dp)
             ) {
                 ProductImage(
                     imageUrl = model.image,

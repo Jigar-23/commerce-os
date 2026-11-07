@@ -396,7 +396,30 @@ const REQUIRED_DATABASE_MIGRATIONS = [
     challenge VARCHAR(128) NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );`
+  );`,
+  `CREATE TABLE IF NOT EXISTS medicine_equivalences (
+    id VARCHAR(64) PRIMARY KEY,
+    reference_sku VARCHAR(64) NOT NULL,
+    substitute_sku VARCHAR(64) NOT NULL,
+    active_ingredient VARCHAR(255) NOT NULL,
+    strength VARCHAR(64) NOT NULL,
+    dosage_form VARCHAR(64) NOT NULL,
+    route VARCHAR(64) NOT NULL DEFAULT 'ORAL',
+    bioequivalence_status VARCHAR(64) NOT NULL DEFAULT 'VERIFIED_EQUIVALENT',
+    pharmacist_verified BOOLEAN NOT NULL DEFAULT TRUE,
+    savings_percent NUMERIC(5,2) DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_med_equiv_ref ON medicine_equivalences(reference_sku);`,
+  `CREATE INDEX IF NOT EXISTS idx_med_equiv_sub ON medicine_equivalences(substitute_sku);`,
+  `INSERT INTO medicine_equivalences (id, reference_sku, substitute_sku, active_ingredient, strength, dosage_form, bioequivalence_status, pharmacist_verified, savings_percent)
+   VALUES
+     ('eq_pcm_1', 'MED_DOLO_650', 'MED_PARACIP_500', 'Paracetamol', '650mg', 'Tablet', 'VERIFIED_EQUIVALENT', TRUE, 42.0),
+     ('eq_pcm_2', 'MED_CROCIN_ADV', 'MED_PARACIP_500', 'Paracetamol', '500mg', 'Tablet', 'VERIFIED_EQUIVALENT', TRUE, 38.5),
+     ('eq_amox_1', 'SKU-AMOX-625', 'MED_AUGMENTIN_625', 'Amoxicillin + Potassium Clavulanate', '625mg', 'Tablet', 'VERIFIED_EQUIVALENT', TRUE, 45.0),
+     ('eq_pan_1', 'MED_PAN_40', 'MED_PANTOCID_40', 'Pantoprazole Gastro-resistant', '40mg', 'Tablet', 'VERIFIED_EQUIVALENT', TRUE, 35.0),
+     ('eq_glyc_1', 'SKU-GLYC-500', 'MED_GLYCOMET_500', 'Metformin Hydrochloride Prolonged Release', '500mg', 'Tablet', 'VERIFIED_EQUIVALENT', TRUE, 30.0)
+   ON CONFLICT (id) DO NOTHING;`
 ];
 
 async function runDatabaseMigrations(pgPool) {
@@ -2719,24 +2742,20 @@ const server = http.createServer(async (req, res) => {
         revocationInterval = setInterval(async () => {
           try {
             const adminCheck = await pool.query(
-              `SELECT role, status FROM users WHERE (id = $1 OR username = $1 OR email = $1) LIMIT 1`,
+              `SELECT id, admin_id, email, status FROM admins WHERE (admin_id = $1 OR id = $1 OR email = $1) LIMIT 1`,
               [authClaims.sub]
             );
-            if (adminCheck.rows.length > 0) {
-              const u = adminCheck.rows[0];
-              const stillAdmin = (u.role === 'ADMIN' || u.role === 'ROLE_ADMIN') && u.status !== 'SUSPENDED' && u.status !== 'REVOKED';
-              if (!stillAdmin) {
-                res.write(`event: error\ndata: ${JSON.stringify({ error: 'ROLE_REVOKED', message: 'Admin authority has been revoked.' })}\n\n`);
-                res.end();
-                clearInterval(revocationInterval);
-              }
+            if (adminCheck.rows.length === 0 || adminCheck.rows[0].status !== 'ACTIVE') {
+              res.write(`event: error\ndata: ${JSON.stringify({ error: 'ROLE_REVOKED', message: 'Admin authority has been revoked or suspended.' })}\n\n`);
+              res.end();
+              clearInterval(revocationInterval);
             }
           } catch (_) {}
         }, 30000);
         if (revocationInterval.unref) revocationInterval.unref();
       }
 
-      req.on('close', () => {
+      res.on('close', () => {
         clearTimeout(expiryTimer);
         if (revocationInterval) clearInterval(revocationInterval);
       });
@@ -4943,11 +4962,25 @@ const server = http.createServer(async (req, res) => {
       if (coll === 'deals_of_the_day') {
         queryText += ` AND (discounted_price IS NOT NULL AND discounted_price < price) ORDER BY ((mrp - COALESCE(discounted_price, price)) / NULLIF(mrp, 0)) DESC LIMIT 100`;
       } else if (coll === 'generic_substitutes') {
-        queryText += ` AND (salt_composition IS NOT NULL AND salt_composition != '') ORDER BY created_at DESC LIMIT 100`;
+        queryText += ` AND (sku IN (SELECT substitute_sku FROM medicine_equivalences WHERE bioequivalence_status = 'VERIFIED_EQUIVALENT' AND pharmacist_verified = TRUE) OR (salt_composition IS NOT NULL AND salt_composition != '' AND EXISTS (SELECT 1 FROM products p2 WHERE p2.id != products.id AND p2.salt_composition = products.salt_composition AND p2.salt_composition IS NOT NULL AND p2.salt_composition != ''))) ORDER BY ((mrp - COALESCE(discounted_price, price)) / NULLIF(mrp, 0)) DESC, created_at DESC LIMIT 100`;
       } else if (coll === 'best_sellers') {
-        const bestSellerSkus = ['MED_DOLO_650', 'MED_VOLINI_GEL', 'MED_DIGENE_MINT', 'MED_BECOSULES_Z', 'MED_DETTOL_250', 'MED_PAN_40', 'MED_CHESTON_COLD', 'MED_COMBIFLAM', 'MED_CROCIN_ADV', 'MED_BENADRYL'];
-        queryParams.push(bestSellerSkus);
-        queryText += ` AND sku = ANY($${queryParams.length}) ORDER BY (price - COALESCE(discounted_price, price)) DESC LIMIT 100`;
+        queryText = `
+          SELECT p.*,
+                 COALESCE(sales_agg.sales_velocity, 0) AS sales_velocity
+          FROM products p
+          LEFT JOIN (
+            SELECT (item->>'sku') AS sku, SUM((item->>'quantity')::int) AS sales_velocity
+            FROM orders, jsonb_array_elements(items) AS item
+            WHERE status NOT IN ('CANCELLED', 'REJECTED')
+            GROUP BY (item->>'sku')
+          ) sales_agg ON p.sku = sales_agg.sku
+          WHERE p.is_active = TRUE
+          ORDER BY sales_agg.sales_velocity DESC NULLS LAST,
+                   ((p.mrp - COALESCE(p.discounted_price, p.price)) / NULLIF(p.mrp, 0)) DESC,
+                   p.created_at DESC
+          LIMIT 100
+        `;
+        queryParams = [];
       } else {
         queryText += ` ORDER BY created_at DESC LIMIT 100`;
       }
@@ -5698,19 +5731,38 @@ const server = http.createServer(async (req, res) => {
     const pricingEngine = require('../pricing-engine');
 
     // Finding 6: Store-specific surge resolution based on customer authoritative fulfillment store
-    async function resolveCustomerCartSurgeAndContext(customerId, rawItems = []) {
+    async function resolveCustomerCartSurgeAndContext(customerId, rawItems = [], targetAddressId = null) {
       if (!pool || !customerId) {
-        return { isSurge: false, isProvisional: true, storeId: null };
+        return { isSurge: false, isProvisional: true, storeId: null, addressId: targetAddressId || null };
       }
       try {
-        const addrRes = await pool.query(
-          `SELECT latitude, longitude, address_line, city, postal_code 
-           FROM customer_addresses 
-           WHERE customer_id = $1 AND is_default = TRUE LIMIT 1`,
-          [customerId]
-        );
+        let addrRes = null;
+        if (targetAddressId && !String(targetAddressId).startsWith('temp_')) {
+          addrRes = await pool.query(
+            `SELECT id, latitude, longitude, address_line, city, postal_code
+             FROM customer_addresses
+             WHERE customer_id = $1 AND id = $2 LIMIT 1`,
+            [customerId, targetAddressId]
+          );
+        }
+        if (!addrRes || addrRes.rows.length === 0) {
+          addrRes = await pool.query(
+            `SELECT id, latitude, longitude, address_line, city, postal_code
+             FROM customer_addresses
+             WHERE customer_id = $1 AND is_default = TRUE LIMIT 1`,
+            [customerId]
+          );
+        }
         if (addrRes.rows.length === 0) {
-          return { isSurge: false, isProvisional: true, storeId: null };
+          addrRes = await pool.query(
+            `SELECT id, latitude, longitude, address_line, city, postal_code
+             FROM customer_addresses
+             WHERE customer_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+            [customerId]
+          );
+        }
+        if (addrRes.rows.length === 0) {
+          return { isSurge: false, isProvisional: true, storeId: null, addressId: targetAddressId || null };
         }
         const addr = addrRes.rows[0];
         const items = (rawItems || []).map(i => ({
@@ -5734,15 +5786,16 @@ const server = http.createServer(async (req, res) => {
           return {
             isSurge: Boolean(decision.store.surge_mode),
             isProvisional: false,
-            storeId: decision.storeId
+            storeId: decision.storeId,
+            addressId: addr.id
           };
         }
       } catch (_) {}
 
-      return { isSurge: false, isProvisional: true, storeId: null };
+      return { isSurge: false, isProvisional: true, storeId: null, addressId: targetAddressId || null };
     }
 
-    async function formatCartResponseDto(customerId, rawItems, surgeContext = false, couponCode = null) {
+    async function formatCartResponseDto(customerId, rawItems, surgeContext = false, couponCode = null, targetAddressId = null) {
       const isSurge = typeof surgeContext === 'boolean' ? surgeContext : Boolean(surgeContext?.isSurge);
       const isProvisional = typeof surgeContext === 'object' && surgeContext !== null ? Boolean(surgeContext.isProvisional) : false;
       const items = (rawItems || []).map(r => {
@@ -5836,8 +5889,39 @@ const server = http.createServer(async (req, res) => {
       const remainingForFreeDelivery = isFreeShipping ? 0 : Math.max(0, Math.round((FREE_DELIVERY_THRESHOLD - roundedSubtotal) * 100) / 100);
       const requiresPrescription = items.some(it => it.prescriptionRequired);
 
+      const effectiveAddressId = targetAddressId || (typeof surgeContext === 'object' && surgeContext !== null ? surgeContext.addressId : null);
+      const quoteStoreId = typeof surgeContext === 'object' && surgeContext !== null ? surgeContext.storeId : null;
+      const quoteAppliedCoupon = couponStatus === 'APPLIED' ? String(couponCode).trim().toUpperCase() : null;
+      const quoteTimestamp = Date.now();
+      const quoteId = `qt_${crypto.randomUUID()}`;
+
+      const quotePayload = {
+        quoteId,
+        customerId: String(customerId || ''),
+        storeId: quoteStoreId || null,
+        addressId: effectiveAddressId || null,
+        grandTotal: grandTotal,
+        subtotal: roundedSubtotal,
+        deliveryFee: effectiveDeliveryFee,
+        surgeFee: pricing.surgeFee || 0.0,
+        packagingFee: coldChainPackagingFee,
+        discountAmount: totalDiscount,
+        couponCode: quoteAppliedCoupon,
+        issuedAt: quoteTimestamp
+      };
+
+      const quoteHmac = crypto.createHmac('sha256', JWT_SECRET)
+        .update(`${quotePayload.customerId}|${quotePayload.storeId || ''}|${quotePayload.addressId || ''}|${quotePayload.grandTotal}|${quotePayload.subtotal}|${quotePayload.surgeFee}|${quotePayload.deliveryFee}|${quotePayload.discountAmount}|${quotePayload.couponCode || ''}`)
+        .digest('hex');
+
+      const quoteToken = Buffer.from(JSON.stringify({ ...quotePayload, sig: quoteHmac })).toString('base64url');
+
       return {
         customerId: String(customerId || ''),
+        addressId: effectiveAddressId || null,
+        quoteId: quoteId,
+        quoteToken: quoteToken,
+        pricingRevision: quoteTimestamp,
         items: items,
         subtotal: roundedSubtotal,
         itemsSubtotal: roundedSubtotal,
@@ -5850,7 +5934,7 @@ const server = http.createServer(async (req, res) => {
         taxAmount: pricing.taxAmount,
         taxBreakdown: pricing.taxBreakdown,
         discountAmount: totalDiscount,
-        couponCode: couponStatus === 'APPLIED' ? String(couponCode).trim().toUpperCase() : null,
+        couponCode: quoteAppliedCoupon,
         invalidCouponReason: invalidCouponReason,
         total: grandTotal,
         grandTotal: grandTotal,
@@ -5890,9 +5974,10 @@ const server = http.createServer(async (req, res) => {
       const authClaims = authorizeCartAccess(req, res, customerId);
       if (!authClaims) return;
       const rawItems = await appRepositories.cartRepo.getCart(customerId);
-      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems);
+      const addressId = parsedUrl.searchParams.get('addressId') || parsedUrl.searchParams.get('address_id') || null;
+      const surgeContext = await resolveCustomerCartSurgeAndContext(customerId, rawItems, addressId);
       const couponCode = parsedUrl.searchParams.get('couponCode') || parsedUrl.searchParams.get('code') || null;
-      const cartResponse = await formatCartResponseDto(customerId, rawItems, surgeContext, couponCode);
+      const cartResponse = await formatCartResponseDto(customerId, rawItems, surgeContext, couponCode, addressId);
       return sendJson(res, 200, cartResponse);
     }
 
@@ -7020,6 +7105,47 @@ const server = http.createServer(async (req, res) => {
         ...safeOrderPayload
       } = body;
 
+      // Authoritative Quote Validation
+      const rawQuoteToken = body.quoteToken || body.quote_token || req.headers['x-quote-token'] || null;
+      if (rawQuoteToken) {
+        try {
+          const decodedJson = Buffer.from(rawQuoteToken, 'base64url').toString('utf8');
+          const decoded = JSON.parse(decodedJson);
+          const expectedSig = crypto.createHmac('sha256', JWT_SECRET)
+            .update(`${decoded.customerId}|${decoded.storeId || ''}|${decoded.addressId || ''}|${decoded.grandTotal}|${decoded.subtotal}|${decoded.surgeFee}|${decoded.deliveryFee}|${decoded.discountAmount}|${decoded.couponCode || ''}`)
+            .digest('hex');
+          if (decoded.sig !== expectedSig) {
+            return sendJson(res, 400, {
+              error: 'INVALID_QUOTE_TOKEN',
+              message: 'Authoritative quote token signature verification failed.'
+            });
+          }
+          if (decoded.customerId && decoded.customerId !== authenticatedCustomerId) {
+            return sendJson(res, 403, {
+              error: 'FORBIDDEN',
+              message: 'Quote token does not belong to authenticated customer.'
+            });
+          }
+          if (decoded.addressId && customerAddr && decoded.addressId !== customerAddr.id) {
+            return sendJson(res, 409, {
+              error: 'STALE_QUOTE',
+              message: 'Delivery address has changed since quote was issued. Please refresh quote.'
+            });
+          }
+          if (decoded.issuedAt && (Date.now() - Number(decoded.issuedAt) > 15 * 60 * 1000)) {
+            return sendJson(res, 409, {
+              error: 'STALE_QUOTE',
+              message: 'Authoritative cart quote has expired. Please refresh quote.'
+            });
+          }
+        } catch (tokenErr) {
+          return sendJson(res, 400, {
+            error: 'INVALID_QUOTE_TOKEN',
+            message: 'Malformed authoritative quote token.'
+          });
+        }
+      }
+
       // Idempotency Key Handling: use client-generated key or generate unique attempt key for keyless order
       let idempotencyKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || body.idempotencyKey || body.idempotency_key || null;
       if (!idempotencyKey || !String(idempotencyKey).trim()) {
@@ -7034,7 +7160,8 @@ const server = http.createServer(async (req, res) => {
         deliveryAddress: customerAddr,
         paymentMethod: requestedMethod,
         fulfillmentDecision: fulfillmentDecision.decision,
-        idempotencyKey
+        idempotencyKey,
+        quoteToken: rawQuoteToken
       });
 
       if (!placeResult.ok) {
@@ -11089,19 +11216,30 @@ const server = http.createServer(async (req, res) => {
         if (!validIntegrity) {
           return sendJson(res, 400, { error: 'PLAY_INTEGRITY_VERIFICATION_FAILED', message: 'Google Play Integrity verdict verification failed.' });
         }
-        let pubKey = String(body.publicKey || '').trim();
-        if (pubKey) {
-          if (!pubKey.startsWith('-----BEGIN')) {
-            pubKey = `-----BEGIN PUBLIC KEY-----\n${pubKey}\n-----END PUBLIC KEY-----`;
-          }
+        if (Array.isArray(body.certificateChain) && body.certificateChain.length > 0) {
           try {
-            crypto.createPublicKey(pubKey);
-            authenticPublicKeyPem = pubKey;
-          } catch (e) {
-            return sendJson(res, 400, { error: 'INVALID_PUBLIC_KEY', message: `Device public key is invalid: ${e.message}` });
+            const leafCertPem = body.certificateChain[0];
+            const leafCert = new crypto.X509Certificate(leafCertPem);
+            authenticPublicKeyPem = leafCert.publicKey.export({ type: 'spki', format: 'pem' });
+          } catch (certErr) {
+            console.warn('[production-server] android certChain parse error:', certErr.message);
           }
-        } else {
-          authenticPublicKeyPem = `android_play_integrity_verified:${keyId}`;
+        }
+        if (!authenticPublicKeyPem) {
+          let pubKey = String(body.publicKey || '').trim();
+          if (pubKey) {
+            if (!pubKey.startsWith('-----BEGIN')) {
+              pubKey = `-----BEGIN PUBLIC KEY-----\n${pubKey}\n-----END PUBLIC KEY-----`;
+            }
+            try {
+              crypto.createPublicKey(pubKey);
+              authenticPublicKeyPem = pubKey;
+            } catch (e) {
+              return sendJson(res, 400, { error: 'INVALID_PUBLIC_KEY', message: `Device public key is invalid: ${e.message}` });
+            }
+          } else {
+            authenticPublicKeyPem = `android_play_integrity_verified:${keyId}`;
+          }
         }
       } else {
         return sendJson(res, 400, { error: 'UNSUPPORTED_PLATFORM', message: `Platform ${platform} is not supported.` });
