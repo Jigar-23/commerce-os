@@ -15,7 +15,6 @@ import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -215,34 +214,6 @@ private fun HeroImageSection(product: CommerceProduct) {
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF047857)
-                    )
-                }
-            }
-
-            // Rating pill anchored on the bottom-left of the image tile (Tata 1mg benchmark)
-            val ratingVal = product.rating ?: 4.4
-            Surface(
-                color = Color(0xFF166534),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier.align(Alignment.BottomStart)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = String.format(java.util.Locale.US, "%.1f", ratingVal),
-                        fontSize = 11.sp,
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(10.dp)
                     )
                 }
             }

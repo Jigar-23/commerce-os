@@ -8,7 +8,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -124,32 +123,6 @@ fun ProductSearchCard(
                                 color = CommerceColors.Primary,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
-                        }
-
-                        // STRICT INTEGRITY: Missing rating -> omit
-                        val rating = result.rating
-                        if (rating != null && rating > 0.0) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(color = CommerceColors.Success, shape = RoundedCornerShape(Radius.Micro)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        String.format("%.1f", rating),
-                                        style = CommerceTypography.Meta,
-                                        fontWeight = FontWeight.Bold,
-                                        color = CommerceColors.OnPrimary
-                                    )
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Icon(
-                                        Icons.Default.Star,
-                                        contentDescription = null,
-                                        tint = CommerceColors.OnPrimary,
-                                        modifier = Modifier.size(10.dp)
-                                    )
-                                }
-                            }
                         }
                     }
 
@@ -289,15 +262,6 @@ fun RestaurantSearchCard(result: SearchResult, onClick: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(color = CommerceColors.Primary.copy(alpha = 0.12f), shape = RoundedCornerShape(Radius.Micro)) {
                         Text("FOOD", style = CommerceTypography.Meta, fontWeight = FontWeight.Bold, color = CommerceColors.Primary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                    }
-                    // STRICT INTEGRITY: Missing rating -> omit
-                    val rating = result.rating
-                    if (rating != null && rating > 0.0) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Star, contentDescription = null, tint = CommerceColors.Rating, modifier = Modifier.size(12.dp))
-                            Text(String.format("%.1f", rating), style = CommerceTypography.Meta, fontWeight = FontWeight.Bold)
-                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))

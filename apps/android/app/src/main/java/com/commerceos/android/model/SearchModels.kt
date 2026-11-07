@@ -88,7 +88,6 @@ data class SearchFilterConfig(
         ): SearchFilterConfig {
             val base = listOf(
                 SearchFilterGroup("fulfillment", "Fulfillment", listOf(SearchFilterOption("express_only", "⚡ Express Delivery"))),
-                SearchFilterGroup("rating", "Rating", listOf(SearchFilterOption("4_plus", "★ 4.0 & Above"), SearchFilterOption("4.5_plus", "★ 4.5 & Above"))),
                 SearchFilterGroup("price", "Price", listOf(SearchFilterOption("under_500", "Under ₹500"), SearchFilterOption("500_2000", "₹500 - ₹2,000"), SearchFilterOption("above_2000", "Above ₹2,000")))
             )
             val dynamicCategoryGroup = if (categories.isNotEmpty()) {

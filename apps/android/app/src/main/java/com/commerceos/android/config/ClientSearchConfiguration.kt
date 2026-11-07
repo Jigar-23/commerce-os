@@ -91,15 +91,13 @@ data class ClientSearchConfiguration(
 private fun defaultQuickFilters(): List<SearchFilterOption> = listOf(
     SearchFilterOption("express_only", "⚡ Express"),
     SearchFilterOption("in_stock", "In Stock"),
-    SearchFilterOption("rating_4_plus", "★ 4.0+"),
     SearchFilterOption("deals_only", "🏷️ On Sale")
 )
 
 private fun defaultSortOptions(): List<SortOption> = listOf(
     SortOption("relevance", "Relevance", isDefault = true),
     SortOption("price_low_high", "Price: Low to High"),
-    SortOption("price_high_low", "Price: High to Low"),
-    SortOption("rating", "Top Rated")
+    SortOption("price_high_low", "Price: High to Low")
 )
 
 private fun defaultCardMappings(): Map<SearchEntityType, CardVariant> = mapOf(

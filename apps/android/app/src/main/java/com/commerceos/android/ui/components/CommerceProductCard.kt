@@ -10,7 +10,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -282,33 +281,6 @@ private fun CompactProductCard(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.size(92.dp)
                 )
-                val ratingVal = model.rating ?: 4.4
-                Surface(
-                    color = Color(0xFF166534),
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 4.dp, bottom = 4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
-                    ) {
-                        Text(
-                            text = String.format(java.util.Locale.US, "%.1f", ratingVal),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(8.dp)
-                        )
-                    }
-                }
                 if (onWishlistToggle != null) {
                     WishlistHeartButton(
                         isWishlisted = model.isWishlisted,
@@ -415,34 +387,6 @@ private fun GridProductCard(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.ExtraBold,
                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                // Rating pill anchored on the bottom-left of the image (Tata 1mg signature benchmark)
-                val ratingVal = model.rating ?: 4.4
-                Surface(
-                    color = Color(0xFF166534),
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 8.dp, bottom = 6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
-                    ) {
-                        Text(
-                            text = String.format(java.util.Locale.US, "%.1f", ratingVal),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(9.dp)
                         )
                     }
                 }
@@ -605,51 +549,19 @@ private fun DiscountBadge(percent: Int, modifier: Modifier = Modifier) {
 
 @Composable
 private fun RatingAndDeliveryRow(model: ProductCardModel) {
-    val rating = model.rating
     val eta = model.etaLabel
-    if (rating != null || !eta.isNullOrBlank()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+    if (!eta.isNullOrBlank()) {
+        Surface(
+            color = CommerceColors.SpeedYellow.copy(alpha = 0.22f),
+            shape = RoundedCornerShape(Radius.Micro)
         ) {
-            if (rating != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Star,
-                        contentDescription = null,
-                        tint = CommerceColors.Rating,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                        String.format("%.1f", rating),
-                        style = CommerceTypography.Meta,
-                        fontWeight = FontWeight.Bold,
-                        color = CommerceColors.TextPrimary
-                    )
-                    if (model.reviewCount != null && model.reviewCount > 0) {
-                        Text(
-                            " (${model.reviewCount})",
-                            style = CommerceTypography.Meta,
-                            color = CommerceColors.TextMuted
-                        )
-                    }
-                }
-            }
-            if (!eta.isNullOrBlank()) {
-                Surface(
-                    color = CommerceColors.SpeedYellow.copy(alpha = 0.22f),
-                    shape = RoundedCornerShape(Radius.Micro)
-                ) {
-                    Text(
-                        eta.uppercase(),
-                        style = CommerceTypography.Meta,
-                        fontWeight = FontWeight.Bold,
-                        color = CommerceColors.SushiInk,
-                        modifier = Modifier.padding(horizontal = Spacing.xs, vertical = 2.dp)
-                    )
-                }
-            }
+            Text(
+                eta.uppercase(),
+                style = CommerceTypography.Meta,
+                fontWeight = FontWeight.Bold,
+                color = CommerceColors.SushiInk,
+                modifier = Modifier.padding(horizontal = Spacing.xs, vertical = 2.dp)
+            )
         }
     }
 }
