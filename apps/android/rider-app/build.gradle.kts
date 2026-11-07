@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -21,7 +23,15 @@ android {
         }
 
         val defaultDevUrl = System.getenv("COMMERCEOS_DEV_API_URL") ?: "https://commerce-os-api.onrender.com"
-        val mapsApiKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
+        val localProps = Properties()
+        val localFile = rootProject.file("local.properties")
+        if (localFile.exists()) {
+            localFile.inputStream().use { localProps.load(it) }
+        }
+        val mapsApiKey: String = System.getenv("GOOGLE_MAPS_API_KEY")
+            ?: localProps.getProperty("MAPS_API_KEY")
+            ?: localProps.getProperty("GOOGLE_MAPS_API_KEY")
+            ?: "AIzaSyCzi_sMDds2_im406sGTCU8WAFZoTyNg5c"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "API_BASE_URL", "\"$defaultDevUrl\"")
     }
