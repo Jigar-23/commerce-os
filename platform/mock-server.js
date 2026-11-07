@@ -845,6 +845,8 @@ const SEED_ADDRESSES = [
 
 function serviceabilityFor(address, items) {
   const cold = (items || []).some((i) => i.coldChain || i.coldChainRequired);
+  const itemsSubtotal = (items || []).reduce((acc, it) => acc + (Number(it.discountedPrice || it.price || it.unitPrice || 0) * (Number(it.quantity) || 1)), 0);
+  const deliveryFee = itemsSubtotal >= FREE_DELIVERY_THRESHOLD ? 0 : (items && items.length > 0 ? DELIVERY_FEE : 0);
   const storeLat = 28.202218;
   const storeLng = 76.615403;
   const addrLat = (address && address.latitude != null && !isNaN(Number(address.latitude))) ? Number(address.latitude) : 28.1970;
@@ -867,7 +869,7 @@ function serviceabilityFor(address, items) {
       longitude: storeLng,
       slaMinutes: calculatedEta,
     },
-    deliveryFee: DELIVERY_FEE,
+    deliveryFee: deliveryFee,
     coldChainFee: cold ? COLD_CHAIN_FEE : 0,
     estimatedDeliveryWindow: { min: Math.max(2, calculatedEta - 3), max: calculatedEta + 3 },
   };

@@ -343,14 +343,14 @@ class CheckoutViewModel(
                         return@launch
                     }
 
-                    val deliveryFee = BigDecimal.valueOf(response.deliveryFee)
+                    val effectiveDeliveryFee = if (uiState.itemsSubtotal >= BigDecimal("199.0")) BigDecimal.ZERO else BigDecimal.valueOf(response.deliveryFee)
                     val coldChainFee = BigDecimal.valueOf(response.coldChainFee)
                     val updated = uiState.copy(
                         serviceability = ServiceabilityState.Success(addressId, response),
-                        deliveryFee = deliveryFee,
+                        deliveryFee = effectiveDeliveryFee,
                         coldChainFee = coldChainFee,
                         grandTotal = uiState.itemsSubtotal
-                            .add(deliveryFee)
+                            .add(effectiveDeliveryFee)
                             .add(coldChainFee)
                             .subtract(uiState.couponDiscount)
                             .coerceAtLeast(BigDecimal.ZERO)
@@ -572,8 +572,8 @@ class CheckoutViewModel(
                             val finalPricingChanged = finalGrandTotal.compareTo(authoritativeGrandTotal) != 0 ||
                                 refreshedSubtotal.compareTo(authoritativeSubtotal) != 0 ||
                                 refreshedDiscount.compareTo(authoritativeDiscount) != 0 ||
-                                finalDeliveryFee.compareTo(deliveryFee) != 0 ||
-                                finalColdChainFee.compareTo(coldChainFee) != 0
+                                finalDeliveryFee.compareTo(authoritativeDeliveryFee) != 0 ||
+                                finalColdChainFee.compareTo(authoritativeColdChainFee) != 0
 
                             if (finalItemsChanged || finalPricingChanged) {
                                 gate?.reconcileWithServer(refreshedData)
