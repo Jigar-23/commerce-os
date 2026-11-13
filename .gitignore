@@ -49,5 +49,4 @@ DerivedData/
 .DS_Store
 *.log
 
-.github/
 apps/ios/build-ipad/
