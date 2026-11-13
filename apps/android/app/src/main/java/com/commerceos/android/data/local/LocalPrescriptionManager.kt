@@ -375,7 +375,7 @@ object LocalPrescriptionManager {
         val list: List<Prescription> = gson.fromJson(json, type) ?: emptyList()
         return list.filter { rx ->
             rx.customerId == exactRaw && run {
-                val firstAtt = rx.attachments.firstOrNull()
+                val firstAtt = (rx.attachments ?: emptyList()).firstOrNull()
                 if (firstAtt != null && (firstAtt.startsWith("/") || firstAtt.startsWith("file:"))) {
                     val path = firstAtt.removePrefix("file://")
                     File(path).exists()
@@ -493,7 +493,7 @@ object LocalPrescriptionManager {
                 // Constrain file deletion to the prescriptions directory
                 val rxDirCanonical = getPrescriptionsDir(context).canonicalPath
                 val failedDeletions = mutableListOf<String>()
-                target.attachments.forEach { path ->
+                (target.attachments ?: emptyList()).forEach { path ->
                     val cleanPath = path.removePrefix("file://")
                     if (cleanPath.startsWith("/")) {
                         try {

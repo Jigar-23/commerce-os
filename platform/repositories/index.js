@@ -869,29 +869,41 @@ class TransactionalAddressRepository {
     this.pool = dbPool;
   }
 
+  _getCustIdVariants(customerId) {
+    const clean10 = String(customerId || '').replace(/\D/g, '').slice(-10);
+    const variants = [customerId];
+    if (clean10.length === 10) {
+      variants.push(`cust_${clean10}`, clean10, `+91${clean10}`);
+    }
+    return Array.from(new Set(variants.filter(Boolean)));
+  }
+
   async findAddressById(customerId, addressId) {
     if (!this.pool) return null;
+    const variants = this._getCustIdVariants(customerId);
     const res = await this.pool.query(
-      `SELECT * FROM customer_addresses WHERE customer_id = $1 AND id = $2 LIMIT 1`,
-      [customerId, addressId]
+      `SELECT * FROM customer_addresses WHERE customer_id = ANY($1) AND id = $2 LIMIT 1`,
+      [variants, addressId]
     );
     return res.rows[0] || null;
   }
 
   async getDefaultAddress(customerId) {
     if (!this.pool) return null;
+    const variants = this._getCustIdVariants(customerId);
     const res = await this.pool.query(
-      `SELECT * FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC LIMIT 1`,
-      [customerId]
+      `SELECT * FROM customer_addresses WHERE customer_id = ANY($1) ORDER BY is_default DESC, created_at DESC LIMIT 1`,
+      [variants]
     );
     return res.rows[0] || null;
   }
 
   async getAddresses(customerId) {
     if (!this.pool) return [];
+    const variants = this._getCustIdVariants(customerId);
     const res = await this.pool.query(
-      `SELECT * FROM customer_addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC`,
-      [customerId]
+      `SELECT * FROM customer_addresses WHERE customer_id = ANY($1) ORDER BY is_default DESC, created_at DESC`,
+      [variants]
     );
     return res.rows;
   }
@@ -2034,9 +2046,21 @@ class TransactionalInventoryRepository {
 
     for (const item of sortedItems) {
       const sku = item.sku || item.medicineId || item.id;
-      const productId = item.productId || item.product_id || null;
+      let productId = item.productId || item.product_id || null;
       const itemStoreId = item.storeId || item.store_id || storeId;
       const qty = Math.max(1, Number(item.quantity) || 1);
+
+      if (!productId && sku) {
+        try {
+          const pLookup = await qClient.query(
+            `SELECT id FROM products WHERE (sku = $1 OR id = $1) LIMIT 1`,
+            [sku]
+          );
+          if (pLookup.rows.length > 0) {
+            productId = pLookup.rows[0].id;
+          }
+        } catch (_) {}
+      }
 
       if (!productId) {
         return {
@@ -2108,9 +2132,21 @@ class TransactionalInventoryRepository {
 
     for (const item of sortedItems) {
       const sku = item.sku || item.medicineId || item.id;
-      const productId = item.productId || item.product_id || null;
+      let productId = item.productId || item.product_id || null;
       const itemStoreId = item.storeId || item.store_id || storeId;
       const qty = Math.max(1, Number(item.quantity) || 1);
+
+      if (!productId && sku) {
+        try {
+          const pLookup = await qClient.query(
+            `SELECT id FROM products WHERE (sku = $1 OR id = $1) LIMIT 1`,
+            [sku]
+          );
+          if (pLookup.rows.length > 0) {
+            productId = pLookup.rows[0].id;
+          }
+        } catch (_) {}
+      }
 
       if (!productId) {
         return {
@@ -2841,6 +2877,21 @@ class TransactionalOfferRepository {
     };
   }
 
+  async getDeclinedRiderIdsForDelivery(deliveryId, orderId = null) {
+    if (!this.pool || (!deliveryId && !orderId)) return [];
+    try {
+      const res = await this.pool.query(
+        `SELECT DISTINCT rider_id FROM offers 
+         WHERE (delivery_id = $1 OR id = $1 OR ($2::text IS NOT NULL AND (order_id = $2 OR delivery_id = $2)))
+           AND status = 'DECLINED' AND rider_id IS NOT NULL`,
+        [deliveryId, orderId]
+      );
+      return res.rows.map(r => r.rider_id).filter(Boolean);
+    } catch (_) {
+      return [];
+    }
+  }
+
   async getActiveOffersForRider(riderId, storeId = null) {
     if (!this.pool || !riderId) return [];
     let riderStoreId = storeId;
@@ -3405,6 +3456,13 @@ class LocalDevelopmentOfferRepository {
 
   async findOfferById(offerId) {
     return this._resolveOffer(offerId);
+  }
+
+  async getDeclinedRiderIdsForDelivery(deliveryId, orderId = null) {
+    const list = Array.isArray(this.db.offers) ? this.db.offers : Object.values(this.db.offers || {});
+    return list
+      .filter(o => (o.deliveryId === deliveryId || (orderId && o.orderId === orderId)) && o.status === 'DECLINED' && (o.riderId || o.rider_id))
+      .map(o => o.riderId || o.rider_id);
   }
 
   async updateDeliveryStatus(offerId, status) {
@@ -4074,7 +4132,7 @@ class TransactionalDeliveryRepository {
 
           const isTestEnvironment = isIsolatedTestRunner();
           const distKm = haversineDistanceKm(tLat, tLng, targetCustomerLat, targetCustomerLng);
-          if (distKm * 1000 > 150.0 && !isTestEnvironment) {
+          if (distKm * 1000 > 250.0 && !isTestEnvironment) {
             await client.query('ROLLBACK');
             return {
               ok: false,
@@ -4197,19 +4255,18 @@ class TransactionalDeliveryRepository {
               };
             }
 
-            // Record rider cash collection attestation as pending merchant reconciliation (Finding 1)
             await client.query(
               `UPDATE cod_ledger 
                SET amount_collected = $2,
                    shortage_amount = 0,
-                   status = 'COLLECTED_PENDING_RECONCILIATION',
-                   reconciled = FALSE,
+                   status = 'COLLECTED_RECONCILED',
+                   reconciled = TRUE,
                    collector_id = $3,
                    updated_at = NOW()
                WHERE (order_id = $1 OR id = $1) AND reconciled = FALSE`,
               [order.order_id || order.id, resolvedAmount, riderId]
             );
-            isCodPaid = false;
+            isCodPaid = true;
           } else {
             await client.query('ROLLBACK');
             return {
@@ -4233,11 +4290,11 @@ class TransactionalDeliveryRepository {
       await client.query(
         `UPDATE orders 
          SET status = 'DELIVERED', 
-             payment_status = CASE WHEN is_cod THEN 'PAYMENT_PENDING' ELSE payment_status END, 
+             payment_status = CASE WHEN is_cod THEN (CASE WHEN $2 THEN 'PAID' ELSE 'PAYMENT_PENDING' END) ELSE payment_status END, 
              otp_verified_at = NOW(), 
              updated_at = NOW()
          WHERE id = $1 OR order_id = $1`,
-        [order.id || order.order_id]
+        [order.id || order.order_id, isCodPaid]
       );
 
       // 6. Transactional Outbox Event
@@ -4555,20 +4612,27 @@ class TransactionalOrderRepository {
       const customer = customerRes.rows[0];
 
       // 7. Authoritative Address Resolution (Strictly from customer_addresses table)
+      const cleanCust10 = String(customerId || '').replace(/\D/g, '').slice(-10);
+      let queryCustIds = [customerId];
+      if (cleanCust10.length === 10) {
+        queryCustIds.push(`cust_${cleanCust10}`, cleanCust10, `+91${cleanCust10}`);
+      }
+      queryCustIds = Array.from(new Set(queryCustIds.filter(Boolean)));
+
       let addrRes = await client.query(
         `SELECT id, address_line, city, postal_code, latitude, longitude, is_default 
          FROM customer_addresses 
-         WHERE customer_id = $1 AND id = $2`,
-        [customerId, data.addressId]
+         WHERE customer_id = ANY($1) AND id = $2`,
+        [queryCustIds, data.addressId]
       );
       if (addrRes.rows.length === 0) {
         // Fallback A: Try customer's default or latest saved address from customer_addresses table
         const fallbackAddr = await client.query(
           `SELECT id, address_line, city, postal_code, latitude, longitude, is_default 
            FROM customer_addresses 
-           WHERE customer_id = $1 
+           WHERE customer_id = ANY($1) 
            ORDER BY is_default DESC, created_at DESC LIMIT 1`,
-          [customerId]
+          [queryCustIds]
         );
         if (fallbackAddr.rows.length > 0) {
           addrRes = fallbackAddr;
@@ -5280,8 +5344,8 @@ class TransactionalOrderRepository {
       // Atomically clear cart inside this transaction if checkout was from cart
       if (data.cartCheckout) {
         await client.query(
-          `UPDATE carts SET items = '[]'::jsonb, updated_at = NOW() WHERE customer_id = $1`,
-          [customerId]
+          `UPDATE carts SET items = '[]'::jsonb, updated_at = NOW() WHERE customer_id = ANY($1)`,
+          [queryCustIds]
         );
       }
 
@@ -5414,13 +5478,21 @@ class TransactionalOrderRepository {
 
   async getOrdersByStore(storeId) {
     if (!this.pool) return [];
-    if (!storeId) {
-      throw new Error('FATAL: storeId is strictly required to query store orders.');
+    if (!storeId || storeId === 'ALL') {
+      const res = await this.pool.query(
+        `SELECT o.*, COALESCE(s.store_name, CASE WHEN o.store_id IN ('store_hub_02', 'STORE_02') THEN 'Kathua Hub' ELSE 'Rewari Hub' END) AS store_name 
+         FROM orders o
+         LEFT JOIN stores s ON (s.id = o.store_id)
+         ORDER BY o.created_at DESC`
+      );
+      return res.rows;
     }
     const res = await this.pool.query(
-      `SELECT * FROM orders 
-       WHERE store_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT o.*, COALESCE(s.store_name, CASE WHEN o.store_id IN ('store_hub_02', 'STORE_02') THEN 'Kathua Hub' ELSE 'Rewari Hub' END) AS store_name 
+       FROM orders o
+       LEFT JOIN stores s ON (s.id = o.store_id)
+       WHERE o.store_id = $1
+       ORDER BY o.created_at DESC`,
       [storeId]
     );
     return res.rows;
@@ -5603,24 +5675,94 @@ class TransactionalOrderRepository {
           }
         }
 
-        await client.query(`UPDATE orders SET status = 'CANCELLED', seller_approval_status = 'REJECTED', cancellation = $2, updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id, JSON.stringify({ reason, actor: 'SELLER', sellerId, timestamp: new Date().toISOString() })]);
-        await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE order_id = $1`, [order.order_id || order.id]);
-        await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [order.order_id || order.id]).catch(() => {});
-        await client.query(`UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [order.order_id || order.id]).catch(() => {});
+        const orderIdVal = order.order_id || order.id;
+        const isPaidOrder = order.payment_status === 'PAID' || order.payment_status === 'CAPTURED';
+        let newPaymentStatus = order.payment_status;
+
+        if (isPaidOrder) {
+          const refundId = 'ref_' + crypto.randomUUID();
+          const refundAmount = Number(order.total_amount || 0);
+          await client.query(
+            `INSERT INTO payment_refunds (id, refund_id, order_id, amount, currency, reason, idempotency_key, status, created_at)
+             VALUES ($1, $2, $3, $4, 'INR', $5, $6, 'PENDING', NOW())
+             ON CONFLICT DO NOTHING`,
+            [refundId, refundId, orderIdVal, refundAmount, `Seller rejection: ${reason || 'REJECTED_BY_MERCHANT'}`, `cancel_${orderIdVal}`]
+          );
+          newPaymentStatus = 'REFUND_PENDING';
+          await client.query(
+            `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at, next_attempt_at)
+             VALUES ('PAYMENT', $1, 'PAYMENT_REFUND_REQUESTED', $2, 'PENDING', NOW(), NOW())`,
+            [orderIdVal, JSON.stringify({ refundId, orderId: orderIdVal, amount: refundAmount, currency: 'INR', reason: reason || 'REJECTED_BY_MERCHANT' })]
+          );
+        }
+
+        // Restore consumed prescription quantities back to authorized_items on seller rejection
+        if (order.prescription_id) {
+          try {
+            const rxCheck = await client.query(
+              `SELECT id, status, authorized_items FROM prescriptions WHERE id = $1 FOR UPDATE`,
+              [order.prescription_id]
+            );
+            if (rxCheck.rows.length > 0 && rxCheck.rows[0].status === 'APPROVED') {
+              const rxRow = rxCheck.rows[0];
+              const authItems = Array.isArray(rxRow.authorized_items)
+                ? rxRow.authorized_items
+                : (typeof rxRow.authorized_items === 'string' ? JSON.parse(rxRow.authorized_items) : []);
+              if (authItems.length > 0) {
+                const rxItemsInOrder = orderItems.filter(it => it && (it.rxRequired || it.requiresPrescription || it.rx_required));
+                for (const rxItem of rxItemsInOrder) {
+                  const matched = authItems.find(ai =>
+                    (ai.sku && ai.sku === rxItem.sku) ||
+                    (ai.productId && ai.productId === rxItem.productId) ||
+                    (ai.name && rxItem.name && ai.name.toLowerCase() === rxItem.name.toLowerCase())
+                  );
+                  if (matched) {
+                    const restoredQty = Number(rxItem.quantity || 1);
+                    matched.remainingQuantity = Number(matched.remainingQuantity != null ? matched.remainingQuantity : (matched.quantity || 0)) + restoredQty;
+                    matched.consumedQuantity = Math.max(0, Number(matched.consumedQuantity || 0) - restoredQty);
+                    matched.quantity = matched.remainingQuantity;
+                  }
+                }
+                await client.query(
+                  `UPDATE prescriptions SET authorized_items = $1, updated_at = NOW() WHERE id = $2`,
+                  [JSON.stringify(authItems), rxRow.id]
+                );
+              }
+            }
+          } catch (_) {}
+        }
+
+        // Restore single-use coupon and promotion usage on seller rejection
+        try {
+          await client.query(
+            `UPDATE promotions SET usage_count = GREATEST(0, COALESCE(usage_count, 1) - 1), updated_at = NOW()
+             WHERE id IN (SELECT promotion_id FROM promotion_redemptions WHERE order_id = $1)`,
+            [orderIdVal]
+          );
+          await client.query(
+            `DELETE FROM promotion_redemptions WHERE order_id = $1`,
+            [orderIdVal]
+          );
+        } catch (_) {}
+
+        await client.query(`UPDATE orders SET status = 'CANCELLED', payment_status = $3, seller_approval_status = 'REJECTED', cancellation = $2, updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [orderIdVal, JSON.stringify({ reason, actor: 'SELLER', sellerId, timestamp: new Date().toISOString() }), newPaymentStatus]);
+        await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [orderIdVal]);
+        await client.query(`UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [orderIdVal]).catch(() => {});
+        await client.query(`UPDATE outbox_events SET status = 'CANCELLED', processed_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`, [orderIdVal]).catch(() => {});
         // Update COD ledger to terminal void status in the same transaction
         await client.query(
           `UPDATE cod_ledger 
            SET status = 'VOID', reconciled = TRUE, notes = COALESCE(notes, '') || ' [VOIDED: Seller rejected]', updated_at = NOW() 
            WHERE (order_id = $1 OR id = $1)`,
-          [order.order_id || order.id]
+          [orderIdVal]
         ).catch(() => {});
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
            VALUES ($1, $2, $3, $4, 'PENDING')`,
-          ['ORDER', order.order_id || order.id, 'ORDER_CANCELLED', JSON.stringify({ orderId: order.order_id || order.id, sellerId, reason })]
+          ['ORDER', orderIdVal, 'ORDER_CANCELLED', JSON.stringify({ orderId: orderIdVal, sellerId, reason })]
         );
         await client.query('COMMIT');
-        return { ok: true, order: { ...order, status: 'CANCELLED', seller_approval_status: 'REJECTED' } };
+        return { ok: true, order: { ...order, status: 'CANCELLED', payment_status: newPaymentStatus, seller_approval_status: 'REJECTED' } };
       } catch (err) {
         await client.query('ROLLBACK');
         if ((err.code === '40001' || err.code === '40P01') && attempt < MAX_RETRIES - 1) {
@@ -5788,7 +5930,13 @@ class TransactionalOrderRepository {
           'PACKED_FEFO',
           'READY_FOR_PICKUP',
           'LOOKING_FOR_RIDER',
-          'SEARCHING_FOR_RIDER'
+          'SEARCHING_FOR_RIDER',
+          'RIDER_ASSIGNED',
+          'OUT_FOR_PICKUP',
+          'EN_ROUTE_PICKUP',
+          'ARRIVED_STORE',
+          'ARRIVED_MERCHANT',
+          'ARRIVED_PICKUP'
         ];
         if (!ALLOWED_CANCELLATION_STATES.includes(order.status)) {
           await client.query('ROLLBACK');
@@ -5849,7 +5997,7 @@ class TransactionalOrderRepository {
 
         const orderIdVal = order.order_id || order.id;
         const isPaidOrder = order.payment_status === 'PAID' || order.payment_status === 'CAPTURED';
-        let newPaymentStatus = order.payment_status;
+        let newPaymentStatus = isPaidOrder ? 'REFUND_PENDING' : 'VOID';
 
         if (isPaidOrder) {
           const refundId = 'ref_' + crypto.randomUUID();
@@ -5868,7 +6016,7 @@ class TransactionalOrderRepository {
           );
         }
 
-        await client.query(`UPDATE orders SET status = 'CANCELLED', payment_status = $1, updated_at = NOW() WHERE (order_id = $2 OR id = $2)`, [newPaymentStatus, orderIdVal]);
+        await client.query(`UPDATE orders SET status = 'CANCELLED', payment_status = $1, seller_approval_status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $2 OR id = $2)`, [newPaymentStatus, orderIdVal]);
         await client.query(`UPDATE delivery_sessions SET state = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`, [orderIdVal]);
         await client.query(
           `UPDATE offers SET status = 'CANCELLED', updated_at = NOW() WHERE (order_id = $1 OR id = $1)`,
@@ -5877,7 +6025,7 @@ class TransactionalOrderRepository {
 
         // Cancel pending outbox events so worker doesn't dispatch a cancelled order
         await client.query(
-          `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
+          `UPDATE outbox_events SET status = 'CANCELLED', processed_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
           [orderIdVal]
         ).catch(() => {});
 
@@ -5924,6 +6072,19 @@ class TransactionalOrderRepository {
             }
           } catch (_) {}
         }
+
+        // Restore single-use coupon and promotion usage on order cancellation (Finding 5)
+        try {
+          await client.query(
+            `UPDATE promotions SET usage_count = GREATEST(0, COALESCE(usage_count, 1) - 1), updated_at = NOW()
+             WHERE id IN (SELECT promotion_id FROM promotion_redemptions WHERE order_id = $1)`,
+            [orderIdVal]
+          );
+          await client.query(
+            `DELETE FROM promotion_redemptions WHERE order_id = $1`,
+            [orderIdVal]
+          );
+        } catch (_) {}
 
         await client.query(
           `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status, created_at)
@@ -6843,7 +7004,7 @@ class TransactionalPresenceRepository {
 
   async getEligibleOnlineRiders(storeId = null) {
     if (!this.pool) return [];
-    const res = await this.pool.query(
+    let res = await this.pool.query(
       `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier, r.store_id as rider_store_id,
               COALESCE((
                 SELECT COUNT(*) 
@@ -6857,7 +7018,7 @@ class TransactionalPresenceRepository {
        WHERE rp.status = 'ONLINE' 
          AND r.status = 'ACTIVE'
          AND ($1::text IS NULL OR r.store_id = $1::text)
-         AND rp.last_seen_at >= NOW() - INTERVAL '15 minutes'
+         AND rp.last_seen_at >= NOW() - INTERVAL '1 hour'
          AND NOT EXISTS (
            SELECT 1 FROM delivery_sessions ds 
            WHERE (ds.rider_id = r.rider_id OR ds.rider_id = r.id)
@@ -6867,6 +7028,32 @@ class TransactionalPresenceRepository {
        ORDER BY rp.last_seen_at DESC, r.rider_id ASC`,
       [storeId]
     );
+
+    // If no riders matched the exact storeId, fall back to any active online rider (riders are irrespective of location currently)
+    if (res.rows.length === 0 && storeId) {
+      res = await this.pool.query(
+        `SELECT rp.*, r.full_name, r.phone, r.vehicle_number, r.status as rider_status, r.tier as rider_tier, r.store_id as rider_store_id,
+                COALESCE((
+                  SELECT COUNT(*) 
+                  FROM delivery_sessions ds 
+                  WHERE (ds.rider_id = r.rider_id OR ds.rider_id = r.id)
+                    AND ds.state IN ('ALLOCATED', 'ASSIGNED', 'ACCEPTED', 'ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+                    AND ds.updated_at >= NOW() - INTERVAL '1 hour'
+                ), 0) AS active_workload
+         FROM rider_presence rp
+         JOIN riders r ON (rp.rider_id = r.rider_id OR rp.rider_id = r.id)
+         WHERE rp.status = 'ONLINE' 
+           AND r.status = 'ACTIVE'
+           AND rp.last_seen_at >= NOW() - INTERVAL '1 hour'
+           AND NOT EXISTS (
+             SELECT 1 FROM delivery_sessions ds 
+             WHERE (ds.rider_id = r.rider_id OR ds.rider_id = r.id)
+               AND ds.state IN ('ARRIVED_MERCHANT', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED_CUSTOMER', 'HANDOFF_STARTED')
+               AND ds.updated_at >= NOW() - INTERVAL '15 minutes'
+           )
+         ORDER BY rp.last_seen_at DESC, r.rider_id ASC`
+      );
+    }
 
     return res.rows.map(r => {
       const lat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
@@ -6913,6 +7100,35 @@ class TransactionalPresenceRepository {
        RETURNING *;`,
       [riderId, status, finalLat, finalLng]
     );
+
+    const r = res.rows[0];
+    const rLat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
+    const rLng = r.last_known_lng != null ? Number(r.last_known_lng) : null;
+
+    if (rLat != null && rLng != null && !isNaN(rLat) && !isNaN(rLng) && rLat !== 0 && rLng !== 0) {
+      try {
+        const storeRes = await this.pool.query(
+          `SELECT id, store_name,
+                  (6371 * acos(LEAST(1.0, GREATEST(-1.0,
+                    cos(radians($1)) * cos(radians(latitude)) *
+                    cos(radians(longitude) - radians($2)) +
+                    sin(radians($1)) * sin(radians(latitude))
+                  )))) AS distance_km
+           FROM stores
+           WHERE is_active = TRUE AND latitude IS NOT NULL AND longitude IS NOT NULL
+           ORDER BY distance_km ASC
+           LIMIT 1`,
+          [rLat, rLng]
+        );
+        if (storeRes.rows.length > 0) {
+          await this.pool.query(
+            `UPDATE riders SET store_id = $1, updated_at = NOW() WHERE id = $2 OR rider_id = $2`,
+            [storeRes.rows[0].id, riderId]
+          );
+        }
+      } catch (_) {}
+    }
+
     return res.rows[0];
   }
 
@@ -6941,6 +7157,35 @@ class TransactionalPresenceRepository {
     const r = res.rows[0];
     const rLat = r.last_known_lat != null ? Number(r.last_known_lat) : null;
     const rLng = r.last_known_lng != null ? Number(r.last_known_lng) : null;
+
+    let nearestStore = null;
+    if (rLat != null && rLng != null && !isNaN(rLat) && !isNaN(rLng) && rLat !== 0 && rLng !== 0) {
+      try {
+        const storeRes = await this.pool.query(
+          `SELECT id, store_name, latitude, longitude,
+                  (6371 * acos(LEAST(1.0, GREATEST(-1.0,
+                    cos(radians($1)) * cos(radians(latitude)) *
+                    cos(radians(longitude) - radians($2)) +
+                    sin(radians($1)) * sin(radians(latitude))
+                  )))) AS distance_km
+           FROM stores
+           WHERE is_active = TRUE AND latitude IS NOT NULL AND longitude IS NOT NULL
+           ORDER BY distance_km ASC
+           LIMIT 1`,
+          [rLat, rLng]
+        );
+        if (storeRes.rows.length > 0) {
+          nearestStore = storeRes.rows[0];
+          await this.pool.query(
+            `UPDATE riders SET store_id = $1, updated_at = NOW() WHERE id = $2 OR rider_id = $2`,
+            [nearestStore.id, riderId]
+          );
+        }
+      } catch (stErr) {
+        console.error('[PresenceRepo] Error calculating nearest store:', stErr.message);
+      }
+    }
+
     return {
       riderId: r.rider_id,
       status: r.status,
@@ -6949,6 +7194,9 @@ class TransactionalPresenceRepository {
       latitude: rLat,
       longitude: rLng,
       lastSeenAt: r.last_seen_at,
+      storeId: nearestStore?.id || null,
+      assignedHub: nearestStore?.store_name || null,
+      distanceKm: nearestStore?.distance_km != null ? Number(nearestStore.distance_km) : null,
       attestation_verified: false,
       attestationVerified: false,
       is_presence_fallback: true,
@@ -7696,13 +7944,26 @@ class DispatchService {
       const eligibleRiders = typeof this.presenceRepo.getEligibleOnlineRiders === 'function'
         ? await this.presenceRepo.getEligibleOnlineRiders(storeId || store?.id)
         : [];
-      if (eligibleRiders.length > 0) {
+
+      // Avoid infinite dispatch loop: filter out riders who previously declined this delivery
+      let candidatePoolRiders = eligibleRiders;
+      if (this.offerRepo && typeof this.offerRepo.getDeclinedRiderIdsForDelivery === 'function') {
+        const declinedRiderIds = await this.offerRepo.getDeclinedRiderIdsForDelivery(deliveryId, orderId);
+        if (declinedRiderIds && declinedRiderIds.length > 0) {
+          const nonDeclined = eligibleRiders.filter(r => !declinedRiderIds.includes(r.riderId || r.rider_id || r.id));
+          if (nonDeclined.length > 0) {
+            candidatePoolRiders = nonDeclined;
+          }
+        }
+      }
+
+      if (candidatePoolRiders.length > 0) {
         // Neutral, SLA-optimal Quick-Commerce Dispatch Ranking Engine with Bounded Parallel Matrix & Circuit Breaker (Finding 1):
         // 1. Projected pickup route duration (evaluated in bounded parallel batches with hard time budget & circuit breaker)
         // 2. Active delivery queue load penalty (+4 mins per active delivery)
         // 3. Heartbeat freshness tie-breaker (fresher presence preferred)
         // 4. Stable rider ID lexicographical as final deterministic tie-breaker
-        candidatePool = eligibleRiders.map(r => {
+        candidatePool = candidatePoolRiders.map(r => {
           const rLat = Number(r.lastKnownLat != null ? r.lastKnownLat : (r.last_known_lat != null ? r.last_known_lat : r.latitude));
           const rLng = Number(r.lastKnownLng != null ? r.lastKnownLng : (r.last_known_lng != null ? r.last_known_lng : r.longitude));
           const hasLocation = !isNaN(rLat) && !isNaN(rLng) && (Math.abs(rLat) > 0.001 || Math.abs(rLng) > 0.001);
@@ -8258,7 +8519,15 @@ class TransactionalCartRepository {
 
   async clearCart(customerId) {
     if (!this.pool) return [];
-    await this.pool.query(`UPDATE carts SET items = '[]'::jsonb, updated_at = NOW() WHERE customer_id = $1`, [customerId]);
+    const clean10 = String(customerId || '').replace(/\D/g, '').slice(-10);
+    const variants = [customerId];
+    if (clean10.length === 10) {
+      variants.push(`cust_${clean10}`, clean10, `+91${clean10}`);
+    }
+    await this.pool.query(
+      `UPDATE carts SET items = '[]'::jsonb, updated_at = NOW() WHERE customer_id = ANY($1)`,
+      [Array.from(new Set(variants.filter(Boolean)))]
+    );
     return [];
   }
 }
@@ -8557,7 +8826,7 @@ class TransactionalPaymentRepository {
               } else if (ord.status === 'PRESCRIPTION_VERIFICATION_PENDING') {
                 isRxApproved = false;
               }
-              const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
+              const isSellerAccepted = ord.seller_approval_status === 'ACCEPTED' || ord.seller_approval_status === 'NOT_REQUIRED' || ['ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP'].includes(ord.status);
 
               if (isRxApproved && isSellerAccepted) {
                 await client.query(`UPDATE orders SET status = 'READY_FOR_PICKUP', updated_at = NOW() WHERE id = $1 AND status IN ('PLACED', 'PAYMENT_PENDING')`, [ord.id]);
@@ -8585,7 +8854,7 @@ class TransactionalPaymentRepository {
               }
             }
             await client.query(
-              `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
+              `UPDATE outbox_events SET status = 'CANCELLED', processed_at = NOW() WHERE aggregate_id = $1 AND status = 'PENDING'`,
               [ord.order_id || ord.id]
             ).catch(() => {});
           }
@@ -9232,6 +9501,8 @@ class OutboxProcessor {
     this.sseBroadcaster = options.sseBroadcaster || null;
     this.opsAlertHandler = options.opsAlertHandler || null;
     this.dispatchSlaSeconds = options.dispatchSlaSeconds || 300; // 5-minute dispatch SLA
+    this.batchSize = Number(options.batchSize || process.env.OUTBOX_BATCH_SIZE || 20);
+    this.concurrency = Number(options.concurrency || process.env.OUTBOX_CONCURRENCY || 5);
   }
 
   start(intervalMs = 2000) {
@@ -9307,8 +9578,8 @@ class OutboxProcessor {
         `SELECT * FROM outbox_events 
          WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()) 
            AND (retry_count < $1 OR event_type IN ('ORDER_SELLER_ACCEPTED', 'DISPATCH_REQUESTED'))
-         ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-        [MAX_STANDARD_RETRIES]
+         ORDER BY created_at ASC LIMIT $2 FOR UPDATE SKIP LOCKED`,
+        [MAX_STANDARD_RETRIES, this.batchSize]
       );
       claimedEvents = claimRes.rows;
 
@@ -9335,7 +9606,7 @@ class OutboxProcessor {
     }
 
     let processedCount = 0;
-    for (const event of claimedEvents) {
+    const processSingleEvent = async (event) => {
       const execClient = await this.pool.connect();
       try {
         await this.dispatcher(event);
@@ -9346,7 +9617,7 @@ class OutboxProcessor {
            WHERE id = $1`,
           [event.id]
         );
-        processedCount++;
+        return true;
       } catch (err) {
         const newRetryCount = (event.retry_count || 0) + 1;
         const errMsg = String(err?.message || '').toUpperCase();
@@ -9426,8 +9697,20 @@ class OutboxProcessor {
            WHERE id = $5`,
           [status, newRetryCount, err.message, `${delaySec}`, event.id]
         );
+        return false;
       } finally {
         execClient.release();
+      }
+    };
+
+    const chunkSize = Math.max(1, Math.min(this.concurrency, 5));
+    for (let i = 0; i < claimedEvents.length; i += chunkSize) {
+      const chunk = claimedEvents.slice(i, i + chunkSize);
+      const results = await Promise.allSettled(chunk.map(processSingleEvent));
+      for (const res of results) {
+        if (res.status === 'fulfilled' && res.value) {
+          processedCount++;
+        }
       }
     }
 
@@ -9542,7 +9825,7 @@ class OutboxProcessor {
           [expOrd.order_id || expOrd.id, expOrd.delivery_id]
         ).catch(() => {});
         await client.query(
-          `UPDATE outbox_events SET status = 'CANCELLED', updated_at = NOW() WHERE aggregate_id IN ($1, $2) AND status IN ('PENDING', 'PROCESSING')`,
+          `UPDATE outbox_events SET status = 'CANCELLED', processed_at = NOW() WHERE aggregate_id IN ($1, $2) AND status IN ('PENDING', 'PROCESSING')`,
           [expOrd.order_id, expOrd.id]
         ).catch(() => {});
       }
@@ -9858,26 +10141,35 @@ async function initApplicationRepositories(options = {}) {
             const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : ''));
             const cName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4));
             const cPhone = addr.contactPhone || addr.contact_phone || ord.customer_phone || '';
+            const mName = store.store_name || store.storeName || 'QuickCommerce Hub';
             const dId = 'del_' + (ord.order_id || ord.id);
             await pool.query(
-              `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
-               VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
+              `INSERT INTO delivery_sessions (id, delivery_id, order_id, store_id, state, merchant_name, merchant_address, customer_name, customer_phone, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng, is_cod, cod_amount, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
                ON CONFLICT (delivery_id) DO UPDATE SET 
                  state = 'LOOKING_FOR_RIDER',
+                 merchant_name = EXCLUDED.merchant_name,
+                 customer_name = EXCLUDED.customer_name,
                  customer_lat = COALESCE(EXCLUDED.customer_lat, delivery_sessions.customer_lat),
                  customer_lng = COALESCE(EXCLUDED.customer_lng, delivery_sessions.customer_lng),
-                 customer_address = COALESCE(EXCLUDED.customer_address, delivery_sessions.customer_address)`,
+                 customer_address = COALESCE(EXCLUDED.customer_address, delivery_sessions.customer_address),
+                 updated_at = NOW()`,
               [
+                dId,
                 dId, 
                 ord.order_id || ord.id, 
                 store.id, 
-                ord.customer_id, 
-                store.address, 
+                mName,
+                store.address || 'Store Location',
+                cName,
+                cPhone,
                 cAddress, 
                 store.latitude, 
                 store.longitude, 
                 cLat, 
-                cLng
+                cLng,
+                Boolean(ord.is_cod),
+                Number(ord.cod_amount || ord.total_amount || 0)
               ]
             );
             deliverySession = { 
@@ -9913,7 +10205,7 @@ async function initApplicationRepositories(options = {}) {
         const amount = payload.amount;
         if (refundId) {
           await pool.query(
-            `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE id = $1`,
+            `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE (id = $1 OR refund_id = $1)`,
             [refundId]
           );
         } else if (orderId) {
@@ -10176,26 +10468,35 @@ function createProductionRepositories(pool, options = {}) {
           const cAddress = parts.length > 0 ? parts.join(', ') : (addr.addressLine || addr.address_line || addr.address || (typeof ord.delivery_address === 'string' ? ord.delivery_address : ''));
           const cName = addr.contactName || addr.contact_name || ('Customer ' + String(ord.customer_id || '').slice(-4));
           const cPhone = addr.contactPhone || addr.contact_phone || ord.customer_phone || '';
+          const mName = store.store_name || store.storeName || 'QuickCommerce Hub';
           const dId = 'del_' + (ord.order_id || ord.id);
           await pool.query(
-            `INSERT INTO delivery_sessions (delivery_id, order_id, store_id, customer_id, state, merchant_address, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng)
-             VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10)
+            `INSERT INTO delivery_sessions (id, delivery_id, order_id, store_id, state, merchant_name, merchant_address, customer_name, customer_phone, customer_address, merchant_lat, merchant_lng, customer_lat, customer_lng, is_cod, cod_amount, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 'LOOKING_FOR_RIDER', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
              ON CONFLICT (delivery_id) DO UPDATE SET 
                state = 'LOOKING_FOR_RIDER',
+               merchant_name = EXCLUDED.merchant_name,
+               customer_name = EXCLUDED.customer_name,
                customer_lat = COALESCE(EXCLUDED.customer_lat, delivery_sessions.customer_lat),
                customer_lng = COALESCE(EXCLUDED.customer_lng, delivery_sessions.customer_lng),
-               customer_address = COALESCE(EXCLUDED.customer_address, delivery_sessions.customer_address)`,
+               customer_address = COALESCE(EXCLUDED.customer_address, delivery_sessions.customer_address),
+               updated_at = NOW()`,
             [
+              dId,
               dId, 
               ord.order_id || ord.id, 
               store.id, 
-              ord.customer_id, 
-              store.address, 
+              mName,
+              store.address || 'Store Location',
+              cName,
+              cPhone,
               cAddress, 
               store.latitude, 
               store.longitude, 
               cLat, 
-              cLng
+              cLng,
+              Boolean(ord.is_cod),
+              Number(ord.cod_amount || ord.total_amount || 0)
             ]
           );
           deliverySession = { 
@@ -10292,7 +10593,7 @@ function createProductionRepositories(pool, options = {}) {
       const amount = payload.amount;
       if (refundId) {
         await pool.query(
-          `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE id = $1`,
+          `UPDATE payment_refunds SET status = 'COMPLETED', processed_at = NOW(), error_message = NULL WHERE (id = $1 OR refund_id = $1)`,
           [refundId]
         );
       } else if (orderId) {

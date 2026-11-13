@@ -91,6 +91,7 @@ object Api {
             NetworkClient.baseUrl.takeIf { it.isNotBlank() },
             "https://commerce-os-api.onrender.com",
             com.commerceos.android.BuildConfig.API_BASE_URL.takeIf { it.isNotBlank() },
+            "http://10.0.2.2:8083",
             "http://127.0.0.1:8083"
         ).distinct()
 
@@ -116,6 +117,8 @@ object Api {
             } catch (e: IOException) {
                 lastIoException = e
                 android.util.Log.w("ApiRun", "Endpoint $candidate failed with IOException (${e.message}), attempting next candidate...")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastGeneralException = e
                 break

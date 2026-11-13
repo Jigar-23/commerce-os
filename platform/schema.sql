@@ -495,6 +495,8 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
     reason TEXT,
     idempotency_key VARCHAR(128) UNIQUE NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED',
+    processed_at TIMESTAMPTZ,
+    error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -550,7 +552,8 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
     processed_at TIMESTAMPTZ,
     last_error TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_outbox_claim ON outbox_events(status, next_attempt_at, retry_count, created_at)
@@ -759,6 +762,16 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS otp_resend_count INT NOT NULL DEFAUL
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_otp_resent_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cumulative_otp_attempts INT NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_ref ON payments (provider, provider_ref) WHERE provider_ref IS NOT NULL;
+
+-- High-Performance Scalability Indexes
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_products_brand_trgm ON products USING gin (brand_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_products_category_trgm ON products USING gin (category gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_products_sku_trgm ON products USING gin (sku gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_outbox_perf_claim ON outbox_events(status, next_attempt_at, created_at) WHERE status IN ('PENDING', 'PROCESSING');
+CREATE INDEX IF NOT EXISTS idx_rider_telemetry_perf ON rider_telemetry(delivery_id, recorded_at DESC);
+
 
 
 

@@ -16,7 +16,7 @@ object NotificationChannelHelper {
     const val CHANNEL_ORDER_UPDATES = CHANNEL_DISPATCH_SLA
     const val CHANNEL_PRESCRIPTION_REVIEW = "channel_prescription_review"
     const val CHANNEL_REFILL_REMINDERS = "channel_refill_reminders"
-    const val CHANNEL_OFFERS = "channel_offers_promotions"
+    const val CHANNEL_OFFERS = "channel_broadcast_promotions_v2"
 
     private const val BRAND_EMERALD_COLOR = 0xFF0E675E.toInt()
 
@@ -68,16 +68,19 @@ object NotificationChannelHelper {
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
 
-            // 4. Health Offers & Wellness Tips (Default Importance)
+            // 4. Health Offers & Broadcasts (High Importance - Heads-up Banner)
             val offersChannel = NotificationChannel(
                 CHANNEL_OFFERS,
-                "Health Offers & Wellness Tips",
-                NotificationManager.IMPORTANCE_DEFAULT
+                "Health Offers & Broadcasts",
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Exclusive medicine discounts, seasonal health alerts, and wellness deals"
-                enableLights(false)
-                enableVibration(false)
+                description = "Special promotions, urgent alerts, and wellness announcements"
+                enableLights(true)
+                lightColor = BRAND_EMERALD_COLOR
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 150, 250)
                 setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
 
             notificationManager.createNotificationChannels(

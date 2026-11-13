@@ -446,6 +446,16 @@ async function runBatch6Tests() {
   console.log('🎉 ALL 4 CODEX BATCH 6 AUDIT FINDINGS VERIFIED & PASSED!');
   console.log('================================================================\n');
 
+  if (pool) {
+    await pool.query(`DELETE FROM cod_ledger WHERE order_id IN ($1, $2, $3)`, [testNullStoreOrderId, testStoreBOrderId, testStoreAOrderId]).catch(() => {});
+    await pool.query(`DELETE FROM orders WHERE id IN ($1, $2, $3)`, [testNullStoreOrderId, testStoreBOrderId, testStoreAOrderId]).catch(() => {});
+    await pool.query(`DELETE FROM rider_notifications WHERE rider_id IN ($1, $2, $3)`, [testRiderAId, testRiderBId, testRiderCId]).catch(() => {});
+    await pool.query(`DELETE FROM sellers WHERE id IN ($1, $2)`, [testSellerAId, testSellerBId]).catch(() => {});
+    await pool.query(`DELETE FROM riders WHERE id IN ($1, $2, $3)`, [testRiderAId, testRiderBId, testRiderCId]).catch(() => {});
+    await pool.query(`DELETE FROM stores WHERE id IN ($1, $2)`, [testStoreA, testStoreB]).catch(() => {});
+    await pool.query(`DELETE FROM customers WHERE id = $1`, [testCustomerId]).catch(() => {});
+  }
+
   if (srv) {
     srv.close();
   }

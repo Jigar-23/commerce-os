@@ -360,10 +360,19 @@ class RiderForegroundLocationService : Service(), LocationListener {
                         }
                         conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
                         val code = conn.responseCode
-                        conn.disconnect()
                         if (code in 200..299) {
                             postSuccessful = true
+                            try {
+                                val respText = conn.inputStream.bufferedReader().use { it.readText() }
+                                val respJson = JSONObject(respText)
+                                val assignedStoreId = respJson.optString("storeId", "")
+                                if (assignedStoreId.isNotBlank() && assignedStoreId != sessionMgr.getStoreId()) {
+                                    sessionMgr.saveStoreId(assignedStoreId)
+                                    sessionMgr.reconcileStoreTopic(assignedStoreId, isShiftOnline)
+                                }
+                            } catch (_: Exception) {}
                         }
+                        conn.disconnect()
                     } catch (e: Exception) {
                         Log.w(TAG, "Presence update post failed: ${e.message}")
                     }

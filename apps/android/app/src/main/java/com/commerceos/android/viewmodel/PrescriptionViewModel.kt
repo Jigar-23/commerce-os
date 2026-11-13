@@ -109,10 +109,13 @@ class PrescriptionViewModel(
                             val serverIds = server.mapTo(mutableSetOf()) { it.id }
 
                             val mergedServer = server.map { remote ->
+                                val localAtts = localById[remote.id]?.attachments?.filterNotNull()
+                                val remoteAtts = (remote.attachments ?: emptyList()).filterNotNull()
                                 remote.copy(
-                                    attachments = localById[remote.id]?.attachments
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?: remote.attachments
+                                    attachments = if (!localAtts.isNullOrEmpty()) localAtts else remoteAtts,
+                                    note = remote.note ?: "",
+                                    patientName = remote.patientName?.ifBlank { "Patient" } ?: "Patient",
+                                    status = remote.status ?: "PENDING"
                                 )
                             }
                             prescriptions = mergedServer + local.filterNot { it.id in serverIds }
@@ -121,7 +124,8 @@ class PrescriptionViewModel(
                                 val pendingRx = LocalPrescriptionManager.getPendingUpload(appContext, id)
                                 if (pendingRx != null) {
                                     val committedOnServer = server.any { rx ->
-                                        rx.note.contains(pendingRx.idempotencyKey)
+                                        val n = rx.note ?: ""
+                                        pendingRx.idempotencyKey.isNotBlank() && (n.contains(pendingRx.idempotencyKey) || rx.id == pendingRx.idempotencyKey)
                                     }
                                     if (committedOnServer) {
                                         LocalPrescriptionManager.clearPendingUpload(appContext, id)
@@ -136,15 +140,20 @@ class PrescriptionViewModel(
                     }
                     is ApiResult.Failure -> {
                         if (generation == loadGeneration) {
-                            errorMessage = "Showing prescriptions saved on this device."
+                            errorMessage = if (prescriptions.isEmpty()) "Showing prescriptions saved on this device." else null
                         }
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                android.util.Log.e("PrescriptionViewModel", "Error loading prescriptions", e)
                 if (generation == loadGeneration) {
-                    errorMessage = "Could not load prescriptions."
+                    if (prescriptions.isEmpty()) {
+                        errorMessage = "Could not load prescriptions: ${e.message ?: "Unknown error"}"
+                    } else {
+                        errorMessage = null
+                    }
                 }
             } finally {
                 if (generation == loadGeneration) isLoading = false
@@ -299,14 +308,20 @@ class PrescriptionViewModel(
                                 }
                                 LocalPrescriptionManager.clearDraft(ctx, safeCustomerId)
                             }
-                            val serverRx = if (result.data.attachments.isNotEmpty()) result.data else result.data.copy(attachments = attachments)
-                            prescriptions = listOf(serverRx) + prescriptions.filterNot { it.id == serverRx.id }
+                            val serverRx = if (!result.data.attachments.isNullOrEmpty()) result.data else result.data.copy(attachments = attachments)
+                            val normalizedRx = serverRx.copy(
+                                customerId = serverRx.customerId.ifBlank { safeCustomerId },
+                                patientName = serverRx.patientName?.ifBlank { patientName } ?: patientName,
+                                attachments = if (!serverRx.attachments.isNullOrEmpty()) serverRx.attachments else attachments,
+                                note = serverRx.note ?: ""
+                            )
+                            prescriptions = listOf(normalizedRx) + prescriptions.filterNot { it.id == normalizedRx.id }
                             errorMessage = null
 
                             // Local persistence & notification side effects
                             try {
                                 if (appContext != null) {
-                                    val localCacheSaved = LocalPrescriptionManager.savePrescription(appContext, serverRx)
+                                    val localCacheSaved = LocalPrescriptionManager.savePrescription(appContext, normalizedRx)
                                     if (!localCacheSaved) {
                                         errorMessage = "Prescription uploaded to server, but offline encrypted cache could not be saved."
                                     }

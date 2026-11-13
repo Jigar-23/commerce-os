@@ -1,12 +1,16 @@
 package com.commerceos.android
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
@@ -14,15 +18,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import com.commerceos.android.config.ClientConfigProvider
 import com.commerceos.android.config.LocalClientConfiguration
 import com.commerceos.android.config.TenantEnvironment
+import com.commerceos.android.service.CustomerFirebaseMessagingService
 import com.commerceos.android.ui.theme.CommerceColors
 import com.commerceos.android.ui.theme.CommerceTheme
 import com.commerceos.android.viewmodel.*
+import com.google.firebase.messaging.FirebaseMessaging
 
 /**
  * Clean Android Activity entry point for Commerce OS.
@@ -48,9 +55,38 @@ class MainActivity : ComponentActivity() {
     private var pendingNotificationAction by mutableStateOf<String?>(null)
     private var pendingNotificationTargetId by mutableStateOf<String?>(null)
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Log.d("MainActivity", "Notification permission granted by user")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         extractNotificationExtras(intent)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        // Initialize topic subscriptions & FCM token registration
+        try {
+            CustomerFirebaseMessagingService.subscribeTopics()
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val token = task.result
+                    val prefs = getSharedPreferences(CustomerFirebaseMessagingService.PREFS_FCM, MODE_PRIVATE)
+                    prefs.edit().putString(CustomerFirebaseMessagingService.KEY_FCM_TOKEN, token).apply()
+                    CustomerFirebaseMessagingService.syncTokenWithBackend(token)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "FCM token initialization deferred: ${e.message}")
+        }
 
         // Enable edge-to-edge transparent system bars (infinite app theme)
         enableEdgeToEdge(
@@ -129,6 +165,8 @@ class MainActivity : ComponentActivity() {
         val action = intent?.getStringExtra("notification_action")
         val targetId = intent?.getStringExtra("notification_order_id")
             ?: intent?.getStringExtra("notification_sku")
+            ?: intent?.getStringExtra("notification_deeplink")
+            ?: intent?.getStringExtra("notification_id")
         if (!action.isNullOrBlank()) {
             pendingNotificationAction = action
             pendingNotificationTargetId = targetId

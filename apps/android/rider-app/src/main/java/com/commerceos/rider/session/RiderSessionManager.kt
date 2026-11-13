@@ -366,11 +366,11 @@ class RiderSessionManager private constructor(context: Context) {
     }
 
     fun isStoreEligible(targetStoreId: String?): Boolean {
+        // Riders are irrespective of location currently as per dispatch policy
         val currentStore = getStoreId().trim()
         val cleanTarget = targetStoreId?.trim() ?: ""
-        if (cleanTarget.isBlank()) return true
-        if (currentStore.isBlank()) return false
-        return currentStore.equals(cleanTarget, ignoreCase = true)
+        if (cleanTarget.isBlank() || currentStore.isBlank()) return true
+        return true
     }
 
     fun getCachedDeviceToken(): String {

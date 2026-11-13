@@ -45,6 +45,7 @@ function UserDetailContent() {
   const [orderFilter, setOrderFilter] = useState<'ALL' | 'DELIVERED' | 'ACTIVE' | 'CANCELLED'>('ALL');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [statusToast, setStatusToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isOrdersExpanded, setIsOrdersExpanded] = useState(false);
 
   // Edit Customer Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -678,7 +679,7 @@ function UserDetailContent() {
               </div>
             ) : (
               <div className="space-y-3.5">
-                {filteredOrders.map((order) => {
+                {(isOrdersExpanded ? filteredOrders : filteredOrders.slice(0, 2)).map((order) => {
                   const itemsCount = order.items?.reduce((s, i) => s + (i.quantity || i.qty || 1), 0) || order.items?.length || 0;
                   const orderIdKey = order.order_id || order.id;
 
@@ -783,6 +784,27 @@ function UserDetailContent() {
                     </div>
                   );
                 })}
+
+                {filteredOrders.length > 2 && (
+                  <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border-default">
+                    <button
+                      type="button"
+                      onClick={() => setIsOrdersExpanded(!isOrdersExpanded)}
+                      className="px-4 py-2 bg-surface-subtle hover:bg-surface-muted text-content-primary rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer border border-border-default w-fit"
+                    >
+                      <span>
+                        {isOrdersExpanded
+                          ? 'Show only 2 recent orders'
+                          : `View all ${filteredOrders.length} orders`}
+                      </span>
+                      <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isOrdersExpanded ? '-rotate-90' : 'rotate-90'}`} />
+                    </button>
+
+                    <span className="text-2xs text-content-muted">
+                      Showing {isOrdersExpanded ? filteredOrders.length : Math.min(2, filteredOrders.length)} of {filteredOrders.length} orders
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </section>

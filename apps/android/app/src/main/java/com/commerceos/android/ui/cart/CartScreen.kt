@@ -938,7 +938,7 @@ private fun OptionalPrescriptionCard(
                     ) {
                         items(allSavedRx) { rx ->
                             val isSelected = rx.id == attachedRx?.id
-                            val firstAttachment = rx.attachments.firstOrNull()?.takeIf { it.isNotBlank() }
+                            val firstAttachment = (rx.attachments ?: emptyList()).firstOrNull()?.takeIf { it.isNotBlank() }
                             val thumbModel: Any? = when {
                                 firstAttachment == null -> null
                                 firstAttachment.startsWith("data:") -> {
@@ -1018,7 +1018,7 @@ private fun OptionalPrescriptionCard(
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = rx.patientName.ifBlank { "Prescription #${rx.id.takeLast(6).uppercase()}" },
+                                            text = (rx.patientName ?: "").ifBlank { "Prescription #${rx.id.takeLast(6).uppercase()}" },
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF0F172A),
@@ -1176,7 +1176,7 @@ private fun OptionalPrescriptionCard(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Attached: ${attachedRx.patientName.ifBlank { "Patient Rx" }}",
+                                text = "Attached: ${(attachedRx.patientName ?: "").ifBlank { "Patient Rx" }}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A)
@@ -1343,7 +1343,7 @@ private fun PrescriptionQuickViewDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Prescription Image or Clinical Certificate
-                val firstAttachment = prescription.attachments.firstOrNull()?.takeIf { it.isNotBlank() }
+                val firstAttachment = (prescription.attachments ?: emptyList()).firstOrNull()?.takeIf { it.isNotBlank() }
                 if (firstAttachment != null) {
                     val modelToLoad: Any? = when {
                         firstAttachment.startsWith("data:") -> {
@@ -1401,7 +1401,7 @@ private fun PrescriptionQuickViewDialog(
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Patient Name", fontSize = 12.sp, color = Color(0xFF64748B))
-                            Text(prescription.patientName.ifBlank { "Patient Rx" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text((prescription.patientName ?: "").ifBlank { "Patient Rx" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                         }
                         if (!prescription.doctorName.isNullOrBlank()) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1512,14 +1512,15 @@ private fun ClinicalPrescriptionCard(prescription: Prescription) {
             HorizontalDivider(color = Color(0xFFBBF7D0), thickness = 0.8.dp)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Patient: ${prescription.patientName.ifBlank { "Authorized Patient" }}",
+                text = "Patient: ${prescription.patientName?.ifBlank { "Authorized Patient" } ?: "Authorized Patient"}",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color(0xFF1E293B)
             )
-            if (prescription.note.isNotBlank()) {
+            val noteText = prescription.note ?: ""
+            if (noteText.isNotBlank()) {
                 Text(
-                    text = "Notes: ${prescription.note}",
+                    text = "Notes: $noteText",
                     fontSize = 12.sp,
                     color = Color(0xFF334155),
                     modifier = Modifier.padding(top = 4.dp)
@@ -1886,14 +1887,14 @@ private fun StickyCheckoutBar(
                     Button(
                         onClick = onProceed,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF94A3B8),
+                            containerColor = Color(0xFF0E675E),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
                         modifier = Modifier.height(48.dp)
                     ) {
-                        Text("Select Address to Proceed", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Add Address ➔", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 } else {
                     Button(

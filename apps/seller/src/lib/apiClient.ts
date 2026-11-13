@@ -562,6 +562,51 @@ class SellerApiClient {
     );
     return res;
   }
+
+  public async getNotificationStats(): Promise<ApiResponse<NotificationStats>> {
+    return this.get<NotificationStats>('/api/v1/seller/notifications/stats');
+  }
+
+  public async getBroadcasts(): Promise<ApiResponse<{ ok: boolean; count: number; broadcasts: BroadcastNotification[] }>> {
+    return this.get<{ ok: boolean; count: number; broadcasts: BroadcastNotification[] }>('/api/v1/seller/notifications/broadcasts');
+  }
+
+  public async sendBroadcast(payload: {
+    title: string;
+    body: string;
+    targetAudience: 'ALL' | 'CUSTOMERS' | 'RIDERS';
+    category: 'PROMOTION' | 'ANNOUNCEMENT' | 'URGENT' | 'HEALTH_TIP';
+    imageUrl?: string;
+    deepLink?: string;
+  }): Promise<ApiResponse<{ ok: boolean; broadcastId: string; title: string; body: string; status: string; recipientsCount: number; topic?: string }>> {
+    return this.post<{ ok: boolean; broadcastId: string; title: string; body: string; status: string; recipientsCount: number; topic?: string }>('/api/v1/seller/notifications/broadcast', payload);
+  }
+}
+
+export interface BroadcastNotification {
+  id: string;
+  title: string;
+  body: string;
+  targetAudience: 'ALL' | 'CUSTOMERS' | 'RIDERS';
+  category: 'PROMOTION' | 'ANNOUNCEMENT' | 'URGENT' | 'HEALTH_TIP';
+  imageUrl?: string | null;
+  deepLink?: string | null;
+  metadata?: Record<string, any>;
+  sentBy?: string;
+  recipientsCount: number;
+  fcmStatus: string;
+  createdAt: string;
+}
+
+export interface NotificationStats {
+  totalDevices: number;
+  customerDevices: number;
+  riderDevices: number;
+  totalBroadcastsSent: number;
+  fcmProvider: string;
+  isFreeTier: boolean;
+  costModel: string;
+  topics: Array<{ id: string; name: string; topic: string }>;
 }
 
 export const sellerApi = new SellerApiClient();

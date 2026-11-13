@@ -1,0 +1,139 @@
+version: '3.8'
+
+# ==============================================================================
+# Commerce OS — High-Availability Production Topology (Multi-Tier Cluster)
+# ==============================================================================
+# To launch:
+#   docker compose -f docker-compose.prod.yml up -d
+# To scale API instances under high traffic:
+#   docker compose -f docker-compose.prod.yml up -d --scale app-server=4
+# ==============================================================================
+
+services:
+  # 1. Edge Nginx Reverse Proxy & Load Balancer
+  load-balancer:
+    image: nginx:1.25-alpine
+    container_name: commerceos-load-balancer
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./platform/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app-server
+    networks:
+      - commerceos-net
+
+  # 2. Stateless API Cluster (Handles HTTP requests, Checkouts, and Feeds)
+  app-server:
+    build:
+      context: .
+      dockerfile: platform/docker/Dockerfile.production
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      COMMERCEOS_PROCESS_ROLE: API
+      PORT: 8083
+      DATABASE_URL: postgresql://${POSTGRES_USER:-commerceos}:${POSTGRES_PASSWORD}@postgres:5432/commerceos_order
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-http://osrm-backend:5000}
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_ISSUER: "${JWT_ISSUER:-commerce-os-auth}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-commerce-os-api}"
+      FCM_SERVER_KEY: "${FCM_SERVER_KEY}"
+      FCM_ENDPOINT_URL: "${FCM_ENDPOINT_URL:-https://fcm.googleapis.com/fcm/send}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - commerceos-net
+
+  # 3. Dedicated Background Worker (Outbox Dispatcher, Watchdog, Event Fanout)
+  app-worker:
+    build:
+      context: .
+      dockerfile: platform/docker/Dockerfile.production
+    container_name: commerceos-app-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      COMMERCEOS_PROCESS_ROLE: WORKER
+      PORT: 8084
+      DATABASE_URL: postgresql://${POSTGRES_USER:-commerceos}:${POSTGRES_PASSWORD}@postgres:5432/commerceos_order
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-http://osrm-backend:5000}
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_ISSUER: "${JWT_ISSUER:-commerce-os-auth}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-commerce-os-api}"
+      FCM_SERVER_KEY: "${FCM_SERVER_KEY}"
+      FCM_ENDPOINT_URL: "${FCM_ENDPOINT_URL:-https://fcm.googleapis.com/fcm/send}"
+    networks:
+      - commerceos-net
+
+  # 4. Redis In-Memory Cache, Rate Limiter & Geo-Telemetry Store
+  redis:
+    image: redis:7.2-alpine
+    container_name: commerceos-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-commerceos_secret_redis_2026}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-commerceos_secret_redis_2026}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - commerceos-net
+
+  # 5. Core PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: commerceos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-commerceos}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-commerceos_secure_password_2026}"
+      POSTGRES_DB: commerceos_order
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./platform/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-commerceos}"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - commerceos-net
+
+  # 6. OSRM Routing Machine
+  osrm-backend:
+    image: osrm/osrm-backend:v5.27.1
+    container_name: commerceos-osrm
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld /data/routing.osrm
+    volumes:
+      - ./platform/docker/osrm-data:/data
+    networks:
+      - commerceos-net
+
+networks:
+  commerceos-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

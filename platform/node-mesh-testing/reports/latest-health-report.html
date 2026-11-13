@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commerce OS — Node Mesh Health Dashboard</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --card-bg: #18181b;
+      --border: #27272a;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --accent: #e11d48;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --sky: #0ea5e9;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; }
+    .header { margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 24px; font-weight: 700; color: #fff; }
+    .badge { padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+    .badge-healthy { background: rgba(16, 185, 129, 0.2); color: var(--green); border: 1px solid var(--green); }
+    .badge-loose { background: rgba(245, 158, 11, 0.2); color: var(--yellow); border: 1px solid var(--yellow); }
+    .badge-broken { background: rgba(239, 68, 68, 0.2); color: var(--red); border: 1px solid var(--red); }
+    
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .stat-card .label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+    .stat-card .value { font-size: 26px; font-weight: 700; color: #fff; }
+
+    .topology-container { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+    .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+    .node-box { background: #27272a; border-radius: 8px; padding: 14px; border-left: 4px solid var(--green); }
+    .node-box.loose { border-left-color: var(--yellow); }
+    .node-box.broken { border-left-color: var(--red); }
+    .node-box h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .node-box .meta { font-size: 12px; color: var(--text-muted); }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--text-muted); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>🏛️ Commerce OS — Node Mesh Health Dashboard</h1>
+      <p style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Automated Semantic Health, Pairwise Combinatorics & Gorilla Chaos Fuzzing</p>
+    </div>
+    <span class="badge badge-healthy">Mesh Active</span>
+  </div>
+
+  <div class="grid">
+    <div class="stat-card">
+      <div class="label">Combinatorial State Space</div>
+      <div class="value">10,87,16,35,968</div>
+      <p style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Reduced to 23 optimal test vectors</p>
+    </div>
+    <div class="stat-card">
+      <div class="label">Pairwise Coverage</div>
+      <div class="value" style="color: var(--sky);">100%</div>
+      <p style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">100% 2-way orthogonal interaction proof</p>
+    </div>
+    <div class="stat-card">
+      <div class="label">Gorilla Chaos Resilience</div>
+      <div class="value" style="color: var(--green);">100.0%</div>
+      <p style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">15 / 15 edge attacks absorbed</p>
+    </div>
+  </div>
+
+  <div class="topology-container">
+    <h2 style="font-size: 16px; margin-bottom: 8px;">🌐 Commerce Nodes Health Topology</h2>
+    <div class="node-grid">
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">AUTH</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Authentication & Session Node</h3>
+          <div class="meta">23/23 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">ADDRESS</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Address & Geolocation Node</h3>
+          <div class="meta">31/31 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">CATALOG</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Catalog & Medicine Schedule Node</h3>
+          <div class="meta">23/23 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">INVENTORY</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Seller & Inventory Node</h3>
+          <div class="meta">23/23 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">CART</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Cart & Pricing Calculation Node</h3>
+          <div class="meta">26/26 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">PAYMENT</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Payment Methods & Gateway Node</h3>
+          <div class="meta">25/25 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">ORDER</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Order Lifecycle State Machine Node</h3>
+          <div class="meta">23/23 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">RIDER</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Rider Fleet & Telemetry Node</h3>
+          <div class="meta">25/25 checks verified</div>
+        </div>
+      
+        <div class="node-box ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">DATABASE</span>
+            <span class="badge badge-healthy">100%</span>
+          </div>
+          <h3>Database & Storage Mesh Node</h3>
+          <div class="meta">23/23 checks verified</div>
+        </div>
+      
+    </div>
+  </div>
+
+  <div class="topology-container">
+    <h2 style="font-size: 16px; margin-bottom: 8px;">🦍 Gorilla Fuzzing & Loose Joint Diagnostic</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Target Node</th>
+          <th>Test Name</th>
+          <th>Status</th>
+          <th>Diagnostic Feedback</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Unicode & Emoji Address Handling</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Preserved emojis without encoding corruption</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Giant Payload (10KB) Overflow Defense</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Safely rejected with validation error: ADDRESS_TOO_LONG: Street address exceeds 5000 character limit</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Coordinate Boundary: Latitude > 90</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Cleanly rejected: INVALID_LATITUDE: Latitude must be between -90 and 90</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Coordinate Boundary: Latitude < -90</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Cleanly rejected: INVALID_LATITUDE: Latitude must be between -90 and 90</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Coordinate Boundary: Longitude > 180</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Cleanly rejected: INVALID_LONGITUDE: Longitude must be between -180 and 180</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Coordinate Boundary: Latitude is NaN</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Cleanly rejected: INVALID_LATITUDE: Latitude must be between -90 and 90</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>SQL Injection Defense (Parameterized)</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Input safely escaped and parameterized</td>
+          </tr>
+        
+          <tr>
+            <td><strong>ADDRESS_NODE</strong></td>
+            <td>Pincode vs Geofence Dual-Lock Defense</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Strictly detected and rejected 1,100km coordinate discrepancy for Delhi postal code</td>
+          </tr>
+        
+          <tr>
+            <td><strong>CART_NODE</strong></td>
+            <td>Negative Item Quantity Defense</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Safely rejected: INVALID_QUANTITY: Quantity must be strictly positive</td>
+          </tr>
+        
+          <tr>
+            <td><strong>CART_NODE</strong></td>
+            <td>Floating Point Math Precision (0.1 + 0.2)</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Zero float rounding leaks</td>
+          </tr>
+        
+          <tr>
+            <td><strong>CART_NODE</strong></td>
+            <td>High-Value Cart Arithmetic Integrity ($999M+)</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Processed without 32-bit integer overflow</td>
+          </tr>
+        
+          <tr>
+            <td><strong>PAYMENT_NODE</strong></td>
+            <td>Double-Tap Assault (10 Concurrent Requests)</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Protected: Exactly 1 charge processed, 9 duplicate attempts deduplicated</td>
+          </tr>
+        
+          <tr>
+            <td><strong>PAYMENT_NODE</strong></td>
+            <td>Tampered Webhook Signature Rejection</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Tampered webhook rejected safely</td>
+          </tr>
+        
+          <tr>
+            <td><strong>RIDER_NODE</strong></td>
+            <td>Out-of-Order GPS Telemetry Sorting</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Reordered telemetry monotonically</td>
+          </tr>
+        
+          <tr>
+            <td><strong>RIDER_NODE</strong></td>
+            <td>Delivery OTP Brute-Force Defense</td>
+            <td><span class="badge badge-healthy">Passed</span></td>
+            <td>Rejected all invalid PINs and accepted genuine OTP</td>
+          </tr>
+        
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

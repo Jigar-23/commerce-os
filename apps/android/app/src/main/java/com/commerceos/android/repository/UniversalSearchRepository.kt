@@ -93,7 +93,7 @@ open class UniversalSearchRepository(
                         title = med.name ?: "Medicine",
                         subtitle = med.brandName ?: med.therapeuticCategory ?: "Pharmacy",
                         vertical = "pharmacy",
-                        price = med.discountedPrice.takeIf { it > 0 } ?: med.price,
+                        price = med.discountedPrice.takeIf { it > 0 } ?: med.price.takeIf { it > 0 } ?: 15.0,
                         rating = med.rating,
                         sku = med.sku,
                         isExpressEligible = med.expressDeliverySlaMins > 0,

@@ -422,7 +422,7 @@ class RiderDeliveryRepository(
         try {
             val urlsToTry = mutableListOf<String>()
             val primary = baseUrlProvider().trimEnd('/')
-            if (primary.isNotBlank() && !primary.contains("127.0.0.1") && !primary.contains("localhost")) {
+            if (primary.isNotBlank()) {
                 urlsToTry.add(primary)
             } else {
                 val fallback = com.commerceos.rider.BuildConfig.API_BASE_URL.ifBlank { "https://commerce-os-api.onrender.com" }

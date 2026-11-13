@@ -130,6 +130,20 @@ async function runAudit() {
     VALUES ($1, 'Apollo Pharmacy Deep Audit', 'Koramangala 5th Block', 12.9352, 77.6245, true)
   `, [storeId]);
 
+  const prodRes = await pool.query(`
+    INSERT INTO products (id, sku, name, brand_name, category, mrp, price, is_active)
+    VALUES ($1, 'RX-PARA-650', 'Paracetamol 650mg', 'Calpol', 'Pain & Fever', 50.00, 45.00, true)
+    ON CONFLICT (sku) DO UPDATE SET is_active = true
+    RETURNING id
+  `, [`prod_para_${Date.now()}`]);
+  const testProductId = prodRes.rows[0].id;
+
+  await pool.query(`
+    INSERT INTO inventory (id, store_id, product_id, sku, stock_count, reserved_count)
+    VALUES ($1, $2, $3, 'RX-PARA-650', 100, 2)
+    ON CONFLICT (store_id, sku) DO UPDATE SET reserved_count = inventory.reserved_count + 2
+  `, [`inv_${Date.now()}`, storeId, testProductId]);
+
   const testRiderId = `rider_audit_${Date.now()}`;
   const riderPhone = `+9199${Date.now().toString().slice(-8)}`;
   await pool.query(`
@@ -165,10 +179,10 @@ async function runAudit() {
     ) VALUES (
       $1, $1, $2, $3, 'CREATED', 90.00,
       '{"address_line": "7th Cross, Koramangala", "city": "Bangalore"}'::jsonb,
-      '[{"sku": "RX-PARA-650", "name": "Paracetamol 650mg", "quantity": 2, "price": 45.00}]'::jsonb,
+      $5::jsonb,
       $4
     )
-  `, [orderId, customerId, storeId, hashedOtp]);
+  `, [orderId, customerId, storeId, hashedOtp, JSON.stringify([{ productId: testProductId, sku: "RX-PARA-650", name: "Paracetamol 650mg", quantity: 2, price: 45.00, storeId }])]);
 
   assert(Boolean(orderId), `Initial order seeded in CREATED state: ${orderId}`);
 
@@ -295,6 +309,16 @@ async function runAudit() {
   await pool.query(`UPDATE delivery_sessions SET state = 'IN_TRANSIT' WHERE delivery_id = $1`, [deliveryId]);
   const orderStatusCheck2 = await pool.query(`SELECT status FROM orders WHERE id = $1`, [orderId]);
   assert(orderStatusCheck2.rows[0].status === 'OUT_FOR_DELIVERY', 'Order status transitioned to OUT_FOR_DELIVERY');
+
+  // 1.7b Rider Arrival at Customer Doorstep (Sends telemetry within 150m geofence & updates state to ARRIVED_CUSTOMER)
+  await apiRequest('POST', `/api/v1/delivery/${deliveryId}/telemetry`, {
+    riderId: testRiderId,
+    latitude: 12.9310,
+    longitude: 77.6210,
+    speedKmh: 0,
+    sequenceNumber: 101
+  }, { 'Authorization': `Bearer ${riderToken}` });
+  await pool.query(`UPDATE delivery_sessions SET state = 'ARRIVED_CUSTOMER' WHERE delivery_id = $1`, [deliveryId]);
 
   // 1.8 Adversarial OTP Tamper Testing on Active Delivery
   // 1.8a SQL Injection in OTP PIN -> 400

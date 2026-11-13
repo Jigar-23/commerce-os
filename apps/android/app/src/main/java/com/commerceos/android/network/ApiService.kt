@@ -248,6 +248,11 @@ interface CustomerApi {
         @Path("customerId") customerId: String,
         @Path("addressId") addressId: String
     ): ApiAddress
+
+    @POST("/api/v1/customer/device-token")
+    suspend fun registerDeviceToken(
+        @Body request: RegisterDeviceTokenRequest
+    ): Map<String, Any>
 }
 
 interface PrescriptionApi {

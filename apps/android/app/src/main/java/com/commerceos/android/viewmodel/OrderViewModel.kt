@@ -286,7 +286,19 @@ class OrderViewModel(private val repository: AppRepository) : ViewModel() {
         }
     }
 
+    fun stopLiveTracking() {
+        trackingJob?.cancel()
+        trackingJob = null
+        isStreamReconnecting = false
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopLiveTracking()
+    }
+
     fun reset() {
+        stopLiveTracking()
         history = OrderHistoryUiState.Loading
         detail = OrderDetailUiState.Loading
         errorMessage = null

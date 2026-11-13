@@ -32,6 +32,12 @@ fun AddressScreen(
         viewModel.attachContext(context)
     }
 
+    LaunchedEffect(directAddFlow) {
+        if (directAddFlow && !viewModel.platformUiState.isFlowActive) {
+            viewModel.startAddAddressFlow()
+        }
+    }
+
     val state = viewModel.platformUiState
 
     val handleBackPress: () -> Unit = {

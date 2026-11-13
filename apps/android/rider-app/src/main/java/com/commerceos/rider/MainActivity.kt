@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
         checkBatteryOptimization()
         if (hasLocationPermission()) {
             startLocationService()
+            syncLocationAndNearestHub()
         }
         initFirebaseMessagingToken()
         checkIntentOfferAck(intent)
@@ -132,6 +133,61 @@ class MainActivity : ComponentActivity() {
             e.printStackTrace()
             com.commerceos.rider.util.RiderNotificationManager.showLocationSyncRequiredNotification(applicationContext)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (hasLocationPermission()) {
+            syncLocationAndNearestHub()
+        }
+    }
+
+    private fun syncLocationAndNearestHub() {
+        if (!hasLocationPermission()) return
+        val sessionMgr = com.commerceos.rider.session.RiderSessionManager.getInstance(applicationContext)
+        val authToken = sessionMgr.getAuthToken()
+        val baseUrl = sessionMgr.getBaseUrl()
+        if (authToken.isBlank() || baseUrl.isBlank()) return
+
+        try {
+            val lm = getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager ?: return
+            val lastGps = try { lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER) } catch (_: Exception) { null }
+            val lastNet = try { lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER) } catch (_: Exception) { null }
+            val loc = lastGps ?: lastNet ?: return
+
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                try {
+                    val url = java.net.URL("${baseUrl.trimEnd('/')}/api/v1/delivery/rider/presence")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Authorization", "Bearer $authToken")
+                    conn.doOutput = true
+                    conn.connectTimeout = 4000
+                    conn.readTimeout = 4000
+
+                    val body = org.json.JSONObject().apply {
+                        put("latitude", loc.latitude)
+                        put("longitude", loc.longitude)
+                        put("accuracyMeters", loc.accuracy)
+                        put("isOnline", sessionMgr.isShiftOnline())
+                    }
+                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    if (conn.responseCode in 200..299) {
+                        val respText = conn.inputStream.bufferedReader().use { it.readText() }
+                        val respObj = org.json.JSONObject(respText)
+                        val storeId = respObj.optString("storeId", "")
+                        if (storeId.isNotBlank() && storeId != sessionMgr.getStoreId()) {
+                            sessionMgr.saveStoreId(storeId)
+                            sessionMgr.reconcileStoreTopic(storeId, sessionMgr.isShiftOnline())
+                        }
+                    }
+                    conn.disconnect()
+                } catch (e: Exception) {
+                    android.util.Log.w("MainActivity", "Initial location sync failed: ${e.message}")
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onNewIntent(intent: android.content.Intent?) {

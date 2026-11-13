@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "start": "node platform/server/production-server.js",
+    "start:cluster": "node platform/server/cluster.js",
     "build": "turbo run build",
     "dev": "turbo run dev",
     "mock-api": "node platform/server/production-server.js",
@@ -24,6 +25,7 @@
     "test:http:node-production": "node platform/test-http-security-production-node.js",
     "test:http:spring-production": "node platform/test-http-security-spring.js",
     "test:contracts": "node platform/test-postgres-live/run-local-contracts.js",
+    "test:mesh": "node platform/node-mesh-testing/cli.js",
     "test:package": "node platform/test-production-package-install.test.js",
     "test:live": "node platform/test-postgres-live/run-all-live.js",
     "test:progress": "node platform/test-postgres-live/run-all-matrix-with-progress.js",

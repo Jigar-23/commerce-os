@@ -400,6 +400,9 @@ async function runRiderIntegritySuite() {
   const dbCodCheck = await pool.query(`SELECT status, reconciled FROM cod_ledger WHERE id = $1`, [codEntryId]);
   assert(dbCodCheck.rows[0].status === 'SETTLED' && dbCodCheck.rows[0].reconciled === true, 'COD ledger entry marked SETTLED with reconciled = true');
 
+  // Teardown test ledger record
+  await pool.query(`DELETE FROM cod_ledger WHERE id = $1`, [codEntryId]).catch(() => {});
+
   // --------------------------------------------------------------------------
   // AUDIT SUMMARY
   // --------------------------------------------------------------------------

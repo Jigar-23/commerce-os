@@ -379,4 +379,111 @@ object CustomerNotificationManager {
             NotificationManagerCompat.from(context).notify(sku.hashCode(), builder.build())
         } catch (_: SecurityException) {}
     }
+
+    private fun downloadImageBitmap(imageUrl: String?): Bitmap? {
+        if (imageUrl.isNullOrBlank()) return null
+        return try {
+            val url = java.net.URL(imageUrl)
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.doInput = true
+            connection.connectTimeout = 4000
+            connection.readTimeout = 4000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+            connection.inputStream.use { input ->
+                android.graphics.BitmapFactory.decodeStream(input)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Posts a Broadcast Push Notification received via FCM or backend dispatch.
+     * Displays a high-importance heads-up banner with rich text/banner image,
+     * Deep Emerald brand styling, and in-app inbox persistence.
+     */
+    fun postBroadcastNotification(
+        context: Context,
+        broadcastId: String,
+        title: String,
+        body: String,
+        category: String = "Promotions",
+        deepLink: String? = null,
+        imageUrl: String? = null
+    ) {
+        NotificationChannelHelper.createChannels(context)
+
+        val cleanCategory = when (category.uppercase()) {
+            "PROMOTION", "PROMOTIONS" -> "Offers"
+            "HEALTH_TIP" -> "Health"
+            "URGENT" -> "Urgent"
+            else -> "Announcements"
+        }
+
+        LocalNotificationStorage.saveNotification(
+            context,
+            InAppNotificationItem(
+                title = title,
+                message = body,
+                category = cleanCategory,
+                deepLinkAction = deepLink ?: "HOME",
+                imageUrl = imageUrl
+            )
+        )
+
+        if (!hasPostNotificationPermission(context)) return
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("notification_action", "BROADCAST")
+            putExtra("notification_deeplink", deepLink ?: "commerceos://home")
+            putExtra("notification_id", broadcastId)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            broadcastId.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+        )
+
+        val downloadedBitmap = downloadImageBitmap(imageUrl)
+
+        val style = if (downloadedBitmap != null) {
+            NotificationCompat.BigPictureStyle()
+                .bigPicture(downloadedBitmap)
+                .setBigContentTitle(title)
+                .setSummaryText(body)
+        } else {
+            NotificationCompat.BigTextStyle()
+                .setBigContentTitle(title)
+                .bigText(body)
+        }
+
+        val builder = NotificationCompat.Builder(context, NotificationChannelHelper.CHANNEL_OFFERS)
+            .setSmallIcon(R.drawable.ic_notification_small)
+            .setColor(BRAND_EMERALD_COLOR)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(style)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .addAction(R.drawable.ic_notification_small, "⚡ Open App", pendingIntent)
+
+        if (downloadedBitmap != null) {
+            builder.setLargeIcon(downloadedBitmap)
+        } else {
+            getBrandBadgeBitmap(context)?.let {
+                builder.setLargeIcon(it)
+            }
+        }
+
+        try {
+            NotificationManagerCompat.from(context).notify(broadcastId.hashCode(), builder.build())
+        } catch (_: SecurityException) {}
+    }
 }

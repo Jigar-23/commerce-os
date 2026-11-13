@@ -134,11 +134,39 @@ fun PrescriptionVaultScreen(
 
         Spacer(modifier = Modifier.height(Spacing.md))
 
+        if (errorMessage != null && prescriptions.isNotEmpty()) {
+            Surface(
+                color = Color(0xFFFEF2F2),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.sm)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = null,
+                        tint = Color(0xFFDC2626),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = errorMessage,
+                        style = CommerceTypography.Caption,
+                        color = Color(0xFFB91C1C),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
         when {
-            isLoading -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            isLoading && prescriptions.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = CommerceColors.Primary)
             }
-            errorMessage != null -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            errorMessage != null && prescriptions.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(errorMessage, style = CommerceTypography.BodySmall, color = CommerceColors.Danger, fontWeight = FontWeight.Bold)
             }
             prescriptions.isEmpty() -> EmptyVault()
@@ -182,9 +210,9 @@ private fun PrescriptionCard(
     rx: Prescription,
     onPreview: () -> Unit
 ) {
-    val patient = rx.patientName.takeIf { it.isNotBlank() } ?: "Patient"
+    val patient = rx.patientName?.takeIf { it.isNotBlank() } ?: "Patient"
     val dateDisplay = formatRxDate(rx.createdAt)
-    val attachments = rx.attachments
+    val attachments = rx.attachments ?: emptyList()
     val firstAttachment = attachments.firstOrNull()?.takeIf { it.isNotBlank() }
 
     val modelToLoad: Any? = when {
@@ -366,7 +394,7 @@ fun PrescriptionPreviewDialog(
     prescription: Prescription,
     onDismiss: () -> Unit
 ) {
-    val attachments = prescription.attachments
+    val attachments = prescription.attachments ?: emptyList()
     val firstAttachment = attachments.firstOrNull()?.takeIf { it.isNotBlank() }
 
     val modelToLoad: Any? = when {
@@ -419,7 +447,7 @@ fun PrescriptionPreviewDialog(
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = prescription.patientName.ifBlank { "Patient Prescription" },
+                            text = (prescription.patientName ?: "").ifBlank { "Patient Prescription" },
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
@@ -495,7 +523,7 @@ fun PrescriptionPreviewDialog(
                         ) {
                             Text("Patient Name", fontSize = 12.sp, color = Color(0xFF64748B))
                             Text(
-                                prescription.patientName.ifBlank { "Patient" },
+                                (prescription.patientName ?: "").ifBlank { "Patient" },
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A)
@@ -607,7 +635,7 @@ private fun PrescripionFallbackCard(prescription: Prescription) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "Document slip registered for ${prescription.patientName.ifBlank { "patient" }}",
+                "Document slip registered for ${prescription.patientName?.ifBlank { "patient" } ?: "patient"}",
                 fontSize = 11.sp,
                 color = Color(0xFF15803D)
             )

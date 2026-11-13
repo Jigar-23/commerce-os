@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import SellerSidebar from '@/components/SellerSidebar';
 import HeaderQuickSearch from '@/components/HeaderQuickSearch';
 import SellerAuthGuard from '@/components/SellerAuthGuard';
+import { sellerApi } from '@/lib/apiClient';
 import { Tag, Plus, CheckCircle2, Percent, Sparkles, TrendingUp, Users, PauseCircle, PlayCircle } from 'lucide-react';
 
 interface Promotion {
@@ -36,6 +37,20 @@ export default function PromotionsPage() {
   const [newMaxUsage, setNewMaxUsage] = useState<number>(1000);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    let isMounted = true;
+    sellerApi.get<Promotion[]>('/api/v1/seller/promotions')
+      .then(res => {
+        if (isMounted && res.data && Array.isArray(res.data) && res.data.length > 0) {
+          setPromotions(res.data);
+        }
+      })
+      .catch(() => {
+        // Fall back to default promotions
+      });
+    return () => { isMounted = false; };
+  }, []);
+
   const toggleStatus = async (codeOrId: string) => {
     let nextStatus: 'ACTIVE' | 'PAUSED' = 'ACTIVE';
     setPromotions(prev => prev.map(p => {
@@ -45,7 +60,7 @@ export default function PromotionsPage() {
     }));
 
     try {
-      await fetch(`/api/v1/seller/promotions/${codeOrId}/toggle`, { method: 'POST' });
+      await sellerApi.post(`/api/v1/seller/promotions/${encodeURIComponent(codeOrId)}/toggle`);
     } catch (e) {
       // offline / local fallback
     }

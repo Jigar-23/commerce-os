@@ -253,6 +253,15 @@ open class AppRepository {
     suspend fun setDefaultAddress(customerId: String, addressId: String): ApiResult<ApiAddress> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.customerApi.setDefaultAddress(customerId, addressId) } }
 
+    suspend fun registerDeviceToken(token: String): ApiResult<Map<String, Any>> =
+        withContext(Dispatchers.IO) {
+            Api.run {
+                NetworkClient.customerApi.registerDeviceToken(
+                    RegisterDeviceTokenRequest(deviceToken = token, platform = "ANDROID")
+                )
+            }
+        }
+
     open suspend fun uploadPrescription(request: UploadPrescriptionRequest): ApiResult<Prescription> =
         withContext(Dispatchers.IO) { Api.run { NetworkClient.prescriptionApi.upload(request, request.idempotencyKey) } }
 

@@ -16,7 +16,8 @@ data class InAppNotificationItem(
     val timestamp: Long = System.currentTimeMillis(),
     val formattedTime: String = formatTimestamp(System.currentTimeMillis()),
     val isRead: Boolean = false,
-    val deepLinkAction: String? = null // e.g. "ORDERS", "PRESCRIPTIONS", "REFILL_CART"
+    val deepLinkAction: String? = null, // e.g. "ORDERS", "PRESCRIPTIONS", "REFILL_CART"
+    val imageUrl: String? = null
 ) {
     companion object {
         fun formatTimestamp(millis: Long): String {

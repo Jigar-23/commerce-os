@@ -224,6 +224,11 @@ data class AuthResponse(
             ?: ""
 }
 
+data class RegisterDeviceTokenRequest(
+    val deviceToken: String,
+    val platform: String = "ANDROID"
+)
+
 // Server-owned address book (GET /api/v1/customers/:id/addresses)
 @Immutable
 data class ApiAddress(
@@ -333,7 +338,7 @@ data class Prescription(
     @SerializedName(value = "customerId", alternate = ["customer_id"])
     val customerId: String = "",
     @SerializedName(value = "patientName", alternate = ["patient_name"])
-    val patientName: String = "Patient",
+    val patientName: String? = "Patient",
     @SerializedName(value = "age")
     val age: Int? = null,
     @SerializedName(value = "gender")
@@ -343,11 +348,11 @@ data class Prescription(
     @SerializedName(value = "doctorRegistrationNo", alternate = ["doctor_registration_no"])
     val doctorRegistrationNo: String? = null,
     @SerializedName(value = "attachments")
-    val attachments: List<String> = emptyList(),
+    val attachments: List<String>? = emptyList(),
     @SerializedName(value = "note")
-    val note: String = "",
+    val note: String? = "",
     @SerializedName(value = "status")
-    val status: String = "PENDING",
+    val status: String? = "PENDING",
     @SerializedName(value = "pharmacistId", alternate = ["pharmacist_id"])
     val pharmacistId: String? = null,
     @SerializedName(value = "licenseNo", alternate = ["license_no"])

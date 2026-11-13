@@ -181,9 +181,10 @@ dependencies {
     implementation("com.google.maps.android:android-maps-utils:3.8.0")
     implementation("com.google.android.libraries.places:places:3.4.0")
 
-    // FIREBASE AUTH (GOOGLE PHONE SMS)
+    // FIREBASE AUTH (GOOGLE PHONE SMS) & CLOUD MESSAGING (FCM)
     implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     // UNIT TESTING
     testImplementation("junit:junit:4.13.2")

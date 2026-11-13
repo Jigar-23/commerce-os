@@ -33,15 +33,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Install Platform Dependencies
         run: pnpm install --frozen-lockfile
@@ -92,16 +93,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 9
 
       - name: Install Monorepo Dependencies
         run: pnpm install --frozen-lockfile
@@ -130,14 +131,12 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          cache: gradle
 
       - name: Run Android Customer & Rider Unit Tests
         run: |
           cd apps/android
-          ./gradlew testDebugUnitTest
+          ./gradlew testDebugUnitTest --no-daemon
 
   # -------------------------------------------------------------
   # 4. DOCKER TOPOLOGY VERIFICATION GATE
@@ -157,6 +156,8 @@ jobs:
           POSTGRES_PASSWORD: ci_test_postgres_password
           REDIS_PASSWORD: ci_test_redis_password
           GF_SECURITY_ADMIN_PASSWORD: ci_test_grafana_password
+          JWT_SECRET: ci_test_jwt_secret_key_2026_production
+          PAYMENT_GATEWAY_WEBHOOK_SECRET: ci_test_webhook_secret_2026
         run: |
           docker compose config --quiet
           echo "✅ docker-compose.yml configuration valid."
@@ -192,5 +193,5 @@ jobs:
             fi
           else
             echo "ℹ️ RENDER_DEPLOY_HOOK_URL secret not set. Skipping automated webhook trigger."
-            echo "ℹ️ Render auto-deploy via GitHub integration will track commits to main branch."
+            echo "ℹ️ Render auto-deploy via GitHub integration tracks commits to main branch."
           fi

@@ -91,7 +91,7 @@ class CartViewModel(
     ) {
         val targetCustomerId = customerId.trim()
         if (targetCustomerId.isBlank()) return
-        val authoritativeItems = sanitizeCartItems(cart.items ?: emptyList())
+        val authoritativeItems = sanitizeCartItems(reconcileWithLocalItems(cart.items ?: emptyList(), cartItems))
         var applied = false
 
         cartMutex.withLock {
@@ -166,7 +166,7 @@ class CartViewModel(
                                 }
                                 val refreshed = repository.fetchBackendCart(targetCustomerId)
                                 if (refreshed is ApiResult.Success) {
-                                    cartItems = sanitizeCartItems(refreshed.data.items ?: emptyList())
+                                    cartItems = sanitizeCartItems(reconcileWithLocalItems(refreshed.data.items ?: emptyList(), cartItems))
                                     totals = refreshed.data
                                 }
                             }
@@ -180,7 +180,7 @@ class CartViewModel(
                 if (targetCustomerId.isNotBlank()) {
                     when (val check = repository.fetchBackendCart(targetCustomerId)) {
                         is ApiResult.Success -> {
-                            val backendItems = sanitizeCartItems(check.data.items ?: emptyList())
+                            val backendItems = sanitizeCartItems(reconcileWithLocalItems(check.data.items ?: emptyList(), cartItems))
                             cartItems = backendItems
                             totals = check.data
                             uncertainMoveSkus.toList().forEach { sku ->
@@ -316,24 +316,44 @@ class CartViewModel(
             acc.add(price.multiply(BigDecimal.valueOf(item.quantity.toLong())))
         }
 
+    val isTotalsSyncedWithItems: Boolean
+        get() = totals != null && (totals?.itemsSubtotal?.compareTo(effectiveSubtotal) == 0)
+
     val freeDeliveryThreshold: BigDecimal
         get() = totals?.freeDeliveryThreshold ?: com.commerceos.android.data.local.DeliveryConfigLocalStore.getFreeDeliveryThreshold(appContext)
 
     val freeDeliveryEligible: Boolean
-        get() = totals?.freeDeliveryEligible ?: (effectiveSubtotal >= freeDeliveryThreshold)
+        get() = if (isTotalsSyncedWithItems) {
+            totals?.freeDeliveryEligible ?: (effectiveSubtotal >= freeDeliveryThreshold)
+        } else {
+            effectiveSubtotal >= freeDeliveryThreshold
+        }
 
     val remainingForFreeDelivery: BigDecimal
-        get() = totals?.remainingForFreeDelivery ?: (freeDeliveryThreshold.subtract(effectiveSubtotal)).coerceAtLeast(BigDecimal.ZERO)
+        get() = if (isTotalsSyncedWithItems) {
+            totals?.remainingForFreeDelivery ?: (freeDeliveryThreshold.subtract(effectiveSubtotal)).coerceAtLeast(BigDecimal.ZERO)
+        } else {
+            (freeDeliveryThreshold.subtract(effectiveSubtotal)).coerceAtLeast(BigDecimal.ZERO)
+        }
 
     val effectiveExpressFee: BigDecimal
-        get() = totals?.expressDeliveryFee ?: if (freeDeliveryEligible || effectiveSubtotal == BigDecimal.ZERO) BigDecimal.ZERO else com.commerceos.android.data.local.DeliveryConfigLocalStore.getStandardDeliveryFee(appContext)
+        get() = if (isTotalsSyncedWithItems) {
+            totals?.expressDeliveryFee ?: if (freeDeliveryEligible || effectiveSubtotal == BigDecimal.ZERO) BigDecimal.ZERO else com.commerceos.android.data.local.DeliveryConfigLocalStore.getStandardDeliveryFee(appContext)
+        } else {
+            if (freeDeliveryEligible || effectiveSubtotal == BigDecimal.ZERO) BigDecimal.ZERO else com.commerceos.android.data.local.DeliveryConfigLocalStore.getStandardDeliveryFee(appContext)
+        }
 
     val effectiveColdChainFee: BigDecimal
-        get() = totals?.coldChainPackagingFee ?: if (containsColdChain) BigDecimal("15.00") else BigDecimal.ZERO
+        get() = if (isTotalsSyncedWithItems) {
+            totals?.coldChainPackagingFee ?: if (containsColdChain) BigDecimal("15.00") else BigDecimal.ZERO
+        } else {
+            if (containsColdChain) BigDecimal("15.00") else BigDecimal.ZERO
+        }
 
     val effectiveGrandTotal: BigDecimal
         get() {
-            val baseGrandTotal = totals?.grandTotal
+            if (cartItems.isEmpty()) return BigDecimal.ZERO
+            val baseGrandTotal = if (isTotalsSyncedWithItems) totals?.grandTotal else null
             return if (baseGrandTotal != null) {
                 if (totals?.couponCode != null) {
                     baseGrandTotal.coerceAtLeast(BigDecimal.ZERO)
@@ -353,7 +373,7 @@ class CartViewModel(
 
     val itemMrpSavings: BigDecimal
         get() {
-            val sub = totals?.itemsSubtotal ?: effectiveSubtotal
+            val sub = if (isTotalsSyncedWithItems) (totals?.itemsSubtotal ?: effectiveSubtotal) else effectiveSubtotal
             return mrpTotal.subtract(sub).coerceAtLeast(BigDecimal.ZERO)
         }
 
@@ -532,13 +552,47 @@ class CartViewModel(
         }
     }
 
+    fun reconcileWithLocalItems(
+        serverItems: List<CartItem>,
+        fallbackItems: List<CartItem> = cartItems
+    ): List<CartItem> {
+        val fallbackMap = fallbackItems.associateBy { it.sku }
+        return serverItems.map { sItem ->
+            val local = fallbackMap[sItem.sku]
+            if (local != null) {
+                sItem.copy(
+                    name = if (sItem.name.isNotBlank() && !sItem.name.equals("Medicine Item", ignoreCase = true)) sItem.name else local.name,
+                    unitPrice = if (sItem.unitPrice > BigDecimal.ZERO) sItem.unitPrice else local.unitPrice,
+                    mrp = if (sItem.mrp > BigDecimal.ZERO) sItem.mrp else (if (local.mrp > BigDecimal.ZERO) local.mrp else local.unitPrice),
+                    brand = sItem.brand ?: local.brand,
+                    image = sItem.image ?: local.image,
+                    productId = if (sItem.productId.isNotBlank()) sItem.productId else local.productId,
+                    verticalId = if (sItem.verticalId.isNotBlank()) sItem.verticalId else local.verticalId
+                )
+            } else if (sItem.name.isBlank() || sItem.unitPrice <= BigDecimal.ZERO) {
+                val cleanName = if (sItem.sku.startsWith("MED_", ignoreCase = true)) {
+                    sItem.sku.removePrefix("MED_").replace("_", " ").lowercase().split(" ").joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } }
+                } else if (sItem.name.isNotBlank()) {
+                    sItem.name
+                } else {
+                    "Medicine Item"
+                }
+                sItem.copy(
+                    name = cleanName,
+                    unitPrice = if (sItem.unitPrice > BigDecimal.ZERO) sItem.unitPrice else BigDecimal.ZERO,
+                    mrp = if (sItem.mrp > BigDecimal.ZERO) sItem.mrp else (if (sItem.unitPrice > BigDecimal.ZERO) sItem.unitPrice else BigDecimal.ZERO)
+                )
+            } else {
+                sItem
+            }
+        }
+    }
+
     private fun isValidCartItem(item: CartItem): Boolean =
         item.quantity > 0 &&
-            item.unitPrice > BigDecimal.ZERO &&
             item.sku.isNotBlank() &&
             !item.sku.equals("para", ignoreCase = true) &&
-            item.name.isNotBlank() &&
-            !item.name.equals("Medicine Item", ignoreCase = true)
+            (item.name.isNotBlank() || item.unitPrice > BigDecimal.ZERO)
 
     private suspend fun syncLocalCartCache(
         targetCustId: String,
@@ -776,7 +830,7 @@ class CartViewModel(
                                     errorMessage = "Server returned incomplete cart response (missing items)."
                                 } else {
                                     validServerSnapshot = true
-                                    val backendItems = sanitizeCartItems(rawItems)
+                                    val backendItems = sanitizeCartItems(reconcileWithLocalItems(rawItems, cartItems))
                                     cartItems = backendItems
                                     totals = refresh.data
                                     localCacheWritten = syncLocalCartCache(targetId, backendItems)
@@ -867,7 +921,7 @@ class CartViewModel(
                             }
                             return@launch
                         }
-                        val items = sanitizeCartItems(rawItems)
+                        val items = sanitizeCartItems(reconcileWithLocalItems(rawItems, cartItems))
                         appContext?.let { ctx ->
                             uncertainMoveSkus.addAll(LocalSaveForLaterStore.getUncertainMoveSkus(ctx, activeCustId))
                         }
@@ -1066,7 +1120,7 @@ class CartViewModel(
                             if (!cleared) {
                                 android.util.Log.w("CartViewModel", "Failed to clear pending add key from disk for ${item.sku}")
                             }
-                            val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
+                            val backendItems = sanitizeCartItems(reconcileWithLocalItems(updated.data.items ?: cartItems, cartItems + item))
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
@@ -1190,7 +1244,7 @@ class CartViewModel(
                             appContext?.let { ctx ->
                                 LocalSaveForLaterStore.clearPendingReorderItemKey(ctx, targetCustomerId, sku)
                             }
-                            val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
+                            val backendItems = sanitizeCartItems(reconcileWithLocalItems(updated.data.items ?: cartItems, cartItems + cartItem))
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
@@ -1455,7 +1509,7 @@ class CartViewModel(
                             appContext?.let { ctx ->
                                 LocalSaveForLaterStore.removePendingCartMutation(ctx, targetCustomerId, opKey)
                             }
-                            val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
+                            val backendItems = sanitizeCartItems(reconcileWithLocalItems(updated.data.items ?: cartItems, cartItems))
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null
@@ -1545,7 +1599,7 @@ class CartViewModel(
                             appContext?.let { ctx ->
                                 LocalSaveForLaterStore.removePendingCartMutation(ctx, targetCustomerId, opKey)
                             }
-                            val backendItems = sanitizeCartItems(updated.data.items ?: cartItems)
+                            val backendItems = sanitizeCartItems(reconcileWithLocalItems(updated.data.items ?: cartItems, cartItems))
                             cartItems = backendItems
                             totals = updated.data
                             errorMessage = null

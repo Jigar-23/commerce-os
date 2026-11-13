@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -75,6 +76,7 @@ fun AccountScreen(
     }
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showRefillDialog by remember { mutableStateOf(false) }
+    var showLogoutConfirmDialog by remember { mutableStateOf(false) }
 
     val hasCustomName = !localName.isNullOrBlank() && !localName!!.trim().startsWith("Customer", ignoreCase = true)
     val phone = profile?.phone?.trim()?.takeIf { it.isNotBlank() } ?: fallbackPhone.trim()
@@ -567,7 +569,7 @@ fun AccountScreen(
 
             // 6. Professional Logout Button
             OutlinedButton(
-                onClick = onLogout,
+                onClick = { showLogoutConfirmDialog = true },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
                 border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
@@ -575,7 +577,7 @@ fun AccountScreen(
                     .fillMaxWidth()
                     .height(48.dp)
             ) {
-                Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Log Out of Account", fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
@@ -687,6 +689,60 @@ fun AccountScreen(
                 }
             }
         }
+    }
+
+    if (showLogoutConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirmDialog = false },
+            title = {
+                Text(
+                    text = "Log Out",
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to log out of CommerceOS?",
+                    fontFamily = PlusJakartaSans,
+                    fontSize = 14.sp,
+                    color = Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLogoutConfirmDialog = false
+                        onLogout()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Log Out",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = PlusJakartaSans
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showLogoutConfirmDialog = false }
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = Color(0xFF64748B),
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = PlusJakartaSans
+                    )
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 }
 

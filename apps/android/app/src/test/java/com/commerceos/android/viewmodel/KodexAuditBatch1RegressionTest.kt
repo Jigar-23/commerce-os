@@ -2675,6 +2675,43 @@ class KodexAuditBatch1RegressionTest {
     }
 
     @Test
+    fun testPrescriptionViewModel_loadHandlesNullFieldsFromBackendWithoutError() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalPrescriptionManager.secureStoreProvider = { fakeSecureStore }
+
+        // Simulate backend returning null for note, attachments, patientName, status
+        val nullFieldPrescription = Prescription(
+            id = "rx_null_fields_123",
+            customerId = "cust_null_test",
+            patientName = null,
+            status = null,
+            attachments = null,
+            note = null
+        )
+
+        val repo = object : FakeAppRepository() {
+            override suspend fun getCustomerPrescriptions(customerId: String): ApiResult<List<Prescription>> =
+                ApiResult.Success(listOf(nullFieldPrescription))
+        }
+
+        val vm = PrescriptionViewModel(repo, appContext = fakeContext)
+        vm.load("cust_null_test")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify it didn't crash or report "Could not load prescriptions."
+        assertNull(vm.errorMessage)
+        assertEquals(1, vm.prescriptions.size)
+        val loadedRx = vm.prescriptions.first()
+        assertEquals("rx_null_fields_123", loadedRx.id)
+        assertEquals("Patient", loadedRx.patientName)
+        assertEquals("PENDING", loadedRx.status)
+        assertEquals(emptyList<String>(), loadedRx.attachments)
+        assertEquals("", loadedRx.note)
+    }
+
+    @Test
     fun testPrescriptionViewModel_canonicalSha256FingerprintCollisionFree() = runTest {
         val store = mutableMapOf<String, String>()
         val fakeContext = createFakeContext(store)
@@ -2742,6 +2779,121 @@ class KodexAuditBatch1RegressionTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertEquals("Could not durably clear pending move operation key.", vm.errorMessage)
+    }
+
+    @Test
+    fun testCartViewModel_effectiveGrandTotalUpdatesInstantaneouslyWithoutLag() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        val serverCart = mutableListOf<CartItem>()
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> =
+                ApiResult.Success(CartResponse(items = serverCart.toList(), grandTotal = BigDecimal.ZERO, itemsSubtotal = BigDecimal.ZERO))
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                serverCart.removeAll { it.sku == item.sku }
+                serverCart.add(item)
+                val total = serverCart.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.unitPrice.multiply(BigDecimal.valueOf(it.quantity.toLong()))) }
+                return ApiResult.Success(CartResponse(items = serverCart.toList(), grandTotal = total, itemsSubtotal = total))
+            }
+        }
+
+        val vm = CartViewModel(repo, appContext = fakeContext)
+        vm.init("cust_instant_test")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Cart is empty initially
+        assertEquals(BigDecimal.ZERO, vm.effectiveGrandTotal)
+        assertEquals(0, vm.itemCount)
+
+        // Add item worth 849
+        val prod1 = CommerceProduct(
+            id = "prod_1",
+            sku = "SKU_1",
+            name = "Test Product 1",
+            price = 849.0,
+            sellingPrice = 849.0,
+            verticalId = "pharmacy"
+        )
+        vm.addItem(prod1)
+        testDispatcher.scheduler.runCurrent()
+
+        // Optimistic check: MUST update effectiveGrandTotal and effectiveSubtotal immediately!
+        // No 500ms latency showing 0.
+        assertEquals(0, BigDecimal("849.0").compareTo(vm.effectiveSubtotal))
+        assertEquals(0, BigDecimal("849.0").compareTo(vm.effectiveGrandTotal))
+        assertEquals(1, vm.itemCount)
+
+        // Now advance scheduler to let network complete
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, BigDecimal("849.0").compareTo(vm.effectiveGrandTotal))
+
+        // Now add a second item worth 35 (like Glycomet)
+        val prod2 = CommerceProduct(
+            id = "prod_2",
+            sku = "SKU_2",
+            name = "Test Product 2",
+            price = 35.0,
+            sellingPrice = 35.0,
+            verticalId = "pharmacy"
+        )
+        vm.addItem(prod2)
+        testDispatcher.scheduler.runCurrent()
+
+        // Must immediately reflect 849 + 35 = 884, NOT the stale 849!
+        assertEquals(0, BigDecimal("884.0").compareTo(vm.effectiveSubtotal))
+        assertEquals(0, BigDecimal("884.0").compareTo(vm.effectiveGrandTotal))
+        assertEquals(2, vm.itemCount)
+    }
+
+    @Test
+    fun testCartViewModel_addItemReconcilesWithServerWhenServerReturnsZeroPriceOrEmptyName() = runTest {
+        val store = mutableMapOf<String, String>()
+        val fakeContext = createFakeContext(store)
+        val fakeSecureStore = FakeSecureCredentialStore()
+        com.commerceos.android.data.local.LocalSaveForLaterStore.secureStoreProvider = { fakeSecureStore }
+
+        // Simulate server returning empty name and unitPrice 0 for newly added SKU
+        val repo = object : FakeAppRepository() {
+            override suspend fun fetchBackendCart(customerId: String): ApiResult<CartResponse> =
+                ApiResult.Success(CartResponse(items = emptyList()))
+            override suspend fun addCartItem(customerId: String, item: CartItem, idempotencyKey: String?): ApiResult<CartResponse> {
+                val serverPartialItem = CartItem(
+                    sku = item.sku,
+                    name = "", // Server returned blank name
+                    unitPrice = BigDecimal.ZERO, // Server returned 0 price
+                    quantity = 1,
+                    requiresPrescription = true
+                )
+                return ApiResult.Success(CartResponse(items = listOf(serverPartialItem)))
+            }
+        }
+
+        val vm = CartViewModel(repo, appContext = fakeContext)
+        vm.init("cust_reconcile_test")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val glycomet = CommerceProduct(
+            id = "prod_glycomet_500",
+            sku = "MED_GLYCOMET_500",
+            name = "Glycomet 500mg Metformin Tablets",
+            price = 35.0,
+            sellingPrice = 35.0,
+            verticalId = "pharmacy"
+        )
+
+        vm.addItem(glycomet)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify the item was NOT deleted or pruned!
+        assertEquals(1, vm.cartItems.size)
+        val addedItem = vm.cartItems.first()
+        assertEquals("MED_GLYCOMET_500", addedItem.sku)
+        assertEquals("Glycomet 500mg Metformin Tablets", addedItem.name)
+        assertEquals(BigDecimal("35.0"), addedItem.unitPrice)
+        assertNull(vm.errorMessage)
     }
 
     @Test

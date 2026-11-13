@@ -5,13 +5,46 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { sellerApi, SellerSession } from '@/lib/apiClient';
 import {
-  BarChart3, Package, Layers, IndianRupee, XCircle, RefreshCw,
-  Settings, ChevronRight, ShieldCheck, Store, LogOut, Bike, MapPin, Users,
-  Percent, Tag
+  LayoutDashboard,
+  Package,
+  Layers,
+  IndianRupee,
+  XCircle,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+  Store,
+  LogOut,
+  Bike,
+  MapPin,
+  Users,
+  Percent,
+  Tag,
+  Bell,
+  Wallet,
+  CheckCircle2,
+  Construction,
+  ArrowRight,
 } from 'lucide-react';
 
 interface SellerSidebarProps {
-  activeTab: 'all' | 'orders' | 'inventory' | 'cod' | 'cancelled' | 'audit' | 'dashboard' | 'products' | 'pricing' | 'promotions' | 'settlements' | 'settings' | 'riders' | 'stores' | 'users';
+  activeTab:
+    | 'all'
+    | 'orders'
+    | 'inventory'
+    | 'cod'
+    | 'cancelled'
+    | 'audit'
+    | 'dashboard'
+    | 'products'
+    | 'pricing'
+    | 'promotions'
+    | 'settlements'
+    | 'settings'
+    | 'riders'
+    | 'stores'
+    | 'users'
+    | 'notifications';
   ordersCount?: number;
   inventoryCount?: number;
   pendingCodAmount?: number;
@@ -31,6 +64,7 @@ export default function SellerSidebar({
 }: SellerSidebarProps) {
   const router = useRouter();
   const [session, setSession] = useState<SellerSession | null>(null);
+  const [showSettlementsModal, setShowSettlementsModal] = useState(false);
 
   useEffect(() => {
     setSession(sellerApi.getSession());
@@ -41,24 +75,49 @@ export default function SellerSidebar({
   }, []);
 
   const handleLogout = () => {
-    sellerApi.clearSession();
-    router.push('/login');
+    if (confirm('Are you sure you want to sign out of CommerceOS Seller Hub?')) {
+      sellerApi.clearSession();
+      router.push('/login');
+    }
+  };
+
+  const isTabActive = (tab: string) => {
+    if (tab === 'dashboard') return activeTab === 'all' || activeTab === 'dashboard';
+    return activeTab === tab;
+  };
+
+  const navItemClass = (tab: string) => {
+    const active = isTabActive(tab);
+    return `group flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+      active
+        ? 'bg-slate-900 text-white shadow-sm'
+        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'
+    }`;
+  };
+
+  const iconClass = (tab: string) => {
+    const active = isTabActive(tab);
+    return `w-4 h-4 shrink-0 transition-colors ${
+      active ? 'text-white' : 'text-slate-400 group-hover:text-slate-700'
+    }`;
   };
 
   return (
-    <aside className="w-64 bg-white border-r border-border-default flex flex-col justify-between shrink-0 shadow-sm z-20">
-      <div className="p-5 space-y-6 overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-action-speedBg flex items-center justify-center text-white font-black text-base shadow-md shadow-subtle cursor-pointer hover:scale-105 transition-transform">
+    <aside className="w-64 bg-white border-r border-slate-200/80 flex flex-col justify-between shrink-0 shadow-sm z-20 select-none">
+      {/* Scrollable Nav Content */}
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-6 scrollbar-thin">
+        {/* Hub Header & Status */}
+        <div className="flex items-center justify-between px-1">
+          <Link href="/" className="flex items-center space-x-3 group">
+            <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-sm shadow-sm group-hover:scale-105 transition-transform">
               S
             </div>
             <div>
-              <div className="flex items-center space-x-1.5">
-                <div className="w-2 h-2 rounded-full bg-action-speedBg animate-pulse" />
-                <h1 className="text-2xs font-black uppercase tracking-wider text-content-muted">Commerce OS</h1>
+              <p className="text-xs font-semibold text-slate-900 leading-tight">Rewari Central Hub</p>
+              <div className="flex items-center space-x-1.5 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="text-[11px] font-medium text-emerald-600">Online • 10m SLA</span>
               </div>
-              <p className="text-sm font-black text-content-primary">Rewari Central Hub</p>
             </div>
           </Link>
 
@@ -66,269 +125,278 @@ export default function SellerSidebar({
             <button
               onClick={onRefresh}
               disabled={isLoading}
-              title="Refresh Data"
-              className="p-2 rounded-xl text-content-muted hover:text-content-primary hover:bg-surface-subtle transition-all disabled:opacity-50"
+              title="Sync store data"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all disabled:opacity-40"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-content-accent' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-slate-900' : ''}`} />
             </button>
           )}
         </div>
 
-        <nav className="space-y-1">
-          <Link
-            href="/"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'all' || activeTab === 'dashboard'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <BarChart3 className="w-4 h-4" />
-              <span>Dashboard</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+        {/* Grouped Navigation */}
+        <nav className="space-y-5">
+          {/* Section 1: Operations */}
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 pb-1">
+              Operations
+            </p>
 
-          <Link
-            href="/orders"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'orders'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Package className="w-4 h-4" />
-              <span>Orders</span>
-            </div>
-            {ordersCount > 0 && (
-              <span className="px-2 py-0.5 text-2xs font-bold rounded-full bg-action-speedBg text-white">
-                {ordersCount}
+            <Link href="/" className={navItemClass('dashboard')}>
+              <div className="flex items-center space-x-2.5">
+                <LayoutDashboard className={iconClass('dashboard')} />
+                <span>Dashboard</span>
+              </div>
+            </Link>
+
+            <Link href="/orders" className={navItemClass('orders')}>
+              <div className="flex items-center space-x-2.5">
+                <Package className={iconClass('orders')} />
+                <span>Live Orders</span>
+              </div>
+              {ordersCount > 0 && (
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded-full ${
+                    isTabActive('orders')
+                      ? 'bg-white/20 text-white'
+                      : 'bg-indigo-50 text-indigo-700 border border-indigo-200/50'
+                  }`}
+                >
+                  {ordersCount}
+                </span>
+              )}
+            </Link>
+
+            <Link href="/riders" className={navItemClass('riders')}>
+              <div className="flex items-center space-x-2.5">
+                <Bike className={iconClass('riders')} />
+                <span>Fleet & Riders</span>
+              </div>
+            </Link>
+          </div>
+
+          {/* Section 2: Catalog & Store */}
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 pb-1">
+              Catalog & Store
+            </p>
+
+            <Link href="/inventory" className={navItemClass('inventory')}>
+              <div className="flex items-center space-x-2.5">
+                <Layers className={iconClass('inventory')} />
+                <span>Stock Levels</span>
+              </div>
+              {inventoryCount > 0 && (
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                    isTabActive('inventory') ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {inventoryCount}
+                </span>
+              )}
+            </Link>
+
+            <Link href="/products" className={navItemClass('products')}>
+              <div className="flex items-center space-x-2.5">
+                <Store className={iconClass('products')} />
+                <span>Product Master</span>
+              </div>
+            </Link>
+
+            <Link href="/stores" className={navItemClass('stores')}>
+              <div className="flex items-center space-x-2.5">
+                <MapPin className={iconClass('stores')} />
+                <span>Hubs & Stores</span>
+              </div>
+            </Link>
+          </div>
+
+          {/* Section 3: Finances */}
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 pb-1">
+              Finances
+            </p>
+
+            <Link href="/cod" className={navItemClass('cod')}>
+              <div className="flex items-center space-x-2.5">
+                <IndianRupee className={iconClass('cod')} />
+                <span>Cash on Delivery</span>
+              </div>
+              {Number(pendingCodAmount || 0) > 0 && (
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                    isTabActive('cod')
+                      ? 'bg-white/20 text-white'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200/50'
+                  }`}
+                >
+                  ₹{Number(pendingCodAmount || 0).toFixed(0)}
+                </span>
+              )}
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setShowSettlementsModal(true)}
+              className={`${navItemClass('settlements')} w-full text-left`}
+            >
+              <div className="flex items-center space-x-2.5">
+                <Wallet className={iconClass('settlements')} />
+                <span>Settlements</span>
+              </div>
+              <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-amber-50 text-amber-700 border border-amber-200/60 uppercase">
+                Soon
               </span>
-            )}
-          </Link>
+            </button>
+          </div>
 
-          <Link
-            href="/riders"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'riders'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Bike className="w-4 h-4" />
-              <span>Fleet & Riders</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+          {/* Section 4: Rules & Growth */}
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 pb-1">
+              Marketing & Rules
+            </p>
 
-          <Link
-            href="/users"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'users'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Users className="w-4 h-4" />
-              <span>Registered Users</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+            <Link href="/pricing" className={navItemClass('pricing')}>
+              <div className="flex items-center space-x-2.5">
+                <Tag className={iconClass('pricing')} />
+                <span>Pricing Rules</span>
+              </div>
+            </Link>
 
-          <Link
-            href="/products"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'products'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Store className="w-4 h-4" />
-              <span>Products & SKUs</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+            <Link href="/promotions" className={navItemClass('promotions')}>
+              <div className="flex items-center space-x-2.5">
+                <Percent className={iconClass('promotions')} />
+                <span>Promotions</span>
+              </div>
+            </Link>
 
-          <Link
-            href="/inventory"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'inventory'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Layers className="w-4 h-4" />
-              <span>Stock Inventory</span>
-            </div>
-            {inventoryCount > 0 && (
-              <span className="px-2 py-0.5 text-2xs font-bold rounded-full bg-surface-subtle text-content-secondary">
-                {inventoryCount}
-              </span>
-            )}
-          </Link>
+            <Link href="/notifications" className={navItemClass('notifications')}>
+              <div className="flex items-center space-x-2.5">
+                <Bell className={iconClass('notifications')} />
+                <span>Push Alerts</span>
+              </div>
+            </Link>
+          </div>
 
-          <Link
-            href="/stores"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'stores'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <MapPin className="w-4 h-4" />
-              <span>Stores & Hubs</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+          {/* Section 5: Administration & System */}
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 pb-1">
+              System & Logs
+            </p>
 
-          <Link
-            href="/pricing"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'pricing'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Tag className="w-4 h-4" />
-              <span>Pricing Rules</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+            <Link href="/users" className={navItemClass('users')}>
+              <div className="flex items-center space-x-2.5">
+                <Users className={iconClass('users')} />
+                <span>Registered Users</span>
+              </div>
+            </Link>
 
-          <Link
-            href="/promotions"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'promotions'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Percent className="w-4 h-4" />
-              <span>Promotions</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+            <Link href="/cancelled" className={navItemClass('cancelled')}>
+              <div className="flex items-center space-x-2.5">
+                <XCircle className={iconClass('cancelled')} />
+                <span>Cancelled Orders</span>
+              </div>
+              {cancelledCount > 0 && (
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                    isTabActive('cancelled')
+                      ? 'bg-white/20 text-white'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200/50'
+                  }`}
+                >
+                  {cancelledCount}
+                </span>
+              )}
+            </Link>
 
-          <Link
-            href="/settlements"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'settlements'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <IndianRupee className="w-4 h-4" />
-              <span>Settlements & Payouts</span>
-            </div>
-            <span className="px-1.5 py-0.5 text-3xs font-extrabold uppercase tracking-wider rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-              Soon
-            </span>
-          </Link>
+            <Link href="/audit" className={navItemClass('audit')}>
+              <div className="flex items-center space-x-2.5">
+                <ShieldCheck className={iconClass('audit')} />
+                <span>Audit Trail</span>
+              </div>
+            </Link>
 
-          <Link
-            href="/cod"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'cod'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <IndianRupee className="w-4 h-4" />
-              <span>Cash on Delivery</span>
-            </div>
-            {Number(pendingCodAmount || 0) > 0 && (
-              <span className="px-2 py-0.5 text-2xs font-bold rounded-full bg-action-warningBg text-white">
-                ₹{Number(pendingCodAmount || 0).toFixed(0)}
-              </span>
-            )}
-          </Link>
-
-          <Link
-            href="/cancelled"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'cancelled'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <XCircle className="w-4 h-4" />
-              <span>Cancelled Orders</span>
-            </div>
-            {cancelledCount > 0 && (
-              <span className="px-2 py-0.5 text-2xs font-bold rounded-full bg-action-dangerBg text-white">
-                {cancelledCount}
-              </span>
-            )}
-          </Link>
-
-          <Link
-            href="/audit"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'audit'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Audit Trail</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
-
-          <Link
-            href="/settings"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'settings'
-                ? 'bg-surface-accentSubtle text-content-accent font-bold'
-                : 'text-content-secondary hover:bg-surface-subtle'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
-              <Settings className="w-4 h-4" />
-              <span>Settings</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          </Link>
+            <Link href="/settings" className={navItemClass('settings')}>
+              <div className="flex items-center space-x-2.5">
+                <Settings className={iconClass('settings')} />
+                <span>Settings</span>
+              </div>
+            </Link>
+          </div>
         </nav>
       </div>
 
-      {/* Dynamic Authenticated Merchant Footer */}
-      <div className="p-4 border-t border-border-subtle bg-surface-subtle flex items-center justify-between space-x-3">
-        <div className="flex items-center space-x-3 overflow-hidden">
-          <div className="w-9 h-9 rounded-xl bg-action-speedBg text-white font-bold flex items-center justify-center text-sm shadow-md shrink-0">
+      {/* Merchant Profile Footer */}
+      <div className="p-3 border-t border-slate-200/80 bg-slate-50/50 flex items-center justify-between gap-3">
+        <div className="flex items-center space-x-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-slate-900 text-white font-semibold flex items-center justify-center text-xs shrink-0 shadow-xs">
             {session?.merchantName ? session.merchantName.charAt(0).toUpperCase() : 'M'}
           </div>
-          <div className="overflow-hidden flex-1">
-            <p className="text-xs font-bold text-content-primary truncate" suppressHydrationWarning>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-slate-900 truncate" suppressHydrationWarning>
               {session?.merchantName || 'Rewari Merchant'}
             </p>
-            <p className="text-2xs text-content-muted truncate" suppressHydrationWarning>
-              Rewari Central Hub (Single Store)
+            <p className="text-[11px] text-slate-500 truncate" suppressHydrationWarning>
+              Store Administrator
             </p>
           </div>
         </div>
 
         <button
           onClick={handleLogout}
-          title="Sign Out"
-          className="p-2 text-content-muted hover:text-content-danger hover:bg-white rounded-lg transition-colors shrink-0"
+          title="Sign out of Seller Hub"
+          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
         >
           <LogOut className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Settlements Under Construction Pop-up Modal */}
+      {showSettlementsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-slate-200/80 max-w-sm w-full p-6 text-center space-y-4 animate-in fade-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200/60 text-amber-600 flex items-center justify-center mx-auto shadow-xs">
+              <Construction className="w-6 h-6 animate-pulse" />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 rounded-full">
+                Under Construction
+              </span>
+              <h3 className="text-base font-bold text-slate-900 pt-1">
+                Settlements Module Coming Soon
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Direct automated bank account payouts and settlement cycles are currently in active development.
+              </p>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                All daily revenue and doorstep cash collections are tracked in real-time through your Cash on Delivery Ledger.
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSettlementsModal(false);
+                  router.push('/cod');
+                }}
+                className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-xs transition-all flex items-center justify-center space-x-1.5 active:scale-98"
+              >
+                <span>Open COD Ledger</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSettlementsModal(false)}
+                className="w-full px-4 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition-all"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

@@ -48,5 +48,6 @@ DerivedData/
 *.swo
 .DS_Store
 *.log
+*.tsbuildinfo
 
 apps/ios/build-ipad/

@@ -193,8 +193,8 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
 
   const isExplicitlyUntrusted = Boolean(
     !telemetry ||
-    telemetry.attestationVerified === false ||
-    telemetry.attestation_verified === false ||
+    telemetry.isMockLocation === true ||
+    telemetry.is_mock_location === true ||
     telemetry.untrustedTelemetry === true ||
     telemetry.unverifiedPeriod === true ||
     telemetry.locationVerified === false ||
@@ -204,11 +204,7 @@ function buildEnrichedTrackingDTO(session, rawTelemetry, fallbackPresence = null
 
   const isAttested = Boolean(
     telemetry &&
-    !isExplicitlyUntrusted &&
-    (telemetry.attestationVerified === true ||
-     telemetry.attestation_verified === true ||
-     telemetry.locationVerified === true ||
-     telemetry.attestationVerified === undefined)
+    !isExplicitlyUntrusted
   );
 
   let mapMatched = {

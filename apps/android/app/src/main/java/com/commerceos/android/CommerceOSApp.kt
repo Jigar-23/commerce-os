@@ -178,6 +178,7 @@ fun CommerceOSApp(
         }
     }
 
+    val context = LocalContext.current
     var showRxUploadDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(pendingNotificationAction, pendingNotificationTargetId, session.isAuthenticated) {
@@ -206,12 +207,41 @@ fun CommerceOSApp(
             "NOTIFICATIONS" -> {
                 navigate(Screen.Notifications)
             }
+            "BROADCAST" -> {
+                val deepLink = pendingNotificationTargetId?.lowercase() ?: ""
+                when {
+                    deepLink.contains("cart") -> {
+                        navigateRoot(Screen.Cart)
+                        cartViewModel.loadCart()
+                    }
+                    deepLink.contains("prescription") -> {
+                        navigateRoot(Screen.Prescriptions)
+                        prescriptionViewModel.load(authenticatedCustomerId)
+                    }
+                    deepLink.contains("notification") -> {
+                        navigate(Screen.Notifications)
+                    }
+                    deepLink.contains("offer") || deepLink.contains("catalog") -> {
+                        navigate(Screen.Catalog(CatalogQuery()))
+                    }
+                    else -> {
+                        navigateRoot(Screen.Home)
+                    }
+                }
+            }
         }
         onConsumePendingNotification()
     }
 
     LaunchedEffect(authenticatedCustomerId, session.isAuthenticated) {
         if (session.isAuthenticated) {
+            val fcmToken = context.getSharedPreferences(
+                com.commerceos.android.service.CustomerFirebaseMessagingService.PREFS_FCM,
+                android.content.Context.MODE_PRIVATE
+            ).getString(com.commerceos.android.service.CustomerFirebaseMessagingService.KEY_FCM_TOKEN, null)
+            if (!fcmToken.isNullOrBlank()) {
+                com.commerceos.android.service.CustomerFirebaseMessagingService.syncTokenWithBackend(fcmToken)
+            }
             if (currentScreen !is Screen.Home) {
                 backStack.clear()
                 currentScreen = Screen.Home
@@ -230,8 +260,6 @@ fun CommerceOSApp(
         }
     }
 
-    val context = LocalContext.current
-
     LaunchedEffect(context) {
         addressViewModel.attachContext(context)
     }
@@ -240,7 +268,7 @@ fun CommerceOSApp(
         cartViewModel.addEvents.collect { event ->
             when (event) {
                 is CartAddEvent.Success -> {
-                    Toast.makeText(context, "Added ${event.name} to cart", Toast.LENGTH_SHORT).show()
+                    // No toast on add to cart — GlobalCartBar and button quantity states provide seamless visual feedback
                 }
                 is CartAddEvent.Failure -> {
                     Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
@@ -799,7 +827,10 @@ fun CommerceOSApp(
                     onChangeAddress = {
                         checkoutViewModel.start(authenticatedCustomerId, cartViewModel.cartItems, cartViewModel.couponDiscountAmount, cartViewModel.appliedCouponCode)
                         addressViewModel.init(authenticatedCustomerId, force = true)
-                        navigate(Screen.AddressSelection(fromCheckout = true))
+                        val hasSaved = addressViewModel.addresses.any {
+                            it.id.isNotBlank() && !it.id.startsWith("temp_gps_") && !it.tag.equals("Current Location", ignoreCase = true)
+                        }
+                        navigate(Screen.AddressSelection(fromCheckout = true, directAddFlow = !hasSaved))
                     },
                     onQuantityChange = { sku, quantity -> cartViewModel.updateQuantity(sku, quantity) },
                     onRemoveItem = { cartViewModel.removeItem(it) },
@@ -831,7 +862,10 @@ fun CommerceOSApp(
                             navigate(Screen.PaymentGateway)
                         } else {
                             addressViewModel.init(authenticatedCustomerId, force = true)
-                            navigate(Screen.AddressSelection(fromCheckout = true))
+                            val hasSaved = addressViewModel.addresses.any {
+                                it.id.isNotBlank() && !it.id.startsWith("temp_gps_") && !it.tag.equals("Current Location", ignoreCase = true)
+                            }
+                            navigate(Screen.AddressSelection(fromCheckout = true, directAddFlow = !hasSaved))
                         }
                     },
                     onStartShopping = { navigateRoot(Screen.Catalog(CatalogQuery())) },
@@ -912,27 +946,37 @@ fun CommerceOSApp(
                         onBack = { goBack() }
                     )
                 }
-                is Screen.OrderTracking -> OrderTrackingScreen(
-                    detail = orderViewModel.detail,
-                    liveTracking = orderViewModel.liveTracking,
-                    isReconnecting = orderViewModel.isStreamReconnecting,
-                    onRefresh = { orderViewModel.loadDetail(screen.orderId) },
-                    onBack = { goBack() },
-                    onReorderOrder = { order ->
-                        val items = order.items.orEmpty()
-                        if (items.isNotEmpty()) {
-                            cartViewModel.reorderAll(items)
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Added ${items.size} items to cart")
+                is Screen.OrderTracking -> {
+                    DisposableEffect(screen.orderId) {
+                        onDispose {
+                            orderViewModel.stopLiveTracking()
+                        }
+                    }
+                    OrderTrackingScreen(
+                        detail = orderViewModel.detail,
+                        liveTracking = orderViewModel.liveTracking,
+                        isReconnecting = orderViewModel.isStreamReconnecting,
+                        onRefresh = { orderViewModel.loadDetail(screen.orderId) },
+                        onBack = {
+                            orderViewModel.stopLiveTracking()
+                            goBack()
+                        },
+                        onReorderOrder = { order ->
+                            val items = order.items.orEmpty()
+                            if (items.isNotEmpty()) {
+                                cartViewModel.reorderAll(items)
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Added ${items.size} items to cart")
+                                }
+                                navigate(Screen.Cart)
                             }
+                        },
+                        onReorderItem = { item ->
+                            cartViewModel.addReorderItem(item)
                             navigate(Screen.Cart)
                         }
-                    },
-                    onReorderItem = { item ->
-                        cartViewModel.addReorderItem(item)
-                        navigate(Screen.Cart)
-                    }
-                )
+                    )
+                }
                 is Screen.OrderHistory -> OrderHistoryScreen(
                     history = orderViewModel.history,
                     onRefresh = { orderViewModel.loadHistory(authenticatedCustomerId) },
@@ -1032,14 +1076,15 @@ fun CommerceOSApp(
                         resolveShortcutDestination(res.toDestination())
                     },
                     onAddToCart = { res ->
+                        val safePrice = (res.price ?: 0.0).takeIf { it > 0.0 } ?: 15.0
                         cartViewModel.addItem(
                             com.commerceos.android.model.CommerceProduct(
                                 id = res.entityId,
                                 sku = res.sku ?: res.entityId,
-                                name = res.title,
+                                name = res.title.ifBlank { "Medicine" },
                                 brandName = res.subtitle,
-                                price = res.price ?: 0.0,
-                                sellingPrice = res.price ?: 0.0,
+                                price = safePrice,
+                                sellingPrice = safePrice,
                                 image = res.image,
                                 verticalId = res.vertical.ifBlank { "pharmacy" }
                             )

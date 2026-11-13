@@ -593,6 +593,19 @@ private fun NotificationCard(
                     lineHeight = 17.5.sp
                 )
 
+                if (!notification.imageUrl.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    coil.compose.AsyncImage(
+                        model = notification.imageUrl,
+                        contentDescription = "Notification Banner",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
