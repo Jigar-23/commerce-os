@@ -107,11 +107,11 @@ jobs:
       - name: Install Monorepo Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint Monorepo
-        run: pnpm run lint
-
       - name: Build Packages & Next.js Applications
         run: pnpm run build
+
+      - name: Lint Monorepo
+        run: pnpm run lint
 
       - name: Run Frontend Tests
         run: pnpm run test
