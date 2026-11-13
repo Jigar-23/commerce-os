@@ -159,7 +159,17 @@ async function getJson(url: string, headers: Record<string, string> = {}) {
   const res = await fetch(url, {
     headers: buildHeaders(headers),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch from authoritative backend service.`);
+  if (!res.ok) {
+    let errorDetail = '';
+    try {
+      const errBody = await res.json();
+      errorDetail = errBody.message || errBody.error || '';
+    } catch (_) {}
+    const msg = errorDetail
+      ? `HTTP ${res.status}: ${errorDetail}`
+      : `HTTP ${res.status}: Failed to fetch from authoritative backend service.`;
+    throw new Error(msg);
+  }
   return res.json();
 }
 

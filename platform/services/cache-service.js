@@ -126,6 +126,26 @@ class DistributedCacheService {
     return true;
   }
 
+  async disconnect() {
+    if (this.memSweepInterval) {
+      clearInterval(this.memSweepInterval);
+      this.memSweepInterval = null;
+    }
+    if (this.subscriberClient) {
+      try { await this.subscriberClient.quit(); } catch (_) {
+        try { this.subscriberClient.disconnect(); } catch (_) {}
+      }
+      this.subscriberClient = null;
+    }
+    if (this.redisClient) {
+      try { await this.redisClient.quit(); } catch (_) {
+        try { this.redisClient.disconnect(); } catch (_) {}
+      }
+      this.redisClient = null;
+    }
+    this.isRedisReady = false;
+  }
+
   /**
    * Fast Geospatial Rider Indexing (GEOADD)
    */

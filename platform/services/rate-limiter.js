@@ -231,6 +231,27 @@ class ProductionRateLimiter {
     } catch {}
   }
 
+  async destroy() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+    if (this.subscriberClient) {
+      try { await this.subscriberClient.quit(); } catch (_) {
+        try { this.subscriberClient.disconnect(); } catch (_) {}
+      }
+      this.subscriberClient = null;
+    }
+    if (this.redisClient) {
+      try { await this.redisClient.quit(); } catch (_) {
+        try { this.redisClient.disconnect(); } catch (_) {}
+      }
+      this.redisClient = null;
+    }
+    this.hits.clear();
+    this.bannedIps.clear();
+  }
+
   cleanup() {
     const now = Date.now();
     for (const [key, record] of this.hits.entries()) {

@@ -771,6 +771,9 @@ CREATE INDEX IF NOT EXISTS idx_products_category_trgm ON products USING gin (cat
 CREATE INDEX IF NOT EXISTS idx_products_sku_trgm ON products USING gin (sku gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_outbox_perf_claim ON outbox_events(status, next_attempt_at, created_at) WHERE status IN ('PENDING', 'PROCESSING');
 CREATE INDEX IF NOT EXISTS idx_rider_telemetry_perf ON rider_telemetry(delivery_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_store_status_created ON orders(store_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inventory_store_stock ON inventory(store_id, product_id) WHERE stock_count > 0;
+CREATE INDEX IF NOT EXISTS idx_delivery_sessions_rider_active ON delivery_sessions(rider_id, state) WHERE state NOT IN ('DELIVERED', 'CANCELLED');
 
 
 

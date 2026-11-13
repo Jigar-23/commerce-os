@@ -17,6 +17,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const path = require('path');
 const fs = require('fs');
 const { OrderCodeCodec } = require('../order-code-codec');
@@ -447,7 +448,10 @@ const REQUIRED_DATABASE_MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS idx_products_category_trgm ON products USING gin (category gin_trgm_ops);`,
   `CREATE INDEX IF NOT EXISTS idx_products_sku_trgm ON products USING gin (sku gin_trgm_ops);`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_perf_claim ON outbox_events(status, next_attempt_at, created_at) WHERE status IN ('PENDING', 'PROCESSING');`,
-  `CREATE INDEX IF NOT EXISTS idx_rider_telemetry_perf ON rider_telemetry(delivery_id, recorded_at DESC);`
+  `CREATE INDEX IF NOT EXISTS idx_rider_telemetry_perf ON rider_telemetry(delivery_id, recorded_at DESC);`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_store_status_created ON orders(store_id, status, created_at DESC);`,
+  `CREATE INDEX IF NOT EXISTS idx_inventory_store_stock ON inventory(store_id, product_id) WHERE stock_count > 0;`,
+  `CREATE INDEX IF NOT EXISTS idx_delivery_sessions_rider_active ON delivery_sessions(rider_id, state) WHERE state NOT IN ('DELIVERED', 'CANCELLED');`
 ];
 
 async function runDatabaseMigrations(pgPool) {
@@ -463,11 +467,14 @@ let databaseMigrationsPromise = Promise.resolve();
 let pool = null;
 if (DATABASE_URL) {
   const isLocalDb = DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1');
+  const poolMax = Number(process.env.DATABASE_POOL_MAX || 20);
+  const statementTimeout = Number(process.env.DATABASE_STATEMENT_TIMEOUT_MS || 15000);
   pool = new Pool({
     connectionString: DATABASE_URL,
-    max: 20,
+    max: poolMax,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
+    statement_timeout: statementTimeout,
     ssl: isLocalDb ? false : {
       rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED === 'true' || Boolean(process.env.PGSSLROOTCERT || process.env.DATABASE_SSL_CA),
       ...(process.env.DATABASE_SSL_CA ? { ca: process.env.DATABASE_SSL_CA } : {})
@@ -949,6 +956,7 @@ class ProductionSseBroadcaster {
     this.instanceId = `node_${process.pid}_${Math.random().toString(36).substring(2, 9)}`;
     this.listenerClient = null;
     this.isListening = false;
+    this.keepAliveTimer = null;
     this.hotLocationBus = new HotLocationBus(this.instanceId, (ch, evt, pl, id) => {
       this._deliverLocally(ch, evt, pl, id);
     });
@@ -956,6 +964,58 @@ class ProductionSseBroadcaster {
     if (this.pool) {
       this.initDistributedPubSub().catch(() => {});
     }
+    this.startKeepAlive(20000);
+  }
+
+  startKeepAlive(intervalMs = 20000) {
+    if (this.keepAliveTimer) return;
+    this.keepAliveTimer = setInterval(() => {
+      this._pingAllClients();
+    }, intervalMs);
+    if (this.keepAliveTimer.unref) this.keepAliveTimer.unref();
+  }
+
+  stopKeepAlive() {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+  }
+
+  _pingAllClients() {
+    const deadClients = [];
+    for (const [channel, set] of this.clients.entries()) {
+      for (const client of set) {
+        if (client.destroyed || client.writableEnded) {
+          deadClients.push({ channel, client });
+          continue;
+        }
+        try {
+          client.write(': ping\n\n');
+        } catch (_) {
+          deadClients.push({ channel, client });
+        }
+      }
+    }
+    for (const { channel, client } of deadClients) {
+      const set = this.clients.get(channel);
+      if (set) {
+        set.delete(client);
+        if (set.size === 0) this.clients.delete(channel);
+      }
+    }
+  }
+
+  stop() {
+    this.stopKeepAlive();
+    if (this.hotLocationBus && typeof this.hotLocationBus.destroy === 'function') {
+      try { this.hotLocationBus.destroy(); } catch (_) {}
+    }
+    if (this.listenerClient) {
+      try { this.listenerClient.release(); } catch (_) {}
+      this.listenerClient = null;
+    }
+    this.isListening = false;
   }
 
   setPool(dbPool) {
@@ -1104,12 +1164,18 @@ class ProductionSseBroadcaster {
       const targetSet = this.clients.get(ch);
       if (targetSet && targetSet.size > 0) {
         for (const client of targetSet) {
+          if (client.destroyed || client.writableEnded) {
+            targetSet.delete(client);
+            continue;
+          }
           if (!notifiedClients.has(client)) {
             notifiedClients.add(client);
             try {
               client.write(dataString);
               delivered = true;
-            } catch {}
+            } catch {
+              targetSet.delete(client);
+            }
           }
         }
       }
@@ -1665,10 +1731,26 @@ function sendJson(res, statusCode, data, extraHeaders = {}) {
   if (res.clientPlatform) {
     headers['X-Client-Platform'] = res.clientPlatform;
   }
+  const jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
   const existingHeaders = (typeof res.getHeaders === 'function') ? res.getHeaders() : {};
   const mergedHeaders = Object.assign({}, existingHeaders, headers);
+
+  const acceptEncoding = res.reqAcceptEncoding || '';
+  if (jsonStr.length > 1024 && acceptEncoding.includes('gzip') && !mergedHeaders['Content-Encoding']) {
+    try {
+      const gzipped = zlib.gzipSync(Buffer.from(jsonStr, 'utf8'));
+      mergedHeaders['Content-Encoding'] = 'gzip';
+      mergedHeaders['Content-Length'] = gzipped.length;
+      mergedHeaders['Vary'] = 'Accept-Encoding';
+      res.writeHead(statusCode, mergedHeaders);
+      res.end(gzipped);
+      return;
+    } catch (_) {}
+  }
+
+  mergedHeaders['Content-Length'] = Buffer.byteLength(jsonStr, 'utf8');
   res.writeHead(statusCode, mergedHeaders);
-  res.end(JSON.stringify(data));
+  res.end(jsonStr);
 }
 
 // Module-level durable and in-memory replay protection for device telemetry attestations
@@ -1719,6 +1801,14 @@ async function saveEnrollmentChallenge(riderId, challenge, ttlMs = 5 * 60 * 1000
       [riderId, challenge, expiresAt]
     );
   } else {
+    if (attestationEnrollmentChallenges.size > 2000) {
+      const now = Date.now();
+      for (const [rId, cData] of attestationEnrollmentChallenges.entries()) {
+        if (now > cData.expiresAt) {
+          attestationEnrollmentChallenges.delete(rId);
+        }
+      }
+    }
     attestationEnrollmentChallenges.set(riderId, { challenge, expiresAt });
   }
 }
@@ -2369,6 +2459,7 @@ const server = http.createServer(async (req, res) => {
 
   const origin = req.headers.origin || null;
   res.reqOrigin = origin;
+  res.reqAcceptEncoding = req.headers['accept-encoding'] || '';
 
   // Support X-Client-Platform & X-Client-Version for native iOS / iOS-Rider / Android clients
   const clientPlatform = req.headers['x-client-platform'] || req.headers['X-Client-Platform'] || '';
@@ -2671,11 +2762,22 @@ const server = http.createServer(async (req, res) => {
 
           const riderRecheckTimer = setInterval(async () => {
             try {
-              const currentRCheck = await pool.query(
-                `SELECT id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
-                [authClaims.sub]
-              );
-              if (currentRCheck.rows.length === 0 || currentRCheck.rows[0].status !== 'ACTIVE' || currentRCheck.rows[0].store_id !== riderStoreId) {
+              const cacheKey = `rider:status:${authClaims.sub}`;
+              let statusData = await distributedCache.get(cacheKey);
+              if (!statusData) {
+                const currentRCheck = await pool.query(
+                  `SELECT id, status, store_id FROM riders WHERE (id = $1 OR rider_id = $1) LIMIT 1`,
+                  [authClaims.sub]
+                );
+                if (currentRCheck.rows.length > 0) {
+                  statusData = { status: currentRCheck.rows[0].status, store_id: currentRCheck.rows[0].store_id };
+                  await distributedCache.set(cacheKey, statusData, 10);
+                } else {
+                  statusData = { status: 'DELETED', store_id: null };
+                  await distributedCache.set(cacheKey, statusData, 10);
+                }
+              }
+              if (statusData.status !== 'ACTIVE' || statusData.store_id !== riderStoreId) {
                 clearInterval(riderRecheckTimer);
                 try {
                   res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'ACCESS_REVOKED', message: 'Rider access revoked or store changed.' })}\n\n`);
@@ -2719,11 +2821,22 @@ const server = http.createServer(async (req, res) => {
 
           const sellerRecheckTimer = setInterval(async () => {
             try {
-              const currentCheck = await pool.query(
-                `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR seller_id = $1) LIMIT 1`,
-                [authClaims.sub]
-              );
-              if (currentCheck.rows.length === 0 || currentCheck.rows[0].status !== 'ACTIVE' || currentCheck.rows[0].store_id !== sellerStoreId) {
+              const cacheKey = `seller:status:${authClaims.sub}`;
+              let statusData = await distributedCache.get(cacheKey);
+              if (!statusData) {
+                const currentCheck = await pool.query(
+                  `SELECT id, status, store_id FROM sellers WHERE (id = $1 OR seller_id = $1) LIMIT 1`,
+                  [authClaims.sub]
+                );
+                if (currentCheck.rows.length > 0) {
+                  statusData = { status: currentCheck.rows[0].status, store_id: currentCheck.rows[0].store_id };
+                  await distributedCache.set(cacheKey, statusData, 10);
+                } else {
+                  statusData = { status: 'DELETED', store_id: null };
+                  await distributedCache.set(cacheKey, statusData, 10);
+                }
+              }
+              if (statusData.status !== 'ACTIVE' || statusData.store_id !== sellerStoreId) {
                 clearInterval(sellerRecheckTimer);
                 try {
                   res.write(`event: access_revoked\ndata: ${JSON.stringify({ error: 'ACCESS_REVOKED', message: 'Seller access revoked or store changed.' })}\n\n`);
@@ -14471,18 +14584,40 @@ if (require.main === module) {
     }
   })();
 
-  const shutdown = async () => {
-    console.log('[ProductionServer] Graceful shutdown initiated...');
+  let isShuttingDown = false;
+  const shutdown = async (signal = 'SIGTERM') => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[ProductionServer] Graceful shutdown initiated (${signal})...`);
+
+    const forceKill = setTimeout(() => {
+      console.warn('[ProductionServer] Shutdown timeout exceeded (5s). Forcing termination.');
+      process.exit(1);
+    }, 5000);
+    if (forceKill.unref) forceKill.unref();
+
     if (appRepositories && appRepositories.outboxProcessor) {
-      appRepositories.outboxProcessor.stop();
+      try { appRepositories.outboxProcessor.stop(); } catch (_) {}
+    }
+    if (sseBroadcasterInstance && typeof sseBroadcasterInstance.stop === 'function') {
+      try { sseBroadcasterInstance.stop(); } catch (_) {}
+    }
+    if (typeof server.closeIdleConnections === 'function') {
+      try { server.closeIdleConnections(); } catch (_) {}
     }
     server.close();
-    await pool.end();
+    if (distributedCache && typeof distributedCache.disconnect === 'function') {
+      await distributedCache.disconnect().catch(() => {});
+    }
+    if (pool && typeof pool.end === 'function') {
+      await pool.end().catch(() => {});
+    }
+    clearTimeout(forceKill);
     process.exit(0);
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 module.exports = { server, appRepositories, getAppRepositories: () => appRepositories, pool, runDatabaseMigrations, databaseMigrationsPromise, REQUIRED_DATABASE_MIGRATIONS, ProductionFcmSender, ProductionSseBroadcaster, sseBroadcasterInstance, verifyAndDecodeJwt, validateProductionConfiguration, ApnsDispatcher, ApnsPayloadBuilder, apnsDispatcherInstance, PrometheusMetrics, prometheusMetricsInstance };
